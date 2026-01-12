@@ -52,6 +52,11 @@ install_protoc() {
 
   unzip -qq "${download_path}" -d "${TMP_DIR}"
   mv --force --verbose "${TMP_DIR}/bin/protoc" "${install_path}"
+  # Also install protobuf well-known types (descriptor.proto, etc.)
+  if [ -d "${TMP_DIR}/include" ]; then
+    mkdir -p /usr/local/include
+    cp -r "${TMP_DIR}/include/"* /usr/local/include/
+  fi
 }
 
 install_protoc "3.19.5" "/usr/bin/protoc"

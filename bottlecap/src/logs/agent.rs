@@ -7,6 +7,7 @@ use tracing::debug;
 use crate::event_bus::Event;
 use crate::extension::telemetry::events::TelemetryEvent;
 use crate::logs::{aggregator_service::AggregatorHandle, processor::LogsProcessor};
+use crate::policy::PolicyEvaluator;
 use crate::tags;
 use crate::{LAMBDA_RUNTIME_SLUG, config};
 
@@ -28,6 +29,7 @@ impl LogsAgent {
         event_bus: Sender<Event>,
         aggregator_handle: AggregatorHandle,
         is_managed_instance_mode: bool,
+        policy_evaluator: Option<Arc<PolicyEvaluator>>,
     ) -> (Self, Sender<TelemetryEvent>) {
         let processor = LogsProcessor::new(
             Arc::clone(&datadog_config),
@@ -35,6 +37,7 @@ impl LogsAgent {
             event_bus,
             LAMBDA_RUNTIME_SLUG.to_string(),
             is_managed_instance_mode,
+            policy_evaluator,
         );
 
         let (tx, rx) = mpsc::channel::<TelemetryEvent>(1000);

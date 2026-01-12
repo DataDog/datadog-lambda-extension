@@ -31,6 +31,7 @@ pub mod logs;
 pub mod lwa;
 pub mod metrics;
 pub mod otlp;
+pub mod policy;
 pub mod proc;
 pub mod proxy;
 pub mod secrets;

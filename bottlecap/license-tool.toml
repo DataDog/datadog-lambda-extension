@@ -1,0 +1,6 @@
+# Configuration for dd-rust-license-tool
+# See: https://github.com/DataDog/rust-license-tool
+
+[overrides]
+# These crates do not specify a repository in their metadata
+"openssl-macros" = { origin = "https://github.com/sfackler/rust-openssl" }

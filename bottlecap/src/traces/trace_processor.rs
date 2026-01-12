@@ -5,6 +5,7 @@ use crate::appsec::processor::Processor as AppSecProcessor;
 use crate::appsec::processor::context::HoldArguments;
 use crate::config;
 use crate::lifecycle::invocation::processor::S_TO_MS;
+use crate::policy::{PolicyEvaluator, SpanWrapper};
 use crate::tags::provider;
 use crate::traces::span_pointers::{SpanPointer, attach_span_pointers_to_meta};
 use crate::traces::{
@@ -45,6 +46,7 @@ struct ChunkProcessor {
     obfuscation_config: Arc<obfuscation_config::ObfuscationConfig>,
     tags_provider: Arc<provider::Provider>,
     span_pointers: Option<Vec<SpanPointer>>,
+    policy_evaluator: Option<Arc<PolicyEvaluator>>,
 }
 
 impl TraceChunkProcessor for ChunkProcessor {
@@ -59,6 +61,17 @@ impl TraceChunkProcessor for ChunkProcessor {
         chunk
             .spans
             .retain(|span| !filter_span_from_lambda_library_or_runtime(span));
+
+        // Policy-based span filtering
+        if let Some(evaluator) = &self.policy_evaluator {
+            chunk.spans.retain(|span| {
+                let keep = evaluator.should_keep_sync(&SpanWrapper(span));
+                if !keep {
+                    debug!("TRACE_PROCESSOR | Dropping span due to policy");
+                }
+                keep
+            });
+        }
         for span in &mut chunk.spans {
             // Service name could be incorrectly set to 'aws.lambda'
             // in datadog lambda libraries
@@ -338,6 +351,7 @@ impl TraceProcessor for ServerlessTraceProcessor {
                 obfuscation_config: self.obfuscation_config.clone(),
                 tags_provider: tags_provider.clone(),
                 span_pointers,
+                policy_evaluator: None,
             },
             true, // send agentless since we are the agent
         )
@@ -855,6 +869,7 @@ mod tests {
                 )]),
             )),
             span_pointers: None,
+            policy_evaluator: None,
         };
 
         processor.process(&mut chunk, 0);
@@ -939,6 +954,7 @@ mod tests {
                 )]),
             )),
             span_pointers: None,
+            policy_evaluator: None,
         };
 
         processor.process(&mut chunk, 0);
@@ -1022,6 +1038,7 @@ mod tests {
                 )]),
             )),
             span_pointers: None,
+            policy_evaluator: None,
         };
 
         processor.process(&mut chunk, 0);

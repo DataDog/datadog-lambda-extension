@@ -12,12 +12,13 @@ use crate::extension::telemetry::events::{Status, TelemetryEvent, TelemetryRecor
 use crate::lifecycle::invocation::context::Context as InvocationContext;
 use crate::logs::aggregator_service::AggregatorHandle;
 use crate::logs::processor::{Processor, Rule};
+use crate::policy::PolicyEvaluator;
 use crate::tags::provider;
 
 use crate::logs::lambda::{IntakeLog, Message};
 
 #[allow(clippy::module_name_repetitions)]
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct LambdaProcessor {
     function_arn: String,
     service: String,
@@ -36,6 +37,8 @@ pub struct LambdaProcessor {
     logs_enabled: bool,
     // Managed Instance mode
     is_managed_instance_mode: bool,
+    // Policy evaluator for filtering logs
+    policy_evaluator: Option<Arc<PolicyEvaluator>>,
 }
 
 const OOM_ERRORS: [&str; 7] = [
@@ -63,6 +66,7 @@ impl LambdaProcessor {
         datadog_config: Arc<config::Config>,
         event_bus: Sender<Event>,
         is_managed_instance_mode: bool,
+        policy_evaluator: Option<Arc<PolicyEvaluator>>,
     ) -> Self {
         let service = datadog_config.service.clone().unwrap_or_default();
         let tags = tags_provider.get_tags_string();
@@ -82,6 +86,7 @@ impl LambdaProcessor {
             ready_logs: Vec::new(),
             event_bus,
             is_managed_instance_mode,
+            policy_evaluator,
         }
     }
 
@@ -206,7 +211,7 @@ impl LambdaProcessor {
                     error!("Failed to send PlatformRuntimeDone to the main event bus: {}", e);
                 }
 
-                let mut message = format!("END RequestId: {request_id}"); 
+                let mut message = format!("END RequestId: {request_id}");
                 let mut result_status = "info".to_string();
                 if let Some(metrics) = metrics {
                     self.invocation_context.runtime_duration_ms = metrics.duration_ms;
@@ -438,13 +443,24 @@ impl LambdaProcessor {
     fn process_and_queue_log(&mut self, mut log: IntakeLog) {
         let should_send_log = self.logs_enabled
             && LambdaProcessor::apply_rules(&self.rules, &mut log.message.message);
-        if should_send_log {
-            if let Ok(serialized_log) = serde_json::to_string(&log) {
-                // explicitly drop log so we don't accidentally re-use it and push
-                // duplicate logs to the aggregator
-                drop(log);
-                self.ready_logs.push(serialized_log);
+
+        if !should_send_log {
+            return;
+        }
+
+        // Policy evaluation - check if the log should be kept
+        if let Some(evaluator) = &self.policy_evaluator {
+            if !evaluator.should_keep_sync(&log) {
+                debug!("LOGS | Dropping log due to policy");
+                return;
             }
+        }
+
+        if let Ok(serialized_log) = serde_json::to_string(&log) {
+            // explicitly drop log so we don't accidentally re-use it and push
+            // duplicate logs to the aggregator
+            drop(log);
+            self.ready_logs.push(serialized_log);
         }
     }
 
@@ -515,6 +531,7 @@ mod tests {
                             ..config::Config::default()}),
                         tx.clone(),
                         false, // On-Demand mode
+                        None,  // policy_evaluator
                     );
 
                     let result = processor.get_message(input.clone()).await.unwrap();
@@ -799,7 +816,7 @@ mod tests {
         let (tx, _) = tokio::sync::mpsc::channel(2);
 
         let mut processor =
-            LambdaProcessor::new(tags_provider, Arc::clone(&config), tx.clone(), false);
+            LambdaProcessor::new(tags_provider, Arc::clone(&config), tx.clone(), false, None);
 
         let event = TelemetryEvent {
             time: Utc.with_ymd_and_hms(2023, 1, 7, 3, 23, 47).unwrap(),
@@ -833,7 +850,7 @@ mod tests {
 
         let (tx, _rx) = tokio::sync::mpsc::channel(2);
         let mut processor =
-            LambdaProcessor::new(tags_provider, Arc::clone(&config), tx.clone(), false);
+            LambdaProcessor::new(tags_provider, Arc::clone(&config), tx.clone(), false, None);
 
         let event = TelemetryEvent {
             time: Utc.with_ymd_and_hms(2023, 1, 7, 3, 23, 47).unwrap(),
@@ -880,7 +897,7 @@ mod tests {
 
         let (tx, _rx) = tokio::sync::mpsc::channel(2);
         let mut processor =
-            LambdaProcessor::new(tags_provider, Arc::clone(&config), tx.clone(), false);
+            LambdaProcessor::new(tags_provider, Arc::clone(&config), tx.clone(), false, None);
 
         let event = TelemetryEvent {
             time: Utc.with_ymd_and_hms(2023, 1, 7, 3, 23, 47).unwrap(),
@@ -914,7 +931,7 @@ mod tests {
 
         let (tx, _rx) = tokio::sync::mpsc::channel(2);
         let mut processor =
-            LambdaProcessor::new(tags_provider, Arc::clone(&config), tx.clone(), false);
+            LambdaProcessor::new(tags_provider, Arc::clone(&config), tx.clone(), false, None);
 
         let start_event = TelemetryEvent {
             time: Utc.with_ymd_and_hms(2023, 1, 7, 3, 23, 47).unwrap(),
@@ -958,8 +975,13 @@ mod tests {
         let (tx, _rx) = tokio::sync::mpsc::channel(2);
 
         // Set is_managed_instance_mode to true
-        let mut processor =
-            LambdaProcessor::new(tags_provider.clone(), Arc::clone(&config), tx.clone(), true);
+        let mut processor = LambdaProcessor::new(
+            tags_provider.clone(),
+            Arc::clone(&config),
+            tx.clone(),
+            true,
+            None,
+        );
 
         let event = TelemetryEvent {
             time: Utc.with_ymd_and_hms(2023, 1, 7, 3, 23, 47).unwrap(),
@@ -1007,6 +1029,7 @@ mod tests {
             Arc::clone(&config),
             tx.clone(),
             false,
+            None,
         );
 
         let event = TelemetryEvent {
@@ -1075,6 +1098,7 @@ mod tests {
             Arc::clone(&config),
             tx.clone(),
             false,
+            None,
         );
 
         let event = TelemetryEvent {
@@ -1120,7 +1144,7 @@ mod tests {
         });
 
         let mut processor =
-            LambdaProcessor::new(tags_provider, Arc::clone(&config), tx.clone(), false);
+            LambdaProcessor::new(tags_provider, Arc::clone(&config), tx.clone(), false, None);
 
         let event = TelemetryEvent {
             time: Utc.with_ymd_and_hms(2023, 1, 7, 3, 23, 47).unwrap(),
@@ -1167,6 +1191,7 @@ mod tests {
             Arc::clone(&config),
             tx.clone(),
             false,
+            None,
         );
 
         let start_event = TelemetryEvent {
@@ -1262,6 +1287,7 @@ mod tests {
             Arc::clone(&config),
             tx.clone(),
             false,
+            None,
         );
         let start_event = TelemetryEvent {
             time: Utc.with_ymd_and_hms(2023, 1, 7, 3, 23, 47).unwrap(),
@@ -1324,6 +1350,7 @@ mod tests {
             Arc::clone(&config),
             tx.clone(),
             false,
+            None,
         );
         let start_event = TelemetryEvent {
             time: Utc.with_ymd_and_hms(2023, 1, 7, 3, 23, 47).unwrap(),
@@ -1401,6 +1428,7 @@ mod tests {
             Arc::clone(&config),
             tx.clone(),
             false,
+            None,
         );
 
         // First, send an extension log (orphan) that doesn't have a request_id
@@ -1495,6 +1523,7 @@ mod tests {
             Arc::clone(&config),
             tx.clone(),
             true, // Managed Instance mode
+            None,
         );
 
         // Send a function log without a request_id (inter-invocation log)
@@ -1559,6 +1588,7 @@ mod tests {
             }),
             tx.clone(),
             true, // LMI mode
+            None,
         );
 
         // Test with "requestId" field
@@ -1610,6 +1640,7 @@ mod tests {
             }),
             tx.clone(),
             false, // Regular Lambda mode (not LMI)
+            None,
         );
 
         // Test that requestId is NOT extracted in regular Lambda mode

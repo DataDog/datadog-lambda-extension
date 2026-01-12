@@ -1008,6 +1008,8 @@ api_security_sample_delay: 60 # Seconds
                 apm_filter_tags_regex_require: None,
                 apm_filter_tags_regex_reject: None,
                 statsd_metric_namespace: None,
+                policy_enabled: false,
+                policy_providers: None,
             };
 
             // Assert that
