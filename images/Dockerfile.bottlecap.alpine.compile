@@ -6,7 +6,7 @@ ARG FIPS
 # Install dependencies
 RUN apk add --no-cache bash build-base clang clang-libclang compiler-rt cmake \
                        curl go linux-headers perl unzip \
-                       pkgconfig openssl-dev
+                       pkgconfig openssl-dev patch boost-dev
 
 SHELL ["/bin/bash", "-c"]
 

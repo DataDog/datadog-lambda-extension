@@ -7,7 +7,7 @@ ARG DEBUG
 # Install dependencies
 RUN --mount=type=cache,target=/var/cache/yum \
     yum install -y clang cmake3 compiler-rt curl go make perl unzip \
-    pkgconfig openssl-devel
+    pkgconfig openssl-devel patch boost-devel
 
 # Install Protocol Buffers compiler by hand, since AL2 does not have a recent enough version.
 COPY ./scripts/install-protoc.sh /
