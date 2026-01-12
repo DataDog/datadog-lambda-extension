@@ -4,6 +4,8 @@ ahash,https://github.com/tkaitchuck/ahash,MIT OR Apache-2.0,Tom Kaitchuck <Tom.K
 aho-corasick,https://github.com/BurntSushi/aho-corasick,Unlicense OR MIT,Andrew Gallant <jamslam@gmail.com>
 allocator-api2,https://github.com/zakarumych/allocator-api2,MIT OR Apache-2.0,Zakarum <zaq.dev@icloud.com>
 anyhow,https://github.com/dtolnay/anyhow,MIT OR Apache-2.0,David Tolnay <dtolnay@gmail.com>
+async-stream,https://github.com/tokio-rs/async-stream,MIT,Carl Lerche <me@carllerche.com>
+async-stream-impl,https://github.com/tokio-rs/async-stream,MIT,Carl Lerche <me@carllerche.com>
 async-trait,https://github.com/dtolnay/async-trait,MIT OR Apache-2.0,David Tolnay <dtolnay@gmail.com>
 atomic,https://github.com/Amanieu/atomic-rs,Apache-2.0 OR MIT,Amanieu d'Antras <amanieu@gmail.com>
 atomic-waker,https://github.com/smol-rs/atomic-waker,Apache-2.0 OR MIT,"Stjepan Glavina <stjepang@gmail.com>, Contributors to futures-rs"
@@ -40,6 +42,7 @@ digest,https://github.com/RustCrypto/traits,MIT OR Apache-2.0,RustCrypto Develop
 displaydoc,https://github.com/yaahc/displaydoc,MIT OR Apache-2.0,Jane Lusby <jlusby@yaah.dev>
 dogstatsd,https://github.com/DataDog/serverless-components,Apache-2.0,The dogstatsd Authors
 either,https://github.com/rayon-rs/either,MIT OR Apache-2.0,bluss
+encoding_rs,https://github.com/hsivonen/encoding_rs,(Apache-2.0 OR MIT) AND BSD-3-Clause,Henri Sivonen <hsivonen@hsivonen.fi>
 equivalent,https://github.com/indexmap-rs/equivalent,Apache-2.0 OR MIT,The equivalent Authors
 errno,https://github.com/lambda-fairy/rust-errno,MIT OR Apache-2.0,"Chris Wong <lambda.fairy@gmail.com>, Dan Gohman <dev@sunfishcode.online>"
 fastrand,https://github.com/smol-rs/fastrand,Apache-2.0 OR MIT,Stjepan Glavina <stjepang@gmail.com>
@@ -49,6 +52,8 @@ flate2,https://github.com/rust-lang/flate2-rs,MIT OR Apache-2.0,"Alex Crichton <
 float-cmp,https://github.com/mikedilger/float-cmp,MIT,Mike Dilger <mike@mikedilger.com>
 fnv,https://github.com/servo/rust-fnv,Apache-2.0  OR  MIT,Alex Crichton <alex@alexcrichton.com>
 foldhash,https://github.com/orlp/foldhash,Zlib,Orson Peters <orsonpeters@gmail.com>
+foreign-types,https://github.com/sfackler/foreign-types,MIT OR Apache-2.0,Steven Fackler <sfackler@gmail.com>
+foreign-types-shared,https://github.com/sfackler/foreign-types,MIT OR Apache-2.0,Steven Fackler <sfackler@gmail.com>
 form_urlencoded,https://github.com/servo/rust-url,MIT OR Apache-2.0,The rust-url developers
 futures,https://github.com/rust-lang/futures-rs,MIT OR Apache-2.0,The futures Authors
 futures-channel,https://github.com/rust-lang/futures-rs,MIT OR Apache-2.0,The futures-channel Authors
@@ -77,6 +82,7 @@ hyper,https://github.com/hyperium/hyper,MIT,Sean McArthur <sean@seanmonstar.com>
 hyper-http-proxy,https://github.com/metalbear-co/hyper-http-proxy,MIT,MetalBear Tech LTD <hi@metalbear.co>
 hyper-rustls,https://github.com/rustls/hyper-rustls,Apache-2.0 OR ISC OR MIT,The hyper-rustls Authors
 hyper-timeout,https://github.com/hjr3/hyper-timeout,MIT OR Apache-2.0,Herman J. Radtke III <herman@hermanradtke.com>
+hyper-tls,https://github.com/hyperium/hyper-tls,MIT OR Apache-2.0,Sean McArthur <sean@seanmonstar.com>
 hyper-util,https://github.com/hyperium/hyper-util,MIT,Sean McArthur <sean@seanmonstar.com>
 icu_collections,https://github.com/unicode-org/icu4x,Unicode-3.0,The ICU4X Project Developers
 icu_locale_core,https://github.com/unicode-org/icu4x,Unicode-3.0,The ICU4X Project Developers
@@ -121,11 +127,15 @@ mime_guess,https://github.com/abonander/mime_guess,MIT,Austin Bonander <austin.b
 miniz_oxide,https://github.com/Frommi/miniz_oxide/tree/master/miniz_oxide,MIT OR Zlib OR Apache-2.0,"Frommi <daniil.liferenko@gmail.com>, oyvindln <oyvindln@users.noreply.github.com>, Rich Geldreich richgel99@gmail.com"
 mio,https://github.com/tokio-rs/mio,MIT,"Carl Lerche <me@carllerche.com>, Thomas de Zeeuw <thomasdezeeuw@gmail.com>, Tokio Contributors <team@tokio.rs>"
 multipart,http://github.com/abonander/multipart,MIT OR Apache-2.0,Austin Bonander <austin.bonander@gmail.com>
+native-tls,https://github.com/sfackler/rust-native-tls,MIT OR Apache-2.0,Steven Fackler <sfackler@gmail.com>
 nix,https://github.com/nix-rust/nix,MIT,The nix-rust Project Developers
 num-conv,https://github.com/jhpratt/num-conv,MIT OR Apache-2.0,Jacob Pratt <jacob@jhpratt.dev>
 num-traits,https://github.com/rust-num/num-traits,MIT OR Apache-2.0,The Rust Project Developers
 once_cell,https://github.com/matklad/once_cell,MIT OR Apache-2.0,Aleksey Kladov <aleksey.kladov@gmail.com>
+openssl,https://github.com/rust-openssl/rust-openssl,Apache-2.0,Steven Fackler <sfackler@gmail.com>
+openssl-macros,https://github.com/sfackler/rust-openssl,MIT OR Apache-2.0,The openssl-macros Authors
 openssl-probe,https://github.com/alexcrichton/openssl-probe,MIT OR Apache-2.0,Alex Crichton <alex@alexcrichton.com>
+openssl-sys,https://github.com/rust-openssl/rust-openssl,MIT,"Alex Crichton <alex@alexcrichton.com>, Steven Fackler <sfackler@gmail.com>"
 opentelemetry,https://github.com/open-telemetry/opentelemetry-rust/tree/main/opentelemetry,Apache-2.0,The opentelemetry Authors
 opentelemetry-proto,https://github.com/open-telemetry/opentelemetry-rust/tree/main/opentelemetry-proto,Apache-2.0,The opentelemetry-proto Authors
 opentelemetry-semantic-conventions,https://github.com/open-telemetry/opentelemetry-rust/tree/main/opentelemetry-semantic-conventions,Apache-2.0,The opentelemetry-semantic-conventions Authors
@@ -142,6 +152,7 @@ pin-project,https://github.com/taiki-e/pin-project,Apache-2.0 OR MIT,The pin-pro
 pin-project-internal,https://github.com/taiki-e/pin-project,Apache-2.0 OR MIT,The pin-project-internal Authors
 pin-project-lite,https://github.com/taiki-e/pin-project-lite,Apache-2.0 OR MIT,The pin-project-lite Authors
 pin-utils,https://github.com/rust-lang-nursery/pin-utils,MIT OR Apache-2.0,Josef Brandl <mail@josefbrandl.de>
+policy-rs,https://github.com/usetero/policy-rs,Apache-2.0,The policy-rs Authors
 potential_utf,https://github.com/unicode-org/icu4x,Unicode-3.0,The ICU4X Project Developers
 powerfmt,https://github.com/jhpratt/powerfmt,MIT OR Apache-2.0,Jacob Pratt <jacob@jhpratt.dev>
 ppv-lite86,https://github.com/cryptocorrosion/cryptocorrosion,MIT OR Apache-2.0,The CryptoCorrosion Contributors
@@ -177,6 +188,7 @@ rustls-native-certs,https://github.com/rustls/rustls-native-certs,Apache-2.0 OR 
 rustls-pemfile,https://github.com/rustls/pemfile,Apache-2.0 OR ISC OR MIT,The rustls-pemfile Authors
 rustls-pki-types,https://github.com/rustls/pki-types,MIT OR Apache-2.0,The rustls-pki-types Authors
 rustls-webpki,https://github.com/rustls/webpki,ISC,The rustls-webpki Authors
+rustversion,https://github.com/dtolnay/rustversion,MIT OR Apache-2.0,David Tolnay <dtolnay@gmail.com>
 ryu,https://github.com/dtolnay/ryu,Apache-2.0 OR BSL-1.0,David Tolnay <dtolnay@gmail.com>
 safemem,https://github.com/abonander/safemem,MIT OR Apache-2.0,Austin Bonander <austin.bonander@gmail.com>
 schannel,https://github.com/steffengy/schannel-rs,MIT,"Steven Fackler <sfackler@gmail.com>, Steffen Butzer <steffen.butzer@outlook.com>"
@@ -209,6 +221,8 @@ subtle,https://github.com/dalek-cryptography/subtle,BSD-3-Clause,"Isis Lovecruft
 syn,https://github.com/dtolnay/syn,MIT OR Apache-2.0,David Tolnay <dtolnay@gmail.com>
 sync_wrapper,https://github.com/Actyx/sync_wrapper,Apache-2.0,Actyx AG <developer@actyx.io>
 synstructure,https://github.com/mystor/synstructure,MIT,Nika Layzell <nika@thelayzells.com>
+system-configuration,https://github.com/mullvad/system-configuration-rs,MIT OR Apache-2.0,Mullvad VPN
+system-configuration-sys,https://github.com/mullvad/system-configuration-rs,MIT OR Apache-2.0,Mullvad VPN
 tempfile,https://github.com/Stebalien/tempfile,MIT OR Apache-2.0,"Steven Allen <steven@stebalien.com>, The Rust Project Developers, Ashley Mannix <ashleymannix@live.com.au>, Jason White <me@jasonwhite.io>"
 thiserror,https://github.com/dtolnay/thiserror,MIT OR Apache-2.0,David Tolnay <dtolnay@gmail.com>
 thiserror-impl,https://github.com/dtolnay/thiserror,MIT OR Apache-2.0,David Tolnay <dtolnay@gmail.com>
@@ -223,6 +237,7 @@ tinyvec,https://github.com/Lokathor/tinyvec,Zlib OR Apache-2.0 OR MIT,Lokathor <
 tinyvec_macros,https://github.com/Soveu/tinyvec_macros,MIT OR Apache-2.0 OR Zlib,Soveu <marx.tomasz@gmail.com>
 tokio,https://github.com/tokio-rs/tokio,MIT,Tokio Contributors <team@tokio.rs>
 tokio-macros,https://github.com/tokio-rs/tokio,MIT,Tokio Contributors <team@tokio.rs>
+tokio-native-tls,https://github.com/tokio-rs/tls,MIT,Tokio Contributors <team@tokio.rs>
 tokio-rustls,https://github.com/rustls/tokio-rustls,MIT OR Apache-2.0,The tokio-rustls Authors
 tokio-stream,https://github.com/tokio-rs/tokio,MIT,Tokio Contributors <team@tokio.rs>
 tokio-util,https://github.com/tokio-rs/tokio,MIT,Tokio Contributors <team@tokio.rs>
@@ -251,6 +266,7 @@ ustr,https://github.com/anderslanglands/ustr,BSD-2-Clause-Patent,Anders Langland
 utf8_iter,https://github.com/hsivonen/utf8_iter,Apache-2.0 OR MIT,Henri Sivonen <hsivonen@hsivonen.fi>
 valuable,https://github.com/tokio-rs/valuable,MIT,The valuable Authors
 value-bag,https://github.com/sval-rs/value-bag,Apache-2.0 OR MIT,Ashley Mannix <ashleymannix@live.com.au>
+vectorscan-rs-sys,https://github.com/bradlarsen/vectorscan-rs,Apache-2.0 OR MIT,Brad Larsen <brad@bradfordlarsen.com>
 want,https://github.com/seanmonstar/want,MIT,Sean McArthur <sean@seanmonstar.com>
 wasi,https://github.com/bytecodealliance/wasi,Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT,The Cranelift Project Developers
 wasip2,https://github.com/bytecodealliance/wasi-rs,Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT,The wasip2 Authors
@@ -263,6 +279,9 @@ web-sys,https://github.com/wasm-bindgen/wasm-bindgen/tree/master/crates/web-sys,
 web-time,https://github.com/daxpedda/web-time,MIT OR Apache-2.0,The web-time Authors
 webpki-roots,https://github.com/rustls/webpki-roots,CDLA-Permissive-2.0,The webpki-roots Authors
 windows-link,https://github.com/microsoft/windows-rs,MIT OR Apache-2.0,The windows-link Authors
+windows-registry,https://github.com/microsoft/windows-rs,MIT OR Apache-2.0,The windows-registry Authors
+windows-result,https://github.com/microsoft/windows-rs,MIT OR Apache-2.0,The windows-result Authors
+windows-strings,https://github.com/microsoft/windows-rs,MIT OR Apache-2.0,The windows-strings Authors
 windows-sys,https://github.com/microsoft/windows-rs,MIT OR Apache-2.0,Microsoft
 windows-sys,https://github.com/microsoft/windows-rs,MIT OR Apache-2.0,The windows-sys Authors
 windows-targets,https://github.com/microsoft/windows-rs,MIT OR Apache-2.0,Microsoft
