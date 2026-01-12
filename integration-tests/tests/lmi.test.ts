@@ -46,21 +46,18 @@ describe('LMI Integration Tests', () => {
       expect(results[runtime].traces?.length).toEqual(1);
     });
 
-    // SVLS-8232
-    test.skip('trace should have exactly one span', () => {
+
+    it('trace should have exactly one span with operation_name=aws.lambda', () => {
       const trace = results[runtime].traces![0];
-      const awsLambdaSpan = trace.spans.find((span: any) =>
-          span.attributes.operation_name === 'aws.lambda'
-      );
       expect(trace.spans).toBeDefined();
-      expect(trace.spans.length).toEqual(1);
-    });
-    it('trace should have aws.lambda span', () => {
-      const trace = results[runtime].traces![0];
-      const awsLambdaSpan = trace.spans.find((span: any) =>
+
+      // Filter spans with operation_name='aws.lambda'
+      const awsLambdaSpans = trace.spans.filter((span: any) =>
           span.attributes.operation_name === 'aws.lambda'
       );
-      expect(awsLambdaSpan).toBeDefined();
+      expect(awsLambdaSpans).toBeDefined();
+      // Verify exactly one span has operation_name='aws.lambda'
+      expect(awsLambdaSpans.length).toEqual(1);
     });
     it('aws.lambda.span should have init_type set to lambda-managed-instances', () => {
       const trace = results[runtime].traces![0];
