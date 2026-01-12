@@ -40,6 +40,10 @@ on:
         default: false
         type: boolean
 
+permissions:
+  id-token: write
+  contents: read
+
 jobs:
   prepare:
     name: Prepare release
@@ -227,8 +231,7 @@ jobs:
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
           aws-region: ${{ matrix.region }}
 
       - name: Set variables
@@ -284,6 +287,7 @@ jobs:
       - name: Publish Lambda layer
         id: publish
         run: |
+          aws sts get-caller-identity
           LAYER_NAME="${{ steps.vars.outputs.layer_name }}"
           VERSION="${{ steps.version.outputs.version }}"
           LAYER_FILE=".layers/datadog_extension-${{ steps.vars.outputs.suffix }}.zip"
