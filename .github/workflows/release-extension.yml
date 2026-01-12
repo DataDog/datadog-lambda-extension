@@ -74,9 +74,9 @@ jobs:
         run: |
           echo "layer_suffix=${{ inputs.layer_suffix || '' }}" >> $GITHUB_OUTPUT
 
-          # Convert regions to JSON array
+          # Convert regions to JSON array (compact, single line)
           REGIONS="${{ inputs.regions || 'us-east-1' }}"
-          REGIONS_JSON=$(echo "$REGIONS" | jq -R 'split(",") | map(gsub("^\\s+|\\s+$";""))')
+          REGIONS_JSON=$(echo "$REGIONS" | jq -c -R 'split(",") | map(gsub("^\\s+|\\s+$";""))')
           echo "regions_json=$REGIONS_JSON" >> $GITHUB_OUTPUT
           echo "Regions: $REGIONS_JSON"
 
