@@ -45,7 +45,7 @@ impl DedupHandle {
             .send(DedupCommand::CheckAndAdd(key, response_tx))
             .map_err(DedupError::SendError)?;
 
-        // Sometimes the dedup service fails to send a response for unknown reasons, so we 
+        // Sometimes the dedup service fails to send a response for unknown reasons, so we
         // timeout after 5 seconds to avoid blocking the caller forever. We may remove the
         // timeout if we can figure out and fix the root cause.
         tokio::time::timeout(Duration::from_secs(5), response_rx)
