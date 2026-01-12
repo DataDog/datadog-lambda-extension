@@ -37,7 +37,7 @@ jobs:
       # 20.04 and 22.04 are too old -- our messages require protobuf >= 3.15 --
       # so we need to download a protoc binary instead.
       - run: sudo apt-get update
-      - run: sudo apt-get install -y curl unzip cmake
+      - run: sudo apt-get install -y curl unzip cmake libboost-dev pkg-config libssl-dev
       - name: Install protobuf ${{ env.PB_VERSION }} compiler from binary for ${{ env.PB_TARGET }}
         run: |
           curl -LO "${{ env.PB_URL }}/v${{ env.PB_VERSION }}/protoc-${{ env.PB_VERSION }}-${{ env.PB_TARGET }}.zip"
@@ -65,7 +65,7 @@ jobs:
       # 20.04 and 22.04 are too old -- our messages require protobuf >= 3.15 --
       # so we need to download a protoc binary instead.
       - run: sudo apt-get update
-      - run: sudo apt-get install -y curl unzip cmake
+      - run: sudo apt-get install -y curl unzip cmake libboost-dev pkg-config libssl-dev
       - name: Install protobuf ${{ env.PB_VERSION }} compiler from binary for ${{ env.PB_TARGET }}
         run: |
           curl -LO "${{ env.PB_URL }}/v${{ env.PB_VERSION }}/protoc-${{ env.PB_VERSION }}-${{ env.PB_TARGET }}.zip"
@@ -97,7 +97,7 @@ jobs:
       # 20.04 and 22.04 are too old -- our messages require protobuf >= 3.15 --
       # so we need to download a protoc binary instead.
       - run: sudo apt-get update
-      - run: sudo apt-get install -y curl unzip cmake
+      - run: sudo apt-get install -y curl unzip cmake libboost-dev pkg-config libssl-dev
       - name: Install protobuf ${{ env.PB_VERSION }} compiler from binary for ${{ env.PB_TARGET }}
         run: |
           curl -LO "${{ env.PB_URL }}/v${{ env.PB_VERSION }}/protoc-${{ env.PB_VERSION }}-${{ env.PB_TARGET }}.zip"
@@ -125,7 +125,7 @@ jobs:
       # 20.04 and 22.04 are too old -- our messages require protobuf >= 3.15 --
       # so we need to download a protoc binary instead.
       - run: sudo apt-get update
-      - run: sudo apt-get install -y curl unzip cmake
+      - run: sudo apt-get install -y curl unzip cmake libboost-dev pkg-config libssl-dev
       - name: Install protobuf ${{ env.PB_VERSION }} compiler from binary for ${{ env.PB_TARGET }}
         run: |
           curl -LO "${{ env.PB_URL }}/v${{ env.PB_VERSION }}/protoc-${{ env.PB_VERSION }}-${{ env.PB_TARGET }}.zip"
