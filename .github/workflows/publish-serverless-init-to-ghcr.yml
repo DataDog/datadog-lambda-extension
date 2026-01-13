@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       source_image:
-        description: 'Source image from registry.ddbuild.io (e.g., registry.ddbuild.io/ci/datadog-agent/serverless-init:1.7.8)'
+        description: 'Source image from registry.datadoghq.com (e.g., registry.datadoghq.com/serverless-init:1.7.8)'
         required: true
         type: string
       version:
@@ -49,6 +49,33 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Wait for image availability
+        run: |
+          SOURCE_IMAGE="${{ inputs.source_image }}"
+          MAX_ATTEMPTS=20
+          RETRY_DELAY=30
+          # Maximum wait time: 20 attempts × 30s = 600s (10 minutes)
+
+          echo "⏳ Waiting for image to be available: ${SOURCE_IMAGE}"
+          echo "Will check every ${RETRY_DELAY}s for up to $((MAX_ATTEMPTS * RETRY_DELAY))s"
+
+          for i in $(seq 1 $MAX_ATTEMPTS); do
+            echo "Attempt $i/$MAX_ATTEMPTS: Checking if image exists..."
+
+            if crane manifest ${SOURCE_IMAGE} >/dev/null 2>&1; then
+              echo "✅ Image is available!"
+              exit 0
+            fi
+
+            if [ $i -lt $MAX_ATTEMPTS ]; then
+              echo "⏳ Image not yet available, waiting ${RETRY_DELAY}s..."
+              sleep $RETRY_DELAY
+            fi
+          done
+
+          echo "❌ Image did not become available after $((MAX_ATTEMPTS * RETRY_DELAY))s"
+          exit 1
+
       - name: Copy image to GHCR
         run: |
           SOURCE_IMAGE="${{ inputs.source_image }}"
@@ -65,8 +92,29 @@ jobs:
           echo "    - ${DEST_BASE}:${VERSION}${IMAGE_SUFFIX}"
           echo "    - ${DEST_BASE}:v${PIPELINE_ID}${IMAGE_SUFFIX}"
 
-          # Copy with version tag
-          crane copy ${SOURCE_IMAGE} ${DEST_BASE}:${VERSION}${IMAGE_SUFFIX}
+          # Copy with version tag (with retry logic)
+          # Maximum retry duration: 3 attempts with 10s delays between retries
+          # This workflow is triggered in parallel with the publish attempt to registry.datadoghq.com
+          # Registry.datadoghq.com should normally need about ~30 seconds to recieve the new image
+          MAX_COPY_ATTEMPTS=3
+          COPY_RETRY_DELAY=10
+
+          for i in $(seq 1 $MAX_COPY_ATTEMPTS); do
+            echo "Copying image (attempt $i/$MAX_COPY_ATTEMPTS)..."
+
+            if crane copy ${SOURCE_IMAGE} ${DEST_BASE}:${VERSION}${IMAGE_SUFFIX}; then
+              echo "✅ Image copied successfully!"
+              break
+            fi
+
+            if [ $i -lt $MAX_COPY_ATTEMPTS ]; then
+              echo "⚠️ Copy failed, retrying in ${COPY_RETRY_DELAY}s..."
+              sleep $COPY_RETRY_DELAY
+            else
+              echo "❌ Failed to copy image after $MAX_COPY_ATTEMPTS attempts"
+              exit 1
+            fi
+          done
 
           # Tag for pipeline ID
           crane tag ${DEST_BASE}:${VERSION}${IMAGE_SUFFIX} v${PIPELINE_ID}${IMAGE_SUFFIX}
