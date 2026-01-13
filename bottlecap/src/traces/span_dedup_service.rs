@@ -130,17 +130,17 @@ mod tests {
         let key2 = DedupKey::new(100, 456);
 
         // First call should return true (key was added)
-        assert!(handle.check_and_add(key1).await.unwrap());
+        assert!(handle.check_and_add(key1, None).await.unwrap());
 
         // Second call should return false (key already exists)
-        assert!(!handle.check_and_add(key1).await.unwrap());
+        assert!(!handle.check_and_add(key1, None).await.unwrap());
 
         // Different key should return true again
-        assert!(handle.check_and_add(key2).await.unwrap());
+        assert!(handle.check_and_add(key2, None).await.unwrap());
 
         // Calling again on already-added keys should return false
-        assert!(!handle.check_and_add(key1).await.unwrap());
-        assert!(!handle.check_and_add(key2).await.unwrap());
+        assert!(!handle.check_and_add(key1, None).await.unwrap());
+        assert!(!handle.check_and_add(key2, None).await.unwrap());
     }
 
     #[tokio::test]
@@ -157,17 +157,17 @@ mod tests {
         let key4 = DedupKey::new(4, 40);
 
         // Add 3 keys
-        assert!(handle.check_and_add(key1).await.unwrap());
-        assert!(handle.check_and_add(key2).await.unwrap());
-        assert!(handle.check_and_add(key3).await.unwrap());
+        assert!(handle.check_and_add(key1, None).await.unwrap());
+        assert!(handle.check_and_add(key2, None).await.unwrap());
+        assert!(handle.check_and_add(key3, None).await.unwrap());
 
         // Add a 4th key, should evict the oldest (key1)
-        assert!(handle.check_and_add(key4).await.unwrap());
+        assert!(handle.check_and_add(key4, None).await.unwrap());
 
         // Now key1 should be addable again (was evicted)
-        assert!(handle.check_and_add(key1).await.unwrap());
+        assert!(handle.check_and_add(key1, None).await.unwrap());
 
         // But key2 should now be evicted
-        assert!(handle.check_and_add(key2).await.unwrap());
+        assert!(handle.check_and_add(key2, None).await.unwrap());
     }
 }
