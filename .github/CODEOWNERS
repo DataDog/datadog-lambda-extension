@@ -1,0 +1,3 @@
+# DD Octo STS trust policies require team approval
+# See: https://datadoghq.atlassian.net/wiki/spaces/SECENG/pages/5138645099
+.github/chainguard/serverless-init-ci-publish.sts.yaml @DataDog/serverless-monitoring
