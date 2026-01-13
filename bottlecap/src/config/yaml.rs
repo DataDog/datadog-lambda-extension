@@ -995,6 +995,7 @@ api_security_sample_delay: 60 # Seconds
                 capture_lambda_payload: true,
                 capture_lambda_payload_max_depth: 5,
                 compute_trace_stats_on_extension: true,
+                span_dedup_timeout: None,
                 api_key_secret_reload_interval: None,
 
                 serverless_appsec_enabled: true,
