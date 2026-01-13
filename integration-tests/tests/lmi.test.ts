@@ -67,12 +67,23 @@ describe('LMI Integration Tests', () => {
       expect(awsLambdaSpan?.attributes.custom.init_type).toBe('lambda-managed-instances')
     })
     // SVLS-8232
-    test.skip('aws.lambda.span should have cold_start set to false', () => {
+    it('aws.lambda.span should have cold_start set to false if no cold_start operation', () => {
       const trace = results[runtime].traces![0];
+
+      // The presence of 'aws.lambda.cold_start' span indicates a cold start
+      const coldStartSpan = trace.spans.find((span: any) =>
+          span.attributes.operation_name === 'aws.lambda.cold_start'
+      );
+
       const awsLambdaSpan = trace.spans.find((span: any) =>
           span.attributes.operation_name === 'aws.lambda'
       );
-      expect(awsLambdaSpan?.attributes.custom.cold_start).toBe('false')
+      expect(awsLambdaSpan).toBeDefined(); // Ensure span exists before checking attributes
+
+      // Only check cold_start attribute when no dedicated cold_start span exists
+      if (!coldStartSpan) {
+        expect(awsLambdaSpan?.attributes.custom.cold_start).toBe('false');
+      }
     })
 
   });
