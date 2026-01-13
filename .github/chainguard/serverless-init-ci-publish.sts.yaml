@@ -16,6 +16,7 @@ claim_pattern:
   project_path: "DataDog/serverless-init-ci"
   ref_type: "^(branch|tag)$"
   pipeline_source: "^(web|pipeline|push)$"
+  ci_config_ref_uri: "^gitlab\\.ddbuild\\.io/DataDog/serverless-init-ci//\\.gitlab-ci\\.yml@refs/(heads|tags)/.*$"
 
 # Minimal permissions: only write packages to GHCR
 permissions:
