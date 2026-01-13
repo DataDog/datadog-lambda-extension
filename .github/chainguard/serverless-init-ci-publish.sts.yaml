@@ -1,0 +1,27 @@
+# DD Octo STS Trust Policy for serverless-init-ci GitLab pipeline
+#
+# This policy allows the serverless-init-ci GitLab pipeline to publish
+# serverless-init images to GitHub Container Registry (GHCR).
+#
+# Reference: https://datadoghq.atlassian.net/wiki/spaces/SECENG/pages/5138645099
+# Pipeline: https://gitlab.ddbuild.io/DataDog/serverless-init-ci
+
+issuer: https://gitlab.ddbuild.io
+
+# Subject pattern matches the serverless-init-ci repo on main branch
+subject_pattern: "project_path:DataDog/serverless-init-ci:ref_type:branch:ref:main"
+
+# Restrict to protected main branch only (root of trust)
+claim_pattern:
+  project_path: "DataDog/serverless-init-ci"
+  ref: "main"
+  ref_type: "branch"
+  ref_path: "refs/heads/main"
+  ref_protected: "true"
+  pipeline_source: "push"
+  ci_config_ref_uri: "gitlab.ddbuild.io/DataDog/serverless-init-ci//.gitlab-ci.yml@refs/heads/main"
+
+# Minimal permissions: only write packages to GHCR
+permissions:
+  packages: write
+  metadata: read
