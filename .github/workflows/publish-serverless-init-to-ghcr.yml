@@ -1,0 +1,81 @@
+name: Publish serverless-init to GHCR
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_image:
+        description: 'Source image from registry.ddbuild.io (e.g., registry.ddbuild.io/ci/datadog-agent/serverless-init:1.7.8)'
+        required: true
+        type: string
+      version:
+        description: 'Version tag (e.g., 1.7.8 or 1.7.8-rc1)'
+        required: true
+        type: string
+      image_suffix:
+        description: 'Image suffix (empty for standard, -alpine for alpine)'
+        required: false
+        type: string
+        default: ''
+      pipeline_id:
+        description: 'GitLab pipeline ID'
+        required: true
+        type: string
+      is_latest:
+        description: 'Tag as latest (true for prod releases, false for RCs)'
+        required: true
+        type: boolean
+        default: false
+
+permissions:
+  packages: write
+  contents: read
+
+jobs:
+  publish-to-ghcr:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Install crane
+        run: |
+          cd /tmp
+          wget https://github.com/google/go-containerregistry/releases/download/v0.20.2/go-containerregistry_Linux_x86_64.tar.gz
+          tar -xzf go-containerregistry_Linux_x86_64.tar.gz
+          sudo mv crane /usr/local/bin/
+          crane version
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Copy image to GHCR
+        run: |
+          SOURCE_IMAGE="${{ inputs.source_image }}"
+          VERSION="${{ inputs.version }}"
+          IMAGE_SUFFIX="${{ inputs.image_suffix }}"
+          PIPELINE_ID="${{ inputs.pipeline_id }}"
+          IS_LATEST="${{ inputs.is_latest }}"
+
+          DEST_BASE="ghcr.io/datadog/datadog-lambda-extension/serverless-init"
+
+          echo "📦 Publishing serverless-init image to GHCR"
+          echo "  Source: ${SOURCE_IMAGE}"
+          echo "  Destinations:"
+          echo "    - ${DEST_BASE}:${VERSION}${IMAGE_SUFFIX}"
+          echo "    - ${DEST_BASE}:v${PIPELINE_ID}${IMAGE_SUFFIX}"
+
+          # Copy with version tag
+          crane copy ${SOURCE_IMAGE} ${DEST_BASE}:${VERSION}${IMAGE_SUFFIX}
+
+          # Tag for pipeline ID
+          crane tag ${DEST_BASE}:${VERSION}${IMAGE_SUFFIX} v${PIPELINE_ID}${IMAGE_SUFFIX}
+
+          # Tag as latest if this is a production release
+          if [ "$IS_LATEST" = "true" ]; then
+            echo "    - ${DEST_BASE}:latest${IMAGE_SUFFIX}"
+            crane tag ${DEST_BASE}:${VERSION}${IMAGE_SUFFIX} latest${IMAGE_SUFFIX}
+          fi
+
+          echo "✅ Successfully published image to GHCR!"
+          echo "📍 View at: https://github.com/DataDog/datadog-lambda-extension/pkgs/container/datadog-lambda-extension%2Fserverless-init"
