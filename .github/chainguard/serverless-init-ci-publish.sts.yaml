@@ -8,18 +8,15 @@
 
 issuer: https://gitlab.ddbuild.io
 
-# Subject pattern matches the serverless-init-ci repo on main branch
-subject_pattern: "project_path:DataDog/serverless-init-ci:ref_type:branch:ref:main"
+# Subject pattern matches the serverless-init-ci repo on any branch or tag
+subject_pattern: "project_path:DataDog/serverless-init-ci:ref_type:(branch|tag):ref:.*"
 
-# Restrict to protected main branch only (root of trust)
+# Allow all branches and tags for building RC and prod images
 claim_pattern:
   project_path: "DataDog/serverless-init-ci"
-  ref: "main"
-  ref_type: "branch"
-  ref_path: "refs/heads/main"
-  ref_protected: "true"
-  pipeline_source: "push"
-  ci_config_ref_uri: "gitlab.ddbuild.io/DataDog/serverless-init-ci//.gitlab-ci.yml@refs/heads/main"
+  ref_type: "^(branch|tag)$"
+  pipeline_source: "^(web|pipeline|push)$"
+  ci_config_ref_uri: "^gitlab\\.ddbuild\\.io/DataDog/serverless-init-ci//\\.gitlab-ci\\.yml@refs/(heads|tags)/.*$"
 
 # Minimal permissions: only write packages to GHCR
 permissions:
