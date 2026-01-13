@@ -504,7 +504,7 @@ dependencies = [
  "opentelemetry-semantic-conventions",
  "ordered_hash_map",
  "proptest",
- "prost",
+ "prost 0.13.5",
  "rand 0.8.5",
  "regex",
  "reqwest",
@@ -741,7 +741,7 @@ version = "0.1.0"
 source = "git+https://github.com/DataDog/saluki/?rev=f863626dbfe3c59bb390985fa6530b0621c2a0a2#f863626dbfe3c59bb390985fa6530b0621c2a0a2"
 dependencies = [
  "bytes",
- "prost",
+ "prost 0.13.5",
  "prost-types",
  "protobuf",
  "protobuf-codegen",
@@ -1762,7 +1762,7 @@ checksum = "37c93d8daa9d8a012fd8ab92f088405fb202ea0b6ab73ee2482ae66af4f42091"
 [[package]]
 name = "libdd-common"
 version = "1.0.0"
-source = "git+https://github.com/DataDog/libdatadog?rev=73c675b79f81978ee1190be6af0c5abec997e3b0#73c675b79f81978ee1190be6af0c5abec997e3b0"
+source = "git+https://github.com/DataDog/libdatadog?rev=158b59471f1132e3cb36023fa3c46ccb2dd0eda1#158b59471f1132e3cb36023fa3c46ccb2dd0eda1"
 dependencies = [
  "anyhow",
  "cc",
@@ -1795,15 +1795,15 @@ dependencies = [
 [[package]]
 name = "libdd-ddsketch"
 version = "1.0.0"
-source = "git+https://github.com/DataDog/libdatadog?rev=73c675b79f81978ee1190be6af0c5abec997e3b0#73c675b79f81978ee1190be6af0c5abec997e3b0"
+source = "git+https://github.com/DataDog/libdatadog?rev=158b59471f1132e3cb36023fa3c46ccb2dd0eda1#158b59471f1132e3cb36023fa3c46ccb2dd0eda1"
 dependencies = [
- "prost",
+ "prost 0.14.3",
 ]
 
 [[package]]
 name = "libdd-tinybytes"
 version = "1.0.0"
-source = "git+https://github.com/DataDog/libdatadog?rev=73c675b79f81978ee1190be6af0c5abec997e3b0#73c675b79f81978ee1190be6af0c5abec997e3b0"
+source = "git+https://github.com/DataDog/libdatadog?rev=158b59471f1132e3cb36023fa3c46ccb2dd0eda1#158b59471f1132e3cb36023fa3c46ccb2dd0eda1"
 dependencies = [
  "serde",
 ]
@@ -1811,7 +1811,7 @@ dependencies = [
 [[package]]
 name = "libdd-trace-normalization"
 version = "1.0.0"
-source = "git+https://github.com/DataDog/libdatadog?rev=73c675b79f81978ee1190be6af0c5abec997e3b0#73c675b79f81978ee1190be6af0c5abec997e3b0"
+source = "git+https://github.com/DataDog/libdatadog?rev=158b59471f1132e3cb36023fa3c46ccb2dd0eda1#158b59471f1132e3cb36023fa3c46ccb2dd0eda1"
 dependencies = [
  "anyhow",
  "libdd-trace-protobuf",
@@ -1820,7 +1820,7 @@ dependencies = [
 [[package]]
 name = "libdd-trace-obfuscation"
 version = "1.0.0"
-source = "git+https://github.com/DataDog/libdatadog?rev=73c675b79f81978ee1190be6af0c5abec997e3b0#73c675b79f81978ee1190be6af0c5abec997e3b0"
+source = "git+https://github.com/DataDog/libdatadog?rev=158b59471f1132e3cb36023fa3c46ccb2dd0eda1#158b59471f1132e3cb36023fa3c46ccb2dd0eda1"
 dependencies = [
  "anyhow",
  "libdd-common",
@@ -1837,9 +1837,9 @@ dependencies = [
 [[package]]
 name = "libdd-trace-protobuf"
 version = "1.0.0"
-source = "git+https://github.com/DataDog/libdatadog?rev=73c675b79f81978ee1190be6af0c5abec997e3b0#73c675b79f81978ee1190be6af0c5abec997e3b0"
+source = "git+https://github.com/DataDog/libdatadog?rev=158b59471f1132e3cb36023fa3c46ccb2dd0eda1#158b59471f1132e3cb36023fa3c46ccb2dd0eda1"
 dependencies = [
- "prost",
+ "prost 0.14.3",
  "serde",
  "serde_bytes",
 ]
@@ -1847,7 +1847,7 @@ dependencies = [
 [[package]]
 name = "libdd-trace-stats"
 version = "1.0.0"
-source = "git+https://github.com/DataDog/libdatadog?rev=73c675b79f81978ee1190be6af0c5abec997e3b0#73c675b79f81978ee1190be6af0c5abec997e3b0"
+source = "git+https://github.com/DataDog/libdatadog?rev=158b59471f1132e3cb36023fa3c46ccb2dd0eda1#158b59471f1132e3cb36023fa3c46ccb2dd0eda1"
 dependencies = [
  "hashbrown 0.15.5",
  "libdd-ddsketch",
@@ -1858,12 +1858,13 @@ dependencies = [
 [[package]]
 name = "libdd-trace-utils"
 version = "1.0.0"
-source = "git+https://github.com/DataDog/libdatadog?rev=73c675b79f81978ee1190be6af0c5abec997e3b0#73c675b79f81978ee1190be6af0c5abec997e3b0"
+source = "git+https://github.com/DataDog/libdatadog?rev=158b59471f1132e3cb36023fa3c46ccb2dd0eda1#158b59471f1132e3cb36023fa3c46ccb2dd0eda1"
 dependencies = [
  "anyhow",
  "bytes",
  "flate2",
  "futures",
+ "http 1.4.0",
  "http-body-util",
  "hyper 1.8.1",
  "indexmap 2.12.1",
@@ -1871,7 +1872,7 @@ dependencies = [
  "libdd-tinybytes",
  "libdd-trace-normalization",
  "libdd-trace-protobuf",
- "prost",
+ "prost 0.14.3",
  "rand 0.8.5",
  "rmp",
  "rmp-serde",
@@ -2154,7 +2155,7 @@ dependencies = [
  "hex",
  "opentelemetry",
  "opentelemetry_sdk",
- "prost",
+ "prost 0.13.5",
  "serde",
  "tonic 0.12.3",
  "tracing",
@@ -2460,7 +2461,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2796faa41db3ec313a31f7624d9286acf277b52de526150b7e69f3debf891ee5"
 dependencies = [
  "bytes",
- "prost-derive",
+ "prost-derive 0.13.5",
+]
+
+[[package]]
+name = "prost"
+version = "0.14.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d2ea70524a2f82d518bce41317d0fae74151505651af45faf1ffbd6fd33f0568"
+dependencies = [
+ "bytes",
+ "prost-derive 0.14.3",
 ]
 
 [[package]]
@@ -2476,7 +2487,7 @@ dependencies = [
  "once_cell",
  "petgraph 0.7.1",
  "prettyplease",
- "prost",
+ "prost 0.13.5",
  "prost-types",
  "regex",
  "syn 2.0.111",
@@ -2497,12 +2508,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "prost-derive"
+version = "0.14.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "27c6023962132f4b30eb4c172c91ce92d933da334c59c23cddee82358ddafb0b"
+dependencies = [
+ "anyhow",
+ "itertools 0.11.0",
+ "proc-macro2",
+ "quote",
+ "syn 2.0.111",
+]
+
+[[package]]
 name = "prost-types"
 version = "0.13.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "52c2c1bf36ddb1a1c396b3601a3cec27c2462e45f07c386894ec3ccf5332bd16"
 dependencies = [
- "prost",
+ "prost 0.13.5",
 ]
 
 [[package]]
@@ -3601,7 +3625,7 @@ dependencies = [
  "hyper-util",
  "percent-encoding",
  "pin-project",
- "prost",
+ "prost 0.13.5",
  "tokio",
  "tokio-stream",
  "tower 0.4.13",
@@ -3624,7 +3648,7 @@ dependencies = [
  "http-body-util",
  "percent-encoding",
  "pin-project",
- "prost",
+ "prost 0.13.5",
  "tokio-stream",
  "tower-layer",
  "tower-service",
@@ -3651,7 +3675,7 @@ version = "0.12.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0081d8ee0847d01271392a5aebe960a4600f5d4da6c67648a6382a0940f8b367"
 dependencies = [
- "prost",
+ "prost 0.13.5",
  "prost-types",
  "tonic 0.12.3",
 ]
