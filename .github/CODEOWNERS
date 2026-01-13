@@ -1,0 +1,2 @@
+.github/chainguard/serverless-init-ci-publish.sts.yaml @DataDog/serverless
+.github/publish-serverless-init-to-ghcr.yaml @DataDog/serverless
