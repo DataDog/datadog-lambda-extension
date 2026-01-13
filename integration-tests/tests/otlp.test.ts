@@ -1,4 +1,4 @@
-import { invokeLambdaAndGetDatadogData, LambdaInvocationDatadogData } from './utils/util';
+import { invokeLambdaAndGetDatadogData, LambdaInvocationDatadogData, DATADOG_INDEXING_WAIT_5_MIN_MS } from './utils/util';
 import { getIdentifier } from '../config';
 import { LambdaClient, InvokeCommand } from '@aws-sdk/client-lambda';
 
@@ -16,12 +16,12 @@ describe('OTLP Integration Tests', () => {
 
     console.log('Invoking all OTLP Lambda functions in parallel...');
 
-    // Invoke all Lambdas in parallel
+    // Invoke all Lambdas in parallel (using 5 minute wait for OTLP indexing)
     const invocationResults = await Promise.all([
-      invokeLambdaAndGetDatadogData(functions.node, {}, true),
-      invokeLambdaAndGetDatadogData(functions.python, {}, true),
-      invokeLambdaAndGetDatadogData(functions.java, {}, true),
-      invokeLambdaAndGetDatadogData(functions.dotnet, {}, true),
+      invokeLambdaAndGetDatadogData(functions.node, {}, true, true, DATADOG_INDEXING_WAIT_5_MIN_MS),
+      invokeLambdaAndGetDatadogData(functions.python, {}, true, true, DATADOG_INDEXING_WAIT_5_MIN_MS),
+      invokeLambdaAndGetDatadogData(functions.java, {}, true, true, DATADOG_INDEXING_WAIT_5_MIN_MS),
+      invokeLambdaAndGetDatadogData(functions.dotnet, {}, true, true, DATADOG_INDEXING_WAIT_5_MIN_MS),
     ]);
 
     // Store results
