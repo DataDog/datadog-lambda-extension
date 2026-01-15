@@ -45,7 +45,7 @@ const FUNCTION_TAGS_KEY: &str = "_dd.tags.function";
 // TODO(astuyve) decide what to do with the version
 const EXTENSION_VERSION_KEY: &str = "dd_extension_version";
 // TODO(duncanista) figure out a better way to not hardcode this
-pub const EXTENSION_VERSION: &str = "91-next";
+pub const EXTENSION_VERSION: &str = "92-next";
 
 const REGION_KEY: &str = "region";
 const ACCOUNT_ID_KEY: &str = "account_id";
