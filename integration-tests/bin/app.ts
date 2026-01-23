@@ -5,6 +5,7 @@ import {Base} from '../lib/stacks/base';
 import {Otlp} from '../lib/stacks/otlp';
 import {Snapstart} from '../lib/stacks/snapstart';
 import {LambdaManagedInstancesStack} from '../lib/stacks/lmi';
+import {StackCleanup} from '../lib/stacks/stack-cleanup';
 import {ACCOUNT, getIdentifier, REGION} from '../config';
 import {CapacityProviderStack} from "../lib/capacity-provider";
 
@@ -38,5 +39,8 @@ const stacks = [
 
 // Tag all stacks so we can easily clean them up
 stacks.forEach(stack => stack.addStackTag("extension_integration_test", "true"))
+new StackCleanup(app, `integ--stack-cleanup`, {
+    env,
+});
 
 app.synth();
