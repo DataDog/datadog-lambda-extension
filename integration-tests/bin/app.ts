@@ -39,7 +39,7 @@ const stacks = [
 
 // Tag all stacks so we can easily clean them up
 stacks.forEach(stack => stack.addStackTag("extension_integration_test", "true"))
-new StackCleanup(app, `integ--stack-cleanup`, {
+new StackCleanup(app, `integ-stack-cleanup`, {
     env,
 });
 
