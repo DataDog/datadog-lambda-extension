@@ -254,8 +254,13 @@ impl Processor {
             self.runtime = Some(runtime);
         }
 
-        self.dynamic_tags
-            .insert(String::from("cold_start"), cold_start.to_string());
+        // Skip cold_start tag in Managed Instance mode
+        // We don't want to send this tag for spans, as the experience
+        // won't look good due to the time gap in the flame graph.
+        if !self.aws_config.is_managed_instance_mode() {
+            self.dynamic_tags
+                .insert(String::from("cold_start"), cold_start.to_string());
+        }
 
         if proactive_initialization {
             self.dynamic_tags.insert(
