@@ -305,6 +305,14 @@ impl Processor {
             return;
         };
 
+        // Skip creating cold start span in Managed Instances
+        // Although the telemetry is correct, we instead decide
+        // to not send it since the flame graph would show a big
+        // gap between the init and the first invocation.
+        if self.aws_config.is_managed_instance_mode() {
+            return;
+        }
+
         // Create a cold start span
         let mut cold_start_span = create_empty_span(
             String::from("aws.lambda.cold_start"),
