@@ -45,9 +45,9 @@ jobs:
         ]
     name: "Release Serverless Init (isAlpine: ${{ matrix.arrays.isAlpine }})"
     steps:
-      - uses: actions/checkout@v6.0.0
+      - uses: actions/checkout@v6.0.2
 
-      - uses: actions/checkout@v6.0.0
+      - uses: actions/checkout@v6.0.2
         with:
           repository: DataDog/datadog-agent
           ref: ${{ github.event.inputs.agentBranch }}
