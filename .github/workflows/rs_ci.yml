@@ -171,6 +171,9 @@ jobs:
   cargo-audit:
     name: Audit
     runs-on: ubuntu-22.04
+    permissions:
+      contents: read
+      checks: write
     steps:
       - name: Checkout repository
         uses: actions/checkout@v6.0.2
