@@ -1088,6 +1088,15 @@ impl Processor {
             return Some(sc);
         }
 
+        if let Some(request_obj) = payload_value.get("request") {
+            if let Some(request_headers) = request_obj.get("headers") {
+                if let Some(sc) = propagator.extract(request_headers) {
+                    debug!("Extracted trace context from event.request.headers");
+                    return Some(sc);
+                }
+            }
+        }
+
         None
     }
 
