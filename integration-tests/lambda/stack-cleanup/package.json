@@ -1,0 +1,8 @@
+{
+  "name": "stack-cleanup",
+  "version": "1.0.0",
+  "type": "module",
+  "dependencies": {
+    "@aws-sdk/client-cloudformation": "^3.0.0"
+  }
+}
