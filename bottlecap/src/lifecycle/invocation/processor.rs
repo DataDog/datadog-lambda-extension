@@ -1076,6 +1076,15 @@ impl Processor {
             return Some(sc);
         }
 
+        if let Some(request_obj) = payload_value.get("request") {
+            if let Some(request_headers) = request_obj.get("headers") {
+                if let Some(sc) = propagator.extract(request_headers) {
+                    debug!("Extracted trace context from event.request.headers");
+                    return Some(sc);
+                }
+            }
+        }
+
         if let Some(payload_headers) = payload_value.get("headers") {
             if let Some(sc) = propagator.extract(payload_headers) {
                 debug!("Extracted trace context from event headers");
@@ -1086,15 +1095,6 @@ impl Processor {
         if let Some(sc) = propagator.extract(headers) {
             debug!("Extracted trace context from headers");
             return Some(sc);
-        }
-
-        if let Some(request_obj) = payload_value.get("request") {
-            if let Some(request_headers) = request_obj.get("headers") {
-                if let Some(sc) = propagator.extract(request_headers) {
-                    debug!("Extracted trace context from event.request.headers");
-                    return Some(sc);
-                }
-            }
         }
 
         None
@@ -1956,8 +1956,8 @@ mod tests {
         assert!(result.is_some());
         let context = result.unwrap();
         assert_eq!(
-            context.trace_id, 333,
-            "Should prioritize event.headers over other sources"
+            context.trace_id, 555,
+            "Should prioritize event.request.headers as service-specific extraction"
         );
     }
 
@@ -1988,7 +1988,10 @@ mod tests {
 
         let result = Processor::extract_span_context(&headers, &payload, propagator);
 
-        assert!(result.is_some(), "Should fallback to event.request.headers");
+        assert!(
+            result.is_some(),
+            "Should extract from event.request.headers"
+        );
         let context = result.unwrap();
         assert_eq!(context.trace_id, 7777);
         assert_eq!(context.span_id, 8888);
