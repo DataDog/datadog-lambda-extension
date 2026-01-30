@@ -67,22 +67,31 @@ describe('LMI Integration Tests', () => {
       expect(awsLambdaSpan?.attributes.custom.init_type).toBe('lambda-managed-instances')
     })
     // SVLS-8232
-    it('aws.lambda.span should have cold_start set to false if no cold_start operation', () => {
+    // In Managed Instance mode, cold_start span and tag are not sent by bottlecap
+    // because the concept is less meaningful with concurrent invocations
+    // and it would create a poor flame graph experience due to time gaps.
+    //
+    // Note: Node and Python tracers (dd-trace-js, dd-trace-py) set their own cold_start
+    // attribute on spans independently, so we skip the tag check for those runtimes.
+    it('aws.lambda.span should NOT have cold_start span or tag in LMI mode', () => {
       const trace = results[runtime].traces![0];
 
-      // The presence of 'aws.lambda.cold_start' span indicates a cold start
+      // Verify no 'aws.lambda.cold_start' span exists in LMI mode
       const coldStartSpan = trace.spans.find((span: any) =>
           span.attributes.operation_name === 'aws.lambda.cold_start'
       );
+      expect(coldStartSpan).toBeUndefined();
 
       const awsLambdaSpan = trace.spans.find((span: any) =>
           span.attributes.operation_name === 'aws.lambda'
       );
       expect(awsLambdaSpan).toBeDefined(); // Ensure span exists before checking attributes
 
-      // Only check cold_start attribute when no dedicated cold_start span exists
-      if (!coldStartSpan) {
-        expect(awsLambdaSpan?.attributes.custom.cold_start).toBe('false');
+      // Skip cold_start tag check for Node and Python since their tracer libraries
+      // (dd-trace-js, dd-trace-py) set the cold_start attribute independently.
+      // Only verify for Java and dotnet where bottlecap controls the span.
+      if (runtime !== 'node' && runtime !== 'python') {
+        expect(awsLambdaSpan?.attributes.custom.cold_start).toBeUndefined();
       }
     })
 
