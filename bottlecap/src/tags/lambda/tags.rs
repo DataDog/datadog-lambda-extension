@@ -100,7 +100,7 @@ fn tags_from_env(
         tags_map.insert(ENV_KEY.to_string(), env.to_string());
     }
     if let Some(service) = &config.service {
-        tags_map.insert(SERVICE_KEY.to_string(), service.to_string());
+        tags_map.insert(SERVICE_KEY.to_string(), service.to_lowercase());
     }
     if let Ok(init_type) = std::env::var(INIT_TYPE) {
         tags_map.insert(INIT_TYPE_KEY.to_string(), init_type);

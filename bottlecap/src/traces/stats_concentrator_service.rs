@@ -166,7 +166,7 @@ impl StatsConcentratorService {
                 sequence: 0,
                 // Not supported yet
                 agent_aggregation: String::new(),
-                service: self.config.service.clone().unwrap_or_default(),
+                service: self.config.service.clone().unwrap_or_default().to_lowercase(),
                 container_id: self.tracer_metadata.container_id.clone(),
                 // Not supported yet
                 tags: vec![],
