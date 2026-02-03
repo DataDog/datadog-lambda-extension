@@ -727,7 +727,7 @@ dependencies = [
 [[package]]
 name = "datadog-fips"
 version = "0.1.0"
-source = "git+https://github.com/DataDog/serverless-components?rev=18b49baba8bfef97060d7edd8b830584d0da3373#18b49baba8bfef97060d7edd8b830584d0da3373"
+source = "git+https://github.com/DataDog/serverless-components?rev=9e63555e3bf1455078de8a16ba8d0a39c6b14554#9e63555e3bf1455078de8a16ba8d0a39c6b14554"
 dependencies = [
  "reqwest",
  "rustls",
@@ -836,7 +836,7 @@ dependencies = [
 [[package]]
 name = "dogstatsd"
 version = "0.1.0"
-source = "git+https://github.com/DataDog/serverless-components?rev=18b49baba8bfef97060d7edd8b830584d0da3373#18b49baba8bfef97060d7edd8b830584d0da3373"
+source = "git+https://github.com/DataDog/serverless-components?rev=9e63555e3bf1455078de8a16ba8d0a39c6b14554#9e63555e3bf1455078de8a16ba8d0a39c6b14554"
 dependencies = [
  "datadog-fips",
  "datadog-protos",
