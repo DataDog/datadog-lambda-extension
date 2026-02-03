@@ -330,7 +330,7 @@ signed layer bundle:
 build java lambdas:
   stage: integration-tests
   image: registry.ddbuild.io/images/docker:27.3.1
-  tags: ["docker-in-docker:microvm-arm64"]
+  tags: ["docker-in-docker:arm64"]
   rules:
     - when: on_success
   needs: []
@@ -349,7 +349,7 @@ build java lambdas:
 build dotnet lambdas:
   stage: integration-tests
   image: registry.ddbuild.io/images/docker:27.3.1
-  tags: ["docker-in-docker:microvm-arm64"]
+  tags: ["docker-in-docker:arm64"]
   rules:
     - when: on_success
   needs: []
@@ -368,7 +368,7 @@ build dotnet lambdas:
 build python lambdas:
   stage: integration-tests
   image: registry.ddbuild.io/images/docker:27.3.1
-  tags: ["docker-in-docker:microvm-arm64"]
+  tags: ["docker-in-docker:arm64"]
   rules:
     - when: on_success
   needs: []
@@ -387,7 +387,7 @@ build python lambdas:
 build node lambdas:
   stage: integration-tests
   image: registry.ddbuild.io/images/docker:27.3.1
-  tags: ["docker-in-docker:microvm-arm64"]
+  tags: ["docker-in-docker:arm64"]
   rules:
     - when: on_success
   needs: []
