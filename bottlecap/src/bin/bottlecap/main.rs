@@ -447,8 +447,13 @@ async fn extension_loop_active(
                     }
                    () = cancel_token_clone.cancelled() => {
                         debug!("Managed Instance mode: periodic flusher task cancelled, waiting for pending flushes");
-                        // Wait for any pending flushes before exiting
+                        // Wait for any pending flushes
                         flushing_service.await_handles().await;
+                        // Final flush to capture any data that accumulated since the last
+                        // spawn_non_blocking(). We pass force_stats=true since this is our
+                        // last opportunity to send data before shutdown.
+                        let mut locked_metrics = flushing_service.metrics_flushers().lock().await;
+                        flushing_service.flush_blocking(true, &mut locked_metrics).await;
                         break;
                     }
                 }
@@ -584,47 +589,11 @@ async fn extension_loop_active(
             &lifecycle_listener_shutdown_token,
         );
 
-        // Wait for background flusher to complete gracefully
+        // Wait for background flusher to complete gracefully.
+        // The background task performs the final flush before exiting, so we just need to wait.
         if let Err(e) = flush_task_handle.await {
             error!("Error waiting for background flush task: {e:?}");
         }
-
-        // Final flush to send any remaining observability data before shutdown.
-        //
-        // Managed Instance Mode vs OnDemand Mode Final Flush:
-        //
-        // While both modes perform a final flush during shutdown, the context differs:
-        //
-        // - **Managed Instance Mode (this code)**: Throughout the execution environment's lifetime,
-        //   a background task has been continuously flushing data at regular intervals
-        //   (see flush_task_handle above). This final flush captures any data that was
-        //   generated after the last periodic flush and before shutdown was signaled.
-        //   Since concurrent invocations may have completed just before shutdown, this
-        //   ensures we don't lose their metrics, logs, and traces.
-        //
-        // - **OnDemand Mode**: Flushing is tied to invocation lifecycle, so data is typically
-        //   flushed at the end of each invocation. The final flush captures any remaining
-        //   data from the last invocation that may not have been sent yet.
-        //
-        // In both modes, we pass `force_flush_trace_stats=true` to ensure trace statistics
-        // are flushed regardless of timing constraints, as this is our last opportunity to
-        // send data before the Lambda execution environment terminates.
-        //
-        // Final flush without interval reset. We pass None for race_flush_interval since
-        // this is the final operation before shutdown and resetting the interval timing
-        // serves no purpose. This avoids creating an unnecessary interval object.
-        let flushing_service = FlushingService::new(
-            logs_flusher.clone(),
-            Arc::clone(&trace_flusher),
-            Arc::clone(&stats_flusher),
-            proxy_flusher.clone(),
-            Arc::clone(&metrics_flushers),
-            metrics_aggregator_handle.clone(),
-        );
-        let mut locked_metrics = metrics_flushers.lock().await;
-        flushing_service
-            .flush_blocking(true, &mut locked_metrics)
-            .await;
 
         return Ok(());
     }
