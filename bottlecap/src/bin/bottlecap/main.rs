@@ -623,7 +623,7 @@ async fn extension_loop_active(
         );
         let mut locked_metrics = metrics_flushers.lock().await;
         flushing_service
-            .flush_blocking_with_interval(true, &mut locked_metrics, None)
+            .flush_blocking(true, &mut locked_metrics)
             .await;
 
         return Ok(());
@@ -668,20 +668,18 @@ async fn extension_loop_active(
                         _ = race_flush_interval.tick() => {
                             let mut locked_metrics = metrics_flushers.lock().await;
                             flushing_service
-                                .flush_blocking_with_interval(false, &mut locked_metrics, Some(&mut race_flush_interval))
+                                .flush_blocking(false, &mut locked_metrics)
                                 .await;
+                            race_flush_interval.reset();
                         }
                     }
                 }
                 // flush
                 let mut locked_metrics = metrics_flushers.lock().await;
                 flushing_service
-                    .flush_blocking_with_interval(
-                        false,
-                        &mut locked_metrics,
-                        Some(&mut race_flush_interval),
-                    )
+                    .flush_blocking(false, &mut locked_metrics)
                     .await;
+                race_flush_interval.reset();
                 let next_response =
                     extension::next_event(client, &aws_config.runtime_api, &r.extension_id).await;
                 maybe_shutdown_event =
@@ -699,12 +697,9 @@ async fn extension_loop_active(
                     FlushDecision::Periodic => {
                         let mut locked_metrics = metrics_flushers.lock().await;
                         flushing_service
-                            .flush_blocking_with_interval(
-                                false,
-                                &mut locked_metrics,
-                                Some(&mut race_flush_interval),
-                            )
+                            .flush_blocking(false, &mut locked_metrics)
                             .await;
+                        race_flush_interval.reset();
                     }
                     _ => {
                         // No specific flush logic for Dont or End (End already handled above)
@@ -733,8 +728,9 @@ async fn extension_loop_active(
                             if flush_control.flush_strategy == FlushStrategy::Default {
                                 let mut locked_metrics = metrics_flushers.lock().await;
                                 flushing_service
-                                    .flush_blocking_with_interval(false, &mut locked_metrics, Some(&mut race_flush_interval))
+                                    .flush_blocking(false, &mut locked_metrics)
                                     .await;
+                                race_flush_interval.reset();
                             }
                         }
                     }
@@ -782,11 +778,7 @@ async fn extension_loop_active(
             // Final flush with force_stats=true since this is our last opportunity
             let mut locked_metrics = metrics_flushers.lock().await;
             flushing_service
-                .flush_blocking_with_interval(
-                    true,
-                    &mut locked_metrics,
-                    Some(&mut race_flush_interval),
-                )
+                .flush_blocking(true, &mut locked_metrics)
                 .await;
 
             // Shutdown aggregator services

@@ -296,6 +296,14 @@ where
     ///   regardless of timing constraints.
     /// * `metrics_flushers` - Mutable slice of metrics flushers. The caller must acquire
     ///   the lock before calling this method.
+    ///
+    /// # Note
+    ///
+    /// TODO: The caller must acquire the lock on `metrics_flushers` and pass a mutable slice
+    /// because `MetricsFlusher::flush_metrics` requires `&mut self`. This creates awkward
+    /// ergonomics. Consider modifying the `dogstatsd` crate to use interior mutability
+    /// (e.g., `Arc<Mutex<...>>` internally) so `flush_metrics` can take `&self`, allowing
+    /// this method to handle locking internally.
     pub async fn flush_blocking(&self, force_stats: bool, metrics_flushers: &mut [MetricsFlusher]) {
         let flush_response = self
             .metrics_aggr_handle
@@ -320,27 +328,6 @@ where
             self.stats_flusher.flush(force_stats),
             self.proxy_flusher.flush(None),
         );
-    }
-
-    /// Performs a blocking flush and resets the flush interval.
-    ///
-    /// This is a convenience method that combines `flush_blocking` with interval reset.
-    ///
-    /// # Arguments
-    ///
-    /// * `force_stats` - If `true`, forces the stats flusher to flush immediately.
-    /// * `metrics_flushers` - Mutable slice of metrics flushers.
-    /// * `interval` - Optional interval to reset after flushing.
-    pub async fn flush_blocking_with_interval(
-        &self,
-        force_stats: bool,
-        metrics_flushers: &mut [MetricsFlusher],
-        interval: Option<&mut tokio::time::Interval>,
-    ) {
-        self.flush_blocking(force_stats, metrics_flushers).await;
-        if let Some(interval) = interval {
-            interval.reset();
-        }
     }
 
     /// Returns a reference to the metrics flushers mutex for external locking.
