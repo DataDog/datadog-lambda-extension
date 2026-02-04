@@ -64,7 +64,11 @@ impl LambdaProcessor {
         event_bus: Sender<Event>,
         is_managed_instance_mode: bool,
     ) -> Self {
-        let service = datadog_config.service.clone().unwrap_or_default();
+        let service = datadog_config
+            .service
+            .clone()
+            .unwrap_or_default()
+            .to_lowercase();
         let tags = tags_provider.get_tags_string();
         let function_arn = tags_provider.get_canonical_id().unwrap_or_default();
 

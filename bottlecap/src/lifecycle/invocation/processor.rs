@@ -107,7 +107,8 @@ impl Processor {
             &config.service.clone().unwrap_or(resource.clone()),
             "aws.lambda",
             config.trace_aws_service_representation_enabled,
-        );
+        )
+        .to_lowercase();
 
         let enhanced_metrics = EnhancedMetrics::new(metrics_aggregator, Arc::clone(&config));
         enhanced_metrics.start_usage_metrics_task(); // starts the long-running task that monitors usage metrics (fd_use, threads_use, tmp_used)
