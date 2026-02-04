@@ -23,20 +23,11 @@ use crate::traces::{
 /// - Spawning non-blocking flush tasks
 /// - Awaiting pending flush handles with retry logic
 /// - Performing blocking flushes (spawn + await)
-///
-/// # Type Parameters
-///
-/// * `TF` - Trace flusher type implementing `TraceFlusher`
-/// * `SF` - Stats flusher type implementing `StatsFlusher`
-pub struct FlushingService<TF, SF>
-where
-    TF: TraceFlusher + Send + Sync + 'static,
-    SF: StatsFlusher + Send + Sync + 'static,
-{
+pub struct FlushingService {
     // Flushers
     logs_flusher: LogsFlusher,
-    trace_flusher: Arc<TF>,
-    stats_flusher: Arc<SF>,
+    trace_flusher: Arc<TraceFlusher>,
+    stats_flusher: Arc<StatsFlusher>,
     proxy_flusher: Arc<ProxyFlusher>,
     metrics_flushers: Arc<TokioMutex<Vec<MetricsFlusher>>>,
 
@@ -47,17 +38,13 @@ where
     handles: FlushHandles,
 }
 
-impl<TF, SF> FlushingService<TF, SF>
-where
-    TF: TraceFlusher + Send + Sync + 'static,
-    SF: StatsFlusher + Send + Sync + 'static,
-{
+impl FlushingService {
     /// Creates a new `FlushingService` with the given flushers.
     #[must_use]
     pub fn new(
         logs_flusher: LogsFlusher,
-        trace_flusher: Arc<TF>,
-        stats_flusher: Arc<SF>,
+        trace_flusher: Arc<TraceFlusher>,
+        stats_flusher: Arc<StatsFlusher>,
         proxy_flusher: Arc<ProxyFlusher>,
         metrics_flushers: Arc<TokioMutex<Vec<MetricsFlusher>>>,
         metrics_aggr_handle: MetricsAggregatorHandle,
@@ -340,11 +327,7 @@ where
     }
 }
 
-impl<TF, SF> std::fmt::Debug for FlushingService<TF, SF>
-where
-    TF: TraceFlusher + Send + Sync + 'static,
-    SF: StatsFlusher + Send + Sync + 'static,
-{
+impl std::fmt::Debug for FlushingService {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("FlushingService")
             .field("handles", &self.handles)

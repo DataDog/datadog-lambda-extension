@@ -1,7 +1,6 @@
 // Copyright 2023-Present Datadog, Inc. https://www.datadoghq.com/
 // SPDX-License-Identifier: Apache-2.0
 
-use async_trait::async_trait;
 use std::str::FromStr;
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -9,55 +8,41 @@ use tokio::sync::OnceCell;
 
 use crate::config;
 use crate::lifecycle::invocation::processor::S_TO_MS;
+use crate::traces::hyper_client::{self, HyperClient};
 use crate::traces::stats_aggregator::StatsAggregator;
-use crate::traces::trace_flusher::ServerlessTraceFlusher;
 use dogstatsd::api_key::ApiKeyFactory;
 use libdd_common::Endpoint;
 use libdd_trace_protobuf::pb;
 use libdd_trace_utils::{config_utils::trace_stats_url, stats_utils};
 use tracing::{debug, error};
 
-#[async_trait]
-pub trait StatsFlusher {
-    fn new(
-        api_key_factory: Arc<ApiKeyFactory>,
-        aggregator: Arc<Mutex<StatsAggregator>>,
-        config: Arc<config::Config>,
-    ) -> Self
-    where
-        Self: Sized;
-    /// Flushes stats to the Datadog trace stats intake.
-    async fn send(&self, traces: Vec<pb::ClientStatsPayload>);
-
-    async fn flush(&self, force_flush: bool);
-}
-
-#[allow(clippy::module_name_repetitions)]
-#[derive(Clone)]
-pub struct ServerlessStatsFlusher {
-    // pub buffer: Arc<Mutex<Vec<pb::ClientStatsPayload>>>,
+pub struct StatsFlusher {
     aggregator: Arc<Mutex<StatsAggregator>>,
     config: Arc<config::Config>,
     api_key_factory: Arc<ApiKeyFactory>,
     endpoint: OnceCell<Endpoint>,
+    /// Cached HTTP client, lazily initialized on first use.
+    http_client: OnceCell<HyperClient>,
 }
 
-#[async_trait]
-impl StatsFlusher for ServerlessStatsFlusher {
-    fn new(
+impl StatsFlusher {
+    #[must_use]
+    pub fn new(
         api_key_factory: Arc<ApiKeyFactory>,
         aggregator: Arc<Mutex<StatsAggregator>>,
         config: Arc<config::Config>,
     ) -> Self {
-        ServerlessStatsFlusher {
+        StatsFlusher {
             aggregator,
             config,
             api_key_factory,
             endpoint: OnceCell::new(),
+            http_client: OnceCell::new(),
         }
     }
 
-    async fn send(&self, stats: Vec<pb::ClientStatsPayload>) {
+    /// Flushes stats to the Datadog trace stats intake.
+    pub async fn send(&self, stats: Vec<pb::ClientStatsPayload>) {
         if stats.is_empty() {
             return;
         }
@@ -102,10 +87,9 @@ impl StatsFlusher for ServerlessStatsFlusher {
 
         let start = std::time::Instant::now();
 
-        let Ok(http_client) = ServerlessTraceFlusher::get_http_client(
-            self.config.proxy_https.as_ref(),
-            self.config.tls_cert_file.as_ref(),
-        ) else {
+        // Get or create the cached HTTP client
+        let http_client = self.get_or_init_http_client().await;
+        let Some(http_client) = http_client else {
             error!("STATS_FLUSHER | Failed to create HTTP client");
             return;
         };
@@ -114,7 +98,7 @@ impl StatsFlusher for ServerlessStatsFlusher {
             serialized_stats_payload,
             endpoint,
             api_key.as_str(),
-            Some(&http_client),
+            Some(http_client),
         )
         .await;
         let elapsed = start.elapsed();
@@ -131,7 +115,7 @@ impl StatsFlusher for ServerlessStatsFlusher {
         };
     }
 
-    async fn flush(&self, force_flush: bool) {
+    pub async fn flush(&self, force_flush: bool) {
         let mut guard = self.aggregator.lock().await;
 
         let mut stats = guard.get_batch(force_flush).await;
@@ -140,5 +124,27 @@ impl StatsFlusher for ServerlessStatsFlusher {
 
             stats = guard.get_batch(force_flush).await;
         }
+    }
+    /// Returns a reference to the cached HTTP client, initializing it if necessary.
+    ///
+    /// The client is created once and reused for all subsequent flushes,
+    /// providing connection pooling and TLS session reuse.
+    async fn get_or_init_http_client(&self) -> Option<&HyperClient> {
+        let client = self
+            .http_client
+            .get_or_init(|| async {
+                match hyper_client::create_client(
+                    self.config.proxy_https.as_ref(),
+                    self.config.tls_cert_file.as_ref(),
+                ) {
+                    Ok(client) => client,
+                    Err(e) => {
+                        error!("STATS_FLUSHER | Failed to create HTTP client: {e}");
+                        panic!("STATS_FLUSHER | Cannot proceed without HTTP client");
+                    }
+                }
+            })
+            .await;
+        Some(client)
     }
 }
