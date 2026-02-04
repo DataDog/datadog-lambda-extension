@@ -28,9 +28,8 @@ pub struct TraceFlusher {
     /// Each trace batch is sent to the primary endpoint AND all additional endpoints.
     pub additional_endpoints: Vec<Endpoint>,
     /// Cached HTTP client, lazily initialized on first use.
-    /// TODO: TraceFlusher and StatsFlusher both hit trace.agent.datadoghq.{site} and could
-    /// share a single HTTP client for better connection pooling. Consider using a
-    /// SharedHyperClient wrapper passed to both flushers from main.rs.
+    /// TODO: `TraceFlusher` and `StatsFlusher` both hit trace.agent.datadoghq.{site} and could
+    /// share a single HTTP client for better connection pooling.
     http_client: OnceCell<HyperClient>,
 }
 

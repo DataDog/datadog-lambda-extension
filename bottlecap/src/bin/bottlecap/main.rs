@@ -1394,6 +1394,7 @@ mod flush_handles_tests {
         let mut handles = FlushHandles::new();
         let handle = tokio::spawn(async {
             sleep(Duration::from_millis(5)).await;
+            Vec::new() // Return empty Vec for stats retry
         });
         handles.stats_flush_handles.push(handle);
 
