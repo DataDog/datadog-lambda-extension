@@ -22,6 +22,9 @@ pub struct StatsFlusher {
     api_key_factory: Arc<ApiKeyFactory>,
     endpoint: OnceCell<Endpoint>,
     /// Cached HTTP client, lazily initialized on first use.
+    /// TODO: StatsFlusher and TraceFlusher both hit trace.agent.datadoghq.{site} and could
+    /// share a single HTTP client for better connection pooling. Consider using a
+    /// SharedHyperClient wrapper passed to both flushers from main.rs.
     http_client: OnceCell<HyperClient>,
 }
 
