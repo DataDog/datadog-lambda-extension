@@ -21,6 +21,7 @@ pub struct MetricsRetryBatch {
 /// Each field contains a vector of `JoinHandle`s for in-flight flush tasks.
 /// The return type of each handle contains data that may need to be retried
 /// if the flush failed.
+#[derive(Default)]
 #[allow(clippy::struct_field_names)]
 pub struct FlushHandles {
     /// Handles for trace flush operations. Returns failed traces for retry.
@@ -68,12 +69,6 @@ impl FlushHandles {
             && self.metric_flush_handles.is_empty()
             && self.proxy_flush_handles.is_empty()
             && self.stats_flush_handles.is_empty()
-    }
-}
-
-impl Default for FlushHandles {
-    fn default() -> Self {
-        Self::new()
     }
 }
 
