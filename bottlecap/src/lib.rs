@@ -24,6 +24,7 @@ pub mod config;
 pub mod event_bus;
 pub mod extension;
 pub mod fips;
+pub mod flushing;
 pub mod http;
 pub mod lifecycle;
 pub mod logger;
