@@ -23,6 +23,9 @@ pub struct TraceFlusher {
     pub aggregator_handle: AggregatorHandle,
     pub config: Arc<Config>,
     pub api_key_factory: Arc<ApiKeyFactory>,
+    /// Additional endpoints for dual-shipping traces to multiple Datadog sites.
+    /// Configured via `DD_APM_ADDITIONAL_ENDPOINTS` (e.g., sending to both US and EU).
+    /// Each trace batch is sent to the primary endpoint AND all additional endpoints.
     pub additional_endpoints: Vec<Endpoint>,
     /// Cached HTTP client, lazily initialized on first use.
     http_client: OnceCell<HyperClient>,
@@ -35,8 +38,10 @@ impl TraceFlusher {
         config: Arc<Config>,
         api_key_factory: Arc<ApiKeyFactory>,
     ) -> Self {
+        // Parse additional endpoints for dual-shipping from config.
+        // Format: { "https://trace.agent.datadoghq.eu": ["api-key-1", "api-key-2"], ... }
+        // Each URL + API key combination becomes a separate endpoint.
         let mut additional_endpoints: Vec<Endpoint> = Vec::new();
-
         for (endpoint_url, api_keys) in config.apm_additional_endpoints.clone() {
             for api_key in api_keys {
                 let trace_intake_url = trace_intake_url_prefixed(&endpoint_url);
@@ -47,7 +52,6 @@ impl TraceFlusher {
                     timeout_ms: config.flush_timeout * S_TO_MS,
                     test_token: None,
                 };
-
                 additional_endpoints.push(endpoint);
             }
         }
@@ -84,7 +88,12 @@ impl TraceFlusher {
         let mut failed_batch: Vec<SendData> = Vec::new();
 
         if let Some(traces) = failed_traces {
-            // If we have traces from a previous failed attempt, try to send those first
+            // If we have traces from a previous failed attempt, try to send those first.
+            // TODO: Currently retries always go to the primary endpoint (None), even if the
+            // original failure was for an additional endpoint. This means traces that failed
+            // to send to additional endpoints will be retried to the primary endpoint instead.
+            // To fix this, we need to track which endpoint each failed trace was destined for,
+            // possibly by storing (Vec<SendData>, Option<Endpoint>) pairs in failed_batch.
             if !traces.is_empty() {
                 debug!(
                     "TRACES | Retrying to send {} previously failed batches",
@@ -115,11 +124,15 @@ impl TraceFlusher {
                 .map(SendDataBuilder::build)
                 .collect();
 
+            // Send to PRIMARY endpoint (the default endpoint configured in the trace).
+            // Passing None means "use the endpoint already configured in the SendData".
             let traces_clone = traces.clone();
             let client_clone = http_client.clone();
             batch_tasks
                 .spawn(async move { Self::send_traces(traces_clone, None, client_clone).await });
 
+            // Send to ADDITIONAL endpoints for dual-shipping.
+            // Each additional endpoint gets the same traces, enabling multi-region delivery.
             for endpoint in self.additional_endpoints.clone() {
                 let traces_clone = traces.clone();
                 let client_clone = http_client.clone();
@@ -128,6 +141,9 @@ impl TraceFlusher {
                 });
             }
         }
+        // Collect failed traces from all endpoints (primary + additional).
+        // Note: We lose track of which endpoint each failure came from here.
+        // All failures are mixed together and will be retried to the primary endpoint only.
         while let Some(result) = batch_tasks.join_next().await {
             if let Ok(Some(mut failed)) = result {
                 failed_batch.append(&mut failed);
