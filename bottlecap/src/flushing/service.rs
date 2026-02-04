@@ -122,11 +122,13 @@ impl FlushingService {
             self.handles.metric_flush_handles.push(handle);
         }
 
-        // Spawn stats flush (fire-and-forget, no retry)
+        // Spawn stats flush
         let sf = Arc::clone(&self.stats_flusher);
         self.handles
             .stats_flush_handles
-            .push(tokio::spawn(async move { sf.flush(false).await }));
+            .push(tokio::spawn(async move {
+                sf.flush(false, None).await.unwrap_or_default()
+            }));
 
         // Spawn proxy flush
         let pf = self.proxy_flusher.clone();
@@ -153,11 +155,25 @@ impl FlushingService {
         let mut joinset = tokio::task::JoinSet::new();
         let mut flush_error = false;
 
-        // Await stats handles (no retry)
+        // Await stats handles with retry
         for handle in self.handles.stats_flush_handles.drain(..) {
-            if let Err(e) = handle.await {
-                error!("FLUSHING_SERVICE | stats flush error {e:?}");
-                flush_error = true;
+            match handle.await {
+                Ok(retry) => {
+                    let sf = self.stats_flusher.clone();
+                    if !retry.is_empty() {
+                        debug!(
+                            "FLUSHING_SERVICE | redriving {:?} stats payloads",
+                            retry.len()
+                        );
+                        joinset.spawn(async move {
+                            sf.flush(false, Some(retry)).await;
+                        });
+                    }
+                }
+                Err(e) => {
+                    error!("FLUSHING_SERVICE | stats flush error {e:?}");
+                    flush_error = true;
+                }
             }
         }
 
@@ -312,7 +328,7 @@ impl FlushingService {
             self.logs_flusher.flush(None),
             futures::future::join_all(metrics_futures),
             self.trace_flusher.flush(None),
-            self.stats_flusher.flush(force_stats),
+            self.stats_flusher.flush(force_stats, None),
             self.proxy_flusher.flush(None),
         );
     }

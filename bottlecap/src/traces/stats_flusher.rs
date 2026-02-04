@@ -22,9 +22,8 @@ pub struct StatsFlusher {
     api_key_factory: Arc<ApiKeyFactory>,
     endpoint: OnceCell<Endpoint>,
     /// Cached HTTP client, lazily initialized on first use.
-    /// TODO: StatsFlusher and TraceFlusher both hit trace.agent.datadoghq.{site} and could
-    /// share a single HTTP client for better connection pooling. Consider using a
-    /// SharedHyperClient wrapper passed to both flushers from main.rs.
+    /// TODO: `StatsFlusher` and `TraceFlusher` both hit trace.agent.datadoghq.{site} and could
+    /// share a single HTTP client for better connection pooling.
     http_client: OnceCell<HyperClient>,
 }
 
@@ -45,14 +44,20 @@ impl StatsFlusher {
     }
 
     /// Flushes stats to the Datadog trace stats intake.
-    pub async fn send(&self, stats: Vec<pb::ClientStatsPayload>) {
+    ///
+    /// Returns `None` on success, or `Some(failed_stats)` if the flush failed and should be retried.
+    pub async fn send(
+        &self,
+        stats: Vec<pb::ClientStatsPayload>,
+    ) -> Option<Vec<pb::ClientStatsPayload>> {
         if stats.is_empty() {
-            return;
+            return None;
         }
 
         let Some(api_key) = self.api_key_factory.get_api_key().await else {
-            error!("Skipping flushing stats: Failed to resolve API key");
-            return;
+            error!("STATS | Skipping flushing stats: Failed to resolve API key");
+            // No API key means we can't send - don't retry as it won't help
+            return None;
         };
 
         let api_key_clone = api_key.to_string();
@@ -72,17 +77,18 @@ impl StatsFlusher {
             })
             .await;
 
-        debug!("Flushing {} stats", stats.len());
+        debug!("STATS | Flushing {} stats", stats.len());
 
-        let stats_payload = stats_utils::construct_stats_payload(stats);
+        let stats_payload = stats_utils::construct_stats_payload(stats.clone());
 
-        debug!("Stats payload to be sent: {stats_payload:?}");
+        debug!("STATS | Stats payload to be sent: {stats_payload:?}");
 
         let serialized_stats_payload = match stats_utils::serialize_stats_payload(stats_payload) {
             Ok(res) => res,
             Err(err) => {
-                error!("Failed to serialize stats payload, dropping stats: {err}");
-                return;
+                // Serialization errors are permanent - data is malformed, don't retry
+                error!("STATS | Failed to serialize stats payload, dropping stats: {err}");
+                return None;
             }
         };
 
@@ -93,8 +99,8 @@ impl StatsFlusher {
         // Get or create the cached HTTP client
         let http_client = self.get_or_init_http_client().await;
         let Some(http_client) = http_client else {
-            error!("STATS_FLUSHER | Failed to create HTTP client");
-            return;
+            error!("STATS | Failed to create HTTP client, will retry");
+            return Some(stats);
         };
 
         let resp = stats_utils::send_stats_payload_with_client(
@@ -106,26 +112,61 @@ impl StatsFlusher {
         .await;
         let elapsed = start.elapsed();
         debug!(
-            "Stats request to {} took {} ms",
+            "STATS | Stats request to {} took {} ms",
             stats_url,
             elapsed.as_millis()
         );
         match resp {
-            Ok(()) => debug!("Successfully flushed stats"),
-            Err(e) => {
-                error!("Error sending stats: {e:?}");
+            Ok(()) => {
+                debug!("STATS | Successfully flushed stats");
+                None
             }
-        };
+            Err(e) => {
+                // Network/server errors are temporary - return stats for retry
+                error!("STATS | Error sending stats: {e:?}");
+                Some(stats)
+            }
+        }
     }
 
-    pub async fn flush(&self, force_flush: bool) {
-        let mut guard = self.aggregator.lock().await;
+    /// Flushes stats from the aggregator.
+    ///
+    /// Returns `None` on success, or `Some(failed_stats)` if any flush failed and should be retried.
+    /// If `failed_stats` is provided, it will attempt to send those first before fetching new stats.
+    pub async fn flush(
+        &self,
+        force_flush: bool,
+        failed_stats: Option<Vec<pb::ClientStatsPayload>>,
+    ) -> Option<Vec<pb::ClientStatsPayload>> {
+        let mut all_failed: Vec<pb::ClientStatsPayload> = Vec::new();
 
+        // First, retry any previously failed stats
+        if let Some(retry_stats) = failed_stats {
+            if !retry_stats.is_empty() {
+                debug!(
+                    "STATS | Retrying {} previously failed stats",
+                    retry_stats.len()
+                );
+                if let Some(still_failed) = self.send(retry_stats).await {
+                    all_failed.extend(still_failed);
+                }
+            }
+        }
+
+        // Then flush new stats from the aggregator
+        let mut guard = self.aggregator.lock().await;
         let mut stats = guard.get_batch(force_flush).await;
         while !stats.is_empty() {
-            self.send(stats).await;
-
+            if let Some(failed) = self.send(stats).await {
+                all_failed.extend(failed);
+            }
             stats = guard.get_batch(force_flush).await;
+        }
+
+        if all_failed.is_empty() {
+            None
+        } else {
+            Some(all_failed)
         }
     }
     /// Returns a reference to the cached HTTP client, initializing it if necessary.
