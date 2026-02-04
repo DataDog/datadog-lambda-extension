@@ -145,31 +145,43 @@ impl TraceFlusher {
     ///
     /// The client is created once and reused for all subsequent flushes,
     /// providing connection pooling and TLS session reuse.
+    ///
+    /// Returns `None` if client creation fails. The error is logged but not cached,
+    /// allowing retry on subsequent calls.
     async fn get_or_init_http_client(&self) -> Option<HyperClient> {
-        let client = self
+        match self
             .http_client
-            .get_or_init(|| async {
-                match hyper_client::create_client(
+            .get_or_try_init(|| async {
+                hyper_client::create_client(
                     self.config.proxy_https.as_ref(),
                     self.config.tls_cert_file.as_ref(),
-                ) {
-                    Ok(client) => client,
-                    Err(e) => {
-                        error!("TRACES | Failed to create HTTP client: {e}");
-                        panic!("TRACES | Cannot proceed without HTTP client");
-                    }
-                }
+                )
             })
-            .await;
-        Some(client.clone())
+            .await
+        {
+            Ok(client) => Some(client.clone()),
+            Err(e) => {
+                error!("TRACES | Failed to create HTTP client: {e}");
+                None
+            }
+        }
     }
 
     /// Sends traces to the Datadog intake endpoint using the provided HTTP client.
     ///
-    /// Returns the traces back if there was an error sending them.
+    /// # Arguments
+    ///
+    /// * `traces` - The traces to send
+    /// * `override_endpoint` - If `Some`, sends to this endpoint instead of the trace's
+    ///   configured endpoint. Used for sending to additional endpoints.
+    /// * `http_client` - The HTTP client to use for sending
+    ///
+    /// # Returns
+    ///
+    /// Returns the traces back if there was an error sending them (for retry).
     async fn send_traces(
         traces: Vec<SendData>,
-        endpoint: Option<Endpoint>,
+        override_endpoint: Option<Endpoint>,
         http_client: HyperClient,
     ) -> Option<Vec<SendData>> {
         if traces.is_empty() {
@@ -181,12 +193,12 @@ impl TraceFlusher {
         debug!("TRACES | Flushing {} traces", coalesced_traces.len());
 
         for trace in &coalesced_traces {
-            let trace_with_endpoint = match &endpoint {
-                Some(additional_endpoint) => trace.with_endpoint(additional_endpoint.clone()),
+            let trace_to_send = match &override_endpoint {
+                Some(endpoint) => trace.with_endpoint(endpoint.clone()),
                 None => trace.clone(),
             };
 
-            let send_result = trace_with_endpoint.send(&http_client).await.last_result;
+            let send_result = trace_to_send.send(&http_client).await.last_result;
 
             if let Err(e) = send_result {
                 error!("TRACES | Request failed: {e:?}");

@@ -129,22 +129,25 @@ impl StatsFlusher {
     ///
     /// The client is created once and reused for all subsequent flushes,
     /// providing connection pooling and TLS session reuse.
+    ///
+    /// Returns `None` if client creation fails. The error is logged but not cached,
+    /// allowing retry on subsequent calls.
     async fn get_or_init_http_client(&self) -> Option<&HyperClient> {
-        let client = self
+        match self
             .http_client
-            .get_or_init(|| async {
-                match hyper_client::create_client(
+            .get_or_try_init(|| async {
+                hyper_client::create_client(
                     self.config.proxy_https.as_ref(),
                     self.config.tls_cert_file.as_ref(),
-                ) {
-                    Ok(client) => client,
-                    Err(e) => {
-                        error!("STATS_FLUSHER | Failed to create HTTP client: {e}");
-                        panic!("STATS_FLUSHER | Cannot proceed without HTTP client");
-                    }
-                }
+                )
             })
-            .await;
-        Some(client)
+            .await
+        {
+            Ok(client) => Some(client),
+            Err(e) => {
+                error!("STATS_FLUSHER | Failed to create HTTP client: {e}");
+                None
+            }
+        }
     }
 }
