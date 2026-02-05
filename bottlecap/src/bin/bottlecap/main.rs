@@ -750,6 +750,9 @@ async fn extension_loop_active(
                 .flush_blocking(true, &mut locked_metrics)
                 .await;
 
+            // Even though we're shutting down, we need to reset the flush interval to prevent any future flushes
+            race_flush_interval.reset();
+
             // Shutdown aggregator services
             if let Err(e) = logs_aggregator_handle.shutdown() {
                 error!("Failed to shutdown logs aggregator: {e}");
