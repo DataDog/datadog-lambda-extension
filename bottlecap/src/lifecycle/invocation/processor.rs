@@ -255,8 +255,13 @@ impl Processor {
             self.runtime = Some(runtime);
         }
 
-        self.dynamic_tags
-            .insert(String::from("cold_start"), cold_start.to_string());
+        // Skip cold_start tag in Managed Instance mode
+        // We don't want to send this tag for spans, as the experience
+        // won't look good due to the time gap in the flame graph.
+        if !self.aws_config.is_managed_instance_mode() {
+            self.dynamic_tags
+                .insert(String::from("cold_start"), cold_start.to_string());
+        }
 
         if proactive_initialization {
             self.dynamic_tags.insert(
@@ -305,6 +310,14 @@ impl Processor {
             debug!("Cannot process on platform init start, no invocation context found");
             return;
         };
+
+        // Skip creating cold start span in Managed Instances
+        // Although the telemetry is correct, we instead decide
+        // to not send it since the flame graph would show a big
+        // gap between the init and the first invocation.
+        if self.aws_config.is_managed_instance_mode() {
+            return;
+        }
 
         // Create a cold start span
         let mut cold_start_span = create_empty_span(
