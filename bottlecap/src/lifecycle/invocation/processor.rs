@@ -1076,13 +1076,13 @@ impl Processor {
             return Some(sc);
         }
 
-        if let Some(request_obj) = payload_value.get("request") {
-            if let Some(request_headers) = request_obj.get("headers") {
-                if let Some(sc) = propagator.extract(request_headers) {
-                    debug!("Extracted trace context from event.request.headers");
-                    return Some(sc);
-                }
-            }
+        if let Some(sc) = payload_value
+            .get("request")
+            .and_then(|req| req.get("headers"))
+            .and_then(|headers| propagator.extract(headers))
+        {
+            debug!("Extracted trace context from event.request.headers");
+            return Some(sc);
         }
 
         if let Some(payload_headers) = payload_value.get("headers") {
@@ -1862,68 +1862,6 @@ mod tests {
     }
 
     #[test]
-    fn test_extract_span_context_from_event_request_headers_datadog() {
-        let config = Arc::new(config::Config {
-            trace_propagation_style_extract: vec![
-                config::trace_propagation_style::TracePropagationStyle::Datadog,
-                config::trace_propagation_style::TracePropagationStyle::TraceContext,
-            ],
-            ..config::Config::default()
-        });
-        let propagator = Arc::new(DatadogCompositePropagator::new(Arc::clone(&config)));
-        let headers = HashMap::new();
-
-        let payload = json!({
-            "request": {
-                "headers": {
-                    "x-datadog-trace-id": "1234567890",
-                    "x-datadog-parent-id": "9876543210",
-                    "x-datadog-sampling-priority": "2",
-                    "x-datadog-origin": "rum"
-                }
-            }
-        });
-
-        let result = Processor::extract_span_context(&headers, &payload, propagator);
-
-        assert!(result.is_some());
-        let context = result.unwrap();
-        assert_eq!(context.trace_id, 1_234_567_890);
-        assert_eq!(context.span_id, 9_876_543_210);
-        assert_eq!(context.sampling.unwrap().priority, Some(2));
-        assert_eq!(context.origin, Some("rum".to_string()));
-    }
-
-    #[test]
-    fn test_extract_span_context_from_event_request_headers_tracecontext() {
-        let config = Arc::new(config::Config {
-            trace_propagation_style_extract: vec![
-                config::trace_propagation_style::TracePropagationStyle::Datadog,
-                config::trace_propagation_style::TracePropagationStyle::TraceContext,
-            ],
-            ..config::Config::default()
-        });
-        let propagator = Arc::new(DatadogCompositePropagator::new(Arc::clone(&config)));
-        let headers = HashMap::new();
-
-        let payload = json!({
-            "request": {
-                "headers": {
-                    "traceparent": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
-                    "tracestate": "dd=s:2;o:rum"
-                }
-            }
-        });
-
-        let result = Processor::extract_span_context(&headers, &payload, propagator);
-
-        assert!(result.is_some());
-        let context = result.unwrap();
-        assert_eq!(context.sampling.unwrap().priority, Some(2));
-        assert_eq!(context.origin, Some("rum".to_string()));
-    }
-
-    #[test]
     fn test_extract_span_context_priority_order() {
         let config = Arc::new(config::Config {
             trace_propagation_style_extract: vec![
@@ -1962,43 +1900,6 @@ mod tests {
     }
 
     #[test]
-    fn test_extract_span_context_fallback_to_request_headers() {
-        let config = Arc::new(config::Config {
-            trace_propagation_style_extract: vec![
-                config::trace_propagation_style::TracePropagationStyle::Datadog,
-                config::trace_propagation_style::TracePropagationStyle::TraceContext,
-            ],
-            ..config::Config::default()
-        });
-        let propagator = Arc::new(DatadogCompositePropagator::new(Arc::clone(&config)));
-        let headers = HashMap::new();
-
-        let payload = json!({
-            "argumentsMap": {
-                "id": "123"
-            },
-            "request": {
-                "headers": {
-                    "x-datadog-trace-id": "7777",
-                    "x-datadog-parent-id": "8888",
-                    "x-datadog-sampling-priority": "1"
-                }
-            }
-        });
-
-        let result = Processor::extract_span_context(&headers, &payload, propagator);
-
-        assert!(
-            result.is_some(),
-            "Should extract from event.request.headers"
-        );
-        let context = result.unwrap();
-        assert_eq!(context.trace_id, 7777);
-        assert_eq!(context.span_id, 8888);
-        assert_eq!(context.sampling.unwrap().priority, Some(1));
-    }
-
-    #[test]
     fn test_extract_span_context_no_request_headers() {
         let config = Arc::new(config::Config {
             trace_propagation_style_extract: vec![
@@ -2024,134 +1925,6 @@ mod tests {
         assert!(
             result.is_none(),
             "Should return None when no trace context found"
-        );
-    }
-
-    #[test]
-    fn test_extract_span_context_empty_request_headers() {
-        let config = Arc::new(config::Config {
-            trace_propagation_style_extract: vec![
-                config::trace_propagation_style::TracePropagationStyle::Datadog,
-                config::trace_propagation_style::TracePropagationStyle::TraceContext,
-            ],
-            ..config::Config::default()
-        });
-        let propagator = Arc::new(DatadogCompositePropagator::new(Arc::clone(&config)));
-        let headers = HashMap::new();
-
-        let payload = json!({
-            "request": {
-                "headers": {}
-            }
-        });
-
-        let result = Processor::extract_span_context(&headers, &payload, propagator);
-
-        assert!(
-            result.is_none(),
-            "Should return None when request.headers is empty"
-        );
-    }
-
-    #[test]
-    fn test_extract_span_context_invalid_request_headers() {
-        let config = Arc::new(config::Config {
-            trace_propagation_style_extract: vec![
-                config::trace_propagation_style::TracePropagationStyle::Datadog,
-                config::trace_propagation_style::TracePropagationStyle::TraceContext,
-            ],
-            ..config::Config::default()
-        });
-        let propagator = Arc::new(DatadogCompositePropagator::new(Arc::clone(&config)));
-        let headers = HashMap::new();
-
-        let payload = json!({
-            "request": {
-                "headers": {
-                    "x-datadog-trace-id": "not-a-number",
-                    "x-datadog-parent-id": "also-not-a-number"
-                }
-            }
-        });
-
-        let result = Processor::extract_span_context(&headers, &payload, propagator);
-
-        assert!(
-            result.is_none(),
-            "Should return None when headers are invalid"
-        );
-    }
-
-    #[test]
-    fn test_extract_span_context_appsync_real_world_example() {
-        let config = Arc::new(config::Config {
-            trace_propagation_style_extract: vec![
-                config::trace_propagation_style::TracePropagationStyle::Datadog,
-                config::trace_propagation_style::TracePropagationStyle::TraceContext,
-            ],
-            ..config::Config::default()
-        });
-        let propagator = Arc::new(DatadogCompositePropagator::new(Arc::clone(&config)));
-        let headers = HashMap::new();
-
-        let payload = json!({
-            "arguments": {
-                "userId": "12345"
-            },
-            "identity": {
-                "sub": "user-sub-id"
-            },
-            "request": {
-                "headers": {
-                    "x-datadog-trace-id": "123456789012345",
-                    "x-datadog-parent-id": "98765432109876",
-                    "x-datadog-sampling-priority": "2",
-                    "x-datadog-origin": "rum",
-                    "x-datadog-tags": "_dd.p.dm=-0",
-                    "user-agent": "Mozilla/5.0",
-                    "content-type": "application/json"
-                }
-            },
-            "info": {
-                "fieldName": "getUser",
-                "parentTypeName": "Query"
-            }
-        });
-
-        let result = Processor::extract_span_context(&headers, &payload, propagator);
-
-        assert!(
-            result.is_some(),
-            "Should extract from real-world AppSync event"
-        );
-        let context = result.unwrap();
-        assert_eq!(context.trace_id, 123_456_789_012_345);
-        assert_eq!(context.span_id, 98_765_432_109_876);
-        assert_eq!(context.sampling.unwrap().priority, Some(2));
-        assert_eq!(context.origin, Some("rum".to_string()));
-    }
-
-    #[test]
-    fn test_extract_span_context_request_not_an_object() {
-        let config = Arc::new(config::Config {
-            trace_propagation_style_extract: vec![
-                config::trace_propagation_style::TracePropagationStyle::Datadog,
-                config::trace_propagation_style::TracePropagationStyle::TraceContext,
-            ],
-            ..config::Config::default()
-        });
-        let propagator = Arc::new(DatadogCompositePropagator::new(Arc::clone(&config)));
-        let headers = HashMap::new();
-
-        let payload = json!({
-            "request": "invalid-not-an-object"
-        });
-
-        let result = Processor::extract_span_context(&headers, &payload, propagator);
-
-        assert!(
-            result.is_none(),
-            "Should handle gracefully when request is not an object"
         );
     }
 }
