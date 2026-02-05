@@ -57,7 +57,7 @@ async fn test_enhanced_metrics() {
         retry_strategy: dogstatsd::datadog::RetryStrategy::Immediate(1),
         compression_level: 6,
     };
-    let mut metrics_flusher = MetricsFlusher::new(flusher_config);
+    let metrics_flusher = MetricsFlusher::new(flusher_config);
     let lambda_enhanced_metrics =
         enhanced_metrics::new(metrics_aggr_handle.clone(), Arc::clone(&arc_config));
 
