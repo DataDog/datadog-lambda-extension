@@ -220,7 +220,6 @@ impl ConfigBuilder {
         if self.config.logs_config_logs_dd_url.is_empty() {
             self.config.logs_config_logs_dd_url = build_fqdn_logs(self.config.site.clone());
         } else {
-            // If Logs URL is set, ensure it is prefixed correctly
             self.config.logs_config_logs_dd_url =
                 logs_intake_url(self.config.logs_config_logs_dd_url.as_str());
         }
@@ -485,7 +484,6 @@ fn build_fqdn_logs(site: String) -> String {
     format!("https://http-intake.logs.{site}")
 }
 
-/// Ensures logs intake URL is prefixed with https://
 #[inline]
 #[must_use]
 fn logs_intake_url(url: &str) -> String {
