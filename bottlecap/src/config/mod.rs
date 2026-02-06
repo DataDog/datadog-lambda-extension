@@ -219,6 +219,10 @@ impl ConfigBuilder {
         // If Logs URL is not set, set it to the default
         if self.config.logs_config_logs_dd_url.is_empty() {
             self.config.logs_config_logs_dd_url = build_fqdn_logs(self.config.site.clone());
+        } else {
+            // If Logs URL is set, ensure it is prefixed correctly
+            self.config.logs_config_logs_dd_url =
+                logs_intake_url(self.config.logs_config_logs_dd_url.as_str());
         }
 
         // If APM URL is not set, set it to the default
@@ -479,6 +483,20 @@ pub fn get_config(config_directory: &Path) -> Config {
 #[must_use]
 fn build_fqdn_logs(site: String) -> String {
     format!("https://http-intake.logs.{site}")
+}
+
+/// Ensures logs intake URL is prefixed with https://
+#[inline]
+#[must_use]
+fn logs_intake_url(url: &str) -> String {
+    let url = url.trim();
+    if url.is_empty() {
+        return url.to_string();
+    }
+    if url.starts_with("https://") || url.starts_with("http://") {
+        return url.to_string();
+    }
+    format!("https://{url}")
 }
 
 pub fn deserialize_optional_string<'de, D>(deserializer: D) -> Result<Option<String>, D::Error>
@@ -811,7 +829,44 @@ pub mod tests {
             let config = get_config(Path::new(""));
             assert_eq!(
                 config.logs_config_logs_dd_url,
-                "agent-http-intake-pci.logs.datadoghq.com:443".to_string()
+                "https://agent-http-intake-pci.logs.datadoghq.com:443".to_string()
+            );
+            Ok(())
+        });
+    }
+
+    #[test]
+    fn test_logs_intake_url_adds_prefix() {
+        figment::Jail::expect_with(|jail| {
+            jail.clear_env();
+            jail.set_env(
+                "DD_LOGS_CONFIG_LOGS_DD_URL",
+                "dr-test-failover-http-intake.logs.datadoghq.com:443",
+            );
+
+            let config = get_config(Path::new(""));
+            // ensure host:port URL is prefixed with https://
+            assert_eq!(
+                config.logs_config_logs_dd_url,
+                "https://dr-test-failover-http-intake.logs.datadoghq.com:443".to_string()
+            );
+            Ok(())
+        });
+    }
+
+    #[test]
+    fn test_prefixed_logs_intake_url() {
+        figment::Jail::expect_with(|jail| {
+            jail.clear_env();
+            jail.set_env(
+                "DD_LOGS_CONFIG_LOGS_DD_URL",
+                "https://custom-intake.logs.datadoghq.com:443",
+            );
+
+            let config = get_config(Path::new(""));
+            assert_eq!(
+                config.logs_config_logs_dd_url,
+                "https://custom-intake.logs.datadoghq.com:443".to_string()
             );
             Ok(())
         });
