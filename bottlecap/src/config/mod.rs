@@ -217,7 +217,7 @@ impl ConfigBuilder {
         }
 
         // If Logs URL is not set, set it to the default
-        if self.config.logs_config_logs_dd_url.is_empty() {
+        if self.config.logs_config_logs_dd_url.trim().is_empty() {
             self.config.logs_config_logs_dd_url = build_fqdn_logs(self.config.site.clone());
         } else {
             self.config.logs_config_logs_dd_url =
