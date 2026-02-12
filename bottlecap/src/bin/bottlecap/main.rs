@@ -1194,7 +1194,6 @@ async fn start_dogstatsd(
         host: EXTENSION_HOST.to_string(),
         port: DOGSTATSD_PORT,
         metric_namespace: config.statsd_metric_namespace.clone(),
-        windows_pipe_name: None,
     };
     let cancel_token = tokio_util::sync::CancellationToken::new();
     let dogstatsd_agent = DogStatsD::new(
