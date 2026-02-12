@@ -274,7 +274,7 @@ publish image ({{ $multi_arch_image_flavor.name }}):
   variables:
     IMG_SOURCES: ${CI_DOCKER_TARGET_IMAGE}:v${CI_PIPELINE_ID}-${CI_COMMIT_SHORT_SHA}{{ $multi_arch_image_flavor.suffix }}
     IMG_DESTINATIONS: lambda-extension:${VERSION}{{ $multi_arch_image_flavor.suffix }},lambda-extension:latest{{ $multi_arch_image_flavor.suffix }}
-    IMG_REGISTRIES: dockerhub,ecr-public,gcr-datadoghq
+    IMG_REGISTRIES: public
     IMG_SIGNING: false
 
 {{ end }} # end multi_arch_image_flavors
