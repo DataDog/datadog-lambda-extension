@@ -66,14 +66,14 @@ use bottlecap::{
         span_dedup_service,
         stats_aggregator::StatsAggregator,
         stats_concentrator_service::{StatsConcentratorHandle, StatsConcentratorService},
-        stats_flusher::{self, StatsFlusher},
+        stats_flusher,
         stats_generator::StatsGenerator,
         stats_processor, trace_agent,
         trace_aggregator::SendDataBuilderInfo,
         trace_aggregator_service::{
             AggregatorHandle as TraceAggregatorHandle, AggregatorService as TraceAggregatorService,
         },
-        trace_flusher::{self, TraceFlusher},
+        trace_flusher,
         trace_processor::{self, SendingTraceProcessor},
     },
 };
@@ -1081,9 +1081,9 @@ fn start_trace_agent(
     appsec_processor: Option<Arc<TokioMutex<AppSecProcessor>>>,
 ) -> (
     Sender<SendDataBuilderInfo>,
-    Arc<trace_flusher::ServerlessTraceFlusher>,
+    Arc<trace_flusher::TraceFlusher>,
     Arc<trace_processor::ServerlessTraceProcessor>,
-    Arc<stats_flusher::ServerlessStatsFlusher>,
+    Arc<stats_flusher::StatsFlusher>,
     Arc<ProxyFlusher>,
     tokio_util::sync::CancellationToken,
     StatsConcentratorHandle,
@@ -1096,7 +1096,7 @@ fn start_trace_agent(
     let stats_aggregator: Arc<TokioMutex<StatsAggregator>> = Arc::new(TokioMutex::new(
         StatsAggregator::new_with_concentrator(stats_concentrator_handle.clone()),
     ));
-    let stats_flusher = Arc::new(stats_flusher::ServerlessStatsFlusher::new(
+    let stats_flusher = Arc::new(stats_flusher::StatsFlusher::new(
         api_key_factory.clone(),
         stats_aggregator.clone(),
         Arc::clone(config),
@@ -1108,7 +1108,7 @@ fn start_trace_agent(
     let (trace_aggregator_service, trace_aggregator_handle) = TraceAggregatorService::default();
     tokio::spawn(trace_aggregator_service.run());
 
-    let trace_flusher = Arc::new(trace_flusher::ServerlessTraceFlusher::new(
+    let trace_flusher = Arc::new(trace_flusher::TraceFlusher::new(
         trace_aggregator_handle.clone(),
         config.clone(),
         api_key_factory.clone(),
@@ -1394,6 +1394,7 @@ mod flush_handles_tests {
         let mut handles = FlushHandles::new();
         let handle = tokio::spawn(async {
             sleep(Duration::from_millis(5)).await;
+            Vec::new() // Return empty Vec for stats retry
         });
         handles.stats_flush_handles.push(handle);
 

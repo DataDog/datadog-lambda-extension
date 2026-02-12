@@ -23,20 +23,11 @@ use crate::traces::{
 /// - Spawning non-blocking flush tasks
 /// - Awaiting pending flush handles with retry logic
 /// - Performing blocking flushes (spawn + await)
-///
-/// # Type Parameters
-///
-/// * `TF` - Trace flusher type implementing `TraceFlusher`
-/// * `SF` - Stats flusher type implementing `StatsFlusher`
-pub struct FlushingService<TF, SF>
-where
-    TF: TraceFlusher + Send + Sync + 'static,
-    SF: StatsFlusher + Send + Sync + 'static,
-{
+pub struct FlushingService {
     // Flushers
     logs_flusher: LogsFlusher,
-    trace_flusher: Arc<TF>,
-    stats_flusher: Arc<SF>,
+    trace_flusher: Arc<TraceFlusher>,
+    stats_flusher: Arc<StatsFlusher>,
     proxy_flusher: Arc<ProxyFlusher>,
     metrics_flushers: Arc<TokioMutex<Vec<MetricsFlusher>>>,
 
@@ -47,17 +38,13 @@ where
     handles: FlushHandles,
 }
 
-impl<TF, SF> FlushingService<TF, SF>
-where
-    TF: TraceFlusher + Send + Sync + 'static,
-    SF: StatsFlusher + Send + Sync + 'static,
-{
+impl FlushingService {
     /// Creates a new `FlushingService` with the given flushers.
     #[must_use]
     pub fn new(
         logs_flusher: LogsFlusher,
-        trace_flusher: Arc<TF>,
-        stats_flusher: Arc<SF>,
+        trace_flusher: Arc<TraceFlusher>,
+        stats_flusher: Arc<StatsFlusher>,
         proxy_flusher: Arc<ProxyFlusher>,
         metrics_flushers: Arc<TokioMutex<Vec<MetricsFlusher>>>,
         metrics_aggr_handle: MetricsAggregatorHandle,
@@ -135,11 +122,13 @@ where
             self.handles.metric_flush_handles.push(handle);
         }
 
-        // Spawn stats flush (fire-and-forget, no retry)
+        // Spawn stats flush
         let sf = Arc::clone(&self.stats_flusher);
         self.handles
             .stats_flush_handles
-            .push(tokio::spawn(async move { sf.flush(false).await }));
+            .push(tokio::spawn(async move {
+                sf.flush(false, None).await.unwrap_or_default()
+            }));
 
         // Spawn proxy flush
         let pf = self.proxy_flusher.clone();
@@ -166,11 +155,25 @@ where
         let mut joinset = tokio::task::JoinSet::new();
         let mut flush_error = false;
 
-        // Await stats handles (no retry)
+        // Await stats handles with retry
         for handle in self.handles.stats_flush_handles.drain(..) {
-            if let Err(e) = handle.await {
-                error!("FLUSHING_SERVICE | stats flush error {e:?}");
-                flush_error = true;
+            match handle.await {
+                Ok(retry) => {
+                    let sf = self.stats_flusher.clone();
+                    if !retry.is_empty() {
+                        debug!(
+                            "FLUSHING_SERVICE | redriving {:?} stats payloads",
+                            retry.len()
+                        );
+                        joinset.spawn(async move {
+                            sf.flush(false, Some(retry)).await;
+                        });
+                    }
+                }
+                Err(e) => {
+                    error!("FLUSHING_SERVICE | stats flush error {e:?}");
+                    flush_error = true;
+                }
             }
         }
 
@@ -325,7 +328,7 @@ where
             self.logs_flusher.flush(None),
             futures::future::join_all(metrics_futures),
             self.trace_flusher.flush(None),
-            self.stats_flusher.flush(force_stats),
+            self.stats_flusher.flush(force_stats, None),
             self.proxy_flusher.flush(None),
         );
     }
@@ -340,11 +343,7 @@ where
     }
 }
 
-impl<TF, SF> std::fmt::Debug for FlushingService<TF, SF>
-where
-    TF: TraceFlusher + Send + Sync + 'static,
-    SF: StatsFlusher + Send + Sync + 'static,
-{
+impl std::fmt::Debug for FlushingService {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("FlushingService")
             .field("handles", &self.handles)
