@@ -1,6 +1,6 @@
 module app
 
-go 1.22
+go 1.25.7
 
 require (
 	github.com/DataDog/datadog-lambda-go v1.8.0
