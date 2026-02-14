@@ -1076,6 +1076,15 @@ impl Processor {
             return Some(sc);
         }
 
+        if let Some(sc) = payload_value
+            .get("request")
+            .and_then(|req| req.get("headers"))
+            .and_then(|headers| propagator.extract(headers))
+        {
+            debug!("Extracted trace context from event.request.headers");
+            return Some(sc);
+        }
+
         if let Some(payload_headers) = payload_value.get("headers") {
             if let Some(sc) = propagator.extract(payload_headers) {
                 debug!("Extracted trace context from event headers");
@@ -1849,6 +1858,73 @@ mod tests {
         assert_eq!(
             spans[1].span_id, 3,
             "Should be snapstart span (id=3), not cold start span (id=2)"
+        );
+    }
+
+    #[test]
+    fn test_extract_span_context_priority_order() {
+        let config = Arc::new(config::Config {
+            trace_propagation_style_extract: vec![
+                config::trace_propagation_style::TracePropagationStyle::Datadog,
+                config::trace_propagation_style::TracePropagationStyle::TraceContext,
+            ],
+            ..config::Config::default()
+        });
+        let propagator = Arc::new(DatadogCompositePropagator::new(Arc::clone(&config)));
+
+        let mut headers = HashMap::new();
+        headers.insert(DATADOG_TRACE_ID_KEY.to_string(), "111".to_string());
+        headers.insert(DATADOG_PARENT_ID_KEY.to_string(), "222".to_string());
+
+        let payload = json!({
+            "headers": {
+                "x-datadog-trace-id": "333",
+                "x-datadog-parent-id": "444"
+            },
+            "request": {
+                "headers": {
+                    "x-datadog-trace-id": "555",
+                    "x-datadog-parent-id": "666"
+                }
+            }
+        });
+
+        let result = Processor::extract_span_context(&headers, &payload, propagator);
+
+        assert!(result.is_some());
+        let context = result.unwrap();
+        assert_eq!(
+            context.trace_id, 555,
+            "Should prioritize event.request.headers as service-specific extraction"
+        );
+    }
+
+    #[test]
+    fn test_extract_span_context_no_request_headers() {
+        let config = Arc::new(config::Config {
+            trace_propagation_style_extract: vec![
+                config::trace_propagation_style::TracePropagationStyle::Datadog,
+                config::trace_propagation_style::TracePropagationStyle::TraceContext,
+            ],
+            ..config::Config::default()
+        });
+        let propagator = Arc::new(DatadogCompositePropagator::new(Arc::clone(&config)));
+        let headers = HashMap::new();
+
+        let payload = json!({
+            "argumentsMap": {
+                "id": "123"
+            },
+            "request": {
+                "body": "some body"
+            }
+        });
+
+        let result = Processor::extract_span_context(&headers, &payload, propagator);
+
+        assert!(
+            result.is_none(),
+            "Should return None when no trace context found"
         );
     }
 }
