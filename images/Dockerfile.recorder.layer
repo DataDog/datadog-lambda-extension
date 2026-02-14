@@ -1,0 +1,22 @@
+FROM registry.ddbuild.io/images/mirror/ubuntu:22.04 AS compresser
+ARG FILE_SUFFIX
+
+# Install dependencies
+RUN apt-get update
+RUN apt-get install -y zip binutils wget tar xz-utils
+
+
+RUN mkdir /extensions
+WORKDIR /extensions
+
+# Copy Rust Agent binary
+COPY .binaries/recorder-$FILE_SUFFIX /extensions/datadog-recorder
+
+# Zip all binaries together
+RUN  zip -r datadog_recorder.zip /extensions /datadog-recorder
+
+# Use smallest image possible
+FROM scratch
+COPY --from=compresser /extensions/datadog_recorder.zip /
+ENTRYPOINT ["/datadog_recorder.zip"]
+
