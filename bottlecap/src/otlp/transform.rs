@@ -1331,7 +1331,10 @@ mod tests {
             "opentelemetry_instrumentation_aws_lambda.server"
         );
         // With a non-matching lib name, should return server.request
-        assert_eq!(get_otel_operation_name_v2(&otel_span, &lib), "server.request");
+        assert_eq!(
+            get_otel_operation_name_v2(&otel_span, &lib),
+            "server.request"
+        );
     }
 
     #[test]
