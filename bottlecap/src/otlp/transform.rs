@@ -59,6 +59,9 @@ pub const KEY_DATADOG_STATS_COMPUTED: &str = "_dd.stats_computed";
 
 // const SPAN_TYPE_GENERIC_DB: &str = "db";
 
+// AWS Lambda OTEL instrumentation scope name
+const AWS_LAMBDA_INSTRUMENTATION_SCOPE: &str = "opentelemetry.instrumentation.aws_lambda";
+
 lazy_static! {
     // TODO: add mappings
     static ref DB_SYSTEM_MAP: HashMap<String, String> = HashMap::new();
@@ -247,7 +250,7 @@ fn get_otel_operation_name_v1(
 }
 
 #[allow(clippy::too_many_lines)]
-fn get_otel_operation_name_v2(otel_span: &OtelSpan) -> String {
+fn get_otel_operation_name_v2(otel_span: &OtelSpan, lib: &OtelInstrumentationScope) -> String {
     let operation_name =
         get_otel_attribute_value_as_string(&otel_span.attributes, "operation.name", false);
     if !operation_name.is_empty() {
@@ -256,6 +259,12 @@ fn get_otel_operation_name_v2(otel_span: &OtelSpan) -> String {
 
     let is_client = otel_span.kind() == SpanKind::Client;
     let is_server = otel_span.kind() == SpanKind::Server;
+
+    // AWS Lambda: Check if this is the root Lambda invocation span
+    // Only applies to Server spans from the AWS Lambda OTEL instrumentation
+    if is_server && lib.name == AWS_LAMBDA_INSTRUMENTATION_SCOPE {
+        return "aws.lambda".to_string();
+    }
 
     // HTTP
     let method =
@@ -890,7 +899,7 @@ pub fn otel_span_to_dd_span(
         }
 
         if otel_operation_and_resource_v2_enabled(config.clone()) {
-            dd_span.name = get_otel_operation_name_v2(otel_span);
+            dd_span.name = get_otel_operation_name_v2(otel_span, lib);
         } else {
             dd_span.name = get_otel_operation_name_v1(
                 otel_span,
@@ -1321,6 +1330,52 @@ mod tests {
             get_otel_operation_name_v1(&otel_span, &lib, false, &HashMap::new(), true),
             "opentelemetry_instrumentation_aws_lambda.server"
         );
-        assert_eq!(get_otel_operation_name_v2(&otel_span), "server.request");
+        // With a non-matching lib name, should return server.request
+        assert_eq!(get_otel_operation_name_v2(&otel_span, &lib), "server.request");
+    }
+
+    #[test]
+    fn test_otel_operation_name_aws_lambda() {
+        // Test that AWS Lambda OTEL instrumentation gets aws.lambda operation name
+        let otel_span = OtelSpan {
+            name: "handler.handler".to_string(),
+            kind: SpanKind::Server as i32,
+            ..Default::default()
+        };
+        let aws_lambda_lib = OtelInstrumentationScope {
+            name: "opentelemetry.instrumentation.aws_lambda".to_string(),
+            version: "0.42b0".to_string(),
+            attributes: [].to_vec(),
+            dropped_attributes_count: 0,
+        };
+
+        // AWS Lambda Server span should return aws.lambda
+        assert_eq!(
+            get_otel_operation_name_v2(&otel_span, &aws_lambda_lib),
+            "aws.lambda"
+        );
+
+        // Non-server span from AWS Lambda instrumentation should NOT return aws.lambda
+        let internal_span = OtelSpan {
+            name: "my-function".to_string(),
+            kind: SpanKind::Internal as i32,
+            ..Default::default()
+        };
+        assert_eq!(
+            get_otel_operation_name_v2(&internal_span, &aws_lambda_lib),
+            "SPAN_KIND_INTERNAL"
+        );
+
+        // Server span from different instrumentation should return server.request
+        let other_lib = OtelInstrumentationScope {
+            name: "handler".to_string(),
+            version: String::new(),
+            attributes: [].to_vec(),
+            dropped_attributes_count: 0,
+        };
+        assert_eq!(
+            get_otel_operation_name_v2(&otel_span, &other_lib),
+            "server.request"
+        );
     }
 }
