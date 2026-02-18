@@ -727,7 +727,7 @@ dependencies = [
 [[package]]
 name = "datadog-fips"
 version = "0.1.0"
-source = "git+https://github.com/DataDog/serverless-components?rev=086c9375e0bec1f50e268827d9347a5e3b73b79d#086c9375e0bec1f50e268827d9347a5e3b73b79d"
+source = "git+https://github.com/DataDog/serverless-components?rev=659a19f036f7f42776e1746ae60cbbc8396a7593#659a19f036f7f42776e1746ae60cbbc8396a7593"
 dependencies = [
  "reqwest",
  "rustls",
@@ -836,7 +836,7 @@ dependencies = [
 [[package]]
 name = "dogstatsd"
 version = "0.1.0"
-source = "git+https://github.com/DataDog/serverless-components?rev=086c9375e0bec1f50e268827d9347a5e3b73b79d#086c9375e0bec1f50e268827d9347a5e3b73b79d"
+source = "git+https://github.com/DataDog/serverless-components?rev=659a19f036f7f42776e1746ae60cbbc8396a7593#659a19f036f7f42776e1746ae60cbbc8396a7593"
 dependencies = [
  "datadog-fips",
  "datadog-protos",
@@ -850,6 +850,7 @@ dependencies = [
  "rustls-pemfile",
  "serde",
  "serde_json",
+ "socket2 0.6.2",
  "thiserror 1.0.69",
  "tokio",
  "tokio-util",
