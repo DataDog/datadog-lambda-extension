@@ -303,6 +303,17 @@ pub struct Config {
     // Metrics
     pub metrics_config_compression_level: i32,
     pub statsd_metric_namespace: Option<String>,
+    /// Size of the receive buffer for `DogStatsD` UDP packets, in bytes (`SO_RCVBUF`).
+    /// Increase to reduce packet loss under high-throughput metric bursts.
+    /// If None, uses the OS default.
+    pub dogstatsd_so_rcvbuf: Option<usize>,
+    /// Maximum size of a single read from any transport (UDP or named pipe), in bytes.
+    /// Defaults to 8192. For UDP, the client must batch metrics into packets of
+    /// this size for the increase to take effect.
+    pub dogstatsd_buffer_size: Option<usize>,
+    /// Internal queue capacity between the socket reader and metric processor.
+    /// Defaults to 1024. Increase if the processor can't keep up with burst traffic.
+    pub dogstatsd_queue_size: Option<usize>,
 
     // OTLP
     //
@@ -420,6 +431,14 @@ impl Default for Config {
             // Metrics
             metrics_config_compression_level: 3,
             statsd_metric_namespace: None,
+
+            // DogStatsD
+            // Defaults to None, which uses the OS default.
+            dogstatsd_so_rcvbuf: None,
+            // Defaults to 8192 internally.
+            dogstatsd_buffer_size: None,
+            // Defaults to 1024 internally.
+            dogstatsd_queue_size: None,
 
             // OTLP
             otlp_config_traces_enabled: true,
