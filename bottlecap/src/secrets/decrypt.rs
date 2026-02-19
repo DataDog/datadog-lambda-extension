@@ -115,7 +115,7 @@ pub async fn resolve_secrets(config: Arc<Config>, aws_config: Arc<AwsConfig>) ->
 
 fn clean_api_key(maybe_key: Option<String>) -> Option<String> {
     if let Some(key) = maybe_key {
-        let clean_key = key.trim_end_matches('\n').replace(' ', "").to_string();
+        let clean_key = key.trim_end_matches('\n').replace(' ', "").clone();
         if !clean_key.is_empty() {
             return Some(clean_key);
         }
@@ -250,10 +250,10 @@ async fn decrypt_aws_ssm(
     );
 
     let v = request(json_body, headers?, client).await?;
-    if let Some(parameter) = v["Parameter"].as_object() {
-        if let Some(value) = parameter["Value"].as_str() {
-            return Ok(value.to_string());
-        }
+    if let Some(parameter) = v["Parameter"].as_object()
+        && let Some(value) = parameter["Value"].as_str()
+    {
+        return Ok(value.to_string());
     }
     Err(Error::new(std::io::ErrorKind::InvalidData, v.to_string()).into())
 }

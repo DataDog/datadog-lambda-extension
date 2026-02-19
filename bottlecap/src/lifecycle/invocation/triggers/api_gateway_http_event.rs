@@ -178,11 +178,11 @@ impl Trigger for APIGatewayHttpEvent {
         }
 
         if let Some(referer) = self.headers.get("referer") {
-            tags.insert("http.referer".to_string(), referer.to_string());
+            tags.insert("http.referer".to_string(), referer.clone());
         }
 
         if let Some(user_agent) = self.headers.get("user-agent") {
-            tags.insert("http.user_agent".to_string(), user_agent.to_string());
+            tags.insert("http.user_agent".to_string(), user_agent.clone());
         }
 
         tags

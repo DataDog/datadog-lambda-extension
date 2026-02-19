@@ -194,16 +194,16 @@ impl Agent {
                     format!("Error sending traces to the trace aggregator: {err}"),
                 );
             }
-        };
+        }
 
         // This needs to be after process_traces() because process_traces()
         // performs obfuscation, and we need to compute stats on the obfuscated traces.
-        if compute_trace_stats_on_extension {
-            if let Err(err) = stats_generator.send(&processed_traces) {
-                // Just log the error. We don't think trace stats are critical, so we don't want to
-                // return an error if only stats fail to send.
-                error!("OTLP | Error sending traces to the stats concentrator: {err}");
-            }
+        if compute_trace_stats_on_extension
+            && let Err(err) = stats_generator.send(&processed_traces)
+        {
+            // Just log the error. We don't think trace stats are critical, so we don't want to
+            // return an error if only stats fail to send.
+            error!("OTLP | Error sending traces to the stats concentrator: {err}");
         }
 
         Self::otlp_success_response()

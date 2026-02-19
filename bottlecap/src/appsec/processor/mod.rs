@@ -34,7 +34,7 @@ pub struct Processor {
     context_buffer: VecDeque<Context>,
 }
 impl Processor {
-    const CONTEXT_BUFFER_DEFAULT_CAPACITY: NonZero<usize> = unsafe { NonZero::new_unchecked(5) };
+    const CONTEXT_BUFFER_DEFAULT_CAPACITY: NonZero<usize> = NonZero::new(5).unwrap();
 
     /// Creates a new [`Processor`] instance using the provided [`Config`].
     ///
@@ -578,9 +578,9 @@ impl InvocationPayload for IdentifiedTrigger {
                 .unwrap_or_default()
                 .iter()
                 .flat_map(parse_cookie)
-                .chunk_by(|(k, _)| (*k).to_string())
+                .chunk_by(|(k, _)| (*k).clone())
                 .into_iter()
-                .map(|(k, v)| (k, v.into_iter().map(|(_, v)| v.to_string()).collect()))
+                .map(|(k, v)| (k, v.into_iter().map(|(_, v)| v.clone()).collect()))
                 .collect(),
             Self::APIGatewayWebSocketEvent(t) => t
                 .multi_value_headers
@@ -589,9 +589,9 @@ impl InvocationPayload for IdentifiedTrigger {
                 .unwrap_or_default()
                 .iter()
                 .flat_map(parse_cookie)
-                .chunk_by(|(k, _)| k.to_string())
+                .chunk_by(|(k, _)| k.clone())
                 .into_iter()
-                .map(|(k, v)| (k, v.into_iter().map(|(_, v)| v.to_string()).collect()))
+                .map(|(k, v)| (k, v.into_iter().map(|(_, v)| v.clone()).collect()))
                 .collect(),
             Self::ALBEvent(t) => t
                 .multi_value_headers
@@ -601,9 +601,9 @@ impl InvocationPayload for IdentifiedTrigger {
                 .unwrap_or_default()
                 .iter()
                 .flat_map(parse_cookie)
-                .chunk_by(|(k, _)| (*k).to_string())
+                .chunk_by(|(k, _)| (*k).clone())
                 .into_iter()
-                .map(|(k, v)| (k, v.into_iter().map(|(_, v)| v.to_string()).collect()))
+                .map(|(k, v)| (k, v.into_iter().map(|(_, v)| v.clone()).collect()))
                 .collect(),
             Self::LambdaFunctionUrlEvent(t) => {
                 t.cookies.as_ref().map(list_to_map).unwrap_or_default()

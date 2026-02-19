@@ -19,20 +19,20 @@ impl UsageMetrics {
     }
 
     pub fn update(&mut self, tmp_used: Option<f64>, fd_use: Option<f64>, threads_use: Option<f64>) {
-        if let Some(tmp_used) = tmp_used {
-            if tmp_used > self.tmp_used {
-                self.tmp_used = tmp_used;
-            }
+        if let Some(tmp_used) = tmp_used
+            && tmp_used > self.tmp_used
+        {
+            self.tmp_used = tmp_used;
         }
-        if let Some(fd_use) = fd_use {
-            if fd_use > self.fd_use {
-                self.fd_use = fd_use;
-            }
+        if let Some(fd_use) = fd_use
+            && fd_use > self.fd_use
+        {
+            self.fd_use = fd_use;
         }
-        if let Some(threads_use) = threads_use {
-            if threads_use > self.threads_use {
-                self.threads_use = threads_use;
-            }
+        if let Some(threads_use) = threads_use
+            && threads_use > self.threads_use
+        {
+            self.threads_use = threads_use;
         }
     }
 

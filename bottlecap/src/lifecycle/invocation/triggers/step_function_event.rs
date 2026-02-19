@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::fmt::Write;
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -156,7 +157,7 @@ impl StepFunctionEvent {
 
                 let tags = DatadogHeaderPropagator::extract_tags(&HashMap::from([(
                     DATADOG_TAGS_KEY.to_string(),
-                    trace_tags.to_string(),
+                    trace_tags.clone(),
                 )]));
 
                 (lo_tid, tags)
@@ -210,7 +211,7 @@ impl StepFunctionEvent {
         let mut unique_string = format!("{execution_id}#{state_name}#{state_entered_time}");
 
         if retry_count != 0 || redrive_count != 0 {
-            unique_string.push_str(&format!("#{retry_count}#{redrive_count}"));
+            let _ = write!(unique_string, "#{retry_count}#{redrive_count}");
         }
 
         let hash = Sha256::digest(unique_string.as_bytes());

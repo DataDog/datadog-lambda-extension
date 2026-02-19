@@ -59,7 +59,7 @@ pub fn generate_span_id() -> u64 {
 }
 
 fn redact_value(key: &str, value: String) -> String {
-    let split_key = key.split('.').last().unwrap_or_default();
+    let split_key = key.split('.').next_back().unwrap_or_default();
     if REDACTABLE_KEYS.contains(&split_key) {
         String::from("redacted")
     } else {

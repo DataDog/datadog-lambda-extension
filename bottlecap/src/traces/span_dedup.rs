@@ -87,10 +87,10 @@ impl Deduper {
         }
 
         // If we're at capacity, evict the oldest entry
-        if self.order.len() >= self.capacity {
-            if let Some(oldest) = self.order.pop_front() {
-                self.seen.remove(&oldest);
-            }
+        if self.order.len() >= self.capacity
+            && let Some(oldest) = self.order.pop_front()
+        {
+            self.seen.remove(&oldest);
         }
 
         // Add the new key
