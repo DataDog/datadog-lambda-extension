@@ -188,10 +188,10 @@ impl ConfigBuilder {
 
         // If `proxy_https` is not set, set it from `HTTPS_PROXY` environment variable
         // if it exists
-        if let Ok(https_proxy) = std::env::var("HTTPS_PROXY") {
-            if self.config.proxy_https.is_none() {
-                self.config.proxy_https = Some(https_proxy);
-            }
+        if let Ok(https_proxy) = std::env::var("HTTPS_PROXY")
+            && self.config.proxy_https.is_none()
+        {
+            self.config.proxy_https = Some(https_proxy);
         }
 
         // If `proxy_https` is set, check if the site is in `NO_PROXY` environment variable
@@ -1008,7 +1008,7 @@ pub mod tests {
                         TracePropagationStyle::TraceContext
                     ],
                     logs_config_logs_dd_url: "https://http-intake.logs.datadoghq.com".to_string(),
-                    apm_dd_url: trace_intake_url("datadoghq.com").to_string(),
+                    apm_dd_url: trace_intake_url("datadoghq.com").clone(),
                     dd_url: String::new(), // We add the prefix in main.rs
                     ..Config::default()
                 }

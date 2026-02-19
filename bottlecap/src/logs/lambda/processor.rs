@@ -1,4 +1,5 @@
 use std::error::Error;
+use std::fmt::Write;
 use std::sync::Arc;
 use tokio::sync::mpsc::Sender;
 
@@ -215,10 +216,10 @@ impl LambdaProcessor {
                 if let Some(metrics) = metrics {
                     self.invocation_context.runtime_duration_ms = metrics.duration_ms;
                     if status == Status::Timeout {
-                        message.push_str(&format!(" Task timed out after {:.2} seconds", metrics.duration_ms / 1000.0));
+                        let _ = write!(message, " Task timed out after {:.2} seconds", metrics.duration_ms / 1000.0);
                         result_status = "error".to_string();
                     } else if status == Status::Error {
-                        message.push_str(&format!(" Task failed: {:?}", error_type.unwrap_or_default()));
+                        let _ = write!(message, " Task failed: {:?}", error_type.unwrap_or_default());
                         result_status = "error".to_string();
                     }
                 }
@@ -415,15 +416,15 @@ impl LambdaProcessor {
         }
 
         // Check for nested ddtags inside a "message" field
-        if let Some(inner_message) = json_obj.get_mut("message") {
-            if let Some(serde_json::Value::String(message_tags)) = inner_message.get("ddtags") {
-                tags.push(',');
-                tags.push_str(message_tags);
-                if let Some(inner_obj) = inner_message.as_object_mut() {
-                    inner_obj.remove("ddtags");
-                }
-                return inner_message.to_string();
+        if let Some(inner_message) = json_obj.get_mut("message")
+            && let Some(serde_json::Value::String(message_tags)) = inner_message.get("ddtags")
+        {
+            tags.push(',');
+            tags.push_str(message_tags);
+            if let Some(inner_obj) = inner_message.as_object_mut() {
+                inner_obj.remove("ddtags");
             }
+            return inner_message.to_string();
         }
 
         // No ddtags found, use original message
@@ -442,13 +443,11 @@ impl LambdaProcessor {
     fn process_and_queue_log(&mut self, mut log: IntakeLog) {
         let should_send_log = self.logs_enabled
             && LambdaProcessor::apply_rules(&self.rules, &mut log.message.message);
-        if should_send_log {
-            if let Ok(serialized_log) = serde_json::to_string(&log) {
-                // explicitly drop log so we don't accidentally re-use it and push
-                // duplicate logs to the aggregator
-                drop(log);
-                self.ready_logs.push(serialized_log);
-            }
+        if should_send_log && let Ok(serialized_log) = serde_json::to_string(&log) {
+            // explicitly drop log so we don't accidentally re-use it and push
+            // duplicate logs to the aggregator
+            drop(log);
+            self.ready_logs.push(serialized_log);
         }
     }
 
@@ -465,10 +464,10 @@ impl LambdaProcessor {
             }
         }
 
-        if !self.ready_logs.is_empty() {
-            if let Err(e) = aggregator_handle.insert_batch(std::mem::take(&mut self.ready_logs)) {
-                debug!("Failed to send logs to aggregator: {}", e);
-            }
+        if !self.ready_logs.is_empty()
+            && let Err(e) = aggregator_handle.insert_batch(std::mem::take(&mut self.ready_logs))
+        {
+            debug!("Failed to send logs to aggregator: {}", e);
         }
     }
 }

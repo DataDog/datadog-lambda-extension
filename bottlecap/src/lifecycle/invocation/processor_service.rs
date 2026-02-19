@@ -6,7 +6,7 @@ use libdd_trace_protobuf::pb::Span;
 use serde_json::Value;
 use thiserror::Error;
 use tokio::sync::{mpsc, oneshot};
-use tracing::{debug, error};
+use tracing::debug;
 
 use crate::{
     config::{self, aws::AwsConfig},

@@ -113,10 +113,7 @@ impl Flusher {
             let time = Instant::now();
             attempts += 1;
             let Some(cloned_req) = req.try_clone() else {
-                return Err(Box::new(std::io::Error::new(
-                    std::io::ErrorKind::Other,
-                    "can't clone",
-                )));
+                return Err(Box::new(std::io::Error::other("can't clone")));
             };
             let resp = cloned_req.send().await;
             let elapsed = time.elapsed();
@@ -248,17 +245,16 @@ impl LogsFlusher {
 
         // If retry_request is provided, only process that request
         if let Some(req) = retry_request {
-            if let Some(req_clone) = req.try_clone() {
-                if let Err(e) = Flusher::send(req_clone).await {
-                    if let Some(failed_req_err) = e.downcast_ref::<FailedRequestError>() {
-                        failed_requests.push(
-                            failed_req_err
-                                .request
-                                .try_clone()
-                                .expect("should be able to clone request"),
-                        );
-                    }
-                }
+            if let Some(req_clone) = req.try_clone()
+                && let Err(e) = Flusher::send(req_clone).await
+                && let Some(failed_req_err) = e.downcast_ref::<FailedRequestError>()
+            {
+                failed_requests.push(
+                    failed_req_err
+                        .request
+                        .try_clone()
+                        .expect("should be able to clone request"),
+                );
             }
         } else {
             let logs_batches = Arc::new({

@@ -1029,7 +1029,7 @@ api_security_sample_delay: 60 # Seconds
                 apm_filter_tags_regex_require: None,
                 apm_filter_tags_regex_reject: None,
                 statsd_metric_namespace: None,
-                dogstatsd_so_rcvbuf: Some(1048576),
+                dogstatsd_so_rcvbuf: Some(1_048_576),
                 dogstatsd_buffer_size: Some(65507),
                 dogstatsd_queue_size: Some(2048),
             };
@@ -1047,11 +1047,11 @@ api_security_sample_delay: 60 # Seconds
             jail.clear_env();
             jail.create_file(
                 "datadog.yaml",
-                r#"
+                r"
 dogstatsd_so_rcvbuf: 524288
 dogstatsd_buffer_size: 16384
 dogstatsd_queue_size: 512
-"#,
+",
             )?;
             let mut config = Config::default();
             let yaml_config_source = YamlConfigSource {
@@ -1061,7 +1061,7 @@ dogstatsd_queue_size: 512
                 .load(&mut config)
                 .expect("Failed to load config");
 
-            assert_eq!(config.dogstatsd_so_rcvbuf, Some(524288));
+            assert_eq!(config.dogstatsd_so_rcvbuf, Some(524_288));
             assert_eq!(config.dogstatsd_buffer_size, Some(16384));
             assert_eq!(config.dogstatsd_queue_size, Some(512));
             Ok(())

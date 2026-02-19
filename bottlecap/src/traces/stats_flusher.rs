@@ -60,7 +60,7 @@ impl StatsFlusher {
             return None;
         };
 
-        let api_key_clone = api_key.to_string();
+        let api_key_clone = api_key.clone();
         let endpoint = self
             .endpoint
             .get_or_init({
@@ -141,15 +141,15 @@ impl StatsFlusher {
         let mut all_failed: Vec<pb::ClientStatsPayload> = Vec::new();
 
         // First, retry any previously failed stats
-        if let Some(retry_stats) = failed_stats {
-            if !retry_stats.is_empty() {
-                debug!(
-                    "STATS | Retrying {} previously failed stats",
-                    retry_stats.len()
-                );
-                if let Some(still_failed) = self.send(retry_stats).await {
-                    all_failed.extend(still_failed);
-                }
+        if let Some(retry_stats) = failed_stats
+            && !retry_stats.is_empty()
+        {
+            debug!(
+                "STATS | Retrying {} previously failed stats",
+                retry_stats.len()
+            );
+            if let Some(still_failed) = self.send(retry_stats).await {
+                all_failed.extend(still_failed);
             }
         }
 

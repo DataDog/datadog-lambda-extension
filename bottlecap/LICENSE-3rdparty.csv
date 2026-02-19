@@ -66,7 +66,6 @@ h2,https://github.com/hyperium/h2,MIT,"Carl Lerche <me@carllerche.com>, Sean McA
 hashbrown,https://github.com/rust-lang/hashbrown,MIT OR Apache-2.0,Amanieu d'Antras <amanieu@gmail.com>
 headers,https://github.com/hyperium/headers,MIT,Sean McArthur <sean@seanmonstar.com>
 headers-core,https://github.com/hyperium/headers,MIT,Sean McArthur <sean@seanmonstar.com>
-heck,https://github.com/withoutboats/heck,MIT OR Apache-2.0,The heck Authors
 hex,https://github.com/KokaKiwi/rust-hex,MIT OR Apache-2.0,KokaKiwi <kokakiwi@kokakiwi.net>
 hmac,https://github.com/RustCrypto/MACs,MIT OR Apache-2.0,RustCrypto Developers
 http,https://github.com/hyperium/http,MIT OR Apache-2.0,"Alex Crichton <alex@alexcrichton.com>, Carl Lerche <me@carllerche.com>, Sean McArthur <sean@seanmonstar.com>"
@@ -86,7 +85,6 @@ icu_normalizer_data,https://github.com/unicode-org/icu4x,Unicode-3.0,The ICU4X P
 icu_properties,https://github.com/unicode-org/icu4x,Unicode-3.0,The ICU4X Project Developers
 icu_properties_data,https://github.com/unicode-org/icu4x,Unicode-3.0,The ICU4X Project Developers
 icu_provider,https://github.com/unicode-org/icu4x,Unicode-3.0,The ICU4X Project Developers
-id-arena,https://github.com/fitzgen/id-arena,MIT OR Apache-2.0,"Nick Fitzgerald <fitzgen@gmail.com>, Aleksey Kladov <aleksey.kladov@gmail.com>"
 idna,https://github.com/servo/rust-url,MIT OR Apache-2.0,The rust-url developers
 idna_adapter,https://github.com/hsivonen/idna_adapter,Apache-2.0 OR MIT,The rust-url developers
 indexmap,https://github.com/bluss/indexmap,Apache-2.0 OR MIT,The indexmap Authors
@@ -99,7 +97,6 @@ itoa,https://github.com/dtolnay/itoa,MIT OR Apache-2.0,David Tolnay <dtolnay@gma
 jobserver,https://github.com/rust-lang/jobserver-rs,MIT OR Apache-2.0,Alex Crichton <alex@alexcrichton.com>
 js-sys,https://github.com/wasm-bindgen/wasm-bindgen/tree/master/crates/js-sys,MIT OR Apache-2.0,The wasm-bindgen Developers
 lazy_static,https://github.com/rust-lang-nursery/lazy-static.rs,MIT OR Apache-2.0,Marvin Löbel <loebel.marvin@gmail.com>
-leb128fmt,https://github.com/bluk/leb128fmt,MIT OR Apache-2.0,Bryant Luk <code@bryantluk.com>
 libc,https://github.com/rust-lang/libc,MIT OR Apache-2.0,The Rust Project Developers
 libdd-common,https://github.com/DataDog/libdatadog/tree/main/datadog-common,Apache-2.0,The libdd-common Authors
 libdd-ddsketch,https://github.com/DataDog/libdatadog/tree/main/libdd-ddsketch,Apache-2.0,The libdd-ddsketch Authors
@@ -147,7 +144,6 @@ pin-utils,https://github.com/rust-lang-nursery/pin-utils,MIT OR Apache-2.0,Josef
 potential_utf,https://github.com/unicode-org/icu4x,Unicode-3.0,The ICU4X Project Developers
 powerfmt,https://github.com/jhpratt/powerfmt,MIT OR Apache-2.0,Jacob Pratt <jacob@jhpratt.dev>
 ppv-lite86,https://github.com/cryptocorrosion/cryptocorrosion,MIT OR Apache-2.0,The CryptoCorrosion Contributors
-prettyplease,https://github.com/dtolnay/prettyplease,MIT OR Apache-2.0,David Tolnay <dtolnay@gmail.com>
 proc-macro2,https://github.com/dtolnay/proc-macro2,MIT OR Apache-2.0,"David Tolnay <dtolnay@gmail.com>, Alex Crichton <alex@alexcrichton.com>"
 proc-macro2-diagnostics,https://github.com/SergioBenitez/proc-macro2-diagnostics,MIT OR Apache-2.0,Sergio Benitez <sb@sergio.bz>
 prost,https://github.com/tokio-rs/prost,Apache-2.0,"Dan Burkert <dan@danburkert.com>, Lucio Franco <luciofranco14@gmail.com>, Casper Meijn <casper@meijn.net>, Tokio Contributors <team@tokio.rs>"
@@ -186,7 +182,6 @@ schannel,https://github.com/steffengy/schannel-rs,MIT,"Steven Fackler <sfackler@
 scopeguard,https://github.com/bluss/scopeguard,MIT OR Apache-2.0,bluss
 security-framework,https://github.com/kornelski/rust-security-framework,MIT OR Apache-2.0,"Steven Fackler <sfackler@gmail.com>, Kornel <kornel@geekhood.net>"
 security-framework-sys,https://github.com/kornelski/rust-security-framework,MIT OR Apache-2.0,"Steven Fackler <sfackler@gmail.com>, Kornel <kornel@geekhood.net>"
-semver,https://github.com/dtolnay/semver,MIT OR Apache-2.0,David Tolnay <dtolnay@gmail.com>
 serde,https://github.com/serde-rs/serde,MIT OR Apache-2.0,"Erick Tryzelaar <erick.tryzelaar@gmail.com>, David Tolnay <dtolnay@gmail.com>"
 serde-aux,https://github.com/iddm/serde-aux,MIT,Victor Polevoy <maintainer@vpolevoy.com>
 serde-value,https://github.com/arcnmx/serde-value,MIT,arcnmx
@@ -258,15 +253,11 @@ value-bag,https://github.com/sval-rs/value-bag,Apache-2.0 OR MIT,Ashley Mannix <
 want,https://github.com/seanmonstar/want,MIT,Sean McArthur <sean@seanmonstar.com>
 wasi,https://github.com/bytecodealliance/wasi,Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT,The Cranelift Project Developers
 wasip2,https://github.com/bytecodealliance/wasi-rs,Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT,The wasip2 Authors
-wasip3,https://github.com/bytecodealliance/wasi-rs,Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT,The wasip3 Authors
 wasm-bindgen,https://github.com/wasm-bindgen/wasm-bindgen,MIT OR Apache-2.0,The wasm-bindgen Developers
 wasm-bindgen-futures,https://github.com/wasm-bindgen/wasm-bindgen/tree/master/crates/futures,MIT OR Apache-2.0,The wasm-bindgen Developers
 wasm-bindgen-macro,https://github.com/wasm-bindgen/wasm-bindgen/tree/master/crates/macro,MIT OR Apache-2.0,The wasm-bindgen Developers
 wasm-bindgen-macro-support,https://github.com/wasm-bindgen/wasm-bindgen/tree/master/crates/macro-support,MIT OR Apache-2.0,The wasm-bindgen Developers
 wasm-bindgen-shared,https://github.com/wasm-bindgen/wasm-bindgen/tree/master/crates/shared,MIT OR Apache-2.0,The wasm-bindgen Developers
-wasm-encoder,https://github.com/bytecodealliance/wasm-tools/tree/main/crates/wasm-encoder,Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT,Nick Fitzgerald <fitzgen@gmail.com>
-wasm-metadata,https://github.com/bytecodealliance/wasm-tools/tree/main/crates/wasm-metadata,Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT,The wasm-metadata Authors
-wasmparser,https://github.com/bytecodealliance/wasm-tools/tree/main/crates/wasmparser,Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT,Yury Delendik <ydelendik@mozilla.com>
 web-sys,https://github.com/wasm-bindgen/wasm-bindgen/tree/master/crates/web-sys,MIT OR Apache-2.0,The wasm-bindgen Developers
 web-time,https://github.com/daxpedda/web-time,MIT OR Apache-2.0,The web-time Authors
 webpki-roots,https://github.com/rustls/webpki-roots,CDLA-Permissive-2.0,The webpki-roots Authors
@@ -292,11 +283,6 @@ windows_x86_64_gnullvm,https://github.com/microsoft/windows-rs,MIT OR Apache-2.0
 windows_x86_64_msvc,https://github.com/microsoft/windows-rs,MIT OR Apache-2.0,Microsoft
 windows_x86_64_msvc,https://github.com/microsoft/windows-rs,MIT OR Apache-2.0,The windows_x86_64_msvc Authors
 wit-bindgen,https://github.com/bytecodealliance/wit-bindgen,Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT,Alex Crichton <alex@alexcrichton.com>
-wit-bindgen-core,https://github.com/bytecodealliance/wit-bindgen,Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT,Alex Crichton <alex@alexcrichton.com>
-wit-bindgen-rust,https://github.com/bytecodealliance/wit-bindgen,Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT,Alex Crichton <alex@alexcrichton.com>
-wit-bindgen-rust-macro,https://github.com/bytecodealliance/wit-bindgen,Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT,Alex Crichton <alex@alexcrichton.com>
-wit-component,https://github.com/bytecodealliance/wasm-tools/tree/main/crates/wit-component,Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT,Peter Huene <peter@huene.dev>
-wit-parser,https://github.com/bytecodealliance/wasm-tools/tree/main/crates/wit-parser,Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT,Alex Crichton <alex@alexcrichton.com>
 writeable,https://github.com/unicode-org/icu4x,Unicode-3.0,The ICU4X Project Developers
 yansi,https://github.com/SergioBenitez/yansi,MIT OR Apache-2.0,Sergio Benitez <sb@sergio.bz>
 yoke,https://github.com/unicode-org/icu4x,Unicode-3.0,Manish Goregaokar <manishsmail@gmail.com>

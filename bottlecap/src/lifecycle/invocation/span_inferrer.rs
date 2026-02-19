@@ -137,29 +137,28 @@ impl SpanInferrer {
                 None
             }
             IdentifiedTrigger::SnsRecord(t) => {
-                if let Some(message) = &t.sns.message {
-                    if let Ok(event_bridge_wrapper_message) =
+                if let Some(message) = &t.sns.message
+                    && let Ok(event_bridge_wrapper_message) =
                         serde_json::from_str::<EventBridgeEvent>(message)
-                    {
-                        let mut wrapped_inferred_span = Span {
-                            span_id: generate_span_id(),
-                            ..Default::default()
-                        };
+                {
+                    let mut wrapped_inferred_span = Span {
+                        span_id: generate_span_id(),
+                        ..Default::default()
+                    };
 
-                        event_bridge_wrapper_message.enrich_span(
-                            &mut wrapped_inferred_span,
-                            &config.service_mapping,
-                            config.trace_aws_service_representation_enabled,
-                        );
-                        inferred_span
-                            .meta
-                            .extend(event_bridge_wrapper_message.get_tags());
+                    event_bridge_wrapper_message.enrich_span(
+                        &mut wrapped_inferred_span,
+                        &config.service_mapping,
+                        config.trace_aws_service_representation_enabled,
+                    );
+                    inferred_span
+                        .meta
+                        .extend(event_bridge_wrapper_message.get_tags());
 
-                        wrapped_inferred_span.duration =
-                            inferred_span.start - wrapped_inferred_span.start;
+                    wrapped_inferred_span.duration =
+                        inferred_span.start - wrapped_inferred_span.start;
 
-                        return Some(wrapped_inferred_span);
-                    }
+                    return Some(wrapped_inferred_span);
                 }
 
                 None
