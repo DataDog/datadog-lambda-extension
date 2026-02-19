@@ -66,14 +66,14 @@ use bottlecap::{
         span_dedup_service,
         stats_aggregator::StatsAggregator,
         stats_concentrator_service::{StatsConcentratorHandle, StatsConcentratorService},
-        stats_flusher::{self, StatsFlusher},
+        stats_flusher,
         stats_generator::StatsGenerator,
         stats_processor, trace_agent,
         trace_aggregator::SendDataBuilderInfo,
         trace_aggregator_service::{
             AggregatorHandle as TraceAggregatorHandle, AggregatorService as TraceAggregatorService,
         },
-        trace_flusher::{self, TraceFlusher},
+        trace_flusher,
         trace_processor::{self, SendingTraceProcessor},
     },
 };
@@ -450,10 +450,8 @@ async fn extension_loop_active(
                         // Wait for any pending flushes
                         flushing_service.await_handles().await;
                         // Final flush to capture any data that accumulated since the last
-                        // spawn_non_blocking(). We pass force_stats=true since this is our
-                        // last opportunity to send data before shutdown.
-                        let mut locked_metrics = flushing_service.metrics_flushers().lock().await;
-                        flushing_service.flush_blocking(true, &mut locked_metrics).await;
+                        // spawn_non_blocking(). This is our last opportunity to send data.
+                        flushing_service.flush_blocking_final().await;
                         break;
                     }
                 }
@@ -635,19 +633,13 @@ async fn extension_loop_active(
                             }
                         }
                         _ = race_flush_interval.tick() => {
-                            let mut locked_metrics = metrics_flushers.lock().await;
-                            flushing_service
-                                .flush_blocking(false, &mut locked_metrics)
-                                .await;
+                            flushing_service.flush_blocking().await;
                             race_flush_interval.reset();
                         }
                     }
                 }
                 // flush
-                let mut locked_metrics = metrics_flushers.lock().await;
-                flushing_service
-                    .flush_blocking(false, &mut locked_metrics)
-                    .await;
+                flushing_service.flush_blocking().await;
                 race_flush_interval.reset();
                 let next_response =
                     extension::next_event(client, &aws_config.runtime_api, &r.extension_id).await;
@@ -664,10 +656,7 @@ async fn extension_loop_active(
                         }
                     }
                     FlushDecision::Periodic => {
-                        let mut locked_metrics = metrics_flushers.lock().await;
-                        flushing_service
-                            .flush_blocking(false, &mut locked_metrics)
-                            .await;
+                        flushing_service.flush_blocking().await;
                         race_flush_interval.reset();
                     }
                     _ => {
@@ -695,10 +684,7 @@ async fn extension_loop_active(
                         }
                         _ = race_flush_interval.tick() => {
                             if flush_control.flush_strategy == FlushStrategy::Default {
-                                let mut locked_metrics = metrics_flushers.lock().await;
-                                flushing_service
-                                    .flush_blocking(false, &mut locked_metrics)
-                                    .await;
+                                flushing_service.flush_blocking().await;
                                 race_flush_interval.reset();
                             }
                         }
@@ -744,11 +730,8 @@ async fn extension_loop_active(
                 &lifecycle_listener_shutdown_token,
             );
 
-            // Final flush with force_stats=true since this is our last opportunity
-            let mut locked_metrics = metrics_flushers.lock().await;
-            flushing_service
-                .flush_blocking(true, &mut locked_metrics)
-                .await;
+            // Final flush - this is our last opportunity to send data before shutdown
+            flushing_service.flush_blocking_final().await;
 
             // Even though we're shutting down, we need to reset the flush interval to prevent any future flushes
             race_flush_interval.reset();
@@ -1081,9 +1064,9 @@ fn start_trace_agent(
     appsec_processor: Option<Arc<TokioMutex<AppSecProcessor>>>,
 ) -> (
     Sender<SendDataBuilderInfo>,
-    Arc<trace_flusher::ServerlessTraceFlusher>,
+    Arc<trace_flusher::TraceFlusher>,
     Arc<trace_processor::ServerlessTraceProcessor>,
-    Arc<stats_flusher::ServerlessStatsFlusher>,
+    Arc<stats_flusher::StatsFlusher>,
     Arc<ProxyFlusher>,
     tokio_util::sync::CancellationToken,
     StatsConcentratorHandle,
@@ -1096,7 +1079,7 @@ fn start_trace_agent(
     let stats_aggregator: Arc<TokioMutex<StatsAggregator>> = Arc::new(TokioMutex::new(
         StatsAggregator::new_with_concentrator(stats_concentrator_handle.clone()),
     ));
-    let stats_flusher = Arc::new(stats_flusher::ServerlessStatsFlusher::new(
+    let stats_flusher = Arc::new(stats_flusher::StatsFlusher::new(
         api_key_factory.clone(),
         stats_aggregator.clone(),
         Arc::clone(config),
@@ -1108,7 +1091,7 @@ fn start_trace_agent(
     let (trace_aggregator_service, trace_aggregator_handle) = TraceAggregatorService::default();
     tokio::spawn(trace_aggregator_service.run());
 
-    let trace_flusher = Arc::new(trace_flusher::ServerlessTraceFlusher::new(
+    let trace_flusher = Arc::new(trace_flusher::TraceFlusher::new(
         trace_aggregator_handle.clone(),
         config.clone(),
         api_key_factory.clone(),
@@ -1178,7 +1161,7 @@ async fn start_dogstatsd(
     api_key_factory: Arc<ApiKeyFactory>,
     config: &Arc<Config>,
 ) -> (
-    Arc<TokioMutex<Vec<MetricsFlusher>>>,
+    Arc<Vec<MetricsFlusher>>,
     MetricsAggregatorHandle,
     CancellationToken,
 ) {
@@ -1200,17 +1183,20 @@ async fn start_dogstatsd(
     });
 
     // Get flushers with aggregator handle
-    let flushers = Arc::new(TokioMutex::new(start_metrics_flushers(
+    let flushers = Arc::new(start_metrics_flushers(
         Arc::clone(&api_key_factory),
         &aggregator_handle,
         config,
-    )));
+    ));
 
     // Create Dogstatsd server
     let dogstatsd_config = DogStatsDConfig {
         host: EXTENSION_HOST.to_string(),
         port: DOGSTATSD_PORT,
         metric_namespace: config.statsd_metric_namespace.clone(),
+        so_rcvbuf: config.dogstatsd_so_rcvbuf,
+        buffer_size: config.dogstatsd_buffer_size,
+        queue_size: config.dogstatsd_queue_size,
     };
     let cancel_token = tokio_util::sync::CancellationToken::new();
     let dogstatsd_agent = DogStatsD::new(
@@ -1394,6 +1380,7 @@ mod flush_handles_tests {
         let mut handles = FlushHandles::new();
         let handle = tokio::spawn(async {
             sleep(Duration::from_millis(5)).await;
+            Vec::new() // Return empty Vec for stats retry
         });
         handles.stats_flush_handles.push(handle);
 

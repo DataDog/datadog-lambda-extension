@@ -2,7 +2,6 @@
 
 use std::sync::Arc;
 
-use tokio::sync::Mutex as TokioMutex;
 use tracing::{debug, error};
 
 use dogstatsd::{
@@ -23,22 +22,13 @@ use crate::traces::{
 /// - Spawning non-blocking flush tasks
 /// - Awaiting pending flush handles with retry logic
 /// - Performing blocking flushes (spawn + await)
-///
-/// # Type Parameters
-///
-/// * `TF` - Trace flusher type implementing `TraceFlusher`
-/// * `SF` - Stats flusher type implementing `StatsFlusher`
-pub struct FlushingService<TF, SF>
-where
-    TF: TraceFlusher + Send + Sync + 'static,
-    SF: StatsFlusher + Send + Sync + 'static,
-{
+pub struct FlushingService {
     // Flushers
     logs_flusher: LogsFlusher,
-    trace_flusher: Arc<TF>,
-    stats_flusher: Arc<SF>,
+    trace_flusher: Arc<TraceFlusher>,
+    stats_flusher: Arc<StatsFlusher>,
     proxy_flusher: Arc<ProxyFlusher>,
-    metrics_flushers: Arc<TokioMutex<Vec<MetricsFlusher>>>,
+    metrics_flushers: Arc<Vec<MetricsFlusher>>,
 
     // Metrics aggregator handle for getting data to flush
     metrics_aggr_handle: MetricsAggregatorHandle,
@@ -47,19 +37,15 @@ where
     handles: FlushHandles,
 }
 
-impl<TF, SF> FlushingService<TF, SF>
-where
-    TF: TraceFlusher + Send + Sync + 'static,
-    SF: StatsFlusher + Send + Sync + 'static,
-{
+impl FlushingService {
     /// Creates a new `FlushingService` with the given flushers.
     #[must_use]
     pub fn new(
         logs_flusher: LogsFlusher,
-        trace_flusher: Arc<TF>,
-        stats_flusher: Arc<SF>,
+        trace_flusher: Arc<TraceFlusher>,
+        stats_flusher: Arc<StatsFlusher>,
         proxy_flusher: Arc<ProxyFlusher>,
-        metrics_flushers: Arc<TokioMutex<Vec<MetricsFlusher>>>,
+        metrics_flushers: Arc<Vec<MetricsFlusher>>,
         metrics_aggr_handle: MetricsAggregatorHandle,
     ) -> Self {
         Self {
@@ -103,22 +89,17 @@ where
 
         // Spawn metrics flush
         // First get the data from aggregator, then spawn flush tasks for each flusher
-        let (metrics_flushers_copy, series, sketches) = {
-            let locked_metrics = self.metrics_flushers.lock().await;
-            let flush_response = self
-                .metrics_aggr_handle
-                .clone()
-                .flush()
-                .await
-                .expect("can't flush metrics handle");
-            (
-                locked_metrics.clone(),
-                flush_response.series,
-                flush_response.distributions,
-            )
-        };
+        let flush_response = self
+            .metrics_aggr_handle
+            .clone()
+            .flush()
+            .await
+            .expect("can't flush metrics handle");
+        let series = flush_response.series;
+        let sketches = flush_response.distributions;
 
-        for (idx, mut flusher) in metrics_flushers_copy.into_iter().enumerate() {
+        for (idx, flusher) in self.metrics_flushers.iter().enumerate() {
+            let flusher = flusher.clone();
             let series_clone = series.clone();
             let sketches_clone = sketches.clone();
             let handle = tokio::spawn(async move {
@@ -135,11 +116,13 @@ where
             self.handles.metric_flush_handles.push(handle);
         }
 
-        // Spawn stats flush (fire-and-forget, no retry)
+        // Spawn stats flush
         let sf = Arc::clone(&self.stats_flusher);
         self.handles
             .stats_flush_handles
-            .push(tokio::spawn(async move { sf.flush(false).await }));
+            .push(tokio::spawn(async move {
+                sf.flush(false, None).await.unwrap_or_default()
+            }));
 
         // Spawn proxy flush
         let pf = self.proxy_flusher.clone();
@@ -166,11 +149,25 @@ where
         let mut joinset = tokio::task::JoinSet::new();
         let mut flush_error = false;
 
-        // Await stats handles (no retry)
+        // Await stats handles with retry
         for handle in self.handles.stats_flush_handles.drain(..) {
-            if let Err(e) = handle.await {
-                error!("FLUSHING_SERVICE | stats flush error {e:?}");
-                flush_error = true;
+            match handle.await {
+                Ok(retry) => {
+                    let sf = self.stats_flusher.clone();
+                    if !retry.is_empty() {
+                        debug!(
+                            "FLUSHING_SERVICE | redriving {:?} stats payloads",
+                            retry.len()
+                        );
+                        joinset.spawn(async move {
+                            sf.flush(false, Some(retry)).await;
+                        });
+                    }
+                }
+                Err(e) => {
+                    error!("FLUSHING_SERVICE | stats flush error {e:?}");
+                    flush_error = true;
+                }
             }
         }
 
@@ -237,8 +234,7 @@ where
                             retry_batch.sketches.len()
                         );
                         joinset.spawn(async move {
-                            let mut locked_flushers = mf.lock().await;
-                            if let Some(flusher) = locked_flushers.get_mut(retry_batch.flusher_id) {
+                            if let Some(flusher) = mf.get(retry_batch.flusher_id) {
                                 flusher
                                     .flush_metrics(retry_batch.series, retry_batch.sketches)
                                     .await;
@@ -285,34 +281,42 @@ where
         flush_error
     }
 
-    /// Performs a blocking flush of all data.
+    /// Performs a blocking flush of all telemetry data.
     ///
-    /// This method flushes all data synchronously using `tokio::join!` for parallelism.
-    /// Unlike `spawn_non_blocking`, this waits for all flushes to complete before returning.
+    /// Flushes logs, metrics (series and distributions), traces, stats, and APM proxy
+    /// data in parallel using `tokio::join!`. Unlike `spawn_non_blocking`, this waits
+    /// for all flushes to complete before returning.
     ///
-    /// # Arguments
+    /// The stats flusher respects its normal timing constraints (time-based bucketing),
+    /// which may result in some stats being held back until the next flush cycle.
+    pub async fn flush_blocking(&self) {
+        self.flush_blocking_inner(false).await;
+    }
+
+    /// Performs a final blocking flush of all telemetry data before shutdown.
     ///
-    /// * `force_stats` - If `true`, forces the stats flusher to flush immediately
-    ///   regardless of timing constraints.
-    /// * `metrics_flushers` - Mutable slice of metrics flushers. The caller must acquire
-    ///   the lock before calling this method.
+    /// Flushes logs, metrics (series and distributions), traces, stats, and APM proxy
+    /// data in parallel. Unlike `flush_blocking`, this forces the stats flusher to
+    /// flush immediately regardless of its normal timing constraints.
     ///
-    /// # Note
+    /// Use this during shutdown when this is the last opportunity to send data.
+    pub async fn flush_blocking_final(&self) {
+        self.flush_blocking_inner(true).await;
+    }
+
+    /// Internal implementation for blocking flush operations.
     ///
-    /// TODO: The caller must acquire the lock on `metrics_flushers` and pass a mutable slice
-    /// because `MetricsFlusher::flush_metrics` requires `&mut self`. This creates awkward
-    /// ergonomics. Consider modifying the `dogstatsd` crate to use interior mutability
-    /// (e.g., `Arc<Mutex<...>>` internally) so `flush_metrics` can take `&self`, allowing
-    /// this method to handle locking internally.
-    pub async fn flush_blocking(&self, force_stats: bool, metrics_flushers: &mut [MetricsFlusher]) {
+    /// Fetches metrics from the aggregator and flushes all data types in parallel.
+    async fn flush_blocking_inner(&self, force_stats: bool) {
         let flush_response = self
             .metrics_aggr_handle
             .flush()
             .await
             .expect("can't flush metrics aggr handle");
 
-        let metrics_futures: Vec<_> = metrics_flushers
-            .iter_mut()
+        let metrics_futures: Vec<_> = self
+            .metrics_flushers
+            .iter()
             .map(|f| {
                 f.flush_metrics(
                     flush_response.series.clone(),
@@ -325,26 +329,13 @@ where
             self.logs_flusher.flush(None),
             futures::future::join_all(metrics_futures),
             self.trace_flusher.flush(None),
-            self.stats_flusher.flush(force_stats),
+            self.stats_flusher.flush(force_stats, None),
             self.proxy_flusher.flush(None),
         );
     }
-
-    /// Returns a reference to the metrics flushers mutex for external locking.
-    ///
-    /// This is useful when you need to lock the metrics flushers and pass them
-    /// to `flush_blocking` or `flush_blocking_with_interval`.
-    #[must_use]
-    pub fn metrics_flushers(&self) -> &Arc<TokioMutex<Vec<MetricsFlusher>>> {
-        &self.metrics_flushers
-    }
 }
 
-impl<TF, SF> std::fmt::Debug for FlushingService<TF, SF>
-where
-    TF: TraceFlusher + Send + Sync + 'static,
-    SF: StatsFlusher + Send + Sync + 'static,
-{
+impl std::fmt::Debug for FlushingService {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("FlushingService")
             .field("handles", &self.handles)

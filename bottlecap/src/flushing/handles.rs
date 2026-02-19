@@ -2,6 +2,7 @@
 
 use datadog_protos::metrics::SketchPayload;
 use dogstatsd::datadog::Series;
+use libdd_trace_protobuf::pb;
 use libdd_trace_utils::send_data::SendData;
 use tokio::task::JoinHandle;
 
@@ -32,8 +33,8 @@ pub struct FlushHandles {
     pub metric_flush_handles: Vec<JoinHandle<MetricsRetryBatch>>,
     /// Handles for proxy flush operations. Returns failed request builders for retry.
     pub proxy_flush_handles: Vec<JoinHandle<Vec<reqwest::RequestBuilder>>>,
-    /// Handles for stats flush operations. Stats don't support retry.
-    pub stats_flush_handles: Vec<JoinHandle<()>>,
+    /// Handles for stats flush operations. Returns failed stats payloads for retry.
+    pub stats_flush_handles: Vec<JoinHandle<Vec<pb::ClientStatsPayload>>>,
 }
 
 impl FlushHandles {
