@@ -153,7 +153,7 @@ impl Trigger for APIGatewayWebSocketEvent {
         ]);
 
         if let Some(referer) = self.headers.get("referer") {
-            tags.insert("http.referer".to_string(), referer.to_string());
+            tags.insert("http.referer".to_string(), referer.clone());
         }
 
         tags

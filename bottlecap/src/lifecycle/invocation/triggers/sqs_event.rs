@@ -122,7 +122,7 @@ impl Trigger for SqsRecord {
         );
 
         span.name = "aws.sqs".to_string();
-        span.service = service_name.to_string();
+        span.service.clone_from(&service_name);
         span.resource = resource;
         span.r#type = "web".to_string();
         span.start = start_time;
@@ -177,10 +177,10 @@ impl Trigger for SqsRecord {
     fn get_carrier(&self) -> HashMap<String, String> {
         let carrier = HashMap::new();
 
-        if let Some(ma) = self.message_attributes.get(DATADOG_CARRIER_KEY) {
-            if let Some(string_value) = &ma.string_value {
-                return serde_json::from_str(string_value).unwrap_or_default();
-            }
+        if let Some(ma) = self.message_attributes.get(DATADOG_CARRIER_KEY)
+            && let Some(string_value) = &ma.string_value
+        {
+            return serde_json::from_str(string_value).unwrap_or_default();
         }
 
         // Check for SNS event sent through SQS
@@ -208,7 +208,7 @@ impl ServiceNameResolver for SqsRecord {
     fn get_specific_identifier(&self) -> String {
         self.event_source_arn
             .split(':')
-            .last()
+            .next_back()
             .unwrap_or_default()
             .to_string()
     }
@@ -606,7 +606,7 @@ mod tests {
 
         assert_eq!(
             extract_trace_context_from_aws_trace_header(Some(
-                event.attributes.aws_trace_header.unwrap().to_string()
+                event.attributes.aws_trace_header.unwrap().clone()
             ))
             .unwrap(),
             SpanContext {

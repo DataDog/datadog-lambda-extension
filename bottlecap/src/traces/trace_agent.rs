@@ -584,13 +584,12 @@ impl TraceAgent {
                     }
                 }
 
-                if span.resource == INVOCATION_SPAN_RESOURCE {
-                    if let Err(e) = invocation_processor_handle
+                if span.resource == INVOCATION_SPAN_RESOURCE
+                    && let Err(e) = invocation_processor_handle
                         .add_tracer_span(span.clone())
                         .await
-                    {
-                        error!("Failed to add tracer span to processor: {}", e);
-                    }
+                {
+                    error!("Failed to add tracer span to processor: {}", e);
                 }
                 handle_reparenting(&mut reparenting_info, &mut span);
 

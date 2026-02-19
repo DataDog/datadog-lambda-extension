@@ -202,7 +202,7 @@ impl Context {
                 self.process_result(result);
             }
             Err(e) => log_waf_run_error(e),
-        };
+        }
     }
 
     /// Obtain the information about the endpoint that was invoked, if available.

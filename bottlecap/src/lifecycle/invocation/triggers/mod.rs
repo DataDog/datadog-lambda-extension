@@ -1,6 +1,6 @@
 use std::collections::HashMap;
+use std::sync::LazyLock;
 
-use lazy_static::lazy_static;
 use libdd_trace_protobuf::pb::Span;
 use regex::Regex;
 use serde::{Deserialize, Deserializer};
@@ -26,8 +26,8 @@ pub mod step_function_event;
 pub const DATADOG_CARRIER_KEY: &str = "_datadog";
 pub const FUNCTION_TRIGGER_EVENT_SOURCE_TAG: &str = "function_trigger.event_source";
 pub const FUNCTION_TRIGGER_EVENT_SOURCE_ARN_TAG: &str = "function_trigger.event_source_arn";
-lazy_static! {
-    static ref ULID_UUID_GUID: Regex = Regex::new(
+static ULID_UUID_GUID: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(
         r"(?x)
         (
             [0-9a-fA-F]{8}-          # UUID/GUID segment 1
@@ -40,10 +40,10 @@ lazy_static! {
         (
             [0123456789ABCDEFGHJKMNPQRSTVWXYZ]{26}  # ULID
         )
-    "
+    ",
     )
-    .expect("failed to create regex");
-}
+    .expect("failed to create regex")
+});
 
 /// Resolves the service name for a given trigger depending on
 /// service mapping configuration.

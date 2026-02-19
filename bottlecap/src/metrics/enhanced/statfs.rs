@@ -10,7 +10,7 @@ use std::path::Path;
 /// Returns the block size, total number of blocks, and number of blocks available for the specified directory path.
 ///
 pub fn statfs_info(path: &str) -> Result<(f64, f64, f64), io::Error> {
-    let stat = statfs(Path::new(path)).map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+    let stat = statfs(Path::new(path)).map_err(io::Error::other)?;
     Ok((
         stat.block_size() as f64,
         stat.blocks() as f64,

@@ -113,13 +113,13 @@ async fn main() -> anyhow::Result<()> {
     debug!("Starting Datadog Extension v{version_without_next}");
 
     // Debug: Wait for debugger to attach if DD_DEBUG_WAIT_FOR_ATTACH is set
-    if let Ok(wait_secs) = env::var("DD_DEBUG_WAIT_FOR_ATTACH") {
-        if let Ok(secs) = wait_secs.parse::<u64>() {
-            debug!("DD_DEBUG_WAIT_FOR_ATTACH: Waiting {secs} seconds for debugger to attach...");
-            debug!("Connect your debugger to port 2345 now!");
-            tokio::time::sleep(tokio::time::Duration::from_secs(secs)).await;
-            debug!("DD_DEBUG_WAIT_FOR_ATTACH: Continuing execution...");
-        }
+    if let Ok(wait_secs) = env::var("DD_DEBUG_WAIT_FOR_ATTACH")
+        && let Ok(secs) = wait_secs.parse::<u64>()
+    {
+        debug!("DD_DEBUG_WAIT_FOR_ATTACH: Waiting {secs} seconds for debugger to attach...");
+        debug!("Connect your debugger to port 2345 now!");
+        tokio::time::sleep(tokio::time::Duration::from_secs(secs)).await;
+        debug!("DD_DEBUG_WAIT_FOR_ATTACH: Continuing execution...");
     }
 
     prepare_client_provider()?;
@@ -273,7 +273,7 @@ async fn extension_loop_idle(
                 error!("Error getting next event: {e:?}");
                 return Err(e.into());
             }
-        };
+        }
     }
 }
 
@@ -288,11 +288,7 @@ async fn extension_loop_active(
 ) -> anyhow::Result<()> {
     let (mut event_bus, event_bus_tx) = EventBus::run();
 
-    let account_id = r
-        .account_id
-        .as_ref()
-        .unwrap_or(&"none".to_string())
-        .to_string();
+    let account_id = r.account_id.as_ref().unwrap_or(&"none".to_string()).clone();
     let tags_provider = setup_tag_provider(&Arc::clone(&aws_config), config, &account_id);
 
     let (logs_agent_channel, logs_flusher, logs_agent_cancel_token, logs_aggregator_handle) =
@@ -517,7 +513,6 @@ async fn extension_loop_active(
                             "Transient network error waiting for shutdown event: {}. Retrying...",
                             e
                         );
-                        continue;
                     }
                     Err(e) => {
                         error!(
@@ -626,11 +621,10 @@ async fn extension_loop_active(
                     tokio::select! {
                     biased;
                         Some(event) = event_bus.rx.recv() => {
-                            if let Some(telemetry_event) = handle_event_bus_event(event, invocation_processor_handle.clone(), appsec_processor.clone(), tags_provider.clone(), trace_processor.clone(), trace_agent_channel.clone(), stats_concentrator.clone()).await {
-                                if let TelemetryRecord::PlatformRuntimeDone{ .. } = telemetry_event.record {
+                            if let Some(telemetry_event) = handle_event_bus_event(event, invocation_processor_handle.clone(), appsec_processor.clone(), tags_provider.clone(), trace_processor.clone(), trace_agent_channel.clone(), stats_concentrator.clone()).await
+                                && let TelemetryRecord::PlatformRuntimeDone{ .. } = telemetry_event.record {
                                     break 'flush_end;
                                 }
-                            }
                         }
                         _ = race_flush_interval.tick() => {
                             flushing_service.flush_blocking().await;

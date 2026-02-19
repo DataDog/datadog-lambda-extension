@@ -7,7 +7,7 @@ use crate::traces::trace_aggregator::{
 };
 
 pub enum AggregatorCommand {
-    InsertPayload(SendDataBuilderInfo),
+    InsertPayload(Box<SendDataBuilderInfo>),
     GetBatches(oneshot::Sender<Vec<Vec<SendDataBuilder>>>),
     Clear,
     Shutdown,
@@ -23,7 +23,8 @@ impl AggregatorHandle {
         &self,
         payload_info: SendDataBuilderInfo,
     ) -> Result<(), mpsc::error::SendError<AggregatorCommand>> {
-        self.tx.send(AggregatorCommand::InsertPayload(payload_info))
+        self.tx
+            .send(AggregatorCommand::InsertPayload(Box::new(payload_info)))
     }
 
     pub async fn get_batches(&self) -> Result<Vec<Vec<SendDataBuilder>>, String> {
@@ -75,7 +76,7 @@ impl AggregatorService {
         while let Some(command) = self.rx.recv().await {
             match command {
                 AggregatorCommand::InsertPayload(payload_info) => {
-                    self.aggregator.add(payload_info);
+                    self.aggregator.add(*payload_info);
                 }
                 AggregatorCommand::GetBatches(response_tx) => {
                     let mut batches = Vec::new();
