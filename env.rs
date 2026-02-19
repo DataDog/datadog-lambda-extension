@@ -1012,7 +1012,7 @@ mod tests {
                 otlp_config_traces_probabilistic_sampler_sampling_percentage: Some(50),
                 otlp_config_logs_enabled: true,
                 statsd_metric_namespace: None,
-                dogstatsd_so_rcvbuf: Some(1048576),
+                dogstatsd_so_rcvbuf: Some(1_048_576),
                 dogstatsd_buffer_size: Some(65507),
                 dogstatsd_queue_size: Some(2048),
                 api_key_secret_arn: "arn:aws:secretsmanager:region:account:secret:datadog-api-key"
@@ -1216,7 +1216,7 @@ mod tests {
                 .load(&mut config)
                 .expect("Failed to load config");
 
-            assert_eq!(config.dogstatsd_so_rcvbuf, Some(1048576));
+            assert_eq!(config.dogstatsd_so_rcvbuf, Some(1_048_576));
             assert_eq!(config.dogstatsd_buffer_size, Some(65507));
             assert_eq!(config.dogstatsd_queue_size, Some(2048));
             Ok(())
