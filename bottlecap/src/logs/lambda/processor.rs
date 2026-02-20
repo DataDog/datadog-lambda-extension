@@ -386,7 +386,10 @@ impl LambdaProcessor {
                 .get("level")
                 .and_then(|v| v.as_str())
                 .and_then(map_log_level_to_status)
-                .map_or(lambda_message.status.clone(), std::string::ToString::to_string);
+                .map_or(
+                    lambda_message.status.clone(),
+                    std::string::ToString::to_string,
+                );
 
             IntakeLog {
                 hostname: self.function_arn.clone(),
