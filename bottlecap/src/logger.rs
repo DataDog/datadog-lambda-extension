@@ -73,12 +73,13 @@ where
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
     use tracing::subscriber::with_default;
     use tracing_subscriber::fmt::Subscriber;
 
-    /// Captures all output from a tracing subscriber using our Formatter.
+    /// Captures all output from a tracing subscriber using our `Formatter`.
     fn capture_log<F: FnOnce()>(f: F) -> String {
         let buf = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
         let buf_clone = buf.clone();
@@ -100,12 +101,11 @@ mod tests {
         String::from_utf8(lock.clone()).expect("invalid UTF-8 in log output")
     }
 
-    /// A wrapper so Arc<Mutex<Vec<u8>>> implements std::io::Write.
     struct WriterGuard(std::sync::Arc<std::sync::Mutex<Vec<u8>>>);
 
     impl std::io::Write for WriterGuard {
         fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-            self.0.lock().unwrap().extend_from_slice(buf);
+            self.0.lock().expect("write lock poisoned").extend_from_slice(buf);
             Ok(buf.len())
         }
         fn flush(&mut self) -> std::io::Result<()> {
@@ -137,7 +137,8 @@ mod tests {
             tracing::error!("something broke");
         });
 
-        let parsed: serde_json::Value = serde_json::from_str(output.trim()).unwrap();
+        let parsed: serde_json::Value =
+            serde_json::from_str(output.trim()).expect("output should be valid JSON");
         assert_eq!(parsed["level"], "ERROR");
         assert!(
             parsed["message"]
@@ -153,7 +154,8 @@ mod tests {
             tracing::debug!("debug details");
         });
 
-        let parsed: serde_json::Value = serde_json::from_str(output.trim()).unwrap();
+        let parsed: serde_json::Value =
+            serde_json::from_str(output.trim()).expect("output should be valid JSON");
         assert_eq!(parsed["level"], "DEBUG");
         assert!(
             parsed["message"]
@@ -169,7 +171,6 @@ mod tests {
             tracing::info!("message with \"quotes\" and a\nnewline");
         });
 
-        // The output should be valid JSON despite special characters
         let parsed: serde_json::Value =
             serde_json::from_str(output.trim()).expect("special chars should be escaped");
         let msg = parsed["message"].as_str().unwrap();
