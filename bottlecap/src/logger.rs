@@ -49,10 +49,9 @@ where
             for span in scope.from_root() {
                 span_prefix.push_str(span.name());
                 let ext = span.extensions();
-                let fields = &ext
-                    .get::<FormattedFields<N>>()
-                    .expect("will never be `None`");
-                if !fields.is_empty() {
+                if let Some(fields) = ext.get::<FormattedFields<N>>()
+                    && !fields.is_empty()
+                {
                     span_prefix.push('{');
                     span_prefix.push_str(fields);
                     span_prefix.push('}');
@@ -70,5 +69,111 @@ where
         });
 
         writeln!(writer, "{output}")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tracing::subscriber::with_default;
+    use tracing_subscriber::fmt::Subscriber;
+
+    /// Captures all output from a tracing subscriber using our Formatter.
+    fn capture_log<F: FnOnce()>(f: F) -> String {
+        let buf = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let buf_clone = buf.clone();
+
+        let subscriber = Subscriber::builder()
+            .with_writer(move || -> Box<dyn std::io::Write + Send> {
+                Box::new(WriterGuard(buf_clone.clone()))
+            })
+            .with_max_level(tracing::Level::TRACE)
+            .with_level(true)
+            .with_target(false)
+            .without_time()
+            .event_format(Formatter)
+            .finish();
+
+        with_default(subscriber, f);
+
+        let lock = buf.lock().expect("test lock poisoned");
+        String::from_utf8(lock.clone()).expect("invalid UTF-8 in log output")
+    }
+
+    /// A wrapper so Arc<Mutex<Vec<u8>>> implements std::io::Write.
+    struct WriterGuard(std::sync::Arc<std::sync::Mutex<Vec<u8>>>);
+
+    impl std::io::Write for WriterGuard {
+        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+            self.0.lock().unwrap().extend_from_slice(buf);
+            Ok(buf.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn test_formatter_outputs_valid_json_with_level() {
+        let output = capture_log(|| {
+            tracing::info!("hello world");
+        });
+
+        let parsed: serde_json::Value =
+            serde_json::from_str(output.trim()).expect("output should be valid JSON");
+
+        assert_eq!(parsed["level"], "INFO");
+        assert!(
+            parsed["message"]
+                .as_str()
+                .unwrap()
+                .contains("DD_EXTENSION | INFO | hello world")
+        );
+    }
+
+    #[test]
+    fn test_formatter_error_level() {
+        let output = capture_log(|| {
+            tracing::error!("something broke");
+        });
+
+        let parsed: serde_json::Value = serde_json::from_str(output.trim()).unwrap();
+        assert_eq!(parsed["level"], "ERROR");
+        assert!(
+            parsed["message"]
+                .as_str()
+                .unwrap()
+                .contains("DD_EXTENSION | ERROR | something broke")
+        );
+    }
+
+    #[test]
+    fn test_formatter_debug_level() {
+        let output = capture_log(|| {
+            tracing::debug!("debug details");
+        });
+
+        let parsed: serde_json::Value = serde_json::from_str(output.trim()).unwrap();
+        assert_eq!(parsed["level"], "DEBUG");
+        assert!(
+            parsed["message"]
+                .as_str()
+                .unwrap()
+                .contains("DD_EXTENSION | DEBUG | debug details")
+        );
+    }
+
+    #[test]
+    fn test_formatter_escapes_special_characters() {
+        let output = capture_log(|| {
+            tracing::info!("message with \"quotes\" and a\nnewline");
+        });
+
+        // The output should be valid JSON despite special characters
+        let parsed: serde_json::Value =
+            serde_json::from_str(output.trim()).expect("special chars should be escaped");
+        let msg = parsed["message"].as_str().unwrap();
+        assert!(msg.contains("quotes"));
+        assert!(msg.contains("newline"));
     }
 }

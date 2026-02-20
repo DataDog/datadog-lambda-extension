@@ -381,9 +381,11 @@ impl LambdaProcessor {
                 lambda_message.message.clone(),
             );
 
-            // Extract log level from JSON (AWS JSON log format / Powertools)
+            // Extract log level from JSON (AWS JSON log format / Powertools).
+            // Try "level" first (standard), then fall back to "status" (Datadog convention).
             let status = json_obj
                 .get("level")
+                .or_else(|| json_obj.get("status"))
                 .and_then(|v| v.as_str())
                 .and_then(map_log_level_to_status)
                 .map_or(
@@ -1955,5 +1957,169 @@ mod tests {
         let lambda_message = processor.get_message(event).await.unwrap();
         let intake_log = processor.get_intake_log(lambda_message).unwrap();
         assert_eq!(intake_log.message.status, "debug");
+    }
+
+    #[tokio::test]
+    async fn test_get_intake_log_non_string_level_defaults_to_info() {
+        let config = Arc::new(config::Config {
+            service: Some("test-service".to_string()),
+            tags: HashMap::from([("test".to_string(), "tags".to_string())]),
+            ..config::Config::default()
+        });
+
+        let tags_provider = Arc::new(provider::Provider::new(
+            Arc::clone(&config),
+            LAMBDA_RUNTIME_SLUG.to_string(),
+            &HashMap::from([("function_arn".to_string(), "test-arn".to_string())]),
+        ));
+
+        let (tx, _rx) = tokio::sync::mpsc::channel(2);
+        let mut processor =
+            LambdaProcessor::new(tags_provider, Arc::clone(&config), tx.clone(), false);
+
+        // Set request_id
+        let start_event = TelemetryEvent {
+            time: Utc.with_ymd_and_hms(2023, 1, 7, 3, 23, 47).unwrap(),
+            record: TelemetryRecord::PlatformStart {
+                request_id: "test-request-id".to_string(),
+                version: Some("test".to_string()),
+            },
+        };
+        let start_msg = processor.get_message(start_event).await.unwrap();
+        processor.get_intake_log(start_msg).unwrap();
+
+        // level as a number
+        let event = TelemetryEvent {
+            time: Utc.with_ymd_and_hms(2023, 1, 7, 3, 23, 48).unwrap(),
+            record: TelemetryRecord::Function(Value::String(
+                r#"{"level":42,"message":"numeric level"}"#.to_string(),
+            )),
+        };
+        let lambda_message = processor.get_message(event).await.unwrap();
+        let intake_log = processor.get_intake_log(lambda_message).unwrap();
+        assert_eq!(intake_log.message.status, "info");
+
+        // level as null
+        let event = TelemetryEvent {
+            time: Utc.with_ymd_and_hms(2023, 1, 7, 3, 23, 49).unwrap(),
+            record: TelemetryRecord::Function(Value::String(
+                r#"{"level":null,"message":"null level"}"#.to_string(),
+            )),
+        };
+        let lambda_message = processor.get_message(event).await.unwrap();
+        let intake_log = processor.get_intake_log(lambda_message).unwrap();
+        assert_eq!(intake_log.message.status, "info");
+
+        // level as a boolean
+        let event = TelemetryEvent {
+            time: Utc.with_ymd_and_hms(2023, 1, 7, 3, 23, 50).unwrap(),
+            record: TelemetryRecord::Function(Value::String(
+                r#"{"level":true,"message":"bool level"}"#.to_string(),
+            )),
+        };
+        let lambda_message = processor.get_message(event).await.unwrap();
+        let intake_log = processor.get_intake_log(lambda_message).unwrap();
+        assert_eq!(intake_log.message.status, "info");
+    }
+
+    #[tokio::test]
+    async fn test_get_intake_log_ddtags_and_level_combined() {
+        let config = Arc::new(config::Config {
+            service: Some("test-service".to_string()),
+            tags: HashMap::from([("test".to_string(), "tags".to_string())]),
+            ..config::Config::default()
+        });
+
+        let tags_provider = Arc::new(provider::Provider::new(
+            Arc::clone(&config),
+            LAMBDA_RUNTIME_SLUG.to_string(),
+            &HashMap::from([("function_arn".to_string(), "test-arn".to_string())]),
+        ));
+
+        let (tx, _rx) = tokio::sync::mpsc::channel(2);
+        let mut processor =
+            LambdaProcessor::new(tags_provider, Arc::clone(&config), tx.clone(), false);
+
+        // Set request_id
+        let start_event = TelemetryEvent {
+            time: Utc.with_ymd_and_hms(2023, 1, 7, 3, 23, 47).unwrap(),
+            record: TelemetryRecord::PlatformStart {
+                request_id: "test-request-id".to_string(),
+                version: Some("test".to_string()),
+            },
+        };
+        let start_msg = processor.get_message(start_event).await.unwrap();
+        processor.get_intake_log(start_msg).unwrap();
+
+        // JSON log with both ddtags and level
+        let event = TelemetryEvent {
+            time: Utc.with_ymd_and_hms(2023, 1, 7, 3, 23, 48).unwrap(),
+            record: TelemetryRecord::Function(Value::String(
+                r#"{"level":"WARN","message":"warning with tags","ddtags":"env:staging,team:backend"}"#
+                    .to_string(),
+            )),
+        };
+        let lambda_message = processor.get_message(event).await.unwrap();
+        let intake_log = processor.get_intake_log(lambda_message).unwrap();
+
+        // Level should be extracted
+        assert_eq!(intake_log.message.status, "warn");
+        // Tags should be extracted and appended
+        assert!(intake_log.tags.contains("env:staging"));
+        assert!(intake_log.tags.contains("team:backend"));
+        // ddtags should be removed from the message
+        assert!(!intake_log.message.message.contains("ddtags"));
+    }
+
+    #[tokio::test]
+    async fn test_get_intake_log_status_field_fallback() {
+        let config = Arc::new(config::Config {
+            service: Some("test-service".to_string()),
+            tags: HashMap::from([("test".to_string(), "tags".to_string())]),
+            ..config::Config::default()
+        });
+
+        let tags_provider = Arc::new(provider::Provider::new(
+            Arc::clone(&config),
+            LAMBDA_RUNTIME_SLUG.to_string(),
+            &HashMap::from([("function_arn".to_string(), "test-arn".to_string())]),
+        ));
+
+        let (tx, _rx) = tokio::sync::mpsc::channel(2);
+        let mut processor =
+            LambdaProcessor::new(tags_provider, Arc::clone(&config), tx.clone(), false);
+
+        // Set request_id
+        let start_event = TelemetryEvent {
+            time: Utc.with_ymd_and_hms(2023, 1, 7, 3, 23, 47).unwrap(),
+            record: TelemetryRecord::PlatformStart {
+                request_id: "test-request-id".to_string(),
+                version: Some("test".to_string()),
+            },
+        };
+        let start_msg = processor.get_message(start_event).await.unwrap();
+        processor.get_intake_log(start_msg).unwrap();
+
+        // JSON log with "status" field instead of "level" (Datadog convention)
+        let event = TelemetryEvent {
+            time: Utc.with_ymd_and_hms(2023, 1, 7, 3, 23, 48).unwrap(),
+            record: TelemetryRecord::Function(Value::String(
+                r#"{"status":"error","message":"something failed"}"#.to_string(),
+            )),
+        };
+        let lambda_message = processor.get_message(event).await.unwrap();
+        let intake_log = processor.get_intake_log(lambda_message).unwrap();
+        assert_eq!(intake_log.message.status, "error");
+
+        // "level" takes priority over "status" when both are present
+        let event = TelemetryEvent {
+            time: Utc.with_ymd_and_hms(2023, 1, 7, 3, 23, 49).unwrap(),
+            record: TelemetryRecord::Function(Value::String(
+                r#"{"level":"WARN","status":"error","message":"both fields"}"#.to_string(),
+            )),
+        };
+        let lambda_message = processor.get_message(event).await.unwrap();
+        let intake_log = processor.get_intake_log(lambda_message).unwrap();
+        assert_eq!(intake_log.message.status, "warn");
     }
 }
