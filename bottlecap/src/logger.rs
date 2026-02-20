@@ -180,7 +180,7 @@ mod tests {
             "quotes should be escaped in raw JSON"
         );
         assert!(
-            output.contains(r#"\n"#),
+            output.contains(r"\n"),
             "newline should be escaped in raw JSON"
         );
 
