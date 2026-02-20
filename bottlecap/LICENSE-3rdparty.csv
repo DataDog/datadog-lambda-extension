@@ -235,6 +235,7 @@ tracing,https://github.com/tokio-rs/tracing,MIT,"Eliza Weisman <eliza@buoyant.io
 tracing-attributes,https://github.com/tokio-rs/tracing,MIT,"Tokio Contributors <team@tokio.rs>, Eliza Weisman <eliza@buoyant.io>, David Barsky <dbarsky@amazon.com>"
 tracing-core,https://github.com/tokio-rs/tracing,MIT,Tokio Contributors <team@tokio.rs>
 tracing-log,https://github.com/tokio-rs/tracing,MIT,Tokio Contributors <team@tokio.rs>
+tracing-serde,https://github.com/tokio-rs/tracing,MIT,Tokio Contributors <team@tokio.rs>
 tracing-subscriber,https://github.com/tokio-rs/tracing,MIT,"Eliza Weisman <eliza@buoyant.io>, David Barsky <me@davidbarsky.com>, Tokio Contributors <team@tokio.rs>"
 try-lock,https://github.com/seanmonstar/try-lock,MIT,Sean McArthur <sean@seanmonstar.com>
 twoway,https://github.com/bluss/twoway,MIT OR Apache-2.0,bluss
