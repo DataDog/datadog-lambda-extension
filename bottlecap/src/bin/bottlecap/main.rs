@@ -824,9 +824,12 @@ async fn handle_event_bus_event(
         Event::Telemetry(event) => {
             debug!("Telemetry event received: {:?}", event);
             match event.record {
-                TelemetryRecord::PlatformInitStart { .. } => {
+                TelemetryRecord::PlatformInitStart {
+                    runtime_version,
+                    ..
+                } => {
                     if let Err(e) = invocation_processor_handle
-                        .on_platform_init_start(event.time)
+                        .on_platform_init_start(event.time, runtime_version)
                         .await
                     {
                         error!("Failed to send platform init start to processor: {}", e);

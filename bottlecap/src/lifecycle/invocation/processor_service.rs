@@ -40,6 +40,7 @@ pub enum ProcessorCommand {
     },
     PlatformInitStart {
         time: DateTime<Utc>,
+        runtime_version: Option<String>,
     },
     PlatformInitReport {
         init_type: InitType,
@@ -140,9 +141,13 @@ impl InvocationProcessorHandle {
     pub async fn on_platform_init_start(
         &self,
         time: DateTime<Utc>,
+        runtime_version: Option<String>,
     ) -> Result<(), mpsc::error::SendError<ProcessorCommand>> {
         self.sender
-            .send(ProcessorCommand::PlatformInitStart { time })
+            .send(ProcessorCommand::PlatformInitStart {
+                time,
+                runtime_version,
+            })
             .await
     }
 
@@ -454,8 +459,11 @@ impl InvocationProcessorService {
                 ProcessorCommand::InvokeEvent { request_id } => {
                     self.processor.on_invoke_event(request_id);
                 }
-                ProcessorCommand::PlatformInitStart { time } => {
-                    self.processor.on_platform_init_start(time);
+                ProcessorCommand::PlatformInitStart {
+                    time,
+                    runtime_version,
+                } => {
+                    self.processor.on_platform_init_start(time, runtime_version);
                 }
                 ProcessorCommand::PlatformInitReport {
                     init_type,
