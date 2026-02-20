@@ -65,7 +65,8 @@ fn map_log_level_to_status(level: &str) -> Option<&'static str> {
         "ERROR" | "ERR" => Some("error"),
         "WARN" | "WARNING" => Some("warn"),
         "INFO" | "INFORMATION" => Some("info"),
-        "DEBUG" | "TRACE" => Some("debug"),
+        "DEBUG" => Some("debug"),
+        "TRACE" => Some("trace"),
         _ => None,
     }
 }
@@ -1671,7 +1672,7 @@ mod tests {
         assert_eq!(map_log_level_to_status("INFO"), Some("info"));
         assert_eq!(map_log_level_to_status("DEBUG"), Some("debug"));
         assert_eq!(map_log_level_to_status("FATAL"), Some("critical"));
-        assert_eq!(map_log_level_to_status("TRACE"), Some("debug"));
+        assert_eq!(map_log_level_to_status("TRACE"), Some("trace"));
 
         // Case-insensitive (lowercase, mixed case, PascalCase)
         assert_eq!(map_log_level_to_status("warn"), Some("warn"));
@@ -1680,7 +1681,7 @@ mod tests {
         assert_eq!(map_log_level_to_status("Info"), Some("info"));
         assert_eq!(map_log_level_to_status("debug"), Some("debug"));
         assert_eq!(map_log_level_to_status("Fatal"), Some("critical"));
-        assert_eq!(map_log_level_to_status("trace"), Some("debug"));
+        assert_eq!(map_log_level_to_status("trace"), Some("trace"));
 
         // Short-form aliases
         assert_eq!(map_log_level_to_status("ERR"), Some("error"));

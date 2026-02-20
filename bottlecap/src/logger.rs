@@ -174,10 +174,29 @@ mod tests {
             tracing::info!("message with \"quotes\" and a\nnewline");
         });
 
-        let parsed: serde_json::Value =
-            serde_json::from_str(output.trim()).expect("special chars should be escaped");
-        let msg = parsed["message"].as_str().unwrap();
-        assert!(msg.contains("quotes"));
-        assert!(msg.contains("newline"));
+        // The raw output must contain escaped quotes and newlines to be valid JSON
+        assert!(
+            output.contains(r#"\"quotes\""#),
+            "quotes should be escaped in raw JSON"
+        );
+        assert!(
+            output.contains(r#"\n"#),
+            "newline should be escaped in raw JSON"
+        );
+
+        // And it must parse as valid JSON
+        let parsed: serde_json::Value = serde_json::from_str(output.trim())
+            .expect("output with special chars should be valid JSON");
+        let msg = parsed["message"]
+            .as_str()
+            .expect("message field should be a string");
+        assert!(
+            msg.contains("\"quotes\""),
+            "parsed message should contain literal quotes"
+        );
+        assert!(
+            msg.contains('\n'),
+            "parsed message should contain literal newline"
+        );
     }
 }
