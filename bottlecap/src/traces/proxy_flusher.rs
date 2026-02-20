@@ -144,10 +144,7 @@ impl Flusher {
             attempts += 1;
 
             let Some(cloned_request) = request.try_clone() else {
-                return Err(Box::new(std::io::Error::new(
-                    std::io::ErrorKind::Other,
-                    "can't clone proxy request",
-                )));
+                return Err(Box::new(std::io::Error::other("can't clone proxy request")));
             };
 
             let time = std::time::Instant::now();
@@ -199,12 +196,11 @@ impl Flusher {
         let mut failed_requests: Vec<reqwest::RequestBuilder> = Vec::new();
         for result in results {
             // There is no cleaner way to do this, so it's deeply nested.
-            if let Err(e) = result {
-                if let Some(fpre) = e.downcast_ref::<FailedProxyRequestError>() {
-                    if let Some(request) = fpre.request.try_clone() {
-                        failed_requests.push(request);
-                    }
-                }
+            if let Err(e) = result
+                && let Some(fpre) = e.downcast_ref::<FailedProxyRequestError>()
+                && let Some(request) = fpre.request.try_clone()
+            {
+                failed_requests.push(request);
             }
         }
 

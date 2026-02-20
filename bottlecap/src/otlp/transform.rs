@@ -1,5 +1,4 @@
 use hex;
-use lazy_static::lazy_static;
 use libdd_trace_normalization::normalize_utils::{
     normalize_name, normalize_service, normalize_tag,
 };
@@ -29,7 +28,7 @@ use opentelemetry_semantic_conventions::trace::{
 use serde_json::json;
 use std::collections::HashMap;
 use std::str;
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock};
 use tracing::debug;
 
 use crate::config::Config;
@@ -62,27 +61,32 @@ pub const KEY_DATADOG_STATS_COMPUTED: &str = "_dd.stats_computed";
 // AWS Lambda OTEL instrumentation scope name
 const AWS_LAMBDA_INSTRUMENTATION_SCOPE: &str = "opentelemetry.instrumentation.aws_lambda";
 
-lazy_static! {
-    // TODO: add mappings
-    static ref DB_SYSTEM_MAP: HashMap<String, String> = HashMap::new();
-    static ref DD_SEMANTIC_KEYS_TO_META_KEYS: HashMap<&'static str, &'static str> = HashMap::from([
-        (KEY_DATADOG_ENVIRONMENT, "env"),
-        (KEY_DATADOG_VERSION, "version"),
-        (KEY_DATADOG_HTTP_STATUS_CODE, "http.status_code"),
-        (KEY_DATADOG_ERROR_MSG, "error.msg"),
-        (KEY_DATADOG_ERROR_TYPE, "error.type"),
-        (KEY_DATADOG_ERROR_STACK, "error.stack"),
-    ]);
+// TODO: add mappings
+#[allow(dead_code)]
+static DB_SYSTEM_MAP: LazyLock<HashMap<String, String>> = LazyLock::new(HashMap::new);
+static DD_SEMANTIC_KEYS_TO_META_KEYS: LazyLock<HashMap<&'static str, &'static str>> =
+    LazyLock::new(|| {
+        HashMap::from([
+            (KEY_DATADOG_ENVIRONMENT, "env"),
+            (KEY_DATADOG_VERSION, "version"),
+            (KEY_DATADOG_HTTP_STATUS_CODE, "http.status_code"),
+            (KEY_DATADOG_ERROR_MSG, "error.msg"),
+            (KEY_DATADOG_ERROR_TYPE, "error.type"),
+            (KEY_DATADOG_ERROR_STACK, "error.stack"),
+        ])
+    });
 
-    static ref META_KEYS_TO_DD_SEMANTIC_KEYS: HashMap<&'static str, &'static str> = HashMap::from([
-        ("env", KEY_DATADOG_ENVIRONMENT),
-        ("version", KEY_DATADOG_VERSION),
-        ("http.status_code", KEY_DATADOG_HTTP_STATUS_CODE),
-        ("error.msg", KEY_DATADOG_ERROR_MSG),
-        ("error.type", KEY_DATADOG_ERROR_TYPE),
-        ("error.stack", KEY_DATADOG_ERROR_STACK),
-    ]);
-}
+static META_KEYS_TO_DD_SEMANTIC_KEYS: LazyLock<HashMap<&'static str, &'static str>> =
+    LazyLock::new(|| {
+        HashMap::from([
+            ("env", KEY_DATADOG_ENVIRONMENT),
+            ("version", KEY_DATADOG_VERSION),
+            ("http.status_code", KEY_DATADOG_HTTP_STATUS_CODE),
+            ("error.msg", KEY_DATADOG_ERROR_MSG),
+            ("error.type", KEY_DATADOG_ERROR_TYPE),
+            ("error.stack", KEY_DATADOG_ERROR_STACK),
+        ])
+    });
 
 fn get_otel_attribute_value(attributes: &Vec<KeyValue>, key: &str) -> Option<AnyValue> {
     for attribute in attributes {
@@ -558,18 +562,18 @@ fn get_otel_status_code(otel_span: &OtelSpan) -> u32 {
         "http.response.status_code",
         false,
     );
-    if !status_code.is_empty() {
-        if let Ok(status_code) = status_code.parse::<u32>() {
-            return status_code;
-        }
+    if !status_code.is_empty()
+        && let Ok(status_code) = status_code.parse::<u32>()
+    {
+        return status_code;
     }
 
     status_code =
         get_otel_attribute_value_as_string(&otel_span.attributes, HTTP_RESPONSE_STATUS_CODE, false);
-    if !status_code.is_empty() {
-        if let Ok(status_code) = status_code.parse::<u32>() {
-            return status_code;
-        }
+    if !status_code.is_empty()
+        && let Ok(status_code) = status_code.parse::<u32>()
+    {
+        return status_code;
     }
 
     0
@@ -713,11 +717,11 @@ fn marshal_events(events: &[Event]) -> String {
         if !event.attributes.is_empty() {
             let mut attrs = json!({});
             for kv in &event.attributes {
-                let key = kv.key.to_string();
-                if let Some(v) = &kv.value {
-                    if let Some(value) = &v.value {
-                        attrs[key] = json!(otel_value_to_string(value));
-                    }
+                let key = kv.key.clone();
+                if let Some(v) = &kv.value
+                    && let Some(value) = &v.value
+                {
+                    attrs[key] = json!(otel_value_to_string(value));
                 }
             }
             event_obj["attributes"] = attrs;
@@ -749,11 +753,11 @@ fn marshal_links(links: &[Link]) -> String {
         if !link.attributes.is_empty() {
             let mut attrs = json!({});
             for kv in &link.attributes {
-                let key = kv.key.to_string();
-                if let Some(v) = &kv.value {
-                    if let Some(value) = &v.value {
-                        attrs[key] = json!(otel_value_to_string(value));
-                    }
+                let key = kv.key.clone();
+                if let Some(v) = &kv.value
+                    && let Some(value) = &v.value
+                {
+                    attrs[key] = json!(otel_value_to_string(value));
                 }
             }
             link_obj["attributes"] = attrs;
@@ -827,7 +831,7 @@ fn set_span_error_from_otel_span(dd_span: &mut DatadogSpan, otel_span: &OtelSpan
         if let Some(status_code) = dd_span.meta.get("http.response.status_code") {
             dd_span
                 .meta
-                .insert("error.msg".to_string(), status_code.to_string());
+                .insert("error.msg".to_string(), status_code.clone());
         }
     }
 }
@@ -1012,7 +1016,7 @@ pub fn otel_span_to_dd_span(
         if let Some(v) = value.as_ref().and_then(|v| v.value.as_ref()) {
             let value = otel_value_to_string(v);
             if !value.is_empty() {
-                dd_span.meta.insert(key.to_string(), value);
+                dd_span.meta.insert(key.clone(), value);
             }
         }
     }

@@ -188,10 +188,10 @@ impl ConfigBuilder {
 
         // If `proxy_https` is not set, set it from `HTTPS_PROXY` environment variable
         // if it exists
-        if let Ok(https_proxy) = std::env::var("HTTPS_PROXY") {
-            if self.config.proxy_https.is_none() {
-                self.config.proxy_https = Some(https_proxy);
-            }
+        if let Ok(https_proxy) = std::env::var("HTTPS_PROXY")
+            && self.config.proxy_https.is_none()
+        {
+            self.config.proxy_https = Some(https_proxy);
         }
 
         // If `proxy_https` is set, check if the site is in `NO_PROXY` environment variable
@@ -303,6 +303,17 @@ pub struct Config {
     // Metrics
     pub metrics_config_compression_level: i32,
     pub statsd_metric_namespace: Option<String>,
+    /// Size of the receive buffer for `DogStatsD` UDP packets, in bytes (`SO_RCVBUF`).
+    /// Increase to reduce packet loss under high-throughput metric bursts.
+    /// If None, uses the OS default.
+    pub dogstatsd_so_rcvbuf: Option<usize>,
+    /// Maximum size of a single read from any transport (UDP or named pipe), in bytes.
+    /// Defaults to 8192. For UDP, the client must batch metrics into packets of
+    /// this size for the increase to take effect.
+    pub dogstatsd_buffer_size: Option<usize>,
+    /// Internal queue capacity between the socket reader and metric processor.
+    /// Defaults to 1024. Increase if the processor can't keep up with burst traffic.
+    pub dogstatsd_queue_size: Option<usize>,
 
     // OTLP
     //
@@ -420,6 +431,14 @@ impl Default for Config {
             // Metrics
             metrics_config_compression_level: 3,
             statsd_metric_namespace: None,
+
+            // DogStatsD
+            // Defaults to None, which uses the OS default.
+            dogstatsd_so_rcvbuf: None,
+            // Defaults to 8192 internally.
+            dogstatsd_buffer_size: None,
+            // Defaults to 1024 internally.
+            dogstatsd_queue_size: None,
 
             // OTLP
             otlp_config_traces_enabled: true,
@@ -989,7 +1008,7 @@ pub mod tests {
                         TracePropagationStyle::TraceContext
                     ],
                     logs_config_logs_dd_url: "https://http-intake.logs.datadoghq.com".to_string(),
-                    apm_dd_url: trace_intake_url("datadoghq.com").to_string(),
+                    apm_dd_url: trace_intake_url("datadoghq.com").clone(),
                     dd_url: String::new(), // We add the prefix in main.rs
                     ..Config::default()
                 }

@@ -93,6 +93,17 @@ pub struct YamlConfig {
     // Metrics
     pub metrics_config: MetricsConfig,
 
+    // DogStatsD
+    /// Size of the receive buffer for `DogStatsD` UDP packets, in bytes (`SO_RCVBUF`).
+    #[serde(deserialize_with = "deserialize_option_lossless")]
+    pub dogstatsd_so_rcvbuf: Option<usize>,
+    /// Maximum size of a single read from any transport (UDP or named pipe), in bytes.
+    #[serde(deserialize_with = "deserialize_option_lossless")]
+    pub dogstatsd_buffer_size: Option<usize>,
+    /// Internal queue capacity between the socket reader and metric processor.
+    #[serde(deserialize_with = "deserialize_option_lossless")]
+    pub dogstatsd_queue_size: Option<usize>,
+
     // OTLP
     pub otlp_config: Option<OtlpConfig>,
 
@@ -477,6 +488,11 @@ fn merge_config(config: &mut Config, yaml_config: &YamlConfig) {
         compression_level
     );
 
+    // DogStatsD
+    merge_option!(config, yaml_config, dogstatsd_so_rcvbuf);
+    merge_option!(config, yaml_config, dogstatsd_buffer_size);
+    merge_option!(config, yaml_config, dogstatsd_queue_size);
+
     // APM
     merge_hashmap!(config, yaml_config, service_mapping);
     merge_string!(config, apm_dd_url, yaml_config.apm_config, apm_dd_url);
@@ -814,6 +830,10 @@ trace_aws_service_representation_enabled: true
 metrics_config:
   compression_level: 3
 
+dogstatsd_so_rcvbuf: 1048576
+dogstatsd_buffer_size: 65507
+dogstatsd_queue_size: 2048
+
 # OTLP
 otlp_config:
   receiver:
@@ -1009,11 +1029,61 @@ api_security_sample_delay: 60 # Seconds
                 apm_filter_tags_regex_require: None,
                 apm_filter_tags_regex_reject: None,
                 statsd_metric_namespace: None,
+                dogstatsd_so_rcvbuf: Some(1_048_576),
+                dogstatsd_buffer_size: Some(65507),
+                dogstatsd_queue_size: Some(2048),
             };
 
             // Assert that
             assert_eq!(config, expected_config);
 
+            Ok(())
+        });
+    }
+
+    #[test]
+    fn test_yaml_dogstatsd_config() {
+        figment::Jail::expect_with(|jail| {
+            jail.clear_env();
+            jail.create_file(
+                "datadog.yaml",
+                r"
+dogstatsd_so_rcvbuf: 524288
+dogstatsd_buffer_size: 16384
+dogstatsd_queue_size: 512
+",
+            )?;
+            let mut config = Config::default();
+            let yaml_config_source = YamlConfigSource {
+                path: Path::new("datadog.yaml").to_path_buf(),
+            };
+            yaml_config_source
+                .load(&mut config)
+                .expect("Failed to load config");
+
+            assert_eq!(config.dogstatsd_so_rcvbuf, Some(524_288));
+            assert_eq!(config.dogstatsd_buffer_size, Some(16384));
+            assert_eq!(config.dogstatsd_queue_size, Some(512));
+            Ok(())
+        });
+    }
+
+    #[test]
+    fn test_yaml_dogstatsd_config_defaults_to_none() {
+        figment::Jail::expect_with(|jail| {
+            jail.clear_env();
+            jail.create_file("datadog.yaml", "")?;
+            let mut config = Config::default();
+            let yaml_config_source = YamlConfigSource {
+                path: Path::new("datadog.yaml").to_path_buf(),
+            };
+            yaml_config_source
+                .load(&mut config)
+                .expect("Failed to load config");
+
+            assert_eq!(config.dogstatsd_so_rcvbuf, None);
+            assert_eq!(config.dogstatsd_buffer_size, None);
+            assert_eq!(config.dogstatsd_queue_size, None);
             Ok(())
         });
     }

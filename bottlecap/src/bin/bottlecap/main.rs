@@ -113,13 +113,13 @@ async fn main() -> anyhow::Result<()> {
     debug!("Starting Datadog Extension v{version_without_next}");
 
     // Debug: Wait for debugger to attach if DD_DEBUG_WAIT_FOR_ATTACH is set
-    if let Ok(wait_secs) = env::var("DD_DEBUG_WAIT_FOR_ATTACH") {
-        if let Ok(secs) = wait_secs.parse::<u64>() {
-            debug!("DD_DEBUG_WAIT_FOR_ATTACH: Waiting {secs} seconds for debugger to attach...");
-            debug!("Connect your debugger to port 2345 now!");
-            tokio::time::sleep(tokio::time::Duration::from_secs(secs)).await;
-            debug!("DD_DEBUG_WAIT_FOR_ATTACH: Continuing execution...");
-        }
+    if let Ok(wait_secs) = env::var("DD_DEBUG_WAIT_FOR_ATTACH")
+        && let Ok(secs) = wait_secs.parse::<u64>()
+    {
+        debug!("DD_DEBUG_WAIT_FOR_ATTACH: Waiting {secs} seconds for debugger to attach...");
+        debug!("Connect your debugger to port 2345 now!");
+        tokio::time::sleep(tokio::time::Duration::from_secs(secs)).await;
+        debug!("DD_DEBUG_WAIT_FOR_ATTACH: Continuing execution...");
     }
 
     prepare_client_provider()?;
@@ -273,7 +273,7 @@ async fn extension_loop_idle(
                 error!("Error getting next event: {e:?}");
                 return Err(e.into());
             }
-        };
+        }
     }
 }
 
@@ -288,11 +288,7 @@ async fn extension_loop_active(
 ) -> anyhow::Result<()> {
     let (mut event_bus, event_bus_tx) = EventBus::run();
 
-    let account_id = r
-        .account_id
-        .as_ref()
-        .unwrap_or(&"none".to_string())
-        .to_string();
+    let account_id = r.account_id.as_ref().unwrap_or(&"none".to_string()).clone();
     let tags_provider = setup_tag_provider(&Arc::clone(&aws_config), config, &account_id);
 
     let (logs_agent_channel, logs_flusher, logs_agent_cancel_token, logs_aggregator_handle) =
@@ -450,10 +446,8 @@ async fn extension_loop_active(
                         // Wait for any pending flushes
                         flushing_service.await_handles().await;
                         // Final flush to capture any data that accumulated since the last
-                        // spawn_non_blocking(). We pass force_stats=true since this is our
-                        // last opportunity to send data before shutdown.
-                        let mut locked_metrics = flushing_service.metrics_flushers().lock().await;
-                        flushing_service.flush_blocking(true, &mut locked_metrics).await;
+                        // spawn_non_blocking(). This is our last opportunity to send data.
+                        flushing_service.flush_blocking_final().await;
                         break;
                     }
                 }
@@ -519,7 +513,6 @@ async fn extension_loop_active(
                             "Transient network error waiting for shutdown event: {}. Retrying...",
                             e
                         );
-                        continue;
                     }
                     Err(e) => {
                         error!(
@@ -628,26 +621,19 @@ async fn extension_loop_active(
                     tokio::select! {
                     biased;
                         Some(event) = event_bus.rx.recv() => {
-                            if let Some(telemetry_event) = handle_event_bus_event(event, invocation_processor_handle.clone(), appsec_processor.clone(), tags_provider.clone(), trace_processor.clone(), trace_agent_channel.clone(), stats_concentrator.clone()).await {
-                                if let TelemetryRecord::PlatformRuntimeDone{ .. } = telemetry_event.record {
+                            if let Some(telemetry_event) = handle_event_bus_event(event, invocation_processor_handle.clone(), appsec_processor.clone(), tags_provider.clone(), trace_processor.clone(), trace_agent_channel.clone(), stats_concentrator.clone()).await
+                                && let TelemetryRecord::PlatformRuntimeDone{ .. } = telemetry_event.record {
                                     break 'flush_end;
                                 }
-                            }
                         }
                         _ = race_flush_interval.tick() => {
-                            let mut locked_metrics = metrics_flushers.lock().await;
-                            flushing_service
-                                .flush_blocking(false, &mut locked_metrics)
-                                .await;
+                            flushing_service.flush_blocking().await;
                             race_flush_interval.reset();
                         }
                     }
                 }
                 // flush
-                let mut locked_metrics = metrics_flushers.lock().await;
-                flushing_service
-                    .flush_blocking(false, &mut locked_metrics)
-                    .await;
+                flushing_service.flush_blocking().await;
                 race_flush_interval.reset();
                 let next_response =
                     extension::next_event(client, &aws_config.runtime_api, &r.extension_id).await;
@@ -664,10 +650,7 @@ async fn extension_loop_active(
                         }
                     }
                     FlushDecision::Periodic => {
-                        let mut locked_metrics = metrics_flushers.lock().await;
-                        flushing_service
-                            .flush_blocking(false, &mut locked_metrics)
-                            .await;
+                        flushing_service.flush_blocking().await;
                         race_flush_interval.reset();
                     }
                     _ => {
@@ -695,10 +678,7 @@ async fn extension_loop_active(
                         }
                         _ = race_flush_interval.tick() => {
                             if flush_control.flush_strategy == FlushStrategy::Default {
-                                let mut locked_metrics = metrics_flushers.lock().await;
-                                flushing_service
-                                    .flush_blocking(false, &mut locked_metrics)
-                                    .await;
+                                flushing_service.flush_blocking().await;
                                 race_flush_interval.reset();
                             }
                         }
@@ -744,11 +724,8 @@ async fn extension_loop_active(
                 &lifecycle_listener_shutdown_token,
             );
 
-            // Final flush with force_stats=true since this is our last opportunity
-            let mut locked_metrics = metrics_flushers.lock().await;
-            flushing_service
-                .flush_blocking(true, &mut locked_metrics)
-                .await;
+            // Final flush - this is our last opportunity to send data before shutdown
+            flushing_service.flush_blocking_final().await;
 
             // Even though we're shutting down, we need to reset the flush interval to prevent any future flushes
             race_flush_interval.reset();
@@ -1178,7 +1155,7 @@ async fn start_dogstatsd(
     api_key_factory: Arc<ApiKeyFactory>,
     config: &Arc<Config>,
 ) -> (
-    Arc<TokioMutex<Vec<MetricsFlusher>>>,
+    Arc<Vec<MetricsFlusher>>,
     MetricsAggregatorHandle,
     CancellationToken,
 ) {
@@ -1200,17 +1177,20 @@ async fn start_dogstatsd(
     });
 
     // Get flushers with aggregator handle
-    let flushers = Arc::new(TokioMutex::new(start_metrics_flushers(
+    let flushers = Arc::new(start_metrics_flushers(
         Arc::clone(&api_key_factory),
         &aggregator_handle,
         config,
-    )));
+    ));
 
     // Create Dogstatsd server
     let dogstatsd_config = DogStatsDConfig {
         host: EXTENSION_HOST.to_string(),
         port: DOGSTATSD_PORT,
         metric_namespace: config.statsd_metric_namespace.clone(),
+        so_rcvbuf: config.dogstatsd_so_rcvbuf,
+        buffer_size: config.dogstatsd_buffer_size,
+        queue_size: config.dogstatsd_queue_size,
     };
     let cancel_token = tokio_util::sync::CancellationToken::new();
     let dogstatsd_agent = DogStatsD::new(

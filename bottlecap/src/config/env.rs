@@ -277,6 +277,24 @@ pub struct EnvConfig {
     #[serde(deserialize_with = "deserialize_optional_string")]
     pub statsd_metric_namespace: Option<String>,
 
+    /// @env `DD_DOGSTATSD_SO_RCVBUF`
+    /// Size of the receive buffer for `DogStatsD` UDP packets, in bytes (`SO_RCVBUF`).
+    /// Increase to reduce packet loss under high-throughput metric bursts.
+    #[serde(deserialize_with = "deserialize_option_lossless")]
+    pub dogstatsd_so_rcvbuf: Option<usize>,
+
+    /// @env `DD_DOGSTATSD_BUFFER_SIZE`
+    /// Maximum size of a single read from any transport (UDP or named pipe), in bytes.
+    /// Defaults to 8192.
+    #[serde(deserialize_with = "deserialize_option_lossless")]
+    pub dogstatsd_buffer_size: Option<usize>,
+
+    /// @env `DD_DOGSTATSD_QUEUE_SIZE`
+    /// Internal queue capacity between the socket reader and metric processor.
+    /// Defaults to 1024. Increase if the processor can't keep up with burst traffic.
+    #[serde(deserialize_with = "deserialize_option_lossless")]
+    pub dogstatsd_queue_size: Option<usize>,
+
     // OTLP
     //
     // - APM / Traces
@@ -554,6 +572,11 @@ fn merge_config(config: &mut Config, env_config: &EnvConfig) {
         config.statsd_metric_namespace = parse_metric_namespace(namespace);
     }
 
+    // DogStatsD
+    merge_option!(config, env_config, dogstatsd_so_rcvbuf);
+    merge_option!(config, env_config, dogstatsd_buffer_size);
+    merge_option!(config, env_config, dogstatsd_queue_size);
+
     // OTLP
     merge_option_to_value!(config, env_config, otlp_config_traces_enabled);
     merge_option_to_value!(
@@ -830,6 +853,11 @@ mod tests {
             );
             jail.set_env("DD_OTLP_CONFIG_LOGS_ENABLED", "true");
 
+            // DogStatsD
+            jail.set_env("DD_DOGSTATSD_SO_RCVBUF", "1048576");
+            jail.set_env("DD_DOGSTATSD_BUFFER_SIZE", "65507");
+            jail.set_env("DD_DOGSTATSD_QUEUE_SIZE", "2048");
+
             // AWS Lambda
             jail.set_env(
                 "DD_API_KEY_SECRET_ARN",
@@ -984,6 +1012,9 @@ mod tests {
                 otlp_config_traces_probabilistic_sampler_sampling_percentage: Some(50),
                 otlp_config_logs_enabled: true,
                 statsd_metric_namespace: None,
+                dogstatsd_so_rcvbuf: Some(1_048_576),
+                dogstatsd_buffer_size: Some(65507),
+                dogstatsd_queue_size: Some(2048),
                 api_key_secret_arn: "arn:aws:secretsmanager:region:account:secret:datadog-api-key"
                     .to_string(),
                 kms_api_key: "test-kms-key".to_string(),
@@ -1167,6 +1198,45 @@ mod tests {
 
             // Default value is true
             assert!(config.serverless_logs_enabled);
+            Ok(())
+        });
+    }
+
+    #[test]
+    fn test_dogstatsd_config_from_env() {
+        figment::Jail::expect_with(|jail| {
+            jail.clear_env();
+            jail.set_env("DD_DOGSTATSD_SO_RCVBUF", "1048576");
+            jail.set_env("DD_DOGSTATSD_BUFFER_SIZE", "65507");
+            jail.set_env("DD_DOGSTATSD_QUEUE_SIZE", "2048");
+
+            let mut config = Config::default();
+            let env_config_source = EnvConfigSource;
+            env_config_source
+                .load(&mut config)
+                .expect("Failed to load config");
+
+            assert_eq!(config.dogstatsd_so_rcvbuf, Some(1_048_576));
+            assert_eq!(config.dogstatsd_buffer_size, Some(65507));
+            assert_eq!(config.dogstatsd_queue_size, Some(2048));
+            Ok(())
+        });
+    }
+
+    #[test]
+    fn test_dogstatsd_config_defaults_to_none() {
+        figment::Jail::expect_with(|jail| {
+            jail.clear_env();
+
+            let mut config = Config::default();
+            let env_config_source = EnvConfigSource;
+            env_config_source
+                .load(&mut config)
+                .expect("Failed to load config");
+
+            assert_eq!(config.dogstatsd_so_rcvbuf, None);
+            assert_eq!(config.dogstatsd_buffer_size, None);
+            assert_eq!(config.dogstatsd_queue_size, None);
             Ok(())
         });
     }

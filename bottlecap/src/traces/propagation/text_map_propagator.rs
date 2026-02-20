@@ -1,6 +1,6 @@
 use std::collections::HashMap;
+use std::sync::LazyLock;
 
-use lazy_static::lazy_static;
 use regex::Regex;
 use tracing::{debug, error, warn};
 
@@ -30,20 +30,23 @@ pub const TRACESTATE_KEY: &str = "tracestate";
 
 pub const BAGGAGE_PREFIX: &str = "ot-baggage-";
 
-lazy_static! {
-    static ref TRACEPARENT_REGEX: Regex =
-        Regex::new(r"(?i)^([a-f0-9]{2})-([a-f0-9]{32})-([a-f0-9]{16})-([a-f0-9]{2})(-.*)?$")
-            .expect("failed creating regex");
-    static ref INVALID_SEGMENT_REGEX: Regex = Regex::new(r"^0+$").expect("failed creating regex");
-    static ref VALID_TAG_KEY_REGEX: Regex =
-        Regex::new(r"^_dd\.p\.[\x21-\x2b\x2d-\x7e]+$").expect("failed creating regex");
-    static ref VALID_TAG_VALUE_REGEX: Regex =
-        Regex::new(r"^[\x20-\x2b\x2d-\x7e]*$").expect("failed creating regex");
-    static ref INVALID_ASCII_CHARACTERS_REGEX: Regex =
-        Regex::new(r"[^\x20-\x7E]+").expect("failed creating regex");
-    static ref VALID_SAMPLING_DECISION_REGEX: Regex =
-        Regex::new(r"^-([0-9])$").expect("failed creating regex");
-}
+static TRACEPARENT_REGEX: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"(?i)^([a-f0-9]{2})-([a-f0-9]{32})-([a-f0-9]{16})-([a-f0-9]{2})(-.*)?$")
+        .expect("failed creating regex")
+});
+static INVALID_SEGMENT_REGEX: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"^0+$").expect("failed creating regex"));
+#[allow(dead_code)]
+static VALID_TAG_KEY_REGEX: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"^_dd\.p\.[\x21-\x2b\x2d-\x7e]+$").expect("failed creating regex")
+});
+#[allow(dead_code)]
+static VALID_TAG_VALUE_REGEX: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"^[\x20-\x2b\x2d-\x7e]*$").expect("failed creating regex"));
+static INVALID_ASCII_CHARACTERS_REGEX: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"[^\x20-\x7E]+").expect("failed creating regex"));
+static VALID_SAMPLING_DECISION_REGEX: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"^-([0-9])$").expect("failed creating regex"));
 
 #[derive(Clone, Copy)]
 pub struct DatadogHeaderPropagator;
@@ -168,21 +171,19 @@ impl DatadogHeaderPropagator {
         }
 
         // Handle 128bit trace ID
-        if !tags.is_empty() {
-            if let Some(trace_id_higher_order_bits) =
+        if !tags.is_empty()
+            && let Some(trace_id_higher_order_bits) =
                 carrier.get(DATADOG_HIGHER_ORDER_TRACE_ID_BITS_KEY)
-            {
-                if !Self::higher_order_bits_valid(trace_id_higher_order_bits) {
-                    warn!(
-                        "Malformed Trace ID: {trace_id_higher_order_bits} Failed to decode trace ID from carrier."
-                    );
-                    tags.insert(
-                        DATADOG_PROPAGATION_ERROR_KEY.to_string(),
-                        format!("malformed tid {trace_id_higher_order_bits}"),
-                    );
-                    tags.remove(DATADOG_HIGHER_ORDER_TRACE_ID_BITS_KEY);
-                }
-            }
+            && !Self::higher_order_bits_valid(trace_id_higher_order_bits)
+        {
+            warn!(
+                "Malformed Trace ID: {trace_id_higher_order_bits} Failed to decode trace ID from carrier."
+            );
+            tags.insert(
+                DATADOG_PROPAGATION_ERROR_KEY.to_string(),
+                format!("malformed tid {trace_id_higher_order_bits}"),
+            );
+            tags.remove(DATADOG_HIGHER_ORDER_TRACE_ID_BITS_KEY);
         }
 
         if !tags.contains_key(DATADOG_SAMPLING_DECISION_KEY) {
@@ -297,7 +298,7 @@ impl TraceContextPropagator {
             return None;
         }
 
-        tags.insert(TRACESTATE_KEY.to_string(), ts.to_string());
+        tags.insert(TRACESTATE_KEY.to_string(), ts.clone());
 
         let mut dd: Option<HashMap<String, String>> = None;
         for v in ts_v.clone() {
@@ -321,10 +322,10 @@ impl TraceContextPropagator {
                 lower_order_trace_id: None,
             };
 
-            if let Some(ts_sp) = dd.get("s") {
-                if let Ok(p_sp) = ts_sp.parse::<i8>() {
-                    tracestate.sampling_priority = Some(p_sp);
-                }
+            if let Some(ts_sp) = dd.get("s")
+                && let Ok(p_sp) = ts_sp.parse::<i8>()
+            {
+                tracestate.sampling_priority = Some(p_sp);
             }
 
             if let Some(o) = dd.get("o") {
@@ -332,7 +333,7 @@ impl TraceContextPropagator {
             }
 
             if let Some(lo_tid) = dd.get("p") {
-                tracestate.lower_order_trace_id = Some(lo_tid.to_string());
+                tracestate.lower_order_trace_id = Some(lo_tid.clone());
             }
 
             // Convert from `t.` to `_dd.p.`
@@ -357,12 +358,11 @@ impl TraceContextPropagator {
         traceparent_sampling_priority: i8,
         tracestate_sampling_priority: Option<i8>,
     ) -> i8 {
-        if let Some(ts_sp) = tracestate_sampling_priority {
-            if (traceparent_sampling_priority == 1 && ts_sp > 0)
-                || (traceparent_sampling_priority == 0 && ts_sp < 0)
-            {
-                return ts_sp;
-            }
+        if let Some(ts_sp) = tracestate_sampling_priority
+            && ((traceparent_sampling_priority == 1 && ts_sp > 0)
+                || (traceparent_sampling_priority == 0 && ts_sp < 0))
+        {
+            return ts_sp;
         }
 
         traceparent_sampling_priority

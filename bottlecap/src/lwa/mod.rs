@@ -114,7 +114,7 @@ pub async fn process_invocation_next(
 
     if let Some(request_id) = request_id {
         let _ = invocation_processor_handle
-            .add_reparenting(request_id.to_string(), generate_span_id(), parent_id)
+            .add_reparenting(request_id.clone(), generate_span_id(), parent_id)
             .await;
     }
 }
@@ -156,11 +156,10 @@ pub async fn process_invocation_response(
 }
 
 fn inner_header(inner_payload: &Value) -> HashMap<String, String> {
-    let headers = if let Some(body) = inner_payload.get("headers") {
+    if let Some(body) = inner_payload.get("headers") {
         serde_json::from_value::<HashMap<String, String>>(body.clone())
             .unwrap_or_else(|_| HashMap::new())
     } else {
         HashMap::new()
-    };
-    headers
+    }
 }

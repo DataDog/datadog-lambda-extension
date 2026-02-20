@@ -7,7 +7,7 @@ use crate::appsec::processor::InvocationPayload;
 use crate::lifecycle::invocation::triggers::body::Body;
 
 /// The expected payload of a response. This is different from trigger to trigger.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum ExpectedResponseFormat {
     /// API Gateway style integration responses (REST and HTTP)
     ApiGatewayResponse,
@@ -16,6 +16,7 @@ pub enum ExpectedResponseFormat {
     Raw,
 
     /// Unknown or unsupported response format
+    #[default]
     Unknown,
 }
 impl ExpectedResponseFormat {
@@ -37,11 +38,6 @@ impl ExpectedResponseFormat {
             }))),
             Self::Unknown => Ok(None),
         }
-    }
-}
-impl Default for ExpectedResponseFormat {
-    fn default() -> Self {
-        Self::Unknown
     }
 }
 

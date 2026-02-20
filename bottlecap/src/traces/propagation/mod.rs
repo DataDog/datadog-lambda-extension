@@ -200,9 +200,8 @@ impl DatadogCompositePropagator {
 
 #[cfg(test)]
 pub mod tests {
+    use std::sync::LazyLock;
     use std::vec;
-
-    use lazy_static::lazy_static;
 
     use crate::traces::context::Sampling;
 
@@ -212,131 +211,152 @@ pub mod tests {
         (value & 0xFFFF_FFFF_FFFF_FFFF) as u64
     }
 
-    lazy_static! {
-        static ref TRACE_ID: u128 = 171_395_628_812_617_415_352_188_477_958_425_669_623;
-        static ref TRACE_ID_LOWER_ORDER_BITS: u64 = lower_64_bits(*TRACE_ID);
-        static ref TRACE_ID_HEX: String = String::from("80f198ee56343ba864fe8b2a57d3eff7");
+    static TRACE_ID: LazyLock<u128> =
+        LazyLock::new(|| 171_395_628_812_617_415_352_188_477_958_425_669_623);
+    static TRACE_ID_LOWER_ORDER_BITS: LazyLock<u64> = LazyLock::new(|| lower_64_bits(*TRACE_ID));
+    static TRACE_ID_HEX: LazyLock<String> =
+        LazyLock::new(|| String::from("80f198ee56343ba864fe8b2a57d3eff7"));
 
-        // TraceContext Headers
-        static ref VALID_TRACECONTEXT_HEADERS_BASIC: HashMap<String, String> = HashMap::from([
-            (
-                "traceparent".to_string(),
-                format!("00-{}-00f067aa0ba902b7-01", *TRACE_ID_HEX)
-            ),
-            (
-                "tracestate".to_string(),
-                "dd=p:00f067aa0ba902b7;s:2;o:rum".to_string()
-            ),
-        ]);
-        static ref VALID_TRACECONTEXT_HEADERS_RUM_NO_SAMPLING_DECISION: HashMap<String, String> =
+    // TraceContext Headers
+    static VALID_TRACECONTEXT_HEADERS_BASIC: LazyLock<HashMap<String, String>> =
+        LazyLock::new(|| {
             HashMap::from([
                 (
                     "traceparent".to_string(),
-                    format!("00-{}-00f067aa0ba902b7-00", *TRACE_ID_HEX)
+                    format!("00-{}-00f067aa0ba902b7-01", *TRACE_ID_HEX),
                 ),
                 (
                     "tracestate".to_string(),
-                    "dd=o:rum".to_string()
+                    "dd=p:00f067aa0ba902b7;s:2;o:rum".to_string(),
                 ),
-            ]);
-        static ref VALID_TRACECONTEXT_HEADERS: HashMap<String, String> = HashMap::from([
-            (
-                "traceparent".to_string(),
-                format!("00-{}-00f067aa0ba902b7-01", *TRACE_ID_HEX)
-            ),
-            (
-                "tracestate".to_string(),
-                "dd=s:2;o:rum;t.dm:-4;t.usr.id:baz64,congo=t61rcWkgMz".to_string()
-            ),
-        ]);
-        static ref VALID_TRACECONTEXT_HEADERS_VALID_64_BIT_TRACE_ID: HashMap<String, String> =
+            ])
+        });
+    static VALID_TRACECONTEXT_HEADERS_RUM_NO_SAMPLING_DECISION: LazyLock<HashMap<String, String>> =
+        LazyLock::new(|| {
             HashMap::from([
                 (
                     "traceparent".to_string(),
-                    "00-000000000000000064fe8b2a57d3eff7-00f067aa0ba902b7-01".to_string()
+                    format!("00-{}-00f067aa0ba902b7-00", *TRACE_ID_HEX),
+                ),
+                ("tracestate".to_string(), "dd=o:rum".to_string()),
+            ])
+        });
+    static VALID_TRACECONTEXT_HEADERS: LazyLock<HashMap<String, String>> = LazyLock::new(|| {
+        HashMap::from([
+            (
+                "traceparent".to_string(),
+                format!("00-{}-00f067aa0ba902b7-01", *TRACE_ID_HEX),
+            ),
+            (
+                "tracestate".to_string(),
+                "dd=s:2;o:rum;t.dm:-4;t.usr.id:baz64,congo=t61rcWkgMz".to_string(),
+            ),
+        ])
+    });
+    static VALID_TRACECONTEXT_HEADERS_VALID_64_BIT_TRACE_ID: LazyLock<HashMap<String, String>> =
+        LazyLock::new(|| {
+            HashMap::from([
+                (
+                    "traceparent".to_string(),
+                    "00-000000000000000064fe8b2a57d3eff7-00f067aa0ba902b7-01".to_string(),
                 ),
                 (
                     "tracestate".to_string(),
-                    "dd=s:2;o:rum;t.dm:-4;t.usr.id:baz64,congo=t61rcWkgMzE".to_string()
+                    "dd=s:2;o:rum;t.dm:-4;t.usr.id:baz64,congo=t61rcWkgMzE".to_string(),
                 ),
-            ]);
+            ])
+        });
 
-        // Datadog Headers
-        static ref VALID_DATADOG_HEADERS: HashMap<String, String> = HashMap::from([
+    // Datadog Headers
+    static VALID_DATADOG_HEADERS: LazyLock<HashMap<String, String>> = LazyLock::new(|| {
+        HashMap::from([
             (
                 "x-datadog-trace-id".to_string(),
                 "13088165645273925489".to_string(),
             ),
-            ("x-datadog-parent-id".to_string(), "5678".to_string(),),
+            ("x-datadog-parent-id".to_string(), "5678".to_string()),
             ("x-datadog-sampling-priority".to_string(), "1".to_string()),
             ("x-datadog-origin".to_string(), "synthetics".to_string()),
-        ]);
-        static ref VALID_DATADOG_HEADERS_NO_PRIORITY: HashMap<String, String> = HashMap::from([
-            (
-                "x-datadog-trace-id".to_string(),
-                "13088165645273925489".to_string(),
-            ),
-            ("x-datadog-parent-id".to_string(), "5678".to_string(),),
-            ("x-datadog-origin".to_string(), "synthetics".to_string()),
-        ]);
-        static ref VALID_DATADOG_HEADERS_MATCHING_TRACE_CONTEXT_VALID_TRACE_ID: HashMap<String, String> =
+        ])
+    });
+    static VALID_DATADOG_HEADERS_NO_PRIORITY: LazyLock<HashMap<String, String>> =
+        LazyLock::new(|| {
             HashMap::from([
                 (
                     "x-datadog-trace-id".to_string(),
-                    TRACE_ID_LOWER_ORDER_BITS.to_string()
+                    "13088165645273925489".to_string(),
                 ),
                 ("x-datadog-parent-id".to_string(), "5678".to_string()),
                 ("x-datadog-origin".to_string(), "synthetics".to_string()),
-                ("x-datadog-sampling-priority".to_string(), "1".to_string()),
-            ]);
-        static ref INVALID_DATADOG_HEADERS: HashMap<String, String> = HashMap::from([
+            ])
+        });
+    static VALID_DATADOG_HEADERS_MATCHING_TRACE_CONTEXT_VALID_TRACE_ID: LazyLock<
+        HashMap<String, String>,
+    > = LazyLock::new(|| {
+        HashMap::from([
+            (
+                "x-datadog-trace-id".to_string(),
+                TRACE_ID_LOWER_ORDER_BITS.to_string(),
+            ),
+            ("x-datadog-parent-id".to_string(), "5678".to_string()),
+            ("x-datadog-origin".to_string(), "synthetics".to_string()),
+            ("x-datadog-sampling-priority".to_string(), "1".to_string()),
+        ])
+    });
+    static INVALID_DATADOG_HEADERS: LazyLock<HashMap<String, String>> = LazyLock::new(|| {
+        HashMap::from([
             (
                 "x-datadog-trace-id".to_string(),
                 "13088165645273925489".to_string(),
             ),
-            ("x-datadog-parent-id".to_string(), "parent_id".to_string(),),
-            ("x-datadog-sampling-priority".to_string(), "sample".to_string()),
-        ]);
+            ("x-datadog-parent-id".to_string(), "parent_id".to_string()),
+            (
+                "x-datadog-sampling-priority".to_string(),
+                "sample".to_string(),
+            ),
+        ])
+    });
 
-        // Fixtures
-        //
-        static ref ALL_VALID_HEADERS: HashMap<String, String> = {
-            let mut h = HashMap::new();
-            h.extend(VALID_DATADOG_HEADERS.clone());
-            h.extend(VALID_TRACECONTEXT_HEADERS.clone());
-            // todo: add b3
-            h
-        };
-        static ref DATADOG_TRACECONTEXT_MATCHING_TRACE_ID_HEADERS: HashMap<String, String> = {
+    // Fixtures
+    static ALL_VALID_HEADERS: LazyLock<HashMap<String, String>> = LazyLock::new(|| {
+        let mut h = HashMap::new();
+        h.extend(VALID_DATADOG_HEADERS.clone());
+        h.extend(VALID_TRACECONTEXT_HEADERS.clone());
+        // todo: add b3
+        h
+    });
+    static DATADOG_TRACECONTEXT_MATCHING_TRACE_ID_HEADERS: LazyLock<HashMap<String, String>> =
+        LazyLock::new(|| {
             let mut h = HashMap::new();
             h.extend(VALID_DATADOG_HEADERS_MATCHING_TRACE_CONTEXT_VALID_TRACE_ID.clone());
             // We use 64-bit traceparent trace id value here so it can match for
             // both 128-bit enabled and disabled
             h.extend(VALID_TRACECONTEXT_HEADERS_VALID_64_BIT_TRACE_ID.clone());
             h
-        };
-        // Edge cases
-        static ref ALL_HEADERS_CHAOTIC_1: HashMap<String, String> = {
-            let mut h = HashMap::new();
-            h.extend(VALID_DATADOG_HEADERS_MATCHING_TRACE_CONTEXT_VALID_TRACE_ID.clone());
-            h.extend(VALID_TRACECONTEXT_HEADERS_VALID_64_BIT_TRACE_ID.clone());
-            // todo: add b3
-            h
-        };
-        static ref ALL_HEADERS_CHAOTIC_2: HashMap<String, String> = {
-            let mut h = HashMap::new();
-            h.extend(VALID_DATADOG_HEADERS.clone());
-            h.extend(VALID_TRACECONTEXT_HEADERS_VALID_64_BIT_TRACE_ID.clone());
-            // todo: add b3
-            h
-        };
-        static ref NO_TRACESTATE_SUPPORT_NOT_MATCHING_TRACE_ID: HashMap<String, String> = {
+        });
+    // Edge cases
+    #[allow(dead_code)]
+    static ALL_HEADERS_CHAOTIC_1: LazyLock<HashMap<String, String>> = LazyLock::new(|| {
+        let mut h = HashMap::new();
+        h.extend(VALID_DATADOG_HEADERS_MATCHING_TRACE_CONTEXT_VALID_TRACE_ID.clone());
+        h.extend(VALID_TRACECONTEXT_HEADERS_VALID_64_BIT_TRACE_ID.clone());
+        // todo: add b3
+        h
+    });
+    static ALL_HEADERS_CHAOTIC_2: LazyLock<HashMap<String, String>> = LazyLock::new(|| {
+        let mut h = HashMap::new();
+        h.extend(VALID_DATADOG_HEADERS.clone());
+        h.extend(VALID_TRACECONTEXT_HEADERS_VALID_64_BIT_TRACE_ID.clone());
+        // todo: add b3
+        h
+    });
+    static NO_TRACESTATE_SUPPORT_NOT_MATCHING_TRACE_ID: LazyLock<HashMap<String, String>> =
+        LazyLock::new(|| {
             let mut h = HashMap::new();
             h.extend(VALID_DATADOG_HEADERS.clone());
             h.extend(VALID_TRACECONTEXT_HEADERS_RUM_NO_SAMPLING_DECISION.clone());
             h
-        };
-    }
+        });
 
     macro_rules! test_propagation_extract {
         ($($name:ident: $value:expr,)*) => {
