@@ -1,14 +1,14 @@
 // Copyright 2023-Present Datadog, Inc. https://www.datadoghq.com/
 // SPDX-License-Identifier: Apache-2.0
 
-//! Hyper-based HTTP client for trace and stats flushers.
+//! HTTP client for trace and stats flushers.
 //!
 //! This module provides the HTTP client type required by `libdd_trace_utils`
 //! for sending traces and stats to Datadog intake endpoints.
 
 use hyper_http_proxy;
 use hyper_rustls::HttpsConnectorBuilder;
-use libdd_common::{GenericHttpClient, hyper_migration};
+use libdd_common::{GenericHttpClient, http_common};
 use rustls::RootCertStore;
 use rustls_pki_types::CertificateDer;
 use std::error::Error;
@@ -20,7 +20,7 @@ use tracing::debug;
 /// Type alias for the HTTP client used by trace and stats flushers.
 ///
 /// This is the client type expected by `libdd_trace_utils::SendData::send()`.
-pub type HyperClient =
+pub type HttpClient =
     GenericHttpClient<hyper_http_proxy::ProxyConnector<libdd_common::connector::Connector>>;
 
 /// Initialize the crypto provider needed for setting custom root certificates.
@@ -35,7 +35,7 @@ fn ensure_crypto_provider_initialized() {
     let () = &*INIT_CRYPTO_PROVIDER;
 }
 
-/// Creates a new hyper-based HTTP client with the given configuration.
+/// Creates a new HTTP client with the given configuration.
 ///
 /// This client is compatible with `libdd_trace_utils` and supports:
 /// - HTTPS proxy configuration
@@ -54,7 +54,7 @@ fn ensure_crypto_provider_initialized() {
 pub fn create_client(
     proxy_https: Option<&String>,
     tls_cert_file: Option<&String>,
-) -> Result<HyperClient, Box<dyn Error>> {
+) -> Result<HttpClient, Box<dyn Error>> {
     // Create the base connector with optional custom TLS config
     let connector = if let Some(ca_cert_path) = tls_cert_file {
         // Ensure crypto provider is initialized before creating TLS config
@@ -84,10 +84,7 @@ pub fn create_client(
             .enable_http1()
             .build();
 
-        debug!(
-            "HYPER_CLIENT | Added root certificate from {}",
-            ca_cert_path
-        );
+        debug!("HTTP_CLIENT | Added root certificate from {}", ca_cert_path);
 
         // Construct the Connector::Https variant directly
         libdd_common::connector::Connector::Https(https_connector)
@@ -100,14 +97,14 @@ pub fn create_client(
         let proxy =
             hyper_http_proxy::Proxy::new(hyper_http_proxy::Intercept::Https, proxy.parse()?);
         let proxy_connector = hyper_http_proxy::ProxyConnector::from_proxy(connector, proxy)?;
-        let client = hyper_migration::client_builder().build(proxy_connector);
+        let client = http_common::client_builder().build(proxy_connector);
         debug!(
-            "HYPER_CLIENT | Proxy connector created with proxy: {:?}",
+            "HTTP_CLIENT | Proxy connector created with proxy: {:?}",
             proxy_https
         );
         Ok(client)
     } else {
         let proxy_connector = hyper_http_proxy::ProxyConnector::new(connector)?;
-        Ok(hyper_migration::client_builder().build(proxy_connector))
+        Ok(http_common::client_builder().build(proxy_connector))
     }
 }

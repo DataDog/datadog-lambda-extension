@@ -5,8 +5,9 @@ use dogstatsd::api_key::ApiKeyFactory;
 use libdd_common::Endpoint;
 use libdd_trace_utils::{
     config_utils::trace_intake_url_prefixed,
-    send_data::SendDataBuilder,
-    trace_utils::{self, SendData},
+    send_data::SendData,
+    trace_utils::{self},
+    tracer_payload::TracerPayloadCollection,
 };
 use std::str::FromStr;
 use std::sync::Arc;
@@ -16,7 +17,7 @@ use tracing::{debug, error};
 
 use crate::config::Config;
 use crate::lifecycle::invocation::processor::S_TO_MS;
-use crate::traces::hyper_client::{self, HyperClient};
+use crate::traces::http_client::{self, HttpClient};
 use crate::traces::trace_aggregator_service::AggregatorHandle;
 
 pub struct TraceFlusher {
@@ -30,7 +31,7 @@ pub struct TraceFlusher {
     /// Cached HTTP client, lazily initialized on first use.
     /// TODO: `TraceFlusher` and `StatsFlusher` both hit trace.agent.datadoghq.{site} and could
     /// share a single HTTP client for better connection pooling.
-    http_client: OnceCell<HyperClient>,
+    http_client: OnceCell<HttpClient>,
 }
 
 impl TraceFlusher {
@@ -53,6 +54,7 @@ impl TraceFlusher {
                     api_key: Some(api_key.clone().into()),
                     timeout_ms: config.flush_timeout * S_TO_MS,
                     test_token: None,
+                    use_system_resolver: false,
                 };
                 additional_endpoints.push(endpoint);
             }
@@ -91,17 +93,12 @@ impl TraceFlusher {
 
         if let Some(traces) = failed_traces {
             // If we have traces from a previous failed attempt, try to send those first.
-            // TODO: Currently retries always go to the primary endpoint (None), even if the
-            // original failure was for an additional endpoint. This means traces that failed
-            // to send to additional endpoints will be retried to the primary endpoint instead.
-            // To fix this, we need to track which endpoint each failed trace was destined for,
-            // possibly by storing (Vec<SendData>, Option<Endpoint>) pairs in failed_batch.
             if !traces.is_empty() {
                 debug!(
                     "TRACES | Retrying to send {} previously failed batches",
                     traces.len()
                 );
-                let retry_result = Self::send_traces(traces, None, http_client.clone()).await;
+                let retry_result = Self::send_traces(traces, http_client.clone()).await;
                 if retry_result.is_some() {
                     // Still failed, return to retry later
                     return retry_result;
@@ -120,32 +117,43 @@ impl TraceFlusher {
         let mut batch_tasks = JoinSet::new();
 
         for trace_builders in all_batches {
-            let traces: Vec<_> = trace_builders
+            let traces_with_tags: Vec<_> = trace_builders
                 .into_iter()
-                .map(|builder| builder.with_api_key(api_key.as_str()))
-                .map(SendDataBuilder::build)
+                .map(|info| {
+                    let trace = info.builder.with_api_key(api_key.as_str()).build();
+                    (trace, info.header_tags)
+                })
                 .collect();
 
-            // Send to PRIMARY endpoint (the default endpoint configured in the trace).
-            // Passing None means "use the endpoint already configured in the SendData".
-            let traces_clone = traces.clone();
-            let client_clone = http_client.clone();
-            batch_tasks
-                .spawn(async move { Self::send_traces(traces_clone, None, client_clone).await });
-
             // Send to ADDITIONAL endpoints for dual-shipping.
-            // Each additional endpoint gets the same traces, enabling multi-region delivery.
+            // Construct separate SendData objects per endpoint by cloning the inner
+            // V07 payload data (TracerPayload is Clone, but SendData is not).
             for endpoint in self.additional_endpoints.clone() {
-                let traces_clone = traces.clone();
+                let additional_traces: Vec<_> = traces_with_tags
+                    .iter()
+                    .filter_map(|(trace, tags)| match trace.get_payloads() {
+                        TracerPayloadCollection::V07(payloads) => Some(SendData::new(
+                            trace.len(),
+                            TracerPayloadCollection::V07(payloads.clone()),
+                            tags.to_tracer_header_tags(),
+                            &endpoint,
+                        )),
+                        // All payloads in the extension are V07 (produced by
+                        // collect_pb_trace_chunks), so this branch is unreachable.
+                        _ => None,
+                    })
+                    .collect();
                 let client_clone = http_client.clone();
-                batch_tasks.spawn(async move {
-                    Self::send_traces(traces_clone, Some(endpoint), client_clone).await
-                });
+                batch_tasks
+                    .spawn(async move { Self::send_traces(additional_traces, client_clone).await });
             }
+
+            // Send to PRIMARY endpoint (moves traces into the task).
+            let traces: Vec<_> = traces_with_tags.into_iter().map(|(t, _)| t).collect();
+            let client_clone = http_client.clone();
+            batch_tasks.spawn(async move { Self::send_traces(traces, client_clone).await });
         }
         // Collect failed traces from all endpoints (primary + additional).
-        // Note: We lose track of which endpoint each failure came from here.
-        // All failures are mixed together and will be retried to the primary endpoint only.
         while let Some(result) = batch_tasks.join_next().await {
             if let Ok(Some(mut failed)) = result {
                 failed_batch.append(&mut failed);
@@ -166,11 +174,11 @@ impl TraceFlusher {
     ///
     /// Returns `None` if client creation fails. The error is logged but not cached,
     /// allowing retry on subsequent calls.
-    async fn get_or_init_http_client(&self) -> Option<HyperClient> {
+    async fn get_or_init_http_client(&self) -> Option<HttpClient> {
         match self
             .http_client
             .get_or_try_init(|| async {
-                hyper_client::create_client(
+                http_client::create_client(
                     self.config.proxy_https.as_ref(),
                     self.config.tls_cert_file.as_ref(),
                 )
@@ -187,21 +195,9 @@ impl TraceFlusher {
 
     /// Sends traces to the Datadog intake endpoint using the provided HTTP client.
     ///
-    /// # Arguments
-    ///
-    /// * `traces` - The traces to send
-    /// * `override_endpoint` - If `Some`, sends to this endpoint instead of the trace's
-    ///   configured endpoint. Used for sending to additional endpoints.
-    /// * `http_client` - The HTTP client to use for sending
-    ///
-    /// # Returns
-    ///
-    /// Returns the traces back if there was an error sending them (for retry).
-    async fn send_traces(
-        traces: Vec<SendData>,
-        override_endpoint: Option<Endpoint>,
-        http_client: HyperClient,
-    ) -> Option<Vec<SendData>> {
+    /// Each `SendData` is sent to its own configured target endpoint.
+    /// Returns the traces back (by value) if there was an error sending them (for retry).
+    async fn send_traces(traces: Vec<SendData>, http_client: HttpClient) -> Option<Vec<SendData>> {
         if traces.is_empty() {
             return None;
         }
@@ -211,17 +207,11 @@ impl TraceFlusher {
         debug!("TRACES | Flushing {} traces", coalesced_traces.len());
 
         for trace in &coalesced_traces {
-            let trace_to_send = match &override_endpoint {
-                Some(endpoint) => trace.with_endpoint(endpoint.clone()),
-                None => trace.clone(),
-            };
-
-            let send_result = trace_to_send.send(&http_client).await.last_result;
+            let send_result = trace.send(&http_client).await.last_result;
 
             if let Err(e) = send_result {
                 error!("TRACES | Request failed: {e:?}");
-                // Return the original traces for retry
-                return Some(coalesced_traces.clone());
+                return Some(coalesced_traces);
             }
         }
 
