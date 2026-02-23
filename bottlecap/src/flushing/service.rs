@@ -98,6 +98,22 @@ impl FlushingService {
         let series = flush_response.series;
         let sketches = flush_response.distributions;
 
+        debug!(
+            "FLUSHING_SERVICE | flushing {} series batch(es) and {} sketch batch(es)",
+            series.len(),
+            sketches.len()
+        );
+        for (i, sketch_payload) in sketches.iter().enumerate() {
+            for sketch in &sketch_payload.sketches {
+                debug!(
+                    "FLUSHING_SERVICE | sketch batch[{}]: metric='{}' tags={:?}",
+                    i,
+                    sketch.metric,
+                    sketch.tags
+                );
+            }
+        }
+
         for (idx, flusher) in self.metrics_flushers.iter().enumerate() {
             let flusher = flusher.clone();
             let series_clone = series.clone();

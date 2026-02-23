@@ -63,8 +63,13 @@ impl Lambda {
 
     /// Sets the `durable_function:true` tag in `dynamic_value_tags`
     pub fn set_durable_function_tag(&mut self) {
+        debug!("Enhanced metrics: inserting durable_function:true into dynamic_value_tags");
         self.dynamic_value_tags
             .insert(String::from("durable_function"), String::from("true"));
+        debug!(
+            "Enhanced metrics: dynamic_value_tags after set_durable_function_tag: {:?}",
+            self.dynamic_value_tags
+        );
     }
 
     fn get_dynamic_value_tags(&self) -> Option<SortedTags> {
@@ -75,6 +80,11 @@ impl Lambda {
             .collect();
 
         let string_tags = vec_tags.join(",");
+
+        debug!(
+            "Enhanced metrics: get_dynamic_value_tags returning tag string: {:?}",
+            string_tags
+        );
 
         SortedTags::parse(&string_tags).ok()
     }
@@ -152,10 +162,15 @@ impl Lambda {
         if !self.config.enhanced_metrics {
             return;
         }
+        debug!(
+            "Enhanced metrics: creating metric '{}' with dynamic_value_tags: {:?}",
+            metric_name, self.dynamic_value_tags
+        );
+        let tags = self.get_dynamic_value_tags();
         let metric = Metric::new(
             metric_name.into(),
             MetricValue::distribution(1f64),
-            self.get_dynamic_value_tags(),
+            tags,
             Some(timestamp),
         );
         if let Err(e) = self.aggr_handle.insert_batch(vec![metric]) {

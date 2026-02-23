@@ -285,11 +285,18 @@ impl Processor {
     /// This is used to create a cold start span, since this telemetry event does not
     /// provide a `request_id`, we try to guess which invocation is the cold start.
     pub fn on_platform_init_start(&mut self, time: DateTime<Utc>, runtime_version: Option<String>) {
+        debug!(
+            "PlatformInitStart received: runtime_version={:?}",
+            runtime_version
+        );
         if runtime_version
             .as_deref()
             .is_some_and(|rv| rv.contains("DurableFunction"))
         {
+            debug!("DurableFunction detected in runtime_version, setting durable_function:true tag on enhanced metrics");
             self.enhanced_metrics.set_durable_function_tag();
+        } else {
+            debug!("runtime_version does not contain 'DurableFunction', skipping durable_function tag");
         }
         let start_time: i64 = SystemTime::from(time)
             .duration_since(UNIX_EPOCH)
