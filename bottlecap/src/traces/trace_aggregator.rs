@@ -41,7 +41,7 @@ impl From<TracerHeaderTags<'_>> for OwnedTracerHeaderTags {
 }
 
 impl OwnedTracerHeaderTags {
-    #[must_use] 
+    #[must_use]
     pub fn to_tracer_header_tags(&self) -> TracerHeaderTags<'_> {
         TracerHeaderTags {
             lang: &self.lang,
@@ -174,7 +174,11 @@ mod tests {
             tracer_header_tags.clone(),
             &Endpoint::from_slice("localhost"),
         );
-        SendDataBuilderInfo::new(builder, size, OwnedTracerHeaderTags::from(tracer_header_tags))
+        SendDataBuilderInfo::new(
+            builder,
+            size,
+            OwnedTracerHeaderTags::from(tracer_header_tags),
+        )
     }
 
     #[test]
