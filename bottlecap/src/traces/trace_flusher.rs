@@ -5,9 +5,8 @@ use dogstatsd::api_key::ApiKeyFactory;
 use libdd_common::Endpoint;
 use libdd_trace_utils::{
     config_utils::trace_intake_url_prefixed,
-    send_data::{SendData, SendDataBuilder},
+    send_data::SendData,
     trace_utils::{self},
-    tracer_header_tags::TracerHeaderTags,
     tracer_payload::TracerPayloadCollection,
 };
 use std::str::FromStr;
@@ -118,25 +117,29 @@ impl TraceFlusher {
         let mut batch_tasks = JoinSet::new();
 
         for trace_builders in all_batches {
-            let traces: Vec<_> = trace_builders
+            let traces_with_tags: Vec<_> = trace_builders
                 .into_iter()
-                .map(|builder| builder.with_api_key(api_key.as_str()))
-                .map(SendDataBuilder::build)
+                .map(|info| {
+                    let trace = info.builder.with_api_key(api_key.as_str()).build();
+                    (trace, info.header_tags)
+                })
                 .collect();
 
             // Send to ADDITIONAL endpoints for dual-shipping.
             // Construct separate SendData objects per endpoint by cloning the inner
             // V07 payload data (TracerPayload is Clone, but SendData is not).
             for endpoint in self.additional_endpoints.clone() {
-                let additional_traces: Vec<_> = traces
+                let additional_traces: Vec<_> = traces_with_tags
                     .iter()
-                    .filter_map(|trace| match trace.get_payloads() {
+                    .filter_map(|(trace, tags)| match trace.get_payloads() {
                         TracerPayloadCollection::V07(payloads) => Some(SendData::new(
                             trace.len(),
                             TracerPayloadCollection::V07(payloads.clone()),
-                            TracerHeaderTags::default(),
+                            tags.to_tracer_header_tags(),
                             &endpoint,
                         )),
+                        // All payloads in the extension are V07 (produced by
+                        // collect_pb_trace_chunks), so this branch is unreachable.
                         _ => None,
                     })
                     .collect();
@@ -146,6 +149,7 @@ impl TraceFlusher {
             }
 
             // Send to PRIMARY endpoint (moves traces into the task).
+            let traces: Vec<_> = traces_with_tags.into_iter().map(|(t, _)| t).collect();
             let client_clone = http_client.clone();
             batch_tasks.spawn(async move { Self::send_traces(traces, client_clone).await });
         }

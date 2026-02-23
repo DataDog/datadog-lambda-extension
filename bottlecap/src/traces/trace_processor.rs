@@ -31,8 +31,8 @@ use tokio::sync::mpsc::Sender;
 use tokio::sync::mpsc::error::SendError;
 use tracing::{debug, error};
 
-use super::stats_generator::StatsGenerator;
-use super::trace_aggregator::SendDataBuilderInfo;
+use crate::traces::stats_generator::StatsGenerator;
+use crate::traces::trace_aggregator::{OwnedTracerHeaderTags, SendDataBuilderInfo};
 
 #[derive(Clone)]
 #[allow(clippy::module_name_repetitions)]
@@ -372,6 +372,8 @@ impl TraceProcessor for ServerlessTraceProcessor {
             }
         };
 
+        let owned_header_tags = OwnedTracerHeaderTags::from(header_tags.clone());
+
         // Move original payload into builder (no clone needed)
         let builder = SendDataBuilder::new(body_size, payload, header_tags, &endpoint)
             .with_compression(Compression::Zstd(config.apm_config_compression_level))
@@ -383,7 +385,7 @@ impl TraceProcessor for ServerlessTraceProcessor {
             ));
 
         (
-            SendDataBuilderInfo::new(builder, body_size),
+            SendDataBuilderInfo::new(builder, body_size, owned_header_tags),
             payloads_for_stats,
         )
     }
