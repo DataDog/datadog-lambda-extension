@@ -8,7 +8,7 @@ use tokio::sync::OnceCell;
 
 use crate::config;
 use crate::lifecycle::invocation::processor::S_TO_MS;
-use crate::traces::hyper_client::{self, HyperClient};
+use crate::traces::http_client::{self, HttpClient};
 use crate::traces::stats_aggregator::StatsAggregator;
 use dogstatsd::api_key::ApiKeyFactory;
 use libdd_common::Endpoint;
@@ -24,7 +24,7 @@ pub struct StatsFlusher {
     /// Cached HTTP client, lazily initialized on first use.
     /// TODO: `StatsFlusher` and `TraceFlusher` both hit trace.agent.datadoghq.{site} and could
     /// share a single HTTP client for better connection pooling.
-    http_client: OnceCell<HyperClient>,
+    http_client: OnceCell<HttpClient>,
 }
 
 impl StatsFlusher {
@@ -72,6 +72,7 @@ impl StatsFlusher {
                         api_key: Some(api_key_clone.into()),
                         timeout_ms: self.config.flush_timeout * S_TO_MS,
                         test_token: None,
+                        use_system_resolver: false,
                     }
                 }
             })
@@ -176,11 +177,11 @@ impl StatsFlusher {
     ///
     /// Returns `None` if client creation fails. The error is logged but not cached,
     /// allowing retry on subsequent calls.
-    async fn get_or_init_http_client(&self) -> Option<&HyperClient> {
+    async fn get_or_init_http_client(&self) -> Option<&HttpClient> {
         match self
             .http_client
             .get_or_try_init(|| async {
-                hyper_client::create_client(
+                http_client::create_client(
                     self.config.proxy_https.as_ref(),
                     self.config.tls_cert_file.as_ref(),
                 )

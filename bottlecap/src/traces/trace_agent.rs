@@ -43,7 +43,7 @@ use crate::{
         trace_processor,
     },
 };
-use libdd_common::hyper_migration;
+use libdd_common::http_common;
 use libdd_trace_protobuf::pb;
 use libdd_trace_utils::trace_utils::{self};
 
@@ -503,22 +503,22 @@ impl TraceAgent {
 
         let tracer_header_tags = (&parts.headers).into();
 
-        let (body_size, mut traces) = match version {
-            ApiVersion::V04 => match trace_utils::get_traces_from_request_body(
-                hyper_migration::Body::from_bytes(body),
-            )
-            .await
-            {
-                Ok(result) => result,
-                Err(err) => {
-                    return error_response(
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        format!("Error deserializing trace from request body: {err}"),
-                    );
+        let (body_size, mut traces): (usize, Vec<Vec<pb::Span>>) = match version {
+            ApiVersion::V04 => {
+                match trace_utils::get_traces_from_request_body(http_common::Body::from_bytes(body))
+                    .await
+                {
+                    Ok(result) => result,
+                    Err(err) => {
+                        return error_response(
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            format!("Error deserializing trace from request body: {err}"),
+                        );
+                    }
                 }
-            },
+            }
             ApiVersion::V05 => match trace_utils::get_v05_traces_from_request_body(
-                hyper_migration::Body::from_bytes(body),
+                http_common::Body::from_bytes(body),
             )
             .await
             {
