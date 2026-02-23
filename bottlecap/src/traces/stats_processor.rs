@@ -16,8 +16,8 @@ use libdd_common::http_common;
 use libdd_trace_protobuf::pb;
 use libdd_trace_utils::stats_utils;
 
-use crate::traces::trace_agent::MAX_CONTENT_LENGTH;
 use crate::http::extract_request_body;
+use crate::traces::trace_agent::MAX_CONTENT_LENGTH;
 
 #[async_trait]
 pub trait StatsProcessor {
