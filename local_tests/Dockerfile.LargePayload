@@ -1,0 +1,29 @@
+# No Lambda RIE — runs the extension directly against a minimal mock
+# Extensions API server. Uses amazonlinux:2 to match the build environment
+# (same glibc / library versions as Dockerfile.build-bottlecap).
+FROM --platform=linux/amd64 amazonlinux:2
+
+RUN yum install -y curl python3
+
+RUN mkdir -p /opt/extensions
+COPY datadog-agent /opt/extensions/datadog-agent
+RUN chmod +x /opt/extensions/datadog-agent
+
+COPY mock-extensions-api.py /mock-extensions-api.py
+COPY entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+
+# Extension configuration
+ENV DD_API_KEY=fake-key-for-local-test
+ENV DD_APM_DD_URL=http://127.0.0.1:3333
+ENV DD_DD_URL=http://127.0.0.1:3333
+ENV DD_TRACE_ENABLED=false
+ENV DD_LOG_LEVEL=DEBUG
+
+# Point the extension at our mock Lambda Extensions API
+ENV AWS_LAMBDA_RUNTIME_API=127.0.0.1:9001
+ENV AWS_LAMBDA_FUNCTION_NAME=large-payload-test
+ENV AWS_LAMBDA_FUNCTION_MEMORY_SIZE=512
+ENV AWS_REGION=us-east-1
+
+ENTRYPOINT ["/entrypoint.sh"]

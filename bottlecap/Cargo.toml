@@ -81,6 +81,7 @@ libddwaf = { version = "1.28.1", git = "https://github.com/DataDog/libddwaf-rust
 figment = { version = "0.10", default-features = false, features = ["yaml", "env", "test"] }
 proptest = "1.4"
 httpmock = "0.7"
+tower = { version = "0.5", features = ["util"] }
 mock_instant = "0.6"
 serial_test = "3.1"
 tempfile = "3.20"
