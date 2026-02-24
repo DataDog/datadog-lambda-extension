@@ -659,7 +659,7 @@ impl TraceAgent {
         let (parts, body) = match extract_request_body(request).await {
             Ok(r) => r,
             Err(e) => {
-                return error_response(
+                return warn_response(
                     StatusCode::INTERNAL_SERVER_ERROR,
                     format!("TRACE_AGENT | handle_proxy | Error extracting request body: {e}"),
                 );
@@ -718,6 +718,13 @@ fn handle_reparenting(reparenting_info: &mut VecDeque<ReparentingInfo>, span: &m
 
 fn error_response<E: std::fmt::Display>(status: StatusCode, error: E) -> Response {
     error!("{}", error);
+    (status, error.to_string()).into_response()
+}
+
+/// Like [`error_response`], but logs at WARN level. Use when the failure is caused by an
+/// external event (e.g. client disconnected) rather than a bug in the extension itself.
+fn warn_response<E: std::fmt::Display>(status: StatusCode, error: E) -> Response {
+    warn!("{}", error);
     (status, error.to_string()).into_response()
 }
 
