@@ -6,6 +6,23 @@ use tracing_subscriber::fmt::{
 };
 use tracing_subscriber::registry::LookupSpan;
 
+/// Writes `s` to `w` with the 6 mandatory JSON string escape sequences applied.
+/// Handles: `"`, `\`, `\n`, `\r`, `\t`, and U+0000–U+001F control characters.
+fn write_json_escaped(w: &mut impl fmt::Write, s: &str) -> fmt::Result {
+    for c in s.chars() {
+        match c {
+            '"' => w.write_str("\\\"")?,
+            '\\' => w.write_str("\\\\")?,
+            '\n' => w.write_str("\\n")?,
+            '\r' => w.write_str("\\r")?,
+            '\t' => w.write_str("\\t")?,
+            c if (c as u32) < 0x20 => write!(w, "\\u{:04X}", c as u32)?,
+            c => w.write_char(c)?,
+        }
+    }
+    Ok(())
+}
+
 #[derive(Debug, Clone, Copy)]
 pub struct Formatter;
 
@@ -62,13 +79,9 @@ where
 
         let message = format!("DD_EXTENSION | {level} | {span_prefix}{}", visitor.0);
 
-        // Use serde_json for safe serialization (handles escaping automatically)
-        let output = serde_json::json!({
-            "level": level.to_string(),
-            "message": message,
-        });
-
-        writeln!(writer, "{output}")
+        write!(writer, "{{\"level\":\"{level}\",\"message\":\"")?;
+        write_json_escaped(&mut writer, &message)?;
+        writeln!(writer, "\"}}")
     }
 }
 
@@ -114,6 +127,55 @@ mod tests {
         fn flush(&mut self) -> std::io::Result<()> {
             Ok(())
         }
+    }
+
+    fn escaped(s: &str) -> String {
+        let mut out = String::new();
+        write_json_escaped(&mut out, s).expect("write_json_escaped failed");
+        out
+    }
+
+    #[test]
+    fn test_escape_plain_text_is_unchanged() {
+        assert_eq!(escaped("hello world"), "hello world");
+    }
+
+    #[test]
+    fn test_escape_double_quote() {
+        assert_eq!(escaped(r#"say "hi""#), r#"say \"hi\""#);
+    }
+
+    #[test]
+    fn test_escape_backslash() {
+        assert_eq!(escaped(r"C:\path"), r"C:\\path");
+    }
+
+    #[test]
+    fn test_escape_newline() {
+        assert_eq!(escaped("line1\nline2"), r"line1\nline2");
+    }
+
+    #[test]
+    fn test_escape_carriage_return() {
+        assert_eq!(escaped("a\rb"), r"a\rb");
+    }
+
+    #[test]
+    fn test_escape_tab() {
+        assert_eq!(escaped("a\tb"), r"a\tb");
+    }
+
+    #[test]
+    fn test_escape_control_characters() {
+        // U+0001 (SOH) and U+001F (US) must be \uXXXX-escaped
+        assert_eq!(escaped("\x01"), r"\u0001");
+        assert_eq!(escaped("\x1F"), r"\u001F");
+    }
+
+    #[test]
+    fn test_escape_unicode_above_control_range_passes_through() {
+        // U+0020 (space) and above are not escaped
+        assert_eq!(escaped("€ ñ 中"), "€ ñ 中");
     }
 
     #[test]
