@@ -1725,10 +1725,7 @@ mod tests {
         let mut processor = setup();
         let time = Utc::now();
 
-        processor.on_platform_init_start(
-            time,
-            Some("python:3.14.DurableFunction.v6".to_string()),
-        );
+        processor.on_platform_init_start(time, Some("python:3.14.DurableFunction.v6".to_string()));
 
         let now: i64 = std::time::UNIX_EPOCH
             .elapsed()

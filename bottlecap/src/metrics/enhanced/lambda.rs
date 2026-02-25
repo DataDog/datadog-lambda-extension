@@ -867,14 +867,13 @@ mod tests {
         let ts = (now / 10) * 10;
         let durable_tags = SortedTags::parse("durable_function:true").ok();
         let entry = metrics_aggr
-            .get_entry_by_id(
-                constants::INVOCATIONS_METRIC.into(),
-                durable_tags,
-                ts,
-            )
+            .get_entry_by_id(constants::INVOCATIONS_METRIC.into(), durable_tags, ts)
             .await
             .unwrap();
-        assert!(entry.is_some(), "Expected metric with durable_function:true tag");
+        assert!(
+            entry.is_some(),
+            "Expected metric with durable_function:true tag"
+        );
     }
 
     #[tokio::test]

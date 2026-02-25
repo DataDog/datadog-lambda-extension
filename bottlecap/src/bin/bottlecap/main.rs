@@ -825,8 +825,7 @@ async fn handle_event_bus_event(
             debug!("Telemetry event received: {:?}", event);
             match event.record {
                 TelemetryRecord::PlatformInitStart {
-                    runtime_version,
-                    ..
+                    runtime_version, ..
                 } => {
                     if let Err(e) = invocation_processor_handle
                         .on_platform_init_start(event.time, runtime_version)

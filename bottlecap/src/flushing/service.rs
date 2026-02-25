@@ -107,9 +107,7 @@ impl FlushingService {
             for sketch in &sketch_payload.sketches {
                 debug!(
                     "FLUSHING_SERVICE | sketch batch[{}]: metric='{}' tags={:?}",
-                    i,
-                    sketch.metric,
-                    sketch.tags
+                    i, sketch.metric, sketch.tags
                 );
             }
         }
