@@ -52,7 +52,10 @@ serde-aux = { version = "4.7", default-features = false }
 serde_html_form = { version = "0.2", default-features = false }
 opentelemetry-proto = { version = "0.30.0", features = ["trace", "with-serde", "gen-tonic"] }
 opentelemetry-semantic-conventions = { version = "0.30", features = ["semconv_experimental"] }
-rustls-native-certs = { version = "0.8.1", optional = true }
+# Pinned to <0.8.3: version 0.8.3 upgraded to openssl-probe 0.2.x which scans all cert
+# directories and parses ~200 individual cert files on Lambda instead of loading a single
+# bundle file, adding ~45ms to each reqwest::Client::build() call.
+rustls-native-certs = { version = ">=0.8.1, <0.8.3", optional = true }
 axum = { version = "0.8.4", default-features = false, features = ["default"] }
 ustr = { version = "1.0.0", default-features = false }
 tower-http = { version = "0.6.6", default-features = false, features = ["limit"] }
