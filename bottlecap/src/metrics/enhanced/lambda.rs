@@ -152,10 +152,6 @@ impl Lambda {
         if !self.config.enhanced_metrics {
             return;
         }
-        debug!(
-            "Enhanced metrics: creating metric '{}' with dynamic_value_tags: {:?}",
-            metric_name, self.dynamic_value_tags
-        );
         let tags = self.get_dynamic_value_tags();
         let metric = Metric::new(
             metric_name.into(),
