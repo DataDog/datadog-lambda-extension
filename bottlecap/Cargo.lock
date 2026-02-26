@@ -525,6 +525,7 @@ dependencies = [
  "tokio",
  "tokio-util",
  "tonic-types",
+ "tower 0.5.3",
  "tower-http",
  "tracing",
  "tracing-core",
