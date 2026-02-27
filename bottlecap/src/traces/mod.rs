@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 pub mod context;
-pub mod hyper_client;
+pub mod http_client;
 pub mod propagation;
 pub mod proxy_aggregator;
 pub mod proxy_flusher;

@@ -284,7 +284,10 @@ impl Processor {
     ///
     /// This is used to create a cold start span, since this telemetry event does not
     /// provide a `request_id`, we try to guess which invocation is the cold start.
-    pub fn on_platform_init_start(&mut self, time: DateTime<Utc>) {
+    pub fn on_platform_init_start(&mut self, time: DateTime<Utc>, runtime_version: Option<String>) {
+        if runtime_version.as_deref().map_or(false, |rv| rv.contains("DurableFunction")) {
+            self.enhanced_metrics.set_durable_function_tag();
+        }
         let start_time: i64 = SystemTime::from(time)
             .duration_since(UNIX_EPOCH)
             .expect("time went backwards")
@@ -1712,6 +1715,105 @@ mod tests {
             None,
             true,  // context should still exist
         ),
+    }
+
+    #[tokio::test]
+    async fn test_on_platform_init_start_sets_durable_function_tag() {
+        let mut processor = setup();
+        let time = Utc::now();
+
+        processor.on_platform_init_start(time, Some("python:3.14.DurableFunction.v6".to_string()));
+
+        let now: i64 = std::time::UNIX_EPOCH
+            .elapsed()
+            .expect("unable to poll clock, unrecoverable")
+            .as_secs()
+            .try_into()
+            .unwrap_or_default();
+        processor.enhanced_metrics.increment_invocation_metric(now);
+
+        let ts = (now / 10) * 10;
+        let durable_tags = dogstatsd::metric::SortedTags::parse("durable_function:true").ok();
+        let entry = processor
+            .enhanced_metrics
+            .aggr_handle
+            .get_entry_by_id(
+                crate::metrics::enhanced::constants::INVOCATIONS_METRIC.into(),
+                durable_tags,
+                ts,
+            )
+            .await
+            .unwrap();
+        assert!(
+            entry.is_some(),
+            "Expected durable_function:true tag on enhanced metric"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_on_platform_init_start_no_durable_function_tag_for_regular_runtime() {
+        let mut processor = setup();
+        let time = Utc::now();
+
+        processor.on_platform_init_start(time, Some("python:3.12.v10".to_string()));
+
+        let now: i64 = std::time::UNIX_EPOCH
+            .elapsed()
+            .expect("unable to poll clock, unrecoverable")
+            .as_secs()
+            .try_into()
+            .unwrap_or_default();
+        processor.enhanced_metrics.increment_invocation_metric(now);
+
+        let ts = (now / 10) * 10;
+        let durable_tags = dogstatsd::metric::SortedTags::parse("durable_function:true").ok();
+        let entry = processor
+            .enhanced_metrics
+            .aggr_handle
+            .get_entry_by_id(
+                crate::metrics::enhanced::constants::INVOCATIONS_METRIC.into(),
+                durable_tags,
+                ts,
+            )
+            .await
+            .unwrap();
+        assert!(
+            entry.is_none(),
+            "Expected no durable_function:true tag for regular runtime"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_on_platform_init_start_no_durable_function_tag_when_runtime_version_is_none() {
+        let mut processor = setup();
+        let time = Utc::now();
+
+        processor.on_platform_init_start(time, None);
+
+        let now: i64 = std::time::UNIX_EPOCH
+            .elapsed()
+            .expect("unable to poll clock, unrecoverable")
+            .as_secs()
+            .try_into()
+            .unwrap_or_default();
+        processor.enhanced_metrics.increment_invocation_metric(now);
+
+        let ts = (now / 10) * 10;
+        let durable_tags = dogstatsd::metric::SortedTags::parse("durable_function:true").ok();
+        let entry = processor
+            .enhanced_metrics
+            .aggr_handle
+            .get_entry_by_id(
+                crate::metrics::enhanced::constants::INVOCATIONS_METRIC.into(),
+                durable_tags,
+                ts,
+            )
+            .await
+            .unwrap();
+        assert!(
+            entry.is_none(),
+            "Expected no durable_function:true tag when runtime_version is None"
+        );
     }
 
     #[tokio::test]

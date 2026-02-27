@@ -45,14 +45,17 @@ rustls-pki-types = { version = "1.0", default-features = false }
 hyper-rustls = { version = "0.27.7", default-features = false }
 rand = { version = "0.8", default-features = false }
 prost = { version = "0.13", default-features = false }
-tonic-types = { version = "0.12", default-features = false }
+tonic-types = { version = "0.13", default-features = false }
 zstd = { version = "0.13.3", default-features = false }
 futures = { version = "0.3.31", default-features = false }
 serde-aux = { version = "4.7", default-features = false }
 serde_html_form = { version = "0.2", default-features = false }
-opentelemetry-proto = { version = "0.29", features = ["trace", "with-serde", "gen-tonic"] }
+opentelemetry-proto = { version = "0.30.0", features = ["trace", "with-serde", "gen-tonic"] }
 opentelemetry-semantic-conventions = { version = "0.30", features = ["semconv_experimental"] }
-rustls-native-certs = { version = "0.8.1", optional = true }
+# Pinned to <0.8.3: version 0.8.3 upgraded to openssl-probe 0.2.x which scans all cert
+# directories and parses ~200 individual cert files on Lambda instead of loading a single
+# bundle file, adding ~45ms to each reqwest::Client::build() call.
+rustls-native-certs = { version = ">=0.8.1, <0.8.3", optional = true }
 axum = { version = "0.8.4", default-features = false, features = ["default"] }
 ustr = { version = "1.0.0", default-features = false }
 tower-http = { version = "0.6.6", default-features = false, features = ["limit"] }
@@ -67,12 +70,12 @@ indexmap = {version = "2.11.0", default-features = false}
 # be found in the clippy.toml file adjacent to this Cargo.toml.
 datadog-protos = { version = "0.1.0", default-features = false, git = "https://github.com/DataDog/saluki/", rev = "f863626dbfe3c59bb390985fa6530b0621c2a0a2"}
 ddsketch-agent = { version = "0.1.0", default-features = false, git = "https://github.com/DataDog/saluki/", rev = "f863626dbfe3c59bb390985fa6530b0621c2a0a2"}
-libdd-common = { git = "https://github.com/DataDog/libdatadog", rev = "158b59471f1132e3cb36023fa3c46ccb2dd0eda1" }
-libdd-trace-protobuf = { git = "https://github.com/DataDog/libdatadog", rev = "158b59471f1132e3cb36023fa3c46ccb2dd0eda1"  }
-libdd-trace-utils = { git = "https://github.com/DataDog/libdatadog", rev = "158b59471f1132e3cb36023fa3c46ccb2dd0eda1" , features = ["mini_agent"] }
-libdd-trace-normalization = { git = "https://github.com/DataDog/libdatadog",  rev = "158b59471f1132e3cb36023fa3c46ccb2dd0eda1" }
-libdd-trace-obfuscation = { git = "https://github.com/DataDog/libdatadog", rev = "158b59471f1132e3cb36023fa3c46ccb2dd0eda1"  }
-libdd-trace-stats = { git = "https://github.com/DataDog/libdatadog", rev = "158b59471f1132e3cb36023fa3c46ccb2dd0eda1"  }
+libdd-common = { git = "https://github.com/DataDog/libdatadog", rev = "c8121f422d2c8d219f8d421ff3cdb1fcbe9e8b09" }
+libdd-trace-protobuf = { git = "https://github.com/DataDog/libdatadog", rev = "c8121f422d2c8d219f8d421ff3cdb1fcbe9e8b09"  }
+libdd-trace-utils = { git = "https://github.com/DataDog/libdatadog", rev = "c8121f422d2c8d219f8d421ff3cdb1fcbe9e8b09" , features = ["mini_agent"] }
+libdd-trace-normalization = { git = "https://github.com/DataDog/libdatadog",  rev = "c8121f422d2c8d219f8d421ff3cdb1fcbe9e8b09" }
+libdd-trace-obfuscation = { git = "https://github.com/DataDog/libdatadog", rev = "c8121f422d2c8d219f8d421ff3cdb1fcbe9e8b09"  }
+libdd-trace-stats = { git = "https://github.com/DataDog/libdatadog", rev = "c8121f422d2c8d219f8d421ff3cdb1fcbe9e8b09"  }
 dogstatsd = { git = "https://github.com/DataDog/serverless-components", rev = "2eb009a59ed07ffcaf174db1c31af413365e9bc6", default-features = false }
 datadog-fips = { git = "https://github.com/DataDog/serverless-components", rev = "2eb009a59ed07ffcaf174db1c31af413365e9bc6", default-features = false }
 libddwaf = { version = "1.28.1", git = "https://github.com/DataDog/libddwaf-rust", rev = "d1534a158d976bd4f747bf9fcc58e0712d2d17fc", default-features = false, features = ["serde"] }
@@ -81,6 +84,7 @@ libddwaf = { version = "1.28.1", git = "https://github.com/DataDog/libddwaf-rust
 figment = { version = "0.10", default-features = false, features = ["yaml", "env", "test"] }
 proptest = "1.4"
 httpmock = "0.7"
+tower = { version = "0.5", features = ["util"] }
 mock_instant = "0.6"
 serial_test = "3.1"
 tempfile = "3.20"

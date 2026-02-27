@@ -3,7 +3,7 @@
 
 use axum::{
     Router,
-    extract::{Request, State},
+    extract::{DefaultBodyLimit, Request, State},
     http::{HeaderMap, StatusCode},
     response::{IntoResponse, Response},
     routing::{get, post},
@@ -37,6 +37,9 @@ const HELLO_PATH: &str = "/lambda/hello";
 const START_INVOCATION_PATH: &str = "/lambda/start-invocation";
 const END_INVOCATION_PATH: &str = "/lambda/end-invocation";
 const AGENT_PORT: usize = 8124;
+// Lambda's maximum synchronous invocation payload size
+// reference: https://docs.aws.amazon.com/lambda/latest/api/API_Invoke.html
+const LAMBDA_INVOCATION_MAX_PAYLOAD: usize = 6 * 1024 * 1024;
 
 /// Extracts the AWS Lambda request ID from the LWA proxy header.
 fn extract_request_id_from_headers(headers: &HashMap<String, String>) -> Option<String> {
@@ -102,6 +105,7 @@ impl Listener {
             .route(END_INVOCATION_PATH, post(Self::handle_end_invocation))
             .route(HELLO_PATH, get(Self::handle_hello))
             .with_state(state)
+            .layer(DefaultBodyLimit::max(LAMBDA_INVOCATION_MAX_PAYLOAD))
     }
 
     async fn graceful_shutdown(tasks: Arc<Mutex<JoinSet<()>>>, shutdown_token: CancellationToken) {
@@ -192,9 +196,7 @@ impl Listener {
         payload_value: Value,
         invocation_processor_handle: InvocationProcessorHandle,
     ) {
-        debug!(
-            "Received start invocation request from headers:{headers:?}, payload_value:{payload_value:?}"
-        );
+        debug!("Received start invocation request from headers:{headers:?}");
 
         let request_id = extract_request_id_from_headers(&headers);
 
@@ -254,9 +256,7 @@ impl Listener {
         let headers = headers_to_map(headers);
         let payload_value = serde_json::from_slice::<Value>(&body).unwrap_or_else(|_| json!({}));
 
-        debug!(
-            "Received end invocation request from headers:{headers:?}, payload_value:{payload_value:?}"
-        );
+        debug!("Received end invocation request from headers:{headers:?}");
         let request_id = extract_request_id_from_headers(&headers);
 
         if let Err(e) = invocation_processor_handle
@@ -274,6 +274,83 @@ impl Listener {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use axum::{body::Body, http::Request, routing::post};
+    use http_body_util::BodyExt;
+    use tower::ServiceExt;
+
+    /// Builds a minimal router that applies only the body limit layer.
+    /// The handler reads the full body (via the `Bytes` extractor), which
+    /// is what triggers `DefaultBodyLimit` enforcement.
+    fn body_limit_router() -> Router {
+        async fn handler(body: Bytes) -> StatusCode {
+            let _ = body;
+            StatusCode::OK
+        }
+        Router::new()
+            .route("/lambda/start-invocation", post(handler))
+            .layer(DefaultBodyLimit::max(LAMBDA_INVOCATION_MAX_PAYLOAD))
+    }
+
+    #[tokio::test]
+    async fn test_body_limit_accepts_payload_just_below_6mb() {
+        let router = body_limit_router();
+        // 6 MB - 1 byte: should be accepted
+        let payload = vec![b'x'; LAMBDA_INVOCATION_MAX_PAYLOAD - 1];
+        let req = Request::builder()
+            .method("POST")
+            .uri("/lambda/start-invocation")
+            .header("Content-Type", "application/json")
+            .body(Body::from(payload))
+            .expect("failed to build request");
+
+        let response = router.oneshot(req).await.expect("request failed");
+        assert_eq!(response.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn test_body_limit_accepts_payload_above_old_2mb_default() {
+        let router = body_limit_router();
+        // 3 MB: above the old axum 2 MB default, should now succeed
+        let payload = vec![b'x'; 3 * 1024 * 1024];
+        let req = Request::builder()
+            .method("POST")
+            .uri("/lambda/start-invocation")
+            .header("Content-Type", "application/json")
+            .body(Body::from(payload))
+            .expect("failed to build request");
+
+        let response = router.oneshot(req).await.expect("request failed");
+        assert_eq!(response.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn test_body_limit_rejects_payload_above_6mb() {
+        let router = body_limit_router();
+        // 6 MB + 1 byte: should be rejected with 413
+        let payload = vec![b'x'; LAMBDA_INVOCATION_MAX_PAYLOAD + 1];
+        let req = Request::builder()
+            .method("POST")
+            .uri("/lambda/start-invocation")
+            .header("Content-Type", "application/json")
+            .body(Body::from(payload))
+            .expect("failed to build request");
+
+        let response = router.oneshot(req).await.expect("request failed");
+        assert_eq!(response.status(), StatusCode::PAYLOAD_TOO_LARGE);
+
+        let body = response
+            .into_body()
+            .collect()
+            .await
+            .expect("failed to read body")
+            .to_bytes();
+        assert!(
+            body.windows(b"length limit exceeded".len())
+                .any(|w| w == b"length limit exceeded"),
+            "expected 'length limit exceeded' in response body, got: {}",
+            String::from_utf8_lossy(&body)
+        );
+    }
 
     #[test]
     fn test_extract_request_id_from_header() {

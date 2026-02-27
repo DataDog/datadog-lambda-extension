@@ -43,7 +43,7 @@ use crate::{
         trace_processor,
     },
 };
-use libdd_common::hyper_migration;
+use libdd_common::http_common;
 use libdd_trace_protobuf::pb;
 use libdd_trace_utils::trace_utils::{self};
 
@@ -503,22 +503,22 @@ impl TraceAgent {
 
         let tracer_header_tags = (&parts.headers).into();
 
-        let (body_size, mut traces) = match version {
-            ApiVersion::V04 => match trace_utils::get_traces_from_request_body(
-                hyper_migration::Body::from_bytes(body),
-            )
-            .await
-            {
-                Ok(result) => result,
-                Err(err) => {
-                    return error_response(
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        format!("Error deserializing trace from request body: {err}"),
-                    );
+        let (body_size, mut traces): (usize, Vec<Vec<pb::Span>>) = match version {
+            ApiVersion::V04 => {
+                match trace_utils::get_traces_from_request_body(http_common::Body::from_bytes(body))
+                    .await
+                {
+                    Ok(result) => result,
+                    Err(err) => {
+                        return error_response(
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            format!("Error deserializing trace from request body: {err}"),
+                        );
+                    }
                 }
-            },
+            }
             ApiVersion::V05 => match trace_utils::get_v05_traces_from_request_body(
-                hyper_migration::Body::from_bytes(body),
+                http_common::Body::from_bytes(body),
             )
             .await
             {
@@ -659,7 +659,7 @@ impl TraceAgent {
         let (parts, body) = match extract_request_body(request).await {
             Ok(r) => r,
             Err(e) => {
-                return error_response(
+                return warn_response(
                     StatusCode::INTERNAL_SERVER_ERROR,
                     format!("TRACE_AGENT | handle_proxy | Error extracting request body: {e}"),
                 );
@@ -718,6 +718,13 @@ fn handle_reparenting(reparenting_info: &mut VecDeque<ReparentingInfo>, span: &m
 
 fn error_response<E: std::fmt::Display>(status: StatusCode, error: E) -> Response {
     error!("{}", error);
+    (status, error.to_string()).into_response()
+}
+
+/// Like [`error_response`], but logs at WARN level. Use when the failure is caused by an
+/// external event (e.g. client disconnected) rather than a bug in the extension itself.
+fn warn_response<E: std::fmt::Display>(status: StatusCode, error: E) -> Response {
+    warn!("{}", error);
     (status, error.to_string()).into_response()
 }
 

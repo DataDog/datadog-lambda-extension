@@ -31,8 +31,8 @@ use tokio::sync::mpsc::Sender;
 use tokio::sync::mpsc::error::SendError;
 use tracing::{debug, error};
 
-use super::stats_generator::StatsGenerator;
-use super::trace_aggregator::SendDataBuilderInfo;
+use crate::traces::stats_generator::StatsGenerator;
+use crate::traces::trace_aggregator::{OwnedTracerHeaderTags, SendDataBuilderInfo};
 
 #[derive(Clone)]
 #[allow(clippy::module_name_repetitions)]
@@ -357,9 +357,25 @@ impl TraceProcessor for ServerlessTraceProcessor {
             api_key: None,
             timeout_ms: config.flush_timeout * S_TO_MS,
             test_token: None,
+            use_system_resolver: false,
         };
 
-        let builder = SendDataBuilder::new(body_size, payload.clone(), header_tags, &endpoint)
+        // Clone inner V07 payloads for stats generation (TracerPayload is Clone,
+        // but TracerPayloadCollection is not).
+        let payloads_for_stats = match &payload {
+            TracerPayloadCollection::V07(payloads) => {
+                TracerPayloadCollection::V07(payloads.clone())
+            }
+            other => {
+                error!("TRACE_PROCESSOR | Unexpected payload type for stats: {other:?}");
+                TracerPayloadCollection::V07(vec![])
+            }
+        };
+
+        let owned_header_tags = OwnedTracerHeaderTags::from(header_tags.clone());
+
+        // Move original payload into builder (no clone needed)
+        let builder = SendDataBuilder::new(body_size, payload, header_tags, &endpoint)
             .with_compression(Compression::Zstd(config.apm_config_compression_level))
             .with_retry_strategy(RetryStrategy::new(
                 1,
@@ -368,7 +384,10 @@ impl TraceProcessor for ServerlessTraceProcessor {
                 None,
             ));
 
-        (SendDataBuilderInfo::new(builder, body_size), payload)
+        (
+            SendDataBuilderInfo::new(builder, body_size, owned_header_tags),
+            payloads_for_stats,
+        )
     }
 }
 
