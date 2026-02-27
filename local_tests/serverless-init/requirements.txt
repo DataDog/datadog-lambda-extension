@@ -1,3 +1,3 @@
 Flask==2.1.2
 ddtrace==1.4.1
-Werkzeug==2.2.2
+Werkzeug==3.1.5
