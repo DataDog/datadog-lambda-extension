@@ -236,12 +236,6 @@ impl LambdaProcessor {
                 }
                 // Set request_id for unprocessed and future logs
                 self.invocation_context.request_id.clone_from(&request_id);
-                // Fallback: if PlatformInitStart was never received (warm start on first
-                // processed invocation), treat as non-durable to avoid holding logs forever.
-                if self.is_durable_function.is_none() {
-                    self.is_durable_function = Some(false);
-                    self.resolve_held_logs_on_durable_function_set();
-                }
 
                 let version = version.unwrap_or("$LATEST".to_string());
                 Ok(Message::new(
@@ -1242,6 +1236,7 @@ mod tests {
             tx.clone(),
             false,
         );
+        processor.is_durable_function = Some(false);
 
         let event = TelemetryEvent {
             time: Utc.with_ymd_and_hms(2023, 1, 7, 3, 23, 47).unwrap(),
@@ -1402,6 +1397,7 @@ mod tests {
             tx.clone(),
             false,
         );
+        processor.is_durable_function = Some(false);
 
         let start_event = TelemetryEvent {
             time: Utc.with_ymd_and_hms(2023, 1, 7, 3, 23, 47).unwrap(),
@@ -1636,6 +1632,7 @@ mod tests {
             tx.clone(),
             false,
         );
+        processor.is_durable_function = Some(false);
 
         // First, send an extension log (orphan) that doesn't have a request_id
         let extension_event = TelemetryEvent {
