@@ -44,7 +44,7 @@ pub struct LambdaProcessor {
     // Some(false) = not a durable function; flush logs normally.
     is_durable_function: Option<bool>,
     // Logs held pending resolution, keyed by request_id.
-    // While is_durable_function is None every incoming log is stashed here so
+    // While is_durable_function is None, every incoming log is stashed here so
     // we can decide whether to filter/tag it once the flag is known.
     // While is_durable_function is Some(true), logs whose request_id has no
     // durable execution context yet are also stashed here; they are drained
@@ -55,6 +55,8 @@ pub struct LambdaProcessor {
     // Insertion order for FIFO eviction when map reaches capacity
     durable_id_order: VecDeque<String>,
 }
+
+const DURABLE_ID_MAP_CAPACITY: usize = 5;
 
 const OOM_ERRORS: [&str; 7] = [
     "fatal error: runtime: out of memory",       // Go
@@ -122,8 +124,8 @@ impl LambdaProcessor {
             is_managed_instance_mode,
             is_durable_function: None,
             held_logs: HashMap::new(),
-            durable_id_map: HashMap::with_capacity(5),
-            durable_id_order: VecDeque::with_capacity(5),
+            durable_id_map: HashMap::with_capacity(DURABLE_ID_MAP_CAPACITY),
+            durable_id_order: VecDeque::with_capacity(DURABLE_ID_MAP_CAPACITY),
         }
     }
 
@@ -510,7 +512,7 @@ impl LambdaProcessor {
         if let (Some(id), Some(name)) = (execution_id, execution_name) {
             let is_new = !self.durable_id_map.contains_key(request_id);
             if is_new {
-                if self.durable_id_order.len() >= 5 {
+                if self.durable_id_order.len() >= DURABLE_ID_MAP_CAPACITY {
                     if let Some(oldest) = self.durable_id_order.pop_front() {
                         self.durable_id_map.remove(&oldest);
                     }
