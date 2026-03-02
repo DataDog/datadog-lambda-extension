@@ -1,3 +1,4 @@
+use std::collections::{HashMap, VecDeque};
 use std::error::Error;
 use std::fmt::Write;
 use std::sync::Arc;
@@ -37,6 +38,17 @@ pub struct LambdaProcessor {
     logs_enabled: bool,
     // Managed Instance mode
     is_managed_instance_mode: bool,
+    // Whether this is a Durable Function runtime.
+    // None = not yet determined (hold all logs until known).
+    // Some(true) = durable function; apply durable ID filtering.
+    // Some(false) = not a durable function; flush logs normally.
+    is_durable_function: Option<bool>,
+    // Logs held while is_durable_function is None (race-condition guard)
+    pending_durable_logs: Vec<IntakeLog>,
+    // Maps request_id -> (durable_execution_id, durable_execution_name)
+    durable_id_map: HashMap<String, (String, String)>,
+    // Insertion order for FIFO eviction when map reaches capacity
+    durable_id_order: VecDeque<String>,
 }
 
 const OOM_ERRORS: [&str; 7] = [
@@ -103,6 +115,10 @@ impl LambdaProcessor {
             ready_logs: Vec::new(),
             event_bus,
             is_managed_instance_mode,
+            is_durable_function: None,
+            pending_durable_logs: Vec::new(),
+            durable_id_map: HashMap::with_capacity(5),
+            durable_id_order: VecDeque::with_capacity(5),
         }
     }
 
@@ -185,6 +201,8 @@ impl LambdaProcessor {
                 let rv = runtime_version.unwrap_or("?".to_string()); // TODO: check what does containers display
                 let rv_arn = runtime_version_arn.unwrap_or("?".to_string()); // TODO: check what do containers display
 
+                self.is_durable_function = Some(rv.contains("DurableFunction"));
+
                 Ok(Message::new(
                     format!("INIT_START Runtime Version: {rv} Runtime Version ARN: {rv_arn}"),
                     None,
@@ -212,6 +230,11 @@ impl LambdaProcessor {
                 }
                 // Set request_id for unprocessed and future logs
                 self.invocation_context.request_id.clone_from(&request_id);
+                // Fallback: if PlatformInitStart was never received (warm start on first
+                // processed invocation), treat as non-durable to avoid holding logs forever.
+                if self.is_durable_function.is_none() {
+                    self.is_durable_function = Some(false);
+                }
 
                 let version = version.unwrap_or("$LATEST".to_string());
                 Ok(Message::new(
@@ -467,21 +490,105 @@ impl LambdaProcessor {
         }
     }
 
+    /// If the message is a JSON object with `durable_execution_id` and `durable_execution_name`
+    /// fields, inserts a mapping of `request_id` -> `(execution_id, execution_name)` into the
+    /// durable ID map.  Evicts the oldest entry when the map is at capacity (5).
+    fn try_update_durable_map(&mut self, request_id: &str, message: &str) {
+        let Ok(serde_json::Value::Object(obj)) = serde_json::from_str(message) else {
+            return;
+        };
+        let execution_id = obj
+            .get("durable_execution_id")
+            .and_then(serde_json::Value::as_str);
+        let execution_name = obj
+            .get("durable_execution_name")
+            .and_then(serde_json::Value::as_str);
+        if let (Some(id), Some(name)) = (execution_id, execution_name) {
+            if !self.durable_id_map.contains_key(request_id) {
+                if self.durable_id_order.len() >= 5 {
+                    if let Some(oldest) = self.durable_id_order.pop_front() {
+                        self.durable_id_map.remove(&oldest);
+                    }
+                }
+                self.durable_id_order.push_back(request_id.to_string());
+            }
+            self.durable_id_map
+                .insert(request_id.to_string(), (id.to_string(), name.to_string()));
+        }
+    }
+
     /// Processes a log, applies filtering rules, serializes it, and queues it for aggregation
     fn process_and_queue_log(&mut self, mut log: IntakeLog) {
         let should_send_log = self.logs_enabled
             && LambdaProcessor::apply_rules(&self.rules, &mut log.message.message);
-        if should_send_log && let Ok(serialized_log) = serde_json::to_string(&log) {
-            // explicitly drop log so we don't accidentally re-use it and push
-            // duplicate logs to the aggregator
-            drop(log);
-            self.ready_logs.push(serialized_log);
+        if should_send_log {
+            self.queue_log_after_rules(log);
+        }
+    }
+
+    /// Queues a log that has already had processing rules applied.
+    ///
+    /// Routing depends on `is_durable_function`:
+    /// - `None`         → hold in `pending_durable_logs` until the flag is resolved.
+    /// - `Some(false)`  → serialize and push straight to `ready_logs`.
+    /// - `Some(true)`   → apply durable-ID filtering: only send if the request_id is
+    ///                    already in the durable ID map, and append the execution tags.
+    fn queue_log_after_rules(&mut self, mut log: IntakeLog) {
+        match self.is_durable_function {
+            None => {
+                // Not yet known whether this is a durable function — hold the log.
+                self.pending_durable_logs.push(log);
+            }
+            Some(false) => {
+                if let Ok(serialized_log) = serde_json::to_string(&log) {
+                    drop(log);
+                    self.ready_logs.push(serialized_log);
+                }
+            }
+            Some(true) => {
+                // Populate the durable ID map from this log if it carries execution context.
+                if let Some(request_id) = log.message.lambda.request_id.clone() {
+                    self.try_update_durable_map(&request_id, &log.message.message);
+                }
+
+                // Only flush logs whose request_id is already in the durable ID map.
+                let durable_tags = log
+                    .message
+                    .lambda
+                    .request_id
+                    .as_ref()
+                    .and_then(|rid| self.durable_id_map.get(rid))
+                    .map(|(id, name)| {
+                        format!(",durable_execution_id:{id},durable_execution_name:{name}")
+                    });
+
+                let Some(extra_tags) = durable_tags else {
+                    return;
+                };
+
+                log.tags.push_str(&extra_tags);
+                if let Ok(serialized_log) = serde_json::to_string(&log) {
+                    drop(log);
+                    self.ready_logs.push(serialized_log);
+                }
+            }
         }
     }
 
     pub async fn process(&mut self, event: TelemetryEvent, aggregator_handle: &AggregatorHandle) {
         if let Ok(log) = self.make_log(event).await {
             self.process_and_queue_log(log);
+
+            // If is_durable_function was just resolved, drain any logs that were held
+            // while the flag was still None (race-condition guard).
+            if self.is_durable_function.is_some() && !self.pending_durable_logs.is_empty() {
+                let pending = std::mem::take(&mut self.pending_durable_logs);
+                for pending_log in pending {
+                    // Rules were already applied before the log entered pending_durable_logs,
+                    // so go straight to queue_log_after_rules to avoid double-application.
+                    self.queue_log_after_rules(pending_log);
+                }
+            }
 
             // Process orphan logs, since we have a `request_id` now
             let orphan_logs = std::mem::take(&mut self.orphan_logs);
