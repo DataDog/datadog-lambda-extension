@@ -79,6 +79,9 @@ where
 
         let message = format!("DD_EXTENSION | {level} | {span_prefix}{}", visitor.0);
 
+        // Setting specifically `status` as opposed to `level` since AWS
+        // filters out logs by the `level` field. This allows our logs to
+        // appear in CWL regardless of the log level.
         write!(writer, "{{\"status\":\"{level}\",\"message\":\"")?;
         write_json_escaped(&mut writer, &message)?;
         writeln!(writer, "\"}}")
