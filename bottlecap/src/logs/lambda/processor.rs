@@ -208,7 +208,8 @@ impl LambdaProcessor {
                 let rv = runtime_version.unwrap_or("?".to_string()); // TODO: check what does containers display
                 let rv_arn = runtime_version_arn.unwrap_or("?".to_string()); // TODO: check what do containers display
 
-                self.is_durable_function = Some(rv.contains("DurableFunction"));
+                let is_durable = rv.contains("DurableFunction");
+                self.is_durable_function = Some(is_durable);
                 self.resolve_held_logs_on_durable_function_set();
 
                 Ok(Message::new(
@@ -493,37 +494,35 @@ impl LambdaProcessor {
         }
     }
 
-    /// Parses `message` as JSON and, if it contains both `durable_execution_id` and
-    /// `durable_execution_name` fields, inserts or updates the entry for `request_id` in the
-    /// durable ID map (evicting the oldest entry when the map is at capacity 5).
-    ///
-    /// Returns `true` if a brand-new entry was added (the caller may then drain `held_logs`
-    /// for that `request_id`).
-    fn try_update_durable_map(&mut self, request_id: &str, message: &str) -> bool {
-        let Ok(serde_json::Value::Object(obj)) = serde_json::from_str(message) else {
-            return false;
-        };
-        let execution_id = obj
-            .get("durable_execution_id")
-            .and_then(serde_json::Value::as_str);
-        let execution_name = obj
-            .get("durable_execution_name")
-            .and_then(serde_json::Value::as_str);
-        if let (Some(id), Some(name)) = (execution_id, execution_name) {
-            let is_new = !self.durable_id_map.contains_key(request_id);
-            if is_new {
-                if self.durable_id_order.len() >= DURABLE_ID_MAP_CAPACITY
-                    && let Some(oldest) = self.durable_id_order.pop_front()
-                {
-                    self.durable_id_map.remove(&oldest);
-                }
-                self.durable_id_order.push_back(request_id.to_string());
+    /// Records the durable execution context for a `request_id`, received from the `aws.lambda`
+    /// span. Evicts the oldest entry when the map is at capacity. If a new entry is added and
+    /// `is_durable_function` is already `Some(true)`, drains any held logs for that `request_id`.
+    pub fn update_durable_map(
+        &mut self,
+        request_id: &str,
+        execution_id: &str,
+        execution_name: &str,
+    ) {
+        let is_new = !self.durable_id_map.contains_key(request_id);
+        if is_new {
+            if self.durable_id_order.len() >= DURABLE_ID_MAP_CAPACITY
+                && let Some(oldest) = self.durable_id_order.pop_front()
+            {
+                self.durable_id_map.remove(&oldest);
             }
-            self.durable_id_map
-                .insert(request_id.to_string(), (id.to_string(), name.to_string()));
-            return is_new;
+            self.durable_id_order.push_back(request_id.to_string());
         }
-        false
+        self.durable_id_map.insert(
+            request_id.to_string(),
+            (execution_id.to_string(), execution_name.to_string()),
+        );
+        if is_new && self.is_durable_function == Some(true) {
+            self.drain_held_for_request_id(request_id);
+        }
+    }
+
+    pub fn take_ready_logs(&mut self) -> Vec<String> {
+        std::mem::take(&mut self.ready_logs)
     }
 
     /// Moves all logs held for `request_id` into `ready_logs`, tagging each with the
@@ -567,28 +566,23 @@ impl LambdaProcessor {
                 }
             }
             Some(true) => {
+                // Durable context is populated by span processing, not from log messages.
+                // Flush any held logs whose request_id is already in the map; keep the rest.
                 for (request_id, logs) in held {
-                    // Try to discover durable context from the held logs themselves.
-                    for log in &logs {
-                        self.try_update_durable_map(&request_id, &log.message.message);
-                    }
                     let tags_suffix = self.durable_id_map.get(&request_id).map(|(id, name)| {
                         format!(",durable_execution_id:{id},durable_execution_name:{name}")
                     });
                     // Borrow of durable_id_map released here.
-                    match tags_suffix {
-                        Some(suffix) => {
-                            for mut log in logs {
-                                log.tags.push_str(&suffix);
-                                if let Ok(s) = serde_json::to_string(&log) {
-                                    self.ready_logs.push(s);
-                                }
+                    if let Some(suffix) = tags_suffix {
+                        for mut log in logs {
+                            log.tags.push_str(&suffix);
+                            if let Ok(s) = serde_json::to_string(&log) {
+                                self.ready_logs.push(s);
                             }
                         }
-                        None => {
-                            // No context yet — put back and wait for it to arrive.
-                            self.held_logs.insert(request_id, logs);
-                        }
+                    } else {
+                        // No context yet — wait for the aws.lambda span to arrive.
+                        self.held_logs.insert(request_id, logs);
                     }
                 }
             }
@@ -611,22 +605,18 @@ impl LambdaProcessor {
     /// - `None`        → stash in `held_logs[request_id]`; logs without a `request_id` are
     ///   flushed immediately since they cannot carry durable context.
     /// - `Some(false)` → serialize and push straight to `ready_logs`.
-    /// - `Some(true)`  → try to update `durable_id_map` from the log; if a new entry was
-    ///   added, drain `held_logs` for that `request_id`; then flush this log if
-    ///   its `request_id` is in the map, otherwise stash it in `held_logs`.
+    /// - `Some(true)`  → flush if this log's `request_id` is already in `durable_id_map`
+    ///   (context was populated by an `aws.lambda` span); otherwise stash in `held_logs`.
     fn queue_log_after_rules(&mut self, mut log: IntakeLog) {
         match self.is_durable_function {
             None => {
-                match log.message.lambda.request_id.clone() {
-                    Some(rid) => {
-                        self.held_logs.entry(rid).or_default().push(log);
-                    }
-                    None => {
-                        // No request_id — cannot associate with durable context; flush now.
-                        if let Ok(s) = serde_json::to_string(&log) {
-                            drop(log);
-                            self.ready_logs.push(s);
-                        }
+                if let Some(rid) = log.message.lambda.request_id.clone() {
+                    self.held_logs.entry(rid).or_default().push(log);
+                } else {
+                    // No request_id — cannot associate with durable context; flush now.
+                    if let Ok(s) = serde_json::to_string(&log) {
+                        drop(log);
+                        self.ready_logs.push(s);
                     }
                 }
             }
@@ -639,14 +629,8 @@ impl LambdaProcessor {
                 }
             }
             Some(true) => {
-                if let Some(rid) = log.message.lambda.request_id.clone()
-                    && self.try_update_durable_map(&rid, &log.message.message)
-                {
-                    // New durable context just discovered — drain previously held logs.
-                    self.drain_held_for_request_id(&rid);
-                }
-
-                // Flush this log if its request_id now has durable context; otherwise hold.
+                // Durable context is populated by span processing (update_durable_map).
+                // Flush this log if its request_id already has context; otherwise hold.
                 let durable_tags = log
                     .message
                     .lambda
@@ -671,7 +655,7 @@ impl LambdaProcessor {
                         if let Some(rid) = log.message.lambda.request_id.clone() {
                             self.held_logs.entry(rid).or_default().push(log);
                         }
-                        // Logs without a request_id cannot match the durable map; drop them.
+                        // No request_id in durable mode: drop the log.
                     }
                 }
             }
@@ -1932,7 +1916,7 @@ mod tests {
             },
         };
         let start_msg = processor.get_message(start_event).await.unwrap();
-        processor.get_intake_log(start_msg).unwrap();
+        processor.get_intake_log(start_msg, false).unwrap();
 
         // Test WARN level
         let event = TelemetryEvent {
@@ -2017,7 +2001,7 @@ mod tests {
             },
         };
         let start_msg = processor.get_message(start_event).await.unwrap();
-        processor.get_intake_log(start_msg).unwrap();
+        processor.get_intake_log(start_msg, false).unwrap();
 
         // JSON without level field
         let event = TelemetryEvent {
@@ -2058,7 +2042,7 @@ mod tests {
             },
         };
         let start_msg = processor.get_message(start_event).await.unwrap();
-        processor.get_intake_log(start_msg).unwrap();
+        processor.get_intake_log(start_msg, false).unwrap();
 
         // JSON with unrecognized level
         let event = TelemetryEvent {
@@ -2189,7 +2173,7 @@ mod tests {
             },
         };
         let start_msg = processor.get_message(start_event).await.unwrap();
-        processor.get_intake_log(start_msg).unwrap();
+        processor.get_intake_log(start_msg, false).unwrap();
 
         // level as a number
         let event = TelemetryEvent {
@@ -2252,7 +2236,7 @@ mod tests {
             },
         };
         let start_msg = processor.get_message(start_event).await.unwrap();
-        processor.get_intake_log(start_msg).unwrap();
+        processor.get_intake_log(start_msg, false).unwrap();
 
         // JSON log with both ddtags and level
         let event = TelemetryEvent {
@@ -2301,7 +2285,7 @@ mod tests {
             },
         };
         let start_msg = processor.get_message(start_event).await.unwrap();
-        processor.get_intake_log(start_msg).unwrap();
+        processor.get_intake_log(start_msg, false).unwrap();
 
         // JSON log with "status" field instead of "level" (Datadog convention)
         let event = TelemetryEvent {

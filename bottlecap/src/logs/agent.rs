@@ -12,9 +12,13 @@ use crate::{LAMBDA_RUNTIME_SLUG, config};
 
 const DRAIN_LOG_INTERVAL: Duration = Duration::from_millis(100);
 
+/// `(request_id, execution_id, execution_name)` extracted from an `aws.lambda` span.
+pub type DurableContextUpdate = (String, String, String);
+
 #[allow(clippy::module_name_repetitions)]
 pub struct LogsAgent {
     rx: mpsc::Receiver<TelemetryEvent>,
+    durable_context_rx: mpsc::Receiver<DurableContextUpdate>,
     processor: LogsProcessor,
     aggregator_handle: AggregatorHandle,
     cancel_token: CancellationToken,
@@ -28,7 +32,7 @@ impl LogsAgent {
         event_bus: Sender<Event>,
         aggregator_handle: AggregatorHandle,
         is_managed_instance_mode: bool,
-    ) -> (Self, Sender<TelemetryEvent>) {
+    ) -> (Self, Sender<TelemetryEvent>, Sender<DurableContextUpdate>) {
         let processor = LogsProcessor::new(
             Arc::clone(&datadog_config),
             tags_provider,
@@ -38,16 +42,18 @@ impl LogsAgent {
         );
 
         let (tx, rx) = mpsc::channel::<TelemetryEvent>(1000);
+        let (durable_context_tx, durable_context_rx) = mpsc::channel::<DurableContextUpdate>(100);
         let cancel_token = CancellationToken::new();
 
         let agent = Self {
             rx,
+            durable_context_rx,
             processor,
             aggregator_handle,
             cancel_token,
         };
 
-        (agent, tx)
+        (agent, tx, durable_context_tx)
     }
 
     pub async fn spin(&mut self) {
@@ -55,6 +61,13 @@ impl LogsAgent {
             tokio::select! {
                 Some(event) = self.rx.recv() => {
                     self.processor.process(event, &self.aggregator_handle).await;
+                }
+                Some((request_id, execution_id, execution_name)) = self.durable_context_rx.recv() => {
+                    self.processor.update_durable_map(&request_id, &execution_id, &execution_name);
+                    let ready = self.processor.take_ready_logs();
+                    if !ready.is_empty() {
+                        let _ = self.aggregator_handle.insert_batch(ready);
+                    }
                 }
                 () = self.cancel_token.cancelled() => {
                     debug!("LOGS_AGENT | Received shutdown signal, draining remaining events");

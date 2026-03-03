@@ -46,7 +46,7 @@ use bottlecap::{
     },
     logger,
     logs::{
-        agent::LogsAgent,
+        agent::{DurableContextUpdate, LogsAgent},
         aggregator_service::{
             AggregatorHandle as LogsAggregatorHandle, AggregatorService as LogsAggregatorService,
         },
@@ -291,14 +291,19 @@ async fn extension_loop_active(
     let account_id = r.account_id.as_ref().unwrap_or(&"none".to_string()).clone();
     let tags_provider = setup_tag_provider(&Arc::clone(&aws_config), config, &account_id);
 
-    let (logs_agent_channel, logs_flusher, logs_agent_cancel_token, logs_aggregator_handle) =
-        start_logs_agent(
-            config,
-            Arc::clone(&api_key_factory),
-            &tags_provider,
-            event_bus_tx.clone(),
-            aws_config.is_managed_instance_mode(),
-        );
+    let (
+        logs_agent_channel,
+        logs_flusher,
+        logs_agent_cancel_token,
+        logs_aggregator_handle,
+        durable_context_tx,
+    ) = start_logs_agent(
+        config,
+        Arc::clone(&api_key_factory),
+        &tags_provider,
+        event_bus_tx.clone(),
+        aws_config.is_managed_instance_mode(),
+    );
 
     let (metrics_flushers, metrics_aggregator_handle, dogstatsd_cancel_token) =
         start_dogstatsd(tags_provider.clone(), Arc::clone(&api_key_factory), config).await;
@@ -344,6 +349,7 @@ async fn extension_loop_active(
         &tags_provider,
         invocation_processor_handle.clone(),
         appsec_processor.clone(),
+        durable_context_tx,
     );
 
     let api_runtime_proxy_shutdown_signal = start_api_runtime_proxy(
@@ -1024,6 +1030,7 @@ fn start_logs_agent(
     LogsFlusher,
     CancellationToken,
     LogsAggregatorHandle,
+    Sender<DurableContextUpdate>,
 ) {
     let (aggregator_service, aggregator_handle) = LogsAggregatorService::default();
     // Start service in background
@@ -1031,7 +1038,7 @@ fn start_logs_agent(
         aggregator_service.run().await;
     });
 
-    let (mut agent, tx) = LogsAgent::new(
+    let (mut agent, tx, durable_context_tx) = LogsAgent::new(
         Arc::clone(tags_provider),
         Arc::clone(config),
         event_bus,
@@ -1048,7 +1055,7 @@ fn start_logs_agent(
     });
 
     let flusher = LogsFlusher::new(api_key_factory, aggregator_handle.clone(), config.clone());
-    (tx, flusher, cancel_token, aggregator_handle)
+    (tx, flusher, cancel_token, aggregator_handle, durable_context_tx)
 }
 
 #[allow(clippy::type_complexity)]
@@ -1058,6 +1065,7 @@ fn start_trace_agent(
     tags_provider: &Arc<TagProvider>,
     invocation_processor_handle: InvocationProcessorHandle,
     appsec_processor: Option<Arc<TokioMutex<AppSecProcessor>>>,
+    durable_context_tx: Sender<DurableContextUpdate>,
 ) -> (
     Sender<SendDataBuilderInfo>,
     Arc<trace_flusher::TraceFlusher>,
@@ -1130,6 +1138,7 @@ fn start_trace_agent(
         Arc::clone(tags_provider),
         stats_concentrator_handle.clone(),
         span_dedup_handle,
+        durable_context_tx,
     );
     let trace_agent_channel = trace_agent.get_sender_copy();
     let shutdown_token = trace_agent.shutdown_token();
