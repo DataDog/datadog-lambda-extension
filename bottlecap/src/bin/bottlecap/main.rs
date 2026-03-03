@@ -1055,7 +1055,13 @@ fn start_logs_agent(
     });
 
     let flusher = LogsFlusher::new(api_key_factory, aggregator_handle.clone(), config.clone());
-    (tx, flusher, cancel_token, aggregator_handle, durable_context_tx)
+    (
+        tx,
+        flusher,
+        cancel_token,
+        aggregator_handle,
+        durable_context_tx,
+    )
 }
 
 #[allow(clippy::type_complexity)]

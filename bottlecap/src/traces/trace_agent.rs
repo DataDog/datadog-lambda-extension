@@ -593,14 +593,17 @@ impl TraceAgent {
                     }
                 }
 
-                if span.resource == INVOCATION_SPAN_RESOURCE {
-                    if let Err(e) = invocation_processor_handle
+                if span.resource == INVOCATION_SPAN_RESOURCE
+                    && let Err(e) = invocation_processor_handle
                         .add_tracer_span(span.clone())
                         .await
-                    {
-                        error!("Failed to add tracer span to processor: {}", e);
-                    }
+                {
+                    error!("Failed to add tracer span to processor: {}", e);
+                }
+                handle_reparenting(&mut reparenting_info, &mut span);
 
+                if span.name == "aws.lambda" {
+                    debug!("TRACE_AGENT | Received aws.lambda span");
                     // If this aws.lambda span carries durable function context, forward it to
                     // the logs agent so it can tag and release any held logs.
                     if let (Some(request_id), Some(execution_id), Some(execution_name)) = (
@@ -608,6 +611,7 @@ impl TraceAgent {
                         span.meta.get("durable_function_execution_id"),
                         span.meta.get("durable_function_execution_name"),
                     ) {
+                        debug!("TRACE_AGENT | Forwarding durable function context to logs agent");
                         let _ = durable_context_tx
                             .send((
                                 request_id.clone(),
@@ -617,7 +621,6 @@ impl TraceAgent {
                             .await;
                     }
                 }
-                handle_reparenting(&mut reparenting_info, &mut span);
 
                 // Keep the span
                 chunk.push(span);

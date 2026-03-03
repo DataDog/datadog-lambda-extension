@@ -531,7 +531,10 @@ impl LambdaProcessor {
         let Some(held) = self.held_logs.remove(request_id) else {
             return;
         };
-        debug!("LOGS | drain_held_for_request_id: draining {} log(s) for request_id={request_id}", held.len());
+        debug!(
+            "LOGS | drain_held_for_request_id: draining {} log(s) for request_id={request_id}",
+            held.len()
+        );
         let durable_ctx = self
             .durable_id_map
             .get(request_id)
@@ -571,9 +574,10 @@ impl LambdaProcessor {
                 // Durable context is populated by span processing, not from log messages.
                 // Flush any held logs whose request_id is already in the map; keep the rest.
                 for (request_id, logs) in held {
-                    let durable_ctx = self.durable_id_map.get(&request_id).map(|(id, name)| {
-                        (id.clone(), name.clone())
-                    });
+                    let durable_ctx = self
+                        .durable_id_map
+                        .get(&request_id)
+                        .map(|(id, name)| (id.clone(), name.clone()));
                     // Borrow of durable_id_map released here.
                     if let Some((exec_id, exec_name)) = durable_ctx {
                         for mut log in logs {
@@ -1084,7 +1088,7 @@ mod tests {
                 lambda: Lambda {
                     arn: "test-arn".to_string(),
                     request_id: Some("test-request-id".to_string()),
-                ..Lambda::default()
+                    ..Lambda::default()
                 },
                 timestamp: 1_673_061_827_000,
                 status: "info".to_string(),
@@ -1257,7 +1261,7 @@ mod tests {
                 lambda: Lambda {
                     arn: "test-arn".to_string(),
                     request_id: Some("test-request-id".to_string()),
-                ..Lambda::default()
+                    ..Lambda::default()
                 },
                 timestamp: 1_673_061_827_000,
                 status: "info".to_string(),
@@ -1433,7 +1437,7 @@ mod tests {
                 lambda: Lambda {
                     arn: "test-arn".to_string(),
                     request_id: Some("test-request-id".to_string()),
-                ..Lambda::default()
+                    ..Lambda::default()
                 },
                 timestamp: 1_673_061_827_000,
                 status: "info".to_string(),
@@ -1449,7 +1453,7 @@ mod tests {
                 lambda: Lambda {
                     arn: "test-arn".to_string(),
                     request_id: Some("test-request-id".to_string()),
-                ..Lambda::default()
+                    ..Lambda::default()
                 },
                 timestamp: 1_673_061_827_000,
                 status: "info".to_string(),
@@ -1524,7 +1528,7 @@ mod tests {
                 lambda: Lambda {
                     arn: "test-arn".to_string(),
                     request_id: Some("test-request-id".to_string()),
-                ..Lambda::default()
+                    ..Lambda::default()
                 },
                 timestamp: 1_673_061_827_000,
                 status: "info".to_string(),

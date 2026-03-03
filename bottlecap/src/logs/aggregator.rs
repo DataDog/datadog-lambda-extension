@@ -106,7 +106,7 @@ mod tests {
                 lambda: Lambda {
                     arn: "arn".to_string(),
                     request_id: Some("request_id".to_string()),
-                ..Lambda::default()
+                    ..Lambda::default()
                 },
                 timestamp: 0,
                 status: "status".to_string(),
@@ -131,7 +131,7 @@ mod tests {
                 lambda: Lambda {
                     arn: "arn".to_string(),
                     request_id: Some("request_id".to_string()),
-                ..Lambda::default()
+                    ..Lambda::default()
                 },
                 timestamp: 0,
                 status: "status".to_string(),
@@ -158,7 +158,7 @@ mod tests {
                 lambda: Lambda {
                     arn: "arn".to_string(),
                     request_id: Some("request_id".to_string()),
-                ..Lambda::default()
+                    ..Lambda::default()
                 },
                 timestamp: 0,
                 status: "status".to_string(),
@@ -199,7 +199,7 @@ mod tests {
                 lambda: Lambda {
                     arn: "arn".to_string(),
                     request_id: Some("request_id".to_string()),
-                ..Lambda::default()
+                    ..Lambda::default()
                 },
                 timestamp: 0,
                 status: "status".to_string(),
