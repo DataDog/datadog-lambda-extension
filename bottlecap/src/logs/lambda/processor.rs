@@ -512,10 +512,10 @@ impl LambdaProcessor {
         if let (Some(id), Some(name)) = (execution_id, execution_name) {
             let is_new = !self.durable_id_map.contains_key(request_id);
             if is_new {
-                if self.durable_id_order.len() >= DURABLE_ID_MAP_CAPACITY {
-                    if let Some(oldest) = self.durable_id_order.pop_front() {
-                        self.durable_id_map.remove(&oldest);
-                    }
+                if self.durable_id_order.len() >= DURABLE_ID_MAP_CAPACITY
+                    && let Some(oldest) = self.durable_id_order.pop_front()
+                {
+                    self.durable_id_map.remove(&oldest);
                 }
                 self.durable_id_order.push_back(request_id.to_string());
             }
@@ -527,7 +527,7 @@ impl LambdaProcessor {
     }
 
     /// Moves all logs held for `request_id` into `ready_logs`, tagging each with the
-    /// durable execution context that is now known for that request_id.
+    /// durable execution context that is now known for that `request_id`.
     fn drain_held_for_request_id(&mut self, request_id: &str) {
         let Some(held) = self.held_logs.remove(request_id) else {
             return;
@@ -552,8 +552,8 @@ impl LambdaProcessor {
     /// Drains every entry in `held_logs`, routing each batch according to the newly-known flag:
     /// - `Some(false)` → flush all held logs immediately.
     /// - `Some(true)`  → try to extract durable context from the held logs; those whose
-    ///                   request_id is now in the durable ID map are flushed with tags; the
-    ///                   rest stay in `held_logs` until their context arrives.
+    ///   `request_id` is now in the durable ID map are flushed with tags; the
+    ///   rest stay in `held_logs` until their context arrives.
     fn resolve_held_logs_on_durable_function_set(&mut self) {
         let held = std::mem::take(&mut self.held_logs);
         match self.is_durable_function {
@@ -608,12 +608,12 @@ impl LambdaProcessor {
     /// Queues a log that has already had processing rules applied.
     ///
     /// Routing depends on `is_durable_function`:
-    /// - `None`        → stash in `held_logs[request_id]`; logs without a request_id are
-    ///                   flushed immediately since they cannot carry durable context.
+    /// - `None`        → stash in `held_logs[request_id]`; logs without a `request_id` are
+    ///   flushed immediately since they cannot carry durable context.
     /// - `Some(false)` → serialize and push straight to `ready_logs`.
     /// - `Some(true)`  → try to update `durable_id_map` from the log; if a new entry was
-    ///                   added, drain `held_logs` for that request_id; then flush this log if
-    ///                   its request_id is in the map, otherwise stash it in `held_logs`.
+    ///   added, drain `held_logs` for that `request_id`; then flush this log if
+    ///   its `request_id` is in the map, otherwise stash it in `held_logs`.
     fn queue_log_after_rules(&mut self, mut log: IntakeLog) {
         match self.is_durable_function {
             None => {
@@ -639,11 +639,11 @@ impl LambdaProcessor {
                 }
             }
             Some(true) => {
-                if let Some(rid) = log.message.lambda.request_id.clone() {
-                    if self.try_update_durable_map(&rid, &log.message.message) {
-                        // New durable context just discovered — drain previously held logs.
-                        self.drain_held_for_request_id(&rid);
-                    }
+                if let Some(rid) = log.message.lambda.request_id.clone()
+                    && self.try_update_durable_map(&rid, &log.message.message)
+                {
+                    // New durable context just discovered — drain previously held logs.
+                    self.drain_held_for_request_id(&rid);
                 }
 
                 // Flush this log if its request_id now has durable context; otherwise hold.
