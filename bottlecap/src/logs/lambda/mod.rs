@@ -30,10 +30,14 @@ pub struct Message {
     pub status: String,
 }
 
-#[derive(Serialize, Debug, Clone, PartialEq)]
+#[derive(Serialize, Debug, Clone, Default, PartialEq)]
 pub struct Lambda {
     pub arn: String,
     pub request_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub durable_execution_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub durable_execution_name: Option<String>,
 }
 
 impl Message {
@@ -50,6 +54,7 @@ impl Message {
             lambda: Lambda {
                 arn: function_arn,
                 request_id,
+                ..Lambda::default()
             },
             timestamp,
             status: status.unwrap_or("info".to_string()),

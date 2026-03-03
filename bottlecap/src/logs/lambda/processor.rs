@@ -531,14 +531,16 @@ impl LambdaProcessor {
         let Some(held) = self.held_logs.remove(request_id) else {
             return;
         };
-        let tags_suffix = self
+        debug!("LOGS | drain_held_for_request_id: draining {} log(s) for request_id={request_id}", held.len());
+        let durable_ctx = self
             .durable_id_map
             .get(request_id)
-            .map(|(id, name)| format!(",lambda.durable_execution_id:{id},lambda.durable_execution_name:{name}"));
-        // Borrow of durable_id_map is released here (tags_suffix is an owned String).
-        if let Some(suffix) = tags_suffix {
+            .map(|(id, name)| (id.clone(), name.clone()));
+        // Borrow of durable_id_map is released here.
+        if let Some((exec_id, exec_name)) = durable_ctx {
             for mut log in held {
-                log.tags.push_str(&suffix);
+                log.message.lambda.durable_execution_id = Some(exec_id.clone());
+                log.message.lambda.durable_execution_name = Some(exec_name.clone());
                 if let Ok(s) = serde_json::to_string(&log) {
                     drop(log);
                     self.ready_logs.push(s);
@@ -569,13 +571,14 @@ impl LambdaProcessor {
                 // Durable context is populated by span processing, not from log messages.
                 // Flush any held logs whose request_id is already in the map; keep the rest.
                 for (request_id, logs) in held {
-                    let tags_suffix = self.durable_id_map.get(&request_id).map(|(id, name)| {
-                        format!(",lambda.durable_execution_id:{id},lambda.durable_execution_name:{name}")
+                    let durable_ctx = self.durable_id_map.get(&request_id).map(|(id, name)| {
+                        (id.clone(), name.clone())
                     });
                     // Borrow of durable_id_map released here.
-                    if let Some(suffix) = tags_suffix {
+                    if let Some((exec_id, exec_name)) = durable_ctx {
                         for mut log in logs {
-                            log.tags.push_str(&suffix);
+                            log.message.lambda.durable_execution_id = Some(exec_id.clone());
+                            log.message.lambda.durable_execution_name = Some(exec_name.clone());
                             if let Ok(s) = serde_json::to_string(&log) {
                                 self.ready_logs.push(s);
                             }
@@ -631,19 +634,18 @@ impl LambdaProcessor {
             Some(true) => {
                 // Durable context is populated by span processing (update_durable_map).
                 // Flush this log if its request_id already has context; otherwise hold.
-                let durable_tags = log
+                let durable_ctx = log
                     .message
                     .lambda
                     .request_id
                     .as_ref()
                     .and_then(|rid| self.durable_id_map.get(rid))
-                    .map(|(id, name)| {
-                        format!(",lambda.durable_execution_id:{id},lambda.durable_execution_name:{name}")
-                    });
+                    .map(|(id, name)| (id.clone(), name.clone()));
 
-                match durable_tags {
-                    Some(extra_tags) => {
-                        log.tags.push_str(&extra_tags);
+                match durable_ctx {
+                    Some((exec_id, exec_name)) => {
+                        log.message.lambda.durable_execution_id = Some(exec_id);
+                        log.message.lambda.durable_execution_name = Some(exec_name);
                         if let Ok(serialized_log) = serde_json::to_string(&log) {
                             // explicitly drop log so we don't accidentally re-use it and push
                             // duplicate logs to the aggregator
@@ -752,6 +754,7 @@ mod tests {
                     lambda: Lambda {
                         arn: "test-arn".to_string(),
                         request_id: None,
+                    ..Lambda::default()
                     },
                     timestamp: 1_673_061_827_000,
                     status: "info".to_string(),
@@ -769,6 +772,7 @@ mod tests {
                     lambda: Lambda {
                         arn: "test-arn".to_string(),
                         request_id: None,
+                    ..Lambda::default()
                     },
                     timestamp: 1_673_061_827_000,
                     status: "info".to_string(),
@@ -791,6 +795,7 @@ mod tests {
                     lambda: Lambda {
                         arn: "test-arn".to_string(),
                         request_id: None,
+                    ..Lambda::default()
                     },
                     timestamp: 1_673_061_827_000,
                     status: "info".to_string(),
@@ -811,6 +816,7 @@ mod tests {
                     lambda: Lambda {
                         arn: "test-arn".to_string(),
                         request_id: Some("test-request-id".to_string()),
+                    ..Lambda::default()
                     },
                     timestamp: 1_673_061_827_000,
                     status: "info".to_string(),
@@ -836,6 +842,7 @@ mod tests {
                     lambda: Lambda {
                         arn: "test-arn".to_string(),
                         request_id: Some("test-request-id".to_string()),
+                    ..Lambda::default()
                     },
                     timestamp: 1_673_061_827_000,
                     status: "info".to_string(),
@@ -861,6 +868,7 @@ mod tests {
                     lambda: Lambda {
                         arn: "test-arn".to_string(),
                         request_id: Some("test-request-id".to_string()),
+                    ..Lambda::default()
                     },
                     timestamp: 1_673_061_827_000,
                     status: "error".to_string(),
@@ -891,6 +899,7 @@ mod tests {
                     lambda: Lambda {
                         arn: "test-arn".to_string(),
                         request_id: Some("test-request-id".to_string()),
+                    ..Lambda::default()
                     },
                     timestamp: 1_673_061_827_000,
                     status: "info".to_string(),
@@ -916,6 +925,7 @@ mod tests {
                 lambda: Lambda {
                     arn: "test-arn".to_string(),
                     request_id: Some("test-request-id".to_string()),
+                ..Lambda::default()
                 },
                 timestamp: 1_673_058_627_000,
                 status: "info".to_string(),
@@ -941,6 +951,7 @@ mod tests {
                 lambda: Lambda {
                     arn: "test-arn".to_string(),
                     request_id: Some("test-request-id".to_string()),
+                ..Lambda::default()
                 },
                 timestamp: 1_673_058_627_000,
                 status: "error".to_string(),
@@ -966,6 +977,7 @@ mod tests {
                 lambda: Lambda {
                     arn: "test-arn".to_string(),
                     request_id: Some("test-request-id".to_string()),
+                ..Lambda::default()
                 },
                 timestamp: 1_673_058_627_000,
                 status: "error".to_string(),
@@ -991,6 +1003,7 @@ mod tests {
                 lambda: Lambda {
                     arn: "test-arn".to_string(),
                     request_id: Some("test-request-id".to_string()),
+                ..Lambda::default()
                 },
                 timestamp: 1_673_058_627_000,
                 status: "error".to_string(),
@@ -1071,6 +1084,7 @@ mod tests {
                 lambda: Lambda {
                     arn: "test-arn".to_string(),
                     request_id: Some("test-request-id".to_string()),
+                ..Lambda::default()
                 },
                 timestamp: 1_673_061_827_000,
                 status: "info".to_string(),
@@ -1243,6 +1257,7 @@ mod tests {
                 lambda: Lambda {
                     arn: "test-arn".to_string(),
                     request_id: Some("test-request-id".to_string()),
+                ..Lambda::default()
                 },
                 timestamp: 1_673_061_827_000,
                 status: "info".to_string(),
@@ -1418,6 +1433,7 @@ mod tests {
                 lambda: Lambda {
                     arn: "test-arn".to_string(),
                     request_id: Some("test-request-id".to_string()),
+                ..Lambda::default()
                 },
                 timestamp: 1_673_061_827_000,
                 status: "info".to_string(),
@@ -1433,6 +1449,7 @@ mod tests {
                 lambda: Lambda {
                     arn: "test-arn".to_string(),
                     request_id: Some("test-request-id".to_string()),
+                ..Lambda::default()
                 },
                 timestamp: 1_673_061_827_000,
                 status: "info".to_string(),
@@ -1507,6 +1524,7 @@ mod tests {
                 lambda: Lambda {
                     arn: "test-arn".to_string(),
                     request_id: Some("test-request-id".to_string()),
+                ..Lambda::default()
                 },
                 timestamp: 1_673_061_827_000,
                 status: "info".to_string(),
@@ -1568,6 +1586,7 @@ mod tests {
                 lambda: Lambda {
                     arn: "test-arn".to_string(),
                     request_id: Some("test-request-id".to_string()),
+                ..Lambda::default()
                 },
                 timestamp: 1_673_061_827_000,
                 status: "info".to_string(),
@@ -1916,7 +1935,7 @@ mod tests {
             },
         };
         let start_msg = processor.get_message(start_event).await.unwrap();
-        processor.get_intake_log(start_msg, false).unwrap();
+        processor.get_intake_log(start_msg).unwrap();
 
         // Test WARN level
         let event = TelemetryEvent {
@@ -2001,7 +2020,7 @@ mod tests {
             },
         };
         let start_msg = processor.get_message(start_event).await.unwrap();
-        processor.get_intake_log(start_msg, false).unwrap();
+        processor.get_intake_log(start_msg).unwrap();
 
         // JSON without level field
         let event = TelemetryEvent {
@@ -2042,7 +2061,7 @@ mod tests {
             },
         };
         let start_msg = processor.get_message(start_event).await.unwrap();
-        processor.get_intake_log(start_msg, false).unwrap();
+        processor.get_intake_log(start_msg).unwrap();
 
         // JSON with unrecognized level
         let event = TelemetryEvent {
@@ -2173,7 +2192,7 @@ mod tests {
             },
         };
         let start_msg = processor.get_message(start_event).await.unwrap();
-        processor.get_intake_log(start_msg, false).unwrap();
+        processor.get_intake_log(start_msg).unwrap();
 
         // level as a number
         let event = TelemetryEvent {
@@ -2236,7 +2255,7 @@ mod tests {
             },
         };
         let start_msg = processor.get_message(start_event).await.unwrap();
-        processor.get_intake_log(start_msg, false).unwrap();
+        processor.get_intake_log(start_msg).unwrap();
 
         // JSON log with both ddtags and level
         let event = TelemetryEvent {
@@ -2285,7 +2304,7 @@ mod tests {
             },
         };
         let start_msg = processor.get_message(start_event).await.unwrap();
-        processor.get_intake_log(start_msg, false).unwrap();
+        processor.get_intake_log(start_msg).unwrap();
 
         // JSON log with "status" field instead of "level" (Datadog convention)
         let event = TelemetryEvent {
