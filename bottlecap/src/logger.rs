@@ -79,7 +79,10 @@ where
 
         let message = format!("DD_EXTENSION | {level} | {span_prefix}{}", visitor.0);
 
-        write!(writer, "{{\"level\":\"{level}\",\"message\":\"")?;
+        // Setting specifically `status` as opposed to `level` since AWS
+        // filters out logs by the `level` field. This allows our logs to
+        // appear in CWL regardless of the log level.
+        write!(writer, "{{\"status\":\"{level}\",\"message\":\"")?;
         write_json_escaped(&mut writer, &message)?;
         writeln!(writer, "\"}}")
     }
@@ -187,7 +190,7 @@ mod tests {
         let parsed: serde_json::Value =
             serde_json::from_str(output.trim()).expect("output should be valid JSON");
 
-        assert_eq!(parsed["level"], "INFO");
+        assert_eq!(parsed["status"], "INFO");
         assert!(
             parsed["message"]
                 .as_str()
@@ -204,7 +207,7 @@ mod tests {
 
         let parsed: serde_json::Value =
             serde_json::from_str(output.trim()).expect("output should be valid JSON");
-        assert_eq!(parsed["level"], "ERROR");
+        assert_eq!(parsed["status"], "ERROR");
         assert!(
             parsed["message"]
                 .as_str()
@@ -221,7 +224,7 @@ mod tests {
 
         let parsed: serde_json::Value =
             serde_json::from_str(output.trim()).expect("output should be valid JSON");
-        assert_eq!(parsed["level"], "DEBUG");
+        assert_eq!(parsed["status"], "DEBUG");
         assert!(
             parsed["message"]
                 .as_str()
