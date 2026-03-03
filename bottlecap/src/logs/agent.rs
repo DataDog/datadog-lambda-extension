@@ -63,7 +63,6 @@ impl LogsAgent {
                     self.processor.process(event, &self.aggregator_handle).await;
                 }
                 Some((request_id, execution_id, execution_name)) = self.durable_context_rx.recv() => {
-                    debug!("LOGS_AGENT | Received durable function context: request_id={request_id}, execution_id={execution_id}, execution_name={execution_name}");
                     self.processor.update_durable_map(&request_id, &execution_id, &execution_name);
                     let ready = self.processor.take_ready_logs();
                     if !ready.is_empty() {

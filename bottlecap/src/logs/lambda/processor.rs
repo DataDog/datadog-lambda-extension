@@ -531,10 +531,6 @@ impl LambdaProcessor {
         let Some(held) = self.held_logs.remove(request_id) else {
             return;
         };
-        debug!(
-            "LOGS | drain_held_for_request_id: draining {} log(s) for request_id={request_id}",
-            held.len()
-        );
         let durable_ctx = self
             .durable_id_map
             .get(request_id)
