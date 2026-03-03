@@ -534,7 +534,7 @@ impl LambdaProcessor {
         let tags_suffix = self
             .durable_id_map
             .get(request_id)
-            .map(|(id, name)| format!(",durable_execution_id:{id},durable_execution_name:{name}"));
+            .map(|(id, name)| format!(",lambda.durable_execution_id:{id},lambda.durable_execution_name:{name}"));
         // Borrow of durable_id_map is released here (tags_suffix is an owned String).
         if let Some(suffix) = tags_suffix {
             for mut log in held {
@@ -570,7 +570,7 @@ impl LambdaProcessor {
                 // Flush any held logs whose request_id is already in the map; keep the rest.
                 for (request_id, logs) in held {
                     let tags_suffix = self.durable_id_map.get(&request_id).map(|(id, name)| {
-                        format!(",durable_execution_id:{id},durable_execution_name:{name}")
+                        format!(",lambda.durable_execution_id:{id},lambda.durable_execution_name:{name}")
                     });
                     // Borrow of durable_id_map released here.
                     if let Some(suffix) = tags_suffix {
@@ -638,7 +638,7 @@ impl LambdaProcessor {
                     .as_ref()
                     .and_then(|rid| self.durable_id_map.get(rid))
                     .map(|(id, name)| {
-                        format!(",durable_execution_id:{id},durable_execution_name:{name}")
+                        format!(",lambda.durable_execution_id:{id},lambda.durable_execution_name:{name}")
                     });
 
                 match durable_tags {
