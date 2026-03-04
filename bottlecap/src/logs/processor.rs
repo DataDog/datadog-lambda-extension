@@ -50,7 +50,7 @@ impl LogsProcessor {
     ) {
         match self {
             LogsProcessor::Lambda(p) => {
-                p.insert_to_durable_map(request_id, execution_id, execution_name);
+                p.insert_to_durable_context_map(request_id, execution_id, execution_name);
             }
         }
     }

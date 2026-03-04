@@ -501,9 +501,9 @@ impl LambdaProcessor {
     /// already `Some(true)`, drains any held logs for that `request_id`.
     pub fn insert_to_durable_context_map(
         &mut self,
-        request_id: &str,
-        execution_id: &str,
-        execution_name: &str,
+        request_id: &str, // key
+        execution_id: &str, // value
+        execution_name: &str, // value
     ) {
         if self.durable_context_map.contains_key(request_id) {
             error!("LOGS | insert_to_durable_context_map: request_id={request_id} already in map");
@@ -519,9 +519,7 @@ impl LambdaProcessor {
             request_id.to_string(),
             (execution_id.to_string(), execution_name.to_string()),
         );
-        if self.is_durable_function == Some(true) {
-            self.drain_held_for_request_id(request_id);
-        }
+        self.drain_held_for_request_id(request_id);
     }
 
     pub fn take_ready_logs(&mut self) -> Vec<String> {
