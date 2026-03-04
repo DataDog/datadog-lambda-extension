@@ -604,7 +604,7 @@ impl TraceAgent {
 
                 if span.name == "aws.lambda" {
                     // If this aws.lambda span carries durable function context, forward it to
-                    // the logs agent so it can tag and release any held logs.
+                    // the logs agent so it can release any held logs and set durable execution context on them.
                     if let (Some(request_id), Some(execution_id), Some(execution_name)) = (
                         span.meta.get("request_id"),
                         span.meta.get("durable_function_execution_id"),

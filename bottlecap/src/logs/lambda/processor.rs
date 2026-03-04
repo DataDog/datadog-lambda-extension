@@ -536,7 +536,6 @@ impl LambdaProcessor {
             .durable_context_map
             .get(request_id)
             .map(|(id, name)| (id.clone(), name.clone()));
-        // Borrow of durable_context_map is released here.
         if let Some((exec_id, exec_name)) = durable_ctx {
             for mut log in held {
                 log.message.lambda.durable_execution_id = Some(exec_id.clone());
@@ -550,13 +549,13 @@ impl LambdaProcessor {
     }
 
     /// Called once when `is_durable_function` is set, draining every entry in `held_logs`:
-    /// - `false` → mark all held logs as ready to be aggregated.
-    /// - `true`  → mark logs whose `request_id` is already in `durable_context_map` as ready to be aggregated,
+    /// - `false` → drain all held logs.
+    /// - `true`  → drain logs whose `request_id` is already in `durable_context_map`,
     ///   the rest stay in `held_logs` until their context arrives via an `aws.lambda` span.
     fn resolve_held_logs_on_durable_function_set(&mut self, is_durable: bool) {
         let held = std::mem::take(&mut self.held_logs);
         if is_durable {
-            // Mark logs whose request_id is already in the map as ready to be aggregated.
+            // Drain logs whose request_id is already in the map.
             for (request_id, logs) in held {
                 let durable_ctx = self
                     .durable_context_map
@@ -564,7 +563,7 @@ impl LambdaProcessor {
                     .map(|(id, name)| (id.clone(), name.clone()));
                 if let Some((exec_id, exec_name)) = durable_ctx {
                     // If the request_id is in the durable context map, set durable execution id                                                                                                   
-                    //  and execution name, and mark the log as ready to be aggregated. 
+                    // and execution name, and add logs to ready_logs. 
                     for mut log in logs {
                         log.message.lambda.durable_execution_id = Some(exec_id.clone());
                         log.message.lambda.durable_execution_name = Some(exec_name.clone());
@@ -573,12 +572,12 @@ impl LambdaProcessor {
                         }
                     }
                 } else {
-                    // No context yet — wait for the aws.lambda span to arrive.
+                    // No context yet — keep logs in held_logs until the aws.lambda span arrives.
                     self.held_logs.insert(request_id, logs);
                 }
             }
         } else {
-            // Mark all held logs as ready to be aggregated.
+            // Drain all held logs.
             for (_, logs) in held {
                 for log in logs {
                     if let Ok(s) = serde_json::to_string(&log) {
@@ -612,11 +611,7 @@ impl LambdaProcessor {
                 if let Some(rid) = log.message.lambda.request_id.clone() {
                     self.held_logs.entry(rid).or_default().push(log);
                 } else {
-                    // No request_id — cannot associate with durable context; mark as ready to be aggregated.
-                    if let Ok(s) = serde_json::to_string(&log) {
-                        drop(log);
-                        self.ready_logs.push(s);
-                    }
+                    error!("LOGS | queue_log_after_rules: log without request_id");
                 }
             }
             Some(false) => {
@@ -653,7 +648,7 @@ impl LambdaProcessor {
                         if let Some(rid) = log.message.lambda.request_id.clone() {
                             self.held_logs.entry(rid).or_default().push(log);
                         }
-                        // No request_id in durable mode: drop the log.
+                        error!("LOGS | queue_log_after_rules: log without request_id");
                     }
                 }
             }
