@@ -43,7 +43,7 @@ pub struct LambdaProcessor {
     // Some(true) = durable function. Hold logs for a request_id until
     // the durable execution id and execution name for this invocationare known.
     // These two fields are extracted from the aws.lambda span sent by the tracer.
-    // Some(false) = not a durable function; flush logs normally.
+    // Some(false) = not a durable function; mark logs as ready to be aggregated as normal.
     is_durable_function: Option<bool>,
     // Logs held pending resolution, keyed by request_id.
     // While is_durable_function is None, every incoming log is stashed here so
@@ -551,13 +551,13 @@ impl LambdaProcessor {
     }
 
     /// Called once when `is_durable_function` is set, draining every entry in `held_logs`:
-    /// - `false` → flush all held logs immediately.
-    /// - `true`  → flush logs whose `request_id` is already in `durable_context_map`;
+    /// - `false` → mark all held logs as ready to be aggregated.
+    /// - `true`  → mark logs whose `request_id` is already in `durable_context_map` as ready to be aggregated,
     ///   the rest stay in `held_logs` until their context arrives via an `aws.lambda` span.
     fn resolve_held_logs_on_durable_function_set(&mut self, is_durable: bool) {
         let held = std::mem::take(&mut self.held_logs);
         if is_durable {
-            // Flush any held logs whose request_id is already in the map; keep the rest.
+            // Mark logs whose request_id is already in the map as ready to be aggregated.
             for (request_id, logs) in held {
                 let durable_ctx = self
                     .durable_context_map
@@ -565,7 +565,7 @@ impl LambdaProcessor {
                     .map(|(id, name)| (id.clone(), name.clone()));
                 if let Some((exec_id, exec_name)) = durable_ctx {
                     // If the request_id is in the durable context map, set durable execution id                                                                                                   
-                    //  and execution name, and mark the log as ready to be flushed. 
+                    //  and execution name, and mark the log as ready to be aggregated. 
                     for mut log in logs {
                         log.message.lambda.durable_execution_id = Some(exec_id.clone());
                         log.message.lambda.durable_execution_name = Some(exec_name.clone());
@@ -579,7 +579,7 @@ impl LambdaProcessor {
                 }
             }
         } else {
-            // Flush all held logs immediately.
+            // Mark all held logs as ready to be aggregated.
             for (_, logs) in held {
                 for log in logs {
                     if let Ok(s) = serde_json::to_string(&log) {
@@ -603,9 +603,9 @@ impl LambdaProcessor {
     ///
     /// Routing depends on `is_durable_function`:
     /// - `None`        → stash in `held_logs[request_id]`; logs without a `request_id` are
-    ///   flushed immediately since they cannot carry durable context.
+    ///   marked as ready to be aggregated since they cannot carry durable context.
     /// - `Some(false)` → serialize and push straight to `ready_logs`.
-    /// - `Some(true)`  → flush if this log's `request_id` is already in `durable_context_map`
+    /// - `Some(true)`  → mark this log as ready to be aggregated if its `request_id` is already in `durable_context_map`
     ///   (context was populated by an `aws.lambda` span); otherwise stash in `held_logs`.
     fn queue_log_after_rules(&mut self, mut log: IntakeLog) {
         match self.is_durable_function {
@@ -613,7 +613,7 @@ impl LambdaProcessor {
                 if let Some(rid) = log.message.lambda.request_id.clone() {
                     self.held_logs.entry(rid).or_default().push(log);
                 } else {
-                    // No request_id — cannot associate with durable context; flush now.
+                    // No request_id — cannot associate with durable context; mark as ready to be aggregated.
                     if let Ok(s) = serde_json::to_string(&log) {
                         drop(log);
                         self.ready_logs.push(s);
@@ -630,7 +630,7 @@ impl LambdaProcessor {
             }
             Some(true) => {
                 // Durable context is populated by span processing (update_durable_map).
-                // Flush this log if its request_id already has context; otherwise hold.
+                // Mark this log as ready to be aggregated if its request_id already has context; otherwise hold.
                 let durable_ctx = log
                     .message
                     .lambda
