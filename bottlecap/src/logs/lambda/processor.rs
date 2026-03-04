@@ -554,7 +554,7 @@ impl LambdaProcessor {
     /// Drains every entry in `held_logs`, routing each batch according to the newly-known flag:
     /// - `Some(false)` → flush all held logs immediately.
     /// - `Some(true)`  → try to extract durable context from the held logs; those whose
-    ///   `request_id` is now in the durable ID map are flushed with tags; the
+    ///   `request_id` is now in the durable context map are flushed with tags; the
     ///   rest stay in `held_logs` until their context arrives.
     fn resolve_held_logs_on_durable_function_set(&mut self) {
         let held = std::mem::take(&mut self.held_logs);
@@ -569,15 +569,15 @@ impl LambdaProcessor {
                 }
             }
             Some(true) => {
-                // Durable context is populated by span processing, not from log messages.
                 // Flush any held logs whose request_id is already in the map; keep the rest.
                 for (request_id, logs) in held {
                     let durable_ctx = self
                         .durable_context_map
                         .get(&request_id)
                         .map(|(id, name)| (id.clone(), name.clone()));
-                    // Borrow of durable_context_map released here.
                     if let Some((exec_id, exec_name)) = durable_ctx {
+                        // If the request_id is in the durable context map, set durable execution id
+                        //  and execution name, and mark the log as ready to be flushed.
                         for mut log in logs {
                             log.message.lambda.durable_execution_id = Some(exec_id.clone());
                             log.message.lambda.durable_execution_name = Some(exec_name.clone());
