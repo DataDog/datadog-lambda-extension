@@ -51,7 +51,8 @@ async fn test_enhanced_metrics() {
         aggregator_handle: metrics_aggr_handle.clone(),
         metrics_intake_url_prefix: MetricsIntakeUrlPrefix::new(None, Some(metrics_site_override))
             .expect("can't parse metrics intake URL from site"),
-        client: reqwest::Client::builder()
+        client: datadog_fips::reqwest_adapter::create_reqwest_client_builder()
+            .expect("failed to create client builder")
             .build()
             .expect("failed to build client"),
         retry_strategy: dogstatsd::datadog::RetryStrategy::Immediate(1),
