@@ -2,7 +2,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::mpsc::{self, Sender};
 use tokio_util::sync::CancellationToken;
-use tracing::debug;
+use tracing::{debug, error};
 
 use crate::event_bus::Event;
 use crate::extension::telemetry::events::TelemetryEvent;

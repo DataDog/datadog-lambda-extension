@@ -611,7 +611,8 @@ impl LambdaProcessor {
                 if let Some(rid) = log.message.lambda.request_id.clone() {
                     self.held_logs.entry(rid).or_default().push(log);
                 } else {
-                    error!("LOGS | queue_log_after_rules: log without request_id");
+                    error!("LOGS | queue_log_after_rules: log without request_id: {log:?}");
+                    drop(log);
                 }
             }
             Some(false) => {
@@ -647,8 +648,10 @@ impl LambdaProcessor {
                     None => {
                         if let Some(rid) = log.message.lambda.request_id.clone() {
                             self.held_logs.entry(rid).or_default().push(log);
+                        } else {
+                            error!("LOGS | queue_log_after_rules: log without request_id: {log:?}");
+                            drop(log);
                         }
-                        error!("LOGS | queue_log_after_rules: log without request_id");
                     }
                 }
             }
