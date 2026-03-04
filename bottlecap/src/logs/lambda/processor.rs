@@ -212,7 +212,7 @@ impl LambdaProcessor {
 
                 let is_durable = rv.contains("DurableFunction");
                 self.is_durable_function = Some(is_durable);
-                self.resolve_held_logs_on_durable_function_set();
+                self.resolve_held_logs_on_durable_function_set(is_durable);
 
                 Ok(Message::new(
                     format!("INIT_START Runtime Version: {rv} Runtime Version ARN: {rv_arn}"),
@@ -550,48 +550,43 @@ impl LambdaProcessor {
         }
     }
 
-    /// Called once when `is_durable_function` transitions from `None` to `Some(...)`.
-    /// Drains every entry in `held_logs`, routing each batch according to the newly-known flag:
-    /// - `Some(false)` → flush all held logs immediately.
-    /// - `Some(true)`  → try to extract durable context from the held logs; those whose
-    ///   `request_id` is now in the durable context map are flushed with tags; the
-    ///   rest stay in `held_logs` until their context arrives.
-    fn resolve_held_logs_on_durable_function_set(&mut self) {
+    /// Called once when `is_durable_function` is set, draining every entry in `held_logs`:
+    /// - `false` → flush all held logs immediately.
+    /// - `true`  → flush logs whose `request_id` is already in `durable_context_map`;
+    ///   the rest stay in `held_logs` until their context arrives via an `aws.lambda` span.
+    fn resolve_held_logs_on_durable_function_set(&mut self, is_durable: bool) {
         let held = std::mem::take(&mut self.held_logs);
-        match self.is_durable_function {
-            Some(false) => {
-                for (_, logs) in held {
-                    for log in logs {
+        if is_durable {
+            // Flush any held logs whose request_id is already in the map; keep the rest.
+            for (request_id, logs) in held {
+                let durable_ctx = self
+                    .durable_context_map
+                    .get(&request_id)
+                    .map(|(id, name)| (id.clone(), name.clone()));
+                if let Some((exec_id, exec_name)) = durable_ctx {
+                    // If the request_id is in the durable context map, set durable execution id                                                                                                   
+                    //  and execution name, and mark the log as ready to be flushed. 
+                    for mut log in logs {
+                        log.message.lambda.durable_execution_id = Some(exec_id.clone());
+                        log.message.lambda.durable_execution_name = Some(exec_name.clone());
                         if let Ok(s) = serde_json::to_string(&log) {
                             self.ready_logs.push(s);
                         }
                     }
+                } else {
+                    // No context yet — wait for the aws.lambda span to arrive.
+                    self.held_logs.insert(request_id, logs);
                 }
             }
-            Some(true) => {
-                // Flush any held logs whose request_id is already in the map; keep the rest.
-                for (request_id, logs) in held {
-                    let durable_ctx = self
-                        .durable_context_map
-                        .get(&request_id)
-                        .map(|(id, name)| (id.clone(), name.clone()));
-                    if let Some((exec_id, exec_name)) = durable_ctx {
-                        // If the request_id is in the durable context map, set durable execution id
-                        //  and execution name, and mark the log as ready to be flushed.
-                        for mut log in logs {
-                            log.message.lambda.durable_execution_id = Some(exec_id.clone());
-                            log.message.lambda.durable_execution_name = Some(exec_name.clone());
-                            if let Ok(s) = serde_json::to_string(&log) {
-                                self.ready_logs.push(s);
-                            }
-                        }
-                    } else {
-                        // No context yet — wait for the aws.lambda span to arrive.
-                        self.held_logs.insert(request_id, logs);
+        } else {
+            // Flush all held logs immediately.
+            for (_, logs) in held {
+                for log in logs {
+                    if let Ok(s) = serde_json::to_string(&log) {
+                        self.ready_logs.push(s);
                     }
                 }
             }
-            None => {} // Should not happen; guard against misuse.
         }
     }
 
