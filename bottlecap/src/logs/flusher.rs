@@ -1,6 +1,5 @@
 use crate::FLUSH_RETRY_COUNT;
 use crate::config;
-use crate::http::get_client;
 use crate::logs::aggregator_service::AggregatorHandle;
 use dogstatsd::api_key::ApiKeyFactory;
 use futures::future::join_all;
@@ -36,8 +35,8 @@ impl Flusher {
         api_key_factory: Arc<ApiKeyFactory>,
         endpoint: String,
         config: Arc<config::Config>,
+        client: reqwest::Client,
     ) -> Self {
-        let client = get_client(&config);
         Flusher {
             client,
             endpoint,
@@ -199,6 +198,7 @@ impl LogsFlusher {
         api_key_factory: Arc<ApiKeyFactory>,
         aggregator_handle: AggregatorHandle,
         config: Arc<config::Config>,
+        client: reqwest::Client,
     ) -> Self {
         let mut flushers = Vec::new();
 
@@ -216,6 +216,7 @@ impl LogsFlusher {
             Arc::clone(&api_key_factory),
             endpoint,
             config.clone(),
+            client.clone(),
         ));
 
         // Create flushers for additional endpoints
@@ -227,6 +228,7 @@ impl LogsFlusher {
                 additional_api_key_factory,
                 endpoint_url,
                 config.clone(),
+                client.clone(),
             ));
         }
 

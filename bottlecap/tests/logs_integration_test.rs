@@ -70,7 +70,12 @@ async fn test_logs() {
         false,
     );
     let api_key_factory = Arc::new(ApiKeyFactory::new(dd_api_key));
-    let logs_flusher = LogsFlusher::new(api_key_factory, logs_aggr_handle, arc_conf.clone());
+    let client = datadog_fips::reqwest_adapter::create_reqwest_client_builder()
+        .expect("failed to create client builder")
+        .build()
+        .expect("failed to build client");
+    let logs_flusher =
+        LogsFlusher::new(api_key_factory, logs_aggr_handle, arc_conf.clone(), client);
 
     let telemetry_events: Vec<TelemetryEvent> = serde_json::from_str(
         r#"[{"time":"2022-10-21T14:05:03.165Z","type":"platform.start","record":{"requestId":"459921b5-681c-4a96-beb0-81e0aa586026","version":"$LATEST","tracing":{"spanId":"24cd7d670fa455f0","type":"X-Amzn-Trace-Id","value":"Root=1-6352a70e-1e2c502e358361800241fd45;Parent=35465b3a9e2f7c6a;Sampled=1"}}}]"#)

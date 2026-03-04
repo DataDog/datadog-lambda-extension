@@ -60,6 +60,7 @@ use bottlecap::{
         provider::Provider as TagProvider,
     },
     traces::{
+        http_client as trace_http_client,
         propagation::DatadogCompositePropagator,
         proxy_aggregator,
         proxy_flusher::Flusher as ProxyFlusher,
@@ -292,6 +293,11 @@ async fn extension_loop_active(
     let account_id = r.account_id.as_ref().unwrap_or(&"none".to_string()).clone();
     let tags_provider = setup_tag_provider(&Arc::clone(&aws_config), config, &account_id);
 
+    // Build one shared reqwest::Client for metrics, logs, and trace proxy flushing.
+    // reqwest::Client is Arc-based internally, so cloning just increments a refcount
+    // and shares the connection pool.
+    let shared_client = bottlecap::http::get_client(config);
+
     let (logs_agent_channel, logs_flusher, logs_agent_cancel_token, logs_aggregator_handle) =
         start_logs_agent(
             config,
@@ -299,10 +305,16 @@ async fn extension_loop_active(
             &tags_provider,
             event_bus_tx.clone(),
             aws_config.is_managed_instance_mode(),
+            &shared_client,
         );
 
-    let (metrics_flushers, metrics_aggregator_handle, dogstatsd_cancel_token) =
-        start_dogstatsd(tags_provider.clone(), Arc::clone(&api_key_factory), config).await;
+    let (metrics_flushers, metrics_aggregator_handle, dogstatsd_cancel_token) = start_dogstatsd(
+        tags_provider.clone(),
+        Arc::clone(&api_key_factory),
+        config,
+        &shared_client,
+    )
+    .await;
 
     let propagator = Arc::new(DatadogCompositePropagator::new(Arc::clone(config)));
     // Lifecycle Invocation Processor
@@ -345,6 +357,7 @@ async fn extension_loop_active(
         &tags_provider,
         invocation_processor_handle.clone(),
         appsec_processor.clone(),
+        &shared_client,
     );
 
     let api_runtime_proxy_shutdown_signal = start_api_runtime_proxy(
@@ -1020,6 +1033,7 @@ fn start_logs_agent(
     tags_provider: &Arc<TagProvider>,
     event_bus: Sender<Event>,
     is_managed_instance_mode: bool,
+    client: &Client,
 ) -> (
     Sender<TelemetryEvent>,
     LogsFlusher,
@@ -1048,7 +1062,12 @@ fn start_logs_agent(
         drop(agent);
     });
 
-    let flusher = LogsFlusher::new(api_key_factory, aggregator_handle.clone(), config.clone());
+    let flusher = LogsFlusher::new(
+        api_key_factory,
+        aggregator_handle.clone(),
+        config.clone(),
+        client.clone(),
+    );
     (tx, flusher, cancel_token, aggregator_handle)
 }
 
@@ -1059,6 +1078,7 @@ fn start_trace_agent(
     tags_provider: &Arc<TagProvider>,
     invocation_processor_handle: InvocationProcessorHandle,
     appsec_processor: Option<Arc<TokioMutex<AppSecProcessor>>>,
+    client: &Client,
 ) -> (
     Sender<SendDataBuilderInfo>,
     Arc<trace_flusher::TraceFlusher>,
@@ -1069,6 +1089,14 @@ fn start_trace_agent(
     StatsConcentratorHandle,
     TraceAggregatorHandle,
 ) {
+    // Build one shared hyper-based HTTP client for trace and stats flushing.
+    // This client type is required by libdd_trace_utils for SendData::send().
+    let trace_http_client = trace_http_client::create_client(
+        config.proxy_https.as_ref(),
+        config.tls_cert_file.as_ref(),
+    )
+    .expect("Failed to create trace HTTP client");
+
     // Stats
     let (stats_concentrator_service, stats_concentrator_handle) =
         StatsConcentratorService::new(Arc::clone(config));
@@ -1080,6 +1108,7 @@ fn start_trace_agent(
         api_key_factory.clone(),
         stats_aggregator.clone(),
         Arc::clone(config),
+        trace_http_client.clone(),
     ));
 
     let stats_processor = Arc::new(stats_processor::ServerlessStatsProcessor {});
@@ -1092,6 +1121,7 @@ fn start_trace_agent(
         trace_aggregator_handle.clone(),
         config.clone(),
         api_key_factory.clone(),
+        trace_http_client,
     ));
 
     let obfuscation_config = obfuscation_config::ObfuscationConfig {
@@ -1117,6 +1147,7 @@ fn start_trace_agent(
         Arc::clone(&proxy_aggregator),
         Arc::clone(tags_provider),
         Arc::clone(config),
+        client.clone(),
     ));
 
     let trace_agent = trace_agent::TraceAgent::new(
@@ -1157,6 +1188,7 @@ async fn start_dogstatsd(
     tags_provider: Arc<TagProvider>,
     api_key_factory: Arc<ApiKeyFactory>,
     config: &Arc<Config>,
+    client: &Client,
 ) -> (
     Arc<Vec<MetricsFlusher>>,
     MetricsAggregatorHandle,
@@ -1180,12 +1212,11 @@ async fn start_dogstatsd(
     });
 
     // Get flushers with aggregator handle
-    let metrics_client = bottlecap::http::get_client(config);
     let flushers = Arc::new(start_metrics_flushers(
         Arc::clone(&api_key_factory),
         &aggregator_handle,
         config,
-        &metrics_client,
+        client,
     ));
 
     // Create Dogstatsd server
