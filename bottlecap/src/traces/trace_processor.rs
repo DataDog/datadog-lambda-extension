@@ -34,6 +34,8 @@ use tracing::{debug, error};
 use crate::traces::stats_generator::StatsGenerator;
 use crate::traces::trace_aggregator::{OwnedTracerHeaderTags, SendDataBuilderInfo};
 
+const SAMPLING_PRIORITY_KEY: &str = "_sampling_priority_v1";
+
 #[derive(Clone)]
 #[allow(clippy::module_name_repetitions)]
 pub struct ServerlessTraceProcessor {
@@ -424,7 +426,12 @@ impl SendingTraceProcessor {
         body_size: usize,
         span_pointers: Option<Vec<SpanPointer>>,
     ) -> Result<(), SendError<SendDataBuilderInfo>> {
+        // Convert to owned upfront so header_tags can be reconstructed multiple times
+        // if compute_trace_stats_on_extension requires two calls to process_traces.
+        let owned_header_tags = OwnedTracerHeaderTags::from(header_tags);
+
         traces = if let Some(appsec) = &self.appsec {
+            let header_tags = owned_header_tags.to_tracer_header_tags();
             let mut appsec = appsec.lock().await;
             traces.into_iter().filter_map(|mut trace| {
                 let Some(span) = AppSecProcessor::service_entry_span_mut(&mut trace) else {
@@ -466,10 +473,40 @@ impl SendingTraceProcessor {
             return Ok(());
         }
 
+        // When compute_trace_stats_on_extension is true, traces with sampling priority <= 0
+        // should be dropped (not sent to the backend) but still counted in trace stats.
+        if config.compute_trace_stats_on_extension {
+            let (traces_to_keep, traces_to_drop): (Vec<_>, Vec<_>) =
+                traces.into_iter().partition(|trace| !is_trace_sampled_out(trace));
+
+            // Compute stats for dropped traces without sending them to the backend.
+            if !traces_to_drop.is_empty() {
+                let (_, dropped_stats) = self.processor.process_traces(
+                    config.clone(),
+                    tags_provider.clone(),
+                    owned_header_tags.to_tracer_header_tags(),
+                    traces_to_drop,
+                    0,
+                    span_pointers.clone(),
+                );
+                // This needs to be after process_traces() because process_traces()
+                // performs obfuscation, and we need to compute stats on the obfuscated traces.
+                if let Err(err) = self.stats_generator.send(&dropped_stats) {
+                    error!("TRACE_PROCESSOR | Error sending dropped trace stats to the stats concentrator: {err}");
+                }
+            }
+
+            traces = traces_to_keep;
+            if traces.is_empty() {
+                debug!("TRACE_PROCESSOR | All traces were sampled out, skipping backend send.");
+                return Ok(());
+            }
+        }
+
         let (payload, processed_traces) = self.processor.process_traces(
             config.clone(),
             tags_provider,
-            header_tags,
+            owned_header_tags.to_tracer_header_tags(),
             traces,
             body_size,
             span_pointers,
@@ -487,6 +524,22 @@ impl SendingTraceProcessor {
         }
         Ok(())
     }
+}
+
+/// Returns true if the trace should be dropped based on its sampling priority.
+/// A trace is sampled out when the root span's `_sampling_priority_v1` metric is <= 0.
+/// If the sampling priority is absent, the trace is kept.
+fn is_trace_sampled_out(trace: &[pb::Span]) -> bool {
+    let root_span = trace
+        .iter()
+        .find(|s| s.parent_id == 0)
+        .or_else(|| trace.first());
+    if let Some(span) = root_span {
+        if let Some(&priority) = span.metrics.get(SAMPLING_PRIORITY_KEY) {
+            return priority <= 0.0;
+        }
+    }
+    false
 }
 
 #[cfg(test)]
@@ -1048,5 +1101,55 @@ mod tests {
             2,
             "Trace should be kept when no filter tags are set."
         );
+    }
+
+    #[test]
+    fn test_is_trace_sampled_out() {
+        let make_span = |parent_id: u64, priority: Option<f64>| -> pb::Span {
+            let mut metrics = HashMap::new();
+            if let Some(p) = priority {
+                metrics.insert(SAMPLING_PRIORITY_KEY.to_string(), p);
+            }
+            pb::Span {
+                trace_id: 1,
+                span_id: 1,
+                parent_id,
+                metrics,
+                ..Default::default()
+            }
+        };
+
+        // Root span (parent_id == 0) with priority -1 (USER_DROP) → sampled out
+        let trace = vec![make_span(0, Some(-1.0))];
+        assert!(is_trace_sampled_out(&trace));
+
+        // Root span with priority 0 (AUTO_DROP) → sampled out
+        let trace = vec![make_span(0, Some(0.0))];
+        assert!(is_trace_sampled_out(&trace));
+
+        // Root span with priority 1 (AUTO_KEEP) → kept
+        let trace = vec![make_span(0, Some(1.0))];
+        assert!(!is_trace_sampled_out(&trace));
+
+        // Root span with priority 2 (USER_KEEP) → kept
+        let trace = vec![make_span(0, Some(2.0))];
+        assert!(!is_trace_sampled_out(&trace));
+
+        // No sampling priority tag → kept (default)
+        let trace = vec![make_span(0, None)];
+        assert!(!is_trace_sampled_out(&trace));
+
+        // Empty trace → kept
+        assert!(!is_trace_sampled_out(&[]));
+
+        // No root span (no parent_id == 0); falls back to first span with priority 0 → sampled out
+        let trace = vec![make_span(99, Some(0.0)), make_span(99, Some(1.0))];
+        assert!(is_trace_sampled_out(&trace));
+
+        // Root span is not first; priority on root span wins
+        let root = make_span(0, Some(-1.0));
+        let child = make_span(1, Some(1.0));
+        let trace = vec![child, root];
+        assert!(is_trace_sampled_out(&trace));
     }
 }
