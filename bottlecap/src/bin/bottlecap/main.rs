@@ -80,8 +80,9 @@ use bottlecap::{
 use datadog_fips::reqwest_adapter::create_reqwest_client_builder;
 use decrypt::resolve_secrets;
 use dogstatsd::{
-    aggregator_service::AggregatorHandle as MetricsAggregatorHandle,
-    aggregator_service::AggregatorService as MetricsAggregatorService,
+    aggregator::{
+        AggregatorHandle as MetricsAggregatorHandle, AggregatorService as MetricsAggregatorService,
+    },
     api_key::ApiKeyFactory,
     constants::CONTEXTS,
     datadog::{
@@ -95,7 +96,7 @@ use dogstatsd::{
 use libdd_trace_obfuscation::obfuscation_config;
 use reqwest::Client;
 use std::{collections::hash_map, env, path::Path, str::FromStr, sync::Arc};
-use tokio::time::{Duration, Instant};
+use tokio::time::Instant;
 use tokio::{sync::Mutex as TokioMutex, sync::mpsc::Sender};
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, warn};
@@ -1179,10 +1180,12 @@ async fn start_dogstatsd(
     });
 
     // Get flushers with aggregator handle
+    let metrics_client = bottlecap::http::get_client(config);
     let flushers = Arc::new(start_metrics_flushers(
         Arc::clone(&api_key_factory),
         &aggregator_handle,
         config,
+        &metrics_client,
     ));
 
     // Create Dogstatsd server
@@ -1214,6 +1217,7 @@ fn start_metrics_flushers(
     api_key_factory: Arc<ApiKeyFactory>,
     metrics_aggr_handle: &MetricsAggregatorHandle,
     config: &Arc<Config>,
+    client: &Client,
 ) -> Vec<MetricsFlusher> {
     let mut flushers = Vec::new();
 
@@ -1237,9 +1241,7 @@ fn start_metrics_flushers(
         api_key_factory,
         aggregator_handle: metrics_aggr_handle.clone(),
         metrics_intake_url_prefix: metrics_intake_url.expect("can't parse site or override"),
-        https_proxy: config.proxy_https.clone(),
-        ca_cert_path: config.tls_cert_file.clone(),
-        timeout: Duration::from_secs(config.flush_timeout),
+        client: client.clone(),
         retry_strategy: DsdRetryStrategy::Immediate(3),
         compression_level: config.metrics_config_compression_level,
     };
@@ -1267,9 +1269,7 @@ fn start_metrics_flushers(
                 api_key_factory: additional_api_key_factory,
                 aggregator_handle: metrics_aggr_handle.clone(),
                 metrics_intake_url_prefix: metrics_intake_url.clone(),
-                https_proxy: config.proxy_https.clone(),
-                ca_cert_path: config.tls_cert_file.clone(),
-                timeout: Duration::from_secs(config.flush_timeout),
+                client: client.clone(),
                 retry_strategy: DsdRetryStrategy::Immediate(3),
                 compression_level: config.metrics_config_compression_level,
             };
