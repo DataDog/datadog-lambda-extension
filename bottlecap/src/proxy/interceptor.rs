@@ -436,7 +436,7 @@ mod tests {
     use std::{collections::HashMap, time::Duration};
     use tokio::{sync::Mutex as TokioMutex, time::Instant};
 
-    use dogstatsd::{aggregator_service::AggregatorService, metric::EMPTY_TAGS};
+    use dogstatsd::{aggregator::AggregatorService, metric::EMPTY_TAGS};
     use http_body_util::Full;
     use hyper::{server::conn::http1, service::service_fn};
     use hyper_util::rt::TokioIo;
