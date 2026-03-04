@@ -1,6 +1,6 @@
 use bottlecap::config::Config;
 use bottlecap::metrics::enhanced::lambda::Lambda as enhanced_metrics;
-use dogstatsd::aggregator_service::AggregatorService;
+use dogstatsd::aggregator::AggregatorService;
 use dogstatsd::api_key::ApiKeyFactory;
 use dogstatsd::datadog::{DdDdUrl, MetricsIntakeUrlPrefix, MetricsIntakeUrlPrefixOverride};
 use dogstatsd::flusher::Flusher as MetricsFlusher;
@@ -51,9 +51,9 @@ async fn test_enhanced_metrics() {
         aggregator_handle: metrics_aggr_handle.clone(),
         metrics_intake_url_prefix: MetricsIntakeUrlPrefix::new(None, Some(metrics_site_override))
             .expect("can't parse metrics intake URL from site"),
-        https_proxy: None,
-        ca_cert_path: None,
-        timeout: std::time::Duration::from_secs(5),
+        client: reqwest::Client::builder()
+            .build()
+            .expect("failed to build client"),
         retry_strategy: dogstatsd::datadog::RetryStrategy::Immediate(1),
         compression_level: 6,
     };

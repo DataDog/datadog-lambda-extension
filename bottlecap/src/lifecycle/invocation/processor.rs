@@ -96,7 +96,7 @@ impl Processor {
         tags_provider: Arc<provider::Provider>,
         config: Arc<config::Config>,
         aws_config: Arc<AwsConfig>,
-        metrics_aggregator: dogstatsd::aggregator_service::AggregatorHandle,
+        metrics_aggregator: dogstatsd::aggregator::AggregatorHandle,
         propagator: Arc<DatadogCompositePropagator>,
     ) -> Self {
         let resource = tags_provider
@@ -1346,7 +1346,7 @@ mod tests {
     use crate::traces::stats_generator::StatsGenerator;
     use crate::traces::trace_processor;
     use base64::{Engine, engine::general_purpose::STANDARD};
-    use dogstatsd::aggregator_service::AggregatorService;
+    use dogstatsd::aggregator::AggregatorService;
     use dogstatsd::metric::EMPTY_TAGS;
     use serde_json::json;
 

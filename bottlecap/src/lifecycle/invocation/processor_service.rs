@@ -1,7 +1,7 @@
 use std::{collections::HashMap, sync::Arc};
 
 use chrono::{DateTime, Utc};
-use dogstatsd::aggregator_service::AggregatorHandle;
+use dogstatsd::aggregator::AggregatorHandle;
 use libdd_trace_protobuf::pb::Span;
 use serde_json::Value;
 use thiserror::Error;
