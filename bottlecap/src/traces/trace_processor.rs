@@ -476,8 +476,9 @@ impl SendingTraceProcessor {
         // When compute_trace_stats_on_extension is true, traces with sampling priority <= 0
         // should be dropped (not sent to the backend) but still counted in trace stats.
         if config.compute_trace_stats_on_extension {
-            let (traces_to_keep, traces_to_drop): (Vec<_>, Vec<_>) =
-                traces.into_iter().partition(|trace| !is_trace_sampled_out(trace));
+            let (traces_to_keep, traces_to_drop): (Vec<_>, Vec<_>) = traces
+                .into_iter()
+                .partition(|trace| !is_trace_sampled_out(trace));
 
             // Compute stats for dropped traces without sending them to the backend.
             if !traces_to_drop.is_empty() {
@@ -492,7 +493,9 @@ impl SendingTraceProcessor {
                 // This needs to be after process_traces() because process_traces()
                 // performs obfuscation, and we need to compute stats on the obfuscated traces.
                 if let Err(err) = self.stats_generator.send(&dropped_stats) {
-                    error!("TRACE_PROCESSOR | Error sending dropped trace stats to the stats concentrator: {err}");
+                    error!(
+                        "TRACE_PROCESSOR | Error sending dropped trace stats to the stats concentrator: {err}"
+                    );
                 }
             }
 
@@ -534,10 +537,10 @@ fn is_trace_sampled_out(trace: &[pb::Span]) -> bool {
         .iter()
         .find(|s| s.parent_id == 0)
         .or_else(|| trace.first());
-    if let Some(span) = root_span {
-        if let Some(&priority) = span.metrics.get(SAMPLING_PRIORITY_KEY) {
-            return priority <= 0.0;
-        }
+    if let Some(span) = root_span
+        && let Some(&priority) = span.metrics.get(SAMPLING_PRIORITY_KEY)
+    {
+        return priority <= 0.0;
     }
     false
 }
