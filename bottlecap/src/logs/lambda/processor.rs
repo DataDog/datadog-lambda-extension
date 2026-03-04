@@ -501,8 +501,8 @@ impl LambdaProcessor {
     /// already `Some(true)`, drains any held logs for that `request_id`.
     pub fn insert_to_durable_context_map(
         &mut self,
-        request_id: &str, // key
-        execution_id: &str, // value
+        request_id: &str,     // key
+        execution_id: &str,   // value
         execution_name: &str, // value
     ) {
         if self.durable_context_map.contains_key(request_id) {
@@ -562,8 +562,8 @@ impl LambdaProcessor {
                     .get(&request_id)
                     .map(|(id, name)| (id.clone(), name.clone()));
                 if let Some((exec_id, exec_name)) = durable_ctx {
-                    // If the request_id is in the durable context map, set durable execution id                                                                                                   
-                    // and execution name, and add logs to ready_logs. 
+                    // If the request_id is in the durable context map, set durable execution id
+                    // and execution name, and add logs to ready_logs.
                     for mut log in logs {
                         log.message.lambda.durable_execution_id = Some(exec_id.clone());
                         log.message.lambda.durable_execution_name = Some(exec_name.clone());
