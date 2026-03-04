@@ -496,29 +496,30 @@ impl LambdaProcessor {
         }
     }
 
-    /// Records the durable execution context for a `request_id`, received from the `aws.lambda`
-    /// span. Evicts the oldest entry when the map is at capacity. If a new entry is added and
-    /// `is_durable_function` is already `Some(true)`, drains any held logs for that `request_id`.
-    pub fn update_durable_map(
+    /// Inserts the durable execution context for a `request_id`, received from the `aws.lambda`
+    /// span. Evicts the oldest entry when the map is at capacity. If `is_durable_function` is
+    /// already `Some(true)`, drains any held logs for that `request_id`.
+    pub fn insert_to_durable_context_map(
         &mut self,
         request_id: &str,
         execution_id: &str,
         execution_name: &str,
     ) {
-        let is_new = !self.durable_context_map.contains_key(request_id);
-        if is_new {
-            if self.durable_context_order.len() >= DURABLE_CONTEXT_MAP_CAPACITY
-                && let Some(oldest) = self.durable_context_order.pop_front()
-            {
-                self.durable_context_map.remove(&oldest);
-            }
-            self.durable_context_order.push_back(request_id.to_string());
+        if self.durable_context_map.contains_key(request_id) {
+            error!("LOGS | insert_to_durable_context_map: request_id={request_id} already in map");
+            return;
         }
+        if self.durable_context_order.len() >= DURABLE_CONTEXT_MAP_CAPACITY
+            && let Some(oldest) = self.durable_context_order.pop_front()
+        {
+            self.durable_context_map.remove(&oldest);
+        }
+        self.durable_context_order.push_back(request_id.to_string());
         self.durable_context_map.insert(
             request_id.to_string(),
             (execution_id.to_string(), execution_name.to_string()),
         );
-        if is_new && self.is_durable_function == Some(true) {
+        if self.is_durable_function == Some(true) {
             self.drain_held_for_request_id(request_id);
         }
     }
@@ -629,7 +630,7 @@ impl LambdaProcessor {
                 }
             }
             Some(true) => {
-                // Durable context is populated by span processing (update_durable_map).
+                // Durable context is populated by span processing (insert_to_durable_context_map).
                 // Mark this log as ready to be aggregated if its request_id already has context; otherwise hold.
                 let durable_ctx = log
                     .message

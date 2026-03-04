@@ -63,7 +63,7 @@ impl LogsAgent {
                     self.processor.process(event, &self.aggregator_handle).await;
                 }
                 Some((request_id, execution_id, execution_name)) = self.durable_context_rx.recv() => {
-                    self.processor.update_durable_map(&request_id, &execution_id, &execution_name);
+                    self.processor.insert_to_durable_map(&request_id, &execution_id, &execution_name);
                     let ready_logs = self.processor.take_ready_logs();
                     if !ready_logs.is_empty() {
                         let _ = self.aggregator_handle.insert_batch(ready_logs);

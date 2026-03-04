@@ -42,7 +42,7 @@ impl LogsProcessor {
         }
     }
 
-    pub fn update_durable_map(
+    pub fn insert_to_durable_map(
         &mut self,
         request_id: &str,
         execution_id: &str,
@@ -50,7 +50,7 @@ impl LogsProcessor {
     ) {
         match self {
             LogsProcessor::Lambda(p) => {
-                p.update_durable_map(request_id, execution_id, execution_name);
+                p.insert_to_durable_map(request_id, execution_id, execution_name);
             }
         }
     }
