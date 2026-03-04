@@ -58,7 +58,7 @@ pub struct LambdaProcessor {
     durable_context_order: VecDeque<String>,
 }
 
-const DURABLE_ID_MAP_CAPACITY: usize = 5;
+const DURABLE_CONTEXT_MAP_CAPACITY: usize = 5;
 
 const OOM_ERRORS: [&str; 7] = [
     "fatal error: runtime: out of memory",       // Go
@@ -126,8 +126,8 @@ impl LambdaProcessor {
             is_managed_instance_mode,
             is_durable_function: None,
             held_logs: HashMap::new(),
-            durable_context_map: HashMap::with_capacity(DURABLE_ID_MAP_CAPACITY),
-            durable_context_order: VecDeque::with_capacity(DURABLE_ID_MAP_CAPACITY),
+            durable_context_map: HashMap::with_capacity(DURABLE_CONTEXT_MAP_CAPACITY),
+            durable_context_order: VecDeque::with_capacity(DURABLE_CONTEXT_MAP_CAPACITY),
         }
     }
 
@@ -507,7 +507,7 @@ impl LambdaProcessor {
     ) {
         let is_new = !self.durable_context_map.contains_key(request_id);
         if is_new {
-            if self.durable_context_order.len() >= DURABLE_ID_MAP_CAPACITY
+            if self.durable_context_order.len() >= DURABLE_CONTEXT_MAP_CAPACITY
                 && let Some(oldest) = self.durable_context_order.pop_front()
             {
                 self.durable_context_map.remove(&oldest);
