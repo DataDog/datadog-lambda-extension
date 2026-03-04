@@ -40,7 +40,9 @@ pub struct LambdaProcessor {
     is_managed_instance_mode: bool,
     // Whether this is a Durable Function runtime.
     // None = not yet determined (hold all logs until known).
-    // Some(true) = durable function; apply durable ID filtering.
+    // Some(true) = durable function. Hold logs for a request_id until
+    // the durable execution id and execution name for this invocationare known.
+    // These two fields are extracted from the aws.lambda span sent by the tracer.
     // Some(false) = not a durable function; flush logs normally.
     is_durable_function: Option<bool>,
     // Logs held pending resolution, keyed by request_id.
@@ -51,9 +53,9 @@ pub struct LambdaProcessor {
     // the moment that context arrives.
     held_logs: HashMap<String, Vec<IntakeLog>>,
     // Maps request_id -> (durable_execution_id, durable_execution_name)
-    durable_id_map: HashMap<String, (String, String)>,
+    durable_context_map: HashMap<String, (String, String)>,
     // Insertion order for FIFO eviction when map reaches capacity
-    durable_id_order: VecDeque<String>,
+    durable_context_order: VecDeque<String>,
 }
 
 const DURABLE_ID_MAP_CAPACITY: usize = 5;
@@ -124,8 +126,8 @@ impl LambdaProcessor {
             is_managed_instance_mode,
             is_durable_function: None,
             held_logs: HashMap::new(),
-            durable_id_map: HashMap::with_capacity(DURABLE_ID_MAP_CAPACITY),
-            durable_id_order: VecDeque::with_capacity(DURABLE_ID_MAP_CAPACITY),
+            durable_context_map: HashMap::with_capacity(DURABLE_ID_MAP_CAPACITY),
+            durable_context_order: VecDeque::with_capacity(DURABLE_ID_MAP_CAPACITY),
         }
     }
 
@@ -503,16 +505,16 @@ impl LambdaProcessor {
         execution_id: &str,
         execution_name: &str,
     ) {
-        let is_new = !self.durable_id_map.contains_key(request_id);
+        let is_new = !self.durable_context_map.contains_key(request_id);
         if is_new {
-            if self.durable_id_order.len() >= DURABLE_ID_MAP_CAPACITY
-                && let Some(oldest) = self.durable_id_order.pop_front()
+            if self.durable_context_order.len() >= DURABLE_ID_MAP_CAPACITY
+                && let Some(oldest) = self.durable_context_order.pop_front()
             {
-                self.durable_id_map.remove(&oldest);
+                self.durable_context_map.remove(&oldest);
             }
-            self.durable_id_order.push_back(request_id.to_string());
+            self.durable_context_order.push_back(request_id.to_string());
         }
-        self.durable_id_map.insert(
+        self.durable_context_map.insert(
             request_id.to_string(),
             (execution_id.to_string(), execution_name.to_string()),
         );
@@ -532,10 +534,10 @@ impl LambdaProcessor {
             return;
         };
         let durable_ctx = self
-            .durable_id_map
+            .durable_context_map
             .get(request_id)
             .map(|(id, name)| (id.clone(), name.clone()));
-        // Borrow of durable_id_map is released here.
+        // Borrow of durable_context_map is released here.
         if let Some((exec_id, exec_name)) = durable_ctx {
             for mut log in held {
                 log.message.lambda.durable_execution_id = Some(exec_id.clone());
@@ -571,10 +573,10 @@ impl LambdaProcessor {
                 // Flush any held logs whose request_id is already in the map; keep the rest.
                 for (request_id, logs) in held {
                     let durable_ctx = self
-                        .durable_id_map
+                        .durable_context_map
                         .get(&request_id)
                         .map(|(id, name)| (id.clone(), name.clone()));
-                    // Borrow of durable_id_map released here.
+                    // Borrow of durable_context_map released here.
                     if let Some((exec_id, exec_name)) = durable_ctx {
                         for mut log in logs {
                             log.message.lambda.durable_execution_id = Some(exec_id.clone());
@@ -608,7 +610,7 @@ impl LambdaProcessor {
     /// - `None`        → stash in `held_logs[request_id]`; logs without a `request_id` are
     ///   flushed immediately since they cannot carry durable context.
     /// - `Some(false)` → serialize and push straight to `ready_logs`.
-    /// - `Some(true)`  → flush if this log's `request_id` is already in `durable_id_map`
+    /// - `Some(true)`  → flush if this log's `request_id` is already in `durable_context_map`
     ///   (context was populated by an `aws.lambda` span); otherwise stash in `held_logs`.
     fn queue_log_after_rules(&mut self, mut log: IntakeLog) {
         match self.is_durable_function {
@@ -639,7 +641,7 @@ impl LambdaProcessor {
                     .lambda
                     .request_id
                     .as_ref()
-                    .and_then(|rid| self.durable_id_map.get(rid))
+                    .and_then(|rid| self.durable_context_map.get(rid))
                     .map(|(id, name)| (id.clone(), name.clone()));
 
                 match durable_ctx {
