@@ -1094,6 +1094,7 @@ fn start_trace_agent(
     let trace_http_client = trace_http_client::create_client(
         config.proxy_https.as_ref(),
         config.tls_cert_file.as_ref(),
+        config.skip_ssl_validation,
     )
     .expect("Failed to create trace HTTP client");
 
