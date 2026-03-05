@@ -2,6 +2,7 @@
 import 'source-map-support/register';
 import * as cdk from 'aws-cdk-lib';
 import {Base} from '../lib/stacks/base';
+import {Durable} from '../lib/stacks/durable';
 import {Otlp} from '../lib/stacks/otlp';
 import {Snapstart} from '../lib/stacks/snapstart';
 import {LambdaManagedInstancesStack} from '../lib/stacks/lmi';
@@ -23,6 +24,9 @@ new CapacityProviderStack(app, `integ-default-capacity-provider`, {env});
 
 const stacks = [
     new Base(app, `integ-${identifier}-base`, {
+        env,
+    }),
+    new Durable(app, `integ-${identifier}-durable`, {
         env,
     }),
     new Otlp(app, `integ-${identifier}-otlp`, {
