@@ -23,10 +23,15 @@ ci image:
       changes:
         - .gitlab/Dockerfile
       when: on_success
+  id_tokens:
+    DDSIGN_ID_TOKEN:
+      aud: image-integrity
   variables:
     DOCKER_TARGET: ${DOCKER_TARGET_IMAGE}:${DOCKER_TARGET_VERSION}
   script:
-    - docker buildx build --platform linux/amd64,linux/arm64 --no-cache --pull --push --tag ${DOCKER_TARGET} -f .gitlab/Dockerfile .
+    - METADATA_FILE=$(mktemp)
+    - docker buildx build --platform linux/amd64,linux/arm64 --no-cache --pull --push --tag ${DOCKER_TARGET} --metadata-file ${METADATA_FILE} -f .gitlab/Dockerfile .
+    - ddsign sign ${DOCKER_TARGET} --docker-metadata-file ${METADATA_FILE}
 
 .go-cache: &go-cache
   key: datadog-lambda-extension-go-cache
