@@ -28,7 +28,8 @@ fn build_client(config: &Arc<config::Config>) -> Result<reqwest::Client, Box<dyn
         .timeout(Duration::from_secs(config.flush_timeout))
         .pool_idle_timeout(Some(Duration::from_secs(270)))
         // Enable TCP keepalive
-        .tcp_keepalive(Some(Duration::from_secs(120)));
+        .tcp_keepalive(Some(Duration::from_secs(120)))
+        .danger_accept_invalid_certs(config.skip_ssl_validation);
 
     // Determine if we should use HTTP/1 or HTTP/2
     let should_use_http1 = match &config.http_protocol {
