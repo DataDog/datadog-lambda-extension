@@ -80,6 +80,11 @@ pub struct EnvConfig {
     /// Example: `/opt/ca-cert.pem`
     #[serde(deserialize_with = "deserialize_optional_string")]
     pub tls_cert_file: Option<String>,
+    /// @env `DD_SKIP_SSL_VALIDATION`
+    ///
+    /// If set to true, the Agent will skip TLS certificate validation for outgoing connections.
+    #[serde(deserialize_with = "deserialize_optional_bool_from_anything")]
+    pub skip_ssl_validation: Option<bool>,
 
     // Metrics
     /// @env `DD_DD_URL`
@@ -497,6 +502,7 @@ fn merge_config(config: &mut Config, env_config: &EnvConfig) {
     merge_vec!(config, env_config, proxy_no_proxy);
     merge_option!(config, env_config, http_protocol);
     merge_option!(config, env_config, tls_cert_file);
+    merge_option_to_value!(config, env_config, skip_ssl_validation);
 
     // Endpoints
     merge_string!(config, env_config, dd_url);
@@ -733,6 +739,7 @@ mod tests {
             jail.set_env("DD_PROXY_NO_PROXY", "localhost,127.0.0.1");
             jail.set_env("DD_HTTP_PROTOCOL", "http1");
             jail.set_env("DD_TLS_CERT_FILE", "/opt/ca-cert.pem");
+            jail.set_env("DD_SKIP_SSL_VALIDATION", "true");
 
             // Metrics
             jail.set_env("DD_DD_URL", "https://metrics.datadoghq.com");
@@ -895,6 +902,7 @@ mod tests {
                 proxy_no_proxy: vec!["localhost".to_string(), "127.0.0.1".to_string()],
                 http_protocol: Some("http1".to_string()),
                 tls_cert_file: Some("/opt/ca-cert.pem".to_string()),
+                skip_ssl_validation: true,
                 dd_url: "https://metrics.datadoghq.com".to_string(),
                 url: "https://app.datadoghq.com".to_string(),
                 additional_endpoints: HashMap::from([
