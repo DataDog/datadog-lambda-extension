@@ -30,7 +30,9 @@ fn ensure_crypto_provider_initialized() {
         if let Err(_already_installed) =
             rustls::crypto::aws_lc_rs::default_provider().install_default()
         {
-            debug!("HTTP_CLIENT | Default CryptoProvider already installed, using existing provider");
+            debug!(
+                "HTTP_CLIENT | Default CryptoProvider already installed, using existing provider"
+            );
         }
     });
 
