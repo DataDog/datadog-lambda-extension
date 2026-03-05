@@ -53,8 +53,17 @@ jobs:
           ref: ${{ github.event.inputs.agentBranch }}
           path: datadog-agent
 
+      # Pin QEMU to a known-good version. The default (binfmt:latest) has broken
+      # arm64 emulation multiple times due to QEMU segfaults in libc-bin triggers:
+      #   - Feb 2025: qemu-v9.2.0 — PR #571 pinned, PR #581 reverted to :latest
+      #   - Mar 2026: qemu-v10.2.1 — binfmt:latest updated Feb 18, broke builds
+      # See .github/workflows/test-qemu-versions.yml to sweep versions before
+      # bumping this pin. A sweep pass is necessary but not sufficient — always
+      # verify with a real build, as some failures are load-dependent.
       - name: Set up QEMU
         uses: docker/setup-qemu-action@ce360397dd3f832beb865e1373c09c0e9f86d70a #v4.0.0
+        with:
+          image: tonistiigi/binfmt:qemu-v10.1.3
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
