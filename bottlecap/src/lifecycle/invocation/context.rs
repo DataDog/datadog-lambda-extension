@@ -9,7 +9,7 @@ use std::{
 
 use libdd_trace_protobuf::pb::Span;
 use serde_json::Value;
-use tracing::debug;
+use tracing::{debug, warn};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Context {
@@ -199,7 +199,7 @@ impl ContextBuffer {
         {
             return self.buffer.remove(i);
         }
-        debug!("Context for request_id: {:?} not found", request_id);
+        warn!("Context for request_id: {:?} not found", request_id);
 
         None
     }
