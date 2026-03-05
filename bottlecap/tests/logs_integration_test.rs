@@ -70,10 +70,7 @@ async fn test_logs() {
         false,
     );
     let api_key_factory = Arc::new(ApiKeyFactory::new(dd_api_key));
-    let client = datadog_fips::reqwest_adapter::create_reqwest_client_builder()
-        .expect("failed to create client builder")
-        .build()
-        .expect("failed to build client");
+    let client = bottlecap::http::get_client(&Arc::clone(&arc_conf));
     let logs_flusher =
         LogsFlusher::new(api_key_factory, logs_aggr_handle, arc_conf.clone(), client);
 
