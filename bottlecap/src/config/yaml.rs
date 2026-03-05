@@ -55,6 +55,8 @@ pub struct YamlConfig {
     pub http_protocol: Option<String>,
     #[serde(deserialize_with = "deserialize_optional_string")]
     pub tls_cert_file: Option<String>,
+    #[serde(deserialize_with = "deserialize_optional_bool_from_anything")]
+    pub skip_ssl_validation: Option<bool>,
 
     // Endpoints
     #[serde(deserialize_with = "deserialize_additional_endpoints")]
@@ -431,6 +433,7 @@ fn merge_config(config: &mut Config, yaml_config: &YamlConfig) {
     merge_option_to_value!(config, proxy_no_proxy, yaml_config.proxy, no_proxy);
     merge_option!(config, yaml_config, http_protocol);
     merge_option!(config, yaml_config, tls_cert_file);
+    merge_option_to_value!(config, yaml_config, skip_ssl_validation);
 
     // Endpoints
     merge_hashmap!(config, yaml_config, additional_endpoints);
@@ -767,6 +770,7 @@ proxy:
 dd_url: "https://metrics.datadoghq.com"
 http_protocol: "http1"
 tls_cert_file: "/opt/ca-cert.pem"
+skip_ssl_validation: true
 
 # Endpoints
 additional_endpoints:
@@ -907,6 +911,7 @@ api_security_sample_delay: 60 # Seconds
                 proxy_no_proxy: vec!["localhost".to_string(), "127.0.0.1".to_string()],
                 http_protocol: Some("http1".to_string()),
                 tls_cert_file: Some("/opt/ca-cert.pem".to_string()),
+                skip_ssl_validation: true,
                 dd_url: "https://metrics.datadoghq.com".to_string(),
                 url: String::new(), // doesnt exist in yaml
                 additional_endpoints: HashMap::from([
