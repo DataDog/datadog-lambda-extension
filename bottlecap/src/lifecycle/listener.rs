@@ -281,6 +281,8 @@ mod tests {
     use http_body_util::BodyExt;
     use tower::ServiceExt;
 
+    use crate::http::extract_request_body;
+
     /// Builds a minimal router that applies only the body limit layer.
     /// The handler reads the full body (via the `Bytes` extractor), which
     /// is what triggers `DefaultBodyLimit` enforcement.
@@ -396,6 +398,49 @@ mod tests {
             result,
             Some("lwa-proxy-request-id".to_string()),
             "Should extract request_id from LWA proxy header"
+        );
+    }
+
+    /// Shows that `extract_request_body` fails on an oversized payload when
+    /// behind `DefaultBodyLimit`. In `handle_end_invocation`, this failure
+    /// causes the spawned task to early-return, silently skipping
+    /// `universal_instrumentation_end` (trace context, span finalization,
+    /// and status code extraction are all dropped).
+    #[tokio::test]
+    async fn test_extract_request_body_fails_on_oversized_payload() {
+        // Build a router whose handler calls extract_request_body — the
+        // same code path used inside handle_end_invocation's spawned task.
+        async fn handler(request: axum::extract::Request) -> StatusCode {
+            match extract_request_body(request).await {
+                Ok(_) => StatusCode::OK,
+                Err(_) => StatusCode::INTERNAL_SERVER_ERROR,
+            }
+        }
+
+        let router = Router::new()
+            .route(END_INVOCATION_PATH, post(handler))
+            .layer(DefaultBodyLimit::max(LAMBDA_INVOCATION_MAX_PAYLOAD));
+
+        // 6 MB + 1 byte: exceeds the DefaultBodyLimit
+        let payload = vec![b'x'; LAMBDA_INVOCATION_MAX_PAYLOAD + 1];
+        let req = Request::builder()
+            .method("POST")
+            .uri(END_INVOCATION_PATH)
+            .header("Content-Type", "application/json")
+            .body(Body::from(payload))
+            .expect("failed to build request");
+
+        let response = router.oneshot(req).await.expect("request failed");
+
+        // BUG: extract_request_body fails with "length limit exceeded",
+        // which in handle_end_invocation causes the spawned task to
+        // early-return — universal_instrumentation_end is never called.
+        assert_eq!(
+            response.status(),
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "extract_request_body should fail on oversized payload, \
+             proving the spawned task in handle_end_invocation would \
+             early-return and skip processing"
         );
     }
 }
