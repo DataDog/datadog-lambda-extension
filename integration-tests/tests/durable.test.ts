@@ -95,7 +95,7 @@ describe('Durable Function Log Tests', () => {
     });
 
     it('logs arriving before the aws.lambda span should be held and released with durable execution context', () => {
-      // On cold start, function logs arrive before the tracer flushes the aws.lambda span.
+      // On cold start, function logs likely arrive before the tracer flushes the aws.lambda span.
       // The extension stashes these logs in held_logs[request_id] (because is_durable_function
       // is Some(true) and the request_id is not yet in durable_context_map). Once the span
       // arrives and context is inserted, drain_held_for_request_id decorates and releases them.
