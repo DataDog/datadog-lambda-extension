@@ -21,6 +21,8 @@ pub struct MSKRecord {
     pub topic: String,
     pub partition: i32,
     pub timestamp: f64,
+    #[serde(default)]
+    pub headers: Vec<HashMap<String, Vec<u8>>>,
 }
 
 impl Trigger for MSKEvent {
@@ -105,7 +107,17 @@ impl Trigger for MSKEvent {
     }
 
     fn get_carrier(&self) -> HashMap<String, String> {
-        HashMap::new()
+        let mut carrier = HashMap::new();
+        if let Some(record) = self.records.values().find_map(|arr| arr.first()) {
+            for header_map in &record.headers {
+                for (key, value_bytes) in header_map {
+                    if let Ok(value_str) = String::from_utf8(value_bytes.clone()) {
+                        carrier.insert(key.to_lowercase(), value_str);
+                    }
+                }
+            }
+        }
+        carrier
     }
 
     fn is_async(&self) -> bool {
@@ -142,6 +154,7 @@ mod tests {
             topic: String::from("topic1"),
             partition: 0,
             timestamp: 1_745_846_213_022f64,
+            headers: vec![],
         };
         let mut expected_records = HashMap::new();
         expected_records.insert(String::from("topic1"), vec![record]);
@@ -333,6 +346,38 @@ mod tests {
                 false // aws_service_representation_enabled = false
             ),
             "msk" // fallback value
+        );
+    }
+
+    #[test]
+    fn test_new_with_headers() {
+        let json = read_json_file("msk_event_with_headers.json");
+        let payload = serde_json::from_str(&json).expect("Failed to deserialize into Value");
+        let result = MSKEvent::new(payload).expect("Failed to deserialize into MSKEvent");
+
+        let record = result.records.values().find_map(|arr| arr.first()).unwrap();
+        assert_eq!(record.topic, "topic1");
+        assert_eq!(record.headers.len(), 3);
+    }
+
+    #[test]
+    fn test_get_carrier_with_headers() {
+        let json = read_json_file("msk_event_with_headers.json");
+        let payload = serde_json::from_str(&json).expect("Failed to deserialize into Value");
+        let event = MSKEvent::new(payload).expect("Failed to deserialize MSKEvent");
+        let carrier = event.get_carrier();
+
+        assert_eq!(
+            carrier.get("x-datadog-trace-id").map(String::as_str),
+            Some("36979754430890456950")
+        );
+        assert_eq!(
+            carrier.get("x-datadog-parent-id").map(String::as_str),
+            Some("7431398482019833808")
+        );
+        assert_eq!(
+            carrier.get("x-datadog-sampling-priority").map(String::as_str),
+            Some("1")
         );
     }
 }
