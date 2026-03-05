@@ -376,8 +376,8 @@ impl TraceProcessor for ServerlessTraceProcessor {
             }
         };
 
-        // When computing stats on extension, remove sampled-out chunks from the backend
-        // payload. Sampled-out chunks are preserved in payloads_for_stats above so their
+        // Remove sampled-out chunks so they won't be sent to Datadog.
+        // Sampled-out chunks are preserved in payloads_for_stats above so their
         // stats are still counted. CHUNK_PRIORITY_NOT_SET (-128) means no explicit priority
         // was set and the trace is kept; valid drop priorities are -1 (USER_DROP) and 0
         // (AUTO_DROP).
@@ -498,9 +498,8 @@ impl SendingTraceProcessor {
             span_pointers,
         );
 
-        // Compute stats for ALL traces (including sampled-out ones). process_traces()
-        // handles obfuscation and filters sampled-out chunks from the backend payload
-        // when compute_trace_stats_on_extension is true, so stats must come first here.
+        // This needs to be after process_traces() because process_traces()
+        // performs obfuscation, and we need to compute stats on the obfuscated traces.
         if config.compute_trace_stats_on_extension
             && let Err(err) = self.stats_generator.send(&processed_traces)
         {
