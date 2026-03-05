@@ -385,9 +385,8 @@ impl TraceProcessor for ServerlessTraceProcessor {
             && let TracerPayloadCollection::V07(ref mut tracer_payloads) = payload
         {
             for tp in tracer_payloads.iter_mut() {
-                tp.chunks.retain(|chunk| {
-                    chunk.priority > 0 || chunk.priority == CHUNK_PRIORITY_NOT_SET
-                });
+                tp.chunks
+                    .retain(|chunk| chunk.priority > 0 || chunk.priority == CHUNK_PRIORITY_NOT_SET);
             }
             tracer_payloads.retain(|tp| !tp.chunks.is_empty());
             if tracer_payloads.is_empty() {
@@ -408,7 +407,11 @@ impl TraceProcessor for ServerlessTraceProcessor {
             ));
 
         (
-            Some(SendDataBuilderInfo::new(builder, body_size, owned_header_tags)),
+            Some(SendDataBuilderInfo::new(
+                builder,
+                body_size,
+                owned_header_tags,
+            )),
             payloads_for_stats,
         )
     }
@@ -514,7 +517,6 @@ impl SendingTraceProcessor {
         Ok(())
     }
 }
-
 
 #[cfg(test)]
 mod tests {
@@ -1226,15 +1228,15 @@ mod tests {
             }
         };
 
-        let traces = vec![
-            vec![make_dropped_span(1)],
-            vec![make_dropped_span(2)],
-        ];
+        let traces = vec![vec![make_dropped_span(1)], vec![make_dropped_span(2)]];
 
         let (payload, stats_collection) =
             processor.process_traces(config, tags_provider, header_tags, traces, 0, None);
 
-        assert!(payload.is_none(), "backend payload must be None when all traces are sampled out");
+        assert!(
+            payload.is_none(),
+            "backend payload must be None when all traces are sampled out"
+        );
 
         // Stats collection must still include both traces
         let TracerPayloadCollection::V07(ref stats_payloads) = stats_collection else {
@@ -1245,6 +1247,9 @@ mod tests {
             .flat_map(|tp| tp.chunks.iter())
             .map(|c| c.spans.len())
             .sum();
-        assert_eq!(stats_span_count, 2, "stats must include all traces even when all are sampled out");
+        assert_eq!(
+            stats_span_count, 2,
+            "stats must include all traces even when all are sampled out"
+        );
     }
 }
