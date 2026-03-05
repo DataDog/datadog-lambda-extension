@@ -391,7 +391,6 @@ impl TraceProcessor for ServerlessTraceProcessor {
             }
             tracer_payloads.retain(|tp| !tp.chunks.is_empty());
             if tracer_payloads.is_empty() {
-                debug!("TRACE_PROCESSOR | All traces were sampled out, skipping backend send.");
                 return (None, payloads_for_stats);
             }
         }
