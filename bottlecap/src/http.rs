@@ -48,6 +48,13 @@ fn build_client(config: &Arc<config::Config>) -> Result<reqwest::Client, Box<dyn
             .http2_keep_alive_timeout(Duration::from_secs(1000));
     }
 
+    if config.skip_ssl_validation && config.tls_cert_file.is_some() {
+        debug!(
+            "HTTP | skip_ssl_validation=true overrides tls_cert_file={:?}, custom certificate will be ignored",
+            config.tls_cert_file
+        );
+    }
+
     // Load custom TLS certificate if configured
     if let Some(cert_path) = &config.tls_cert_file {
         match load_custom_cert(cert_path) {

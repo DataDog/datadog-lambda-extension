@@ -27,9 +27,11 @@ pub type HttpClient =
 fn ensure_crypto_provider_initialized() {
     static INIT_CRYPTO_PROVIDER: LazyLock<()> = LazyLock::new(|| {
         #[cfg(unix)]
-        rustls::crypto::aws_lc_rs::default_provider()
-            .install_default()
-            .expect("Failed to install default CryptoProvider");
+        if let Err(_already_installed) =
+            rustls::crypto::aws_lc_rs::default_provider().install_default()
+        {
+            debug!("HTTP_CLIENT | Default CryptoProvider already installed, using existing provider");
+        }
     });
 
     let () = &*INIT_CRYPTO_PROVIDER;
@@ -72,6 +74,8 @@ impl rustls::client::danger::ServerCertVerifier for NoVerifier {
     }
 
     fn supported_verify_schemes(&self) -> Vec<rustls::SignatureScheme> {
+        // Safe to unwrap_or_default: the provider is always initialized via
+        // ensure_crypto_provider_initialized() before NoVerifier is used.
         rustls::crypto::CryptoProvider::get_default()
             .map(|p| p.signature_verification_algorithms.supported_schemes())
             .unwrap_or_default()
@@ -101,6 +105,13 @@ pub fn create_client(
     tls_cert_file: Option<&String>,
     skip_ssl_validation: bool,
 ) -> Result<HttpClient, Box<dyn Error>> {
+    if skip_ssl_validation && tls_cert_file.is_some() {
+        debug!(
+            "HTTP_CLIENT | skip_ssl_validation=true overrides tls_cert_file={:?}, custom certificate will be ignored",
+            tls_cert_file
+        );
+    }
+
     // Create the base connector with optional custom TLS config
     let connector = if skip_ssl_validation {
         ensure_crypto_provider_initialized();
