@@ -32,7 +32,7 @@ use std::sync::{Arc, LazyLock};
 use tracing::debug;
 
 use crate::config::Config;
-use crate::traces::propagation::text_map_propagator::DATADOG_HIGHER_ORDER_TRACE_ID_BITS_KEY;
+use datadog_opentelemetry::propagation::datadog::DATADOG_HIGHER_ORDER_TRACE_ID_BITS_KEY;
 
 // Constants for Datadog namespace keys
 pub const KEY_DATADOG_SERVICE: &str = "datadog.service";
