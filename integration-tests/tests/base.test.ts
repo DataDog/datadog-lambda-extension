@@ -1,8 +1,11 @@
 import { invokeLambdaAndGetDatadogData, LambdaInvocationDatadogData } from './utils/util';
+import { invokeLambda, LambdaInvocationResult } from './utils/lambda';
+import { getTraces } from './utils/datadog';
 import { getIdentifier } from '../config';
 
 describe('Base Integration Tests', () => {
   const results: Record<string, LambdaInvocationDatadogData> = {};
+  const secondInvokeResults: Record<string, LambdaInvocationDatadogData> = {};
 
   beforeAll(async () => {
     const identifier = getIdentifier();
@@ -13,24 +16,68 @@ describe('Base Integration Tests', () => {
       dotnet: `integ-${identifier}-base-dotnet-lambda`,
     };
 
-    console.log('Invoking all base Lambda functions in parallel...');
+    // Helper to invoke twice rapidly (cold start + warm start 10ms later) then fetch traces
+    async function invokeWithRapidSecondCall(functionName: string): Promise<{
+      first: LambdaInvocationDatadogData;
+      second: LambdaInvocationDatadogData;
+    }> {
+      // First invocation (cold start)
+      const firstResult = await invokeLambda(functionName, {}, true);
 
-    // Invoke all Lambdas in parallel
+      // Wait 10ms then invoke again (warm start) - SVLS-8659 regression test
+      await new Promise(resolve => setTimeout(resolve, 10));
+      const secondResult = await invokeLambda(functionName, {}, false);
+
+      // Wait for Datadog to index
+      console.log(`Waiting 60s for Datadog to index ${functionName}...`);
+      await new Promise(resolve => setTimeout(resolve, 60000));
+
+      // Fetch traces for both invocations
+      const baseFunctionName = functionName.split(':')[0];
+      const [firstTraces, secondTraces] = await Promise.all([
+        getTraces(baseFunctionName, firstResult.requestId),
+        getTraces(baseFunctionName, secondResult.requestId),
+      ]);
+
+      return {
+        first: {
+          requestId: firstResult.requestId,
+          statusCode: firstResult.statusCode,
+          payload: firstResult.payload,
+          traces: firstTraces,
+        },
+        second: {
+          requestId: secondResult.requestId,
+          statusCode: secondResult.statusCode,
+          payload: secondResult.payload,
+          traces: secondTraces,
+        },
+      };
+    }
+
+    console.log('Invoking all base Lambda functions with rapid second invocation...');
+
+    // Invoke all Lambdas in parallel, each with rapid second invocation
     const invocationResults = await Promise.all([
-      invokeLambdaAndGetDatadogData(functions.node, {}, true),
-      invokeLambdaAndGetDatadogData(functions.python, {}, true),
-      invokeLambdaAndGetDatadogData(functions.java, {}, true),
-      invokeLambdaAndGetDatadogData(functions.dotnet, {}, true),
+      invokeWithRapidSecondCall(functions.node),
+      invokeWithRapidSecondCall(functions.python),
+      invokeWithRapidSecondCall(functions.java),
+      invokeWithRapidSecondCall(functions.dotnet),
     ]);
 
     // Store results
-    results.node = invocationResults[0];
-    results.python = invocationResults[1];
-    results.java = invocationResults[2];
-    results.dotnet = invocationResults[3];
+    results.node = invocationResults[0].first;
+    results.python = invocationResults[1].first;
+    results.java = invocationResults[2].first;
+    results.dotnet = invocationResults[3].first;
+
+    secondInvokeResults.node = invocationResults[0].second;
+    secondInvokeResults.python = invocationResults[1].second;
+    secondInvokeResults.java = invocationResults[2].second;
+    secondInvokeResults.dotnet = invocationResults[3].second;
 
     console.log('All base Lambda invocations and data fetching completed');
-  }, 700000); // 11.6 minute timeout
+  }, 900000); // 15 minute timeout
 
   describe('Node.js Runtime', () => {
     it('should invoke Node.js Lambda successfully', () => {
@@ -139,6 +186,34 @@ describe('Base Integration Tests', () => {
           operation_name: 'aws.lambda.load',
         }
       });
+    });
+  });
+
+  describe('Python Runtime - Second Invocation (SVLS-8659)', () => {
+    it('should invoke Python Lambda successfully on second invocation', () => {
+      expect(secondInvokeResults.python.statusCode).toBe(200);
+    });
+
+    it('should have aws.lambda span with cold_start=false on second invocation', () => {
+      const trace = secondInvokeResults.python.traces![0];
+      const awsLambdaSpan = trace.spans.find((span: any) => span.attributes.operation_name === 'aws.lambda');
+      expect(awsLambdaSpan).toBeDefined();
+      expect(awsLambdaSpan).toMatchObject({
+        attributes: {
+          operation_name: 'aws.lambda',
+          custom: {
+            cold_start: 'false'
+          }
+        }
+      });
+    });
+
+    it('should NOT have aws.lambda.cold_start span on second invocation', () => {
+      const trace = secondInvokeResults.python.traces![0];
+      const coldStartSpans = trace.spans.filter((span: any) => span.attributes.operation_name === 'aws.lambda.cold_start');
+      // Second invocation (10ms after cold start) should NOT have a cold_start span
+      // Before SVLS-8659 fix: would have duplicate cold_start span
+      expect(coldStartSpans.length).toBe(0);
     });
   });
 

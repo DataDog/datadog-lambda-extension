@@ -661,25 +661,32 @@ impl Processor {
     }
 
     /// For Node/Python: Sends the cold start span to the trace agent.
+    /// Takes the cold start span from the context to prevent duplicate sends.
     async fn send_cold_start_span(
         &mut self,
         tags_provider: &Arc<provider::Provider>,
         trace_sender: &Arc<SendingTraceProcessor>,
     ) {
-        if let Some(cold_start_context) = self.context_buffer.get_context_with_cold_start()
-            && let Some(cold_start_span) = &mut cold_start_context.cold_start_span
-        {
-            if cold_start_span.trace_id == 0 {
-                debug!("Not sending cold start span because trace ID is unset.");
-                return;
-            }
+        // Take the cold start span from the context (this also clears it to prevent duplicates)
+        let cold_start_span = self
+            .context_buffer
+            .get_context_with_cold_start()
+            .and_then(|ctx| ctx.cold_start_span.take());
 
-            let traces = vec![cold_start_span.clone()];
-            let body_size = size_of_val(cold_start_span);
+        let Some(cold_start_span) = cold_start_span else {
+            return;
+        };
 
-            self.send_spans(traces, body_size, tags_provider, trace_sender)
-                .await;
+        if cold_start_span.trace_id == 0 {
+            debug!("Not sending cold start span because trace ID is unset.");
+            return;
         }
+
+        let body_size = size_of_val(&cold_start_span);
+        let traces = vec![cold_start_span];
+
+        self.send_spans(traces, body_size, tags_provider, trace_sender)
+            .await;
     }
 
     /// Used by universally instrumented runtimes to send context spans:
