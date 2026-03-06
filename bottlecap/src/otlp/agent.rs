@@ -19,7 +19,7 @@ use tracing::{debug, error};
 use crate::{
     config::Config,
     http::{extract_request_body, handler_not_found},
-    otlp::processor::Processor as OtlpProcessor,
+    otlp::processor::{OtlpEncoding, Processor as OtlpProcessor},
     tags::provider,
     traces::{
         stats_generator::StatsGenerator, trace_aggregator::SendDataBuilderInfo,
@@ -141,6 +141,13 @@ impl Agent {
         >,
         request: Request,
     ) -> Response {
+        let content_type = request
+            .headers()
+            .get(header::CONTENT_TYPE)
+            .and_then(|v| v.to_str().ok())
+            .map(String::from);
+        let encoding = OtlpEncoding::from_content_type(content_type.as_deref());
+
         let (parts, body) = match extract_request_body(request).await {
             Ok(r) => r,
             Err(e) => {
@@ -148,17 +155,19 @@ impl Agent {
                 return Self::otlp_error_response(
                     StatusCode::BAD_REQUEST,
                     format!("Failed to extract request body: {e}"),
+                    encoding,
                 );
             }
         };
 
-        let traces = match processor.process(&body) {
+        let traces = match processor.process(&body, encoding) {
             Ok(traces) => traces,
             Err(e) => {
                 error!("OTLP | Failed to process request: {:?}", e);
                 return Self::otlp_error_response(
-                    StatusCode::INTERNAL_SERVER_ERROR,
+                    StatusCode::BAD_REQUEST,
                     format!("Failed to process request: {e}"),
+                    encoding,
                 );
             }
         };
@@ -170,6 +179,7 @@ impl Agent {
             return Self::otlp_error_response(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "Not sending traces, processor returned empty data".to_string(),
+                encoding,
             );
         }
 
@@ -192,6 +202,7 @@ impl Agent {
                 return Self::otlp_error_response(
                     StatusCode::INTERNAL_SERVER_ERROR,
                     format!("Error sending traces to the trace aggregator: {err}"),
+                    encoding,
                 );
             }
         }
@@ -206,49 +217,88 @@ impl Agent {
             error!("OTLP | Error sending traces to the stats concentrator: {err}");
         }
 
-        Self::otlp_success_response()
+        Self::otlp_success_response(encoding)
     }
 
-    fn otlp_error_response(status_code: StatusCode, message: String) -> Response {
-        let status = Status {
-            code: i32::from(status_code.as_u16()),
-            message: message.clone(),
-            details: vec![],
+    fn otlp_error_response(
+        status_code: StatusCode,
+        message: String,
+        encoding: OtlpEncoding,
+    ) -> Response {
+        let body = match encoding {
+            OtlpEncoding::Json => {
+                let json_error = serde_json::json!({
+                    "code": status_code.as_u16(),
+                    "message": message
+                });
+                match serde_json::to_vec(&json_error) {
+                    Ok(buf) => buf,
+                    Err(e) => {
+                        error!("OTLP | Failed to encode error response as JSON: {e}");
+                        return (status_code, [(header::CONTENT_TYPE, "text/plain")], message)
+                            .into_response();
+                    }
+                }
+            }
+            OtlpEncoding::Protobuf => {
+                let status = Status {
+                    code: i32::from(status_code.as_u16()),
+                    message: message.clone(),
+                    details: vec![],
+                };
+                let mut buf = Vec::new();
+                if let Err(e) = status.encode(&mut buf) {
+                    error!("OTLP | Failed to encode error response: {e}");
+                    return (status_code, [(header::CONTENT_TYPE, "text/plain")], message)
+                        .into_response();
+                }
+                buf
+            }
         };
-
-        let mut buf = Vec::new();
-        if let Err(e) = status.encode(&mut buf) {
-            error!("OTLP | Failed to encode error response: {e}");
-            return (status_code, [(header::CONTENT_TYPE, "text/plain")], message).into_response();
-        }
 
         (
             status_code,
-            [(header::CONTENT_TYPE, "application/x-protobuf")],
-            buf,
+            [(header::CONTENT_TYPE, encoding.content_type())],
+            body,
         )
             .into_response()
     }
 
-    fn otlp_success_response() -> Response {
+    fn otlp_success_response(encoding: OtlpEncoding) -> Response {
         let response = ExportTraceServiceResponse {
             partial_success: None,
         };
 
-        let mut buf = Vec::new();
-        if let Err(e) = response.encode(&mut buf) {
-            error!("OTLP | Failed to encode success response: {e}");
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "Failed to encode response".to_string(),
-            )
-                .into_response();
-        }
+        let body = match encoding {
+            OtlpEncoding::Json => match serde_json::to_vec(&response) {
+                Ok(buf) => buf,
+                Err(e) => {
+                    error!("OTLP | Failed to encode success response as JSON: {e}");
+                    return (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        "Failed to encode response".to_string(),
+                    )
+                        .into_response();
+                }
+            },
+            OtlpEncoding::Protobuf => {
+                let mut buf = Vec::new();
+                if let Err(e) = response.encode(&mut buf) {
+                    error!("OTLP | Failed to encode success response: {e}");
+                    return (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        "Failed to encode response".to_string(),
+                    )
+                        .into_response();
+                }
+                buf
+            }
+        };
 
         (
             StatusCode::OK,
-            [(header::CONTENT_TYPE, "application/x-protobuf")],
-            buf,
+            [(header::CONTENT_TYPE, encoding.content_type())],
+            body,
         )
             .into_response()
     }
