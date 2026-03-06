@@ -41,6 +41,25 @@ impl LogsProcessor {
             }
         }
     }
+
+    pub fn insert_to_durable_map(
+        &mut self,
+        request_id: &str,
+        execution_id: &str,
+        execution_name: &str,
+    ) {
+        match self {
+            LogsProcessor::Lambda(p) => {
+                p.insert_to_durable_context_map(request_id, execution_id, execution_name);
+            }
+        }
+    }
+
+    pub fn take_ready_logs(&mut self) -> Vec<String> {
+        match self {
+            LogsProcessor::Lambda(p) => p.take_ready_logs(),
+        }
+    }
 }
 
 #[allow(clippy::module_name_repetitions)]
