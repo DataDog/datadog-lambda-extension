@@ -1,7 +1,7 @@
 use crate::{
     lifecycle::invocation::processor::MS_TO_NS, metrics::enhanced::lambda::EnhancedMetricData,
-    traces::context::SpanContext,
 };
+use datadog_opentelemetry::propagation::context::SpanContext;
 use std::{
     collections::{HashMap, VecDeque},
     time::{SystemTime, UNIX_EPOCH},

@@ -24,10 +24,11 @@ use crate::{
         },
         processing_rule::{ProcessingRule, deserialize_processing_rules},
         service_mapping::deserialize_service_mapping,
-        trace_propagation_style::{TracePropagationStyle, deserialize_trace_propagation_style},
+        trace_propagation_style::deserialize_trace_propagation_style,
     },
     merge_hashmap, merge_option, merge_option_to_value, merge_string, merge_vec,
 };
+use datadog_opentelemetry::propagation::TracePropagationStyle;
 
 #[derive(Debug, PartialEq, Deserialize, Clone, Default)]
 #[serde(default)]
@@ -719,8 +720,8 @@ mod tests {
         flush_strategy::{FlushStrategy, PeriodicStrategy},
         log_level::LogLevel,
         processing_rule::{Kind, ProcessingRule},
-        trace_propagation_style::TracePropagationStyle,
     };
+    use datadog_opentelemetry::propagation::TracePropagationStyle;
 
     #[test]
     #[allow(clippy::too_many_lines)]
@@ -802,7 +803,7 @@ mod tests {
             jail.set_env("DD_METRICS_CONFIG_COMPRESSION_LEVEL", "3");
             // Trace Propagation
             jail.set_env("DD_TRACE_PROPAGATION_STYLE", "datadog");
-            jail.set_env("DD_TRACE_PROPAGATION_STYLE_EXTRACT", "b3");
+            jail.set_env("DD_TRACE_PROPAGATION_STYLE_EXTRACT", "tracecontext");
             jail.set_env("DD_TRACE_PROPAGATION_EXTRACT_FIRST", "true");
             jail.set_env("DD_TRACE_PROPAGATION_HTTP_BAGGAGE_ENABLED", "true");
             jail.set_env("DD_TRACE_AWS_SERVICE_REPRESENTATION_ENABLED", "true");
@@ -984,7 +985,7 @@ mod tests {
                     "debug:^true$".to_string(),
                 ]),
                 trace_propagation_style: vec![TracePropagationStyle::Datadog],
-                trace_propagation_style_extract: vec![TracePropagationStyle::B3],
+                trace_propagation_style_extract: vec![TracePropagationStyle::TraceContext],
                 trace_propagation_extract_first: true,
                 trace_propagation_http_baggage_enabled: true,
                 trace_aws_service_representation_enabled: true,
