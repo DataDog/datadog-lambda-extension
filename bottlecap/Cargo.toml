@@ -70,7 +70,7 @@ indexmap = {version = "2.11.0", default-features = false}
 # be found in the clippy.toml file adjacent to this Cargo.toml.
 datadog-protos = { version = "0.1.0", default-features = false, git = "https://github.com/DataDog/saluki/", rev = "f863626dbfe3c59bb390985fa6530b0621c2a0a2"}
 ddsketch-agent = { version = "0.1.0", default-features = false, git = "https://github.com/DataDog/saluki/", rev = "f863626dbfe3c59bb390985fa6530b0621c2a0a2"}
-libdd-common = { git = "https://github.com/DataDog/libdatadog", rev = "c8121f422d2c8d219f8d421ff3cdb1fcbe9e8b09" }
+libdd-common = { git = "https://github.com/DataDog/libdatadog", rev = "0f3d46b5046525c9046eb77727f6344753ba76f4" }
 libdd-trace-protobuf = { git = "https://github.com/DataDog/libdatadog", rev = "c8121f422d2c8d219f8d421ff3cdb1fcbe9e8b09"  }
 libdd-trace-utils = { git = "https://github.com/DataDog/libdatadog", rev = "c8121f422d2c8d219f8d421ff3cdb1fcbe9e8b09" , features = ["mini_agent"] }
 libdd-trace-normalization = { git = "https://github.com/DataDog/libdatadog",  rev = "c8121f422d2c8d219f8d421ff3cdb1fcbe9e8b09" }

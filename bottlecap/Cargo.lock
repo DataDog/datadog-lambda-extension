@@ -488,7 +488,7 @@ dependencies = [
  "indexmap",
  "itertools 0.14.0",
  "lazy_static",
- "libdd-common",
+ "libdd-common 2.0.0",
  "libdd-trace-normalization",
  "libdd-trace-obfuscation",
  "libdd-trace-protobuf",
@@ -1777,6 +1777,40 @@ dependencies = [
 ]
 
 [[package]]
+name = "libdd-common"
+version = "2.0.0"
+source = "git+https://github.com/DataDog/libdatadog?rev=0f3d46b5046525c9046eb77727f6344753ba76f4#0f3d46b5046525c9046eb77727f6344753ba76f4"
+dependencies = [
+ "anyhow",
+ "bytes",
+ "cc",
+ "const_format",
+ "futures",
+ "futures-core",
+ "futures-util",
+ "hex",
+ "http 1.4.0",
+ "http-body 1.0.1",
+ "http-body-util",
+ "hyper 1.8.1",
+ "hyper-rustls",
+ "hyper-util",
+ "libc",
+ "nix 0.29.0",
+ "pin-project",
+ "regex",
+ "rustls",
+ "rustls-native-certs",
+ "serde",
+ "static_assertions",
+ "thiserror 1.0.69",
+ "tokio",
+ "tokio-rustls",
+ "tower-service",
+ "windows-sys 0.52.0",
+]
+
+[[package]]
 name = "libdd-ddsketch"
 version = "1.0.0"
 source = "git+https://github.com/DataDog/libdatadog?rev=c8121f422d2c8d219f8d421ff3cdb1fcbe9e8b09#c8121f422d2c8d219f8d421ff3cdb1fcbe9e8b09"
@@ -1807,7 +1841,7 @@ version = "1.0.0"
 source = "git+https://github.com/DataDog/libdatadog?rev=c8121f422d2c8d219f8d421ff3cdb1fcbe9e8b09#c8121f422d2c8d219f8d421ff3cdb1fcbe9e8b09"
 dependencies = [
  "anyhow",
- "libdd-common",
+ "libdd-common 1.1.0",
  "libdd-trace-protobuf",
  "libdd-trace-utils",
  "log",
@@ -1852,7 +1886,7 @@ dependencies = [
  "http-body 1.0.1",
  "http-body-util",
  "indexmap",
- "libdd-common",
+ "libdd-common 1.1.0",
  "libdd-tinybytes",
  "libdd-trace-normalization",
  "libdd-trace-protobuf",
