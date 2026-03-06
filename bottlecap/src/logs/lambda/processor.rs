@@ -2363,14 +2363,20 @@ mod tests {
     fn test_parse_durable_execution_arn_valid() {
         let arn = "arn:aws:lambda:us-east-1:123456789012:function:my-function:1/durable-execution/my-exec-name/exec-id-abc";
         let result = parse_durable_execution_arn(arn);
-        assert_eq!(result, Some(("exec-id-abc".to_string(), "my-exec-name".to_string())));
+        assert_eq!(
+            result,
+            Some(("exec-id-abc".to_string(), "my-exec-name".to_string()))
+        );
     }
 
     #[test]
     fn test_parse_durable_execution_arn_latest() {
         let arn = "arn:aws:lambda:us-west-2:999999999999:function:fn:$LATEST/durable-execution/exec-name/exec-uuid-123";
         let result = parse_durable_execution_arn(arn);
-        assert_eq!(result, Some(("exec-uuid-123".to_string(), "exec-name".to_string())));
+        assert_eq!(
+            result,
+            Some(("exec-uuid-123".to_string(), "exec-name".to_string()))
+        );
     }
 
     #[test]
@@ -2415,7 +2421,10 @@ mod tests {
         };
         let msg = processor.get_message(event).await.unwrap();
         assert_eq!(msg.lambda.durable_execution_id, Some("my-id".to_string()));
-        assert_eq!(msg.lambda.durable_execution_name, Some("my-name".to_string()));
+        assert_eq!(
+            msg.lambda.durable_execution_name,
+            Some("my-name".to_string())
+        );
     }
 
     #[tokio::test]
@@ -2441,8 +2450,14 @@ mod tests {
         let batches = aggregator_handle.get_batches().await.unwrap();
         assert_eq!(batches.len(), 1);
         let logs: Vec<serde_json::Value> = serde_json::from_slice(&batches[0]).unwrap();
-        assert_eq!(logs[0]["message"]["lambda"]["durable_execution_id"], "my-id");
-        assert_eq!(logs[0]["message"]["lambda"]["durable_execution_name"], "my-name");
+        assert_eq!(
+            logs[0]["message"]["lambda"]["durable_execution_id"],
+            "my-id"
+        );
+        assert_eq!(
+            logs[0]["message"]["lambda"]["durable_execution_name"],
+            "my-name"
+        );
     }
 
     #[tokio::test]
