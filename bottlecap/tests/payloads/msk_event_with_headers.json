@@ -1,0 +1,23 @@
+{
+  "eventSource": "aws:kafka",
+  "eventSourceArn": "arn:aws:kafka:us-east-1:123456789012:cluster/demo-cluster/751d2973-a626-431c-9d4e-d7975eb44dd7-2",
+  "bootstrapServers": "b-1.demo-cluster.a1bcde.c1.kafka.us-east-1.amazonaws.com:9092,b-2.demo-cluster.a1bcde.c1.kafka.us-east-1.amazonaws.com:9092",
+  "records": {
+    "topic1": [
+      {
+        "topic":        "topic1",
+        "partition":    0,
+        "offset":       101,
+        "timestamp":    1745846213022,
+        "timestampType":"CREATE_TIME",
+        "key":   "b3JkZXJJZA==",
+        "value": "eyJvcmRlcklkIjoiMTIzNCIsImFtb3VudCI6MTAwLjAxfQ==",
+        "headers": [
+          {"x-datadog-trace-id": [51, 54, 57, 55, 57, 55, 53, 52, 52, 51, 48, 56, 57, 48, 52, 53, 54, 57, 53, 48]},
+          {"x-datadog-parent-id": [55, 52, 51, 49, 51, 57, 56, 52, 56, 50, 48, 49, 57, 56, 51, 51, 56, 48, 56]},
+          {"x-datadog-sampling-priority": [49]}
+        ]
+      }
+    ]
+  }
+}
