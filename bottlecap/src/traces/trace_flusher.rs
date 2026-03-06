@@ -11,13 +11,12 @@ use libdd_trace_utils::{
 };
 use std::str::FromStr;
 use std::sync::Arc;
-use tokio::sync::OnceCell;
 use tokio::task::JoinSet;
 use tracing::{debug, error};
 
 use crate::config::Config;
 use crate::lifecycle::invocation::processor::S_TO_MS;
-use crate::traces::http_client::{self, HttpClient};
+use crate::traces::http_client::HttpClient;
 use crate::traces::trace_aggregator_service::AggregatorHandle;
 
 pub struct TraceFlusher {
@@ -28,10 +27,7 @@ pub struct TraceFlusher {
     /// Configured via `DD_APM_ADDITIONAL_ENDPOINTS` (e.g., sending to both US and EU).
     /// Each trace batch is sent to the primary endpoint AND all additional endpoints.
     pub additional_endpoints: Vec<Endpoint>,
-    /// Cached HTTP client, lazily initialized on first use.
-    /// TODO: `TraceFlusher` and `StatsFlusher` both hit trace.agent.datadoghq.{site} and could
-    /// share a single HTTP client for better connection pooling.
-    http_client: OnceCell<HttpClient>,
+    http_client: HttpClient,
 }
 
 impl TraceFlusher {
@@ -40,6 +36,7 @@ impl TraceFlusher {
         aggregator_handle: AggregatorHandle,
         config: Arc<Config>,
         api_key_factory: Arc<ApiKeyFactory>,
+        http_client: HttpClient,
     ) -> Self {
         // Parse additional endpoints for dual-shipping from config.
         // Format: { "https://trace.agent.datadoghq.eu": ["api-key-1", "api-key-2"], ... }
@@ -65,7 +62,7 @@ impl TraceFlusher {
             config,
             api_key_factory,
             additional_endpoints,
-            http_client: OnceCell::new(),
+            http_client,
         }
     }
 
@@ -83,11 +80,7 @@ impl TraceFlusher {
             return None;
         };
 
-        // Get or create the cached HTTP client
-        let Some(http_client) = self.get_or_init_http_client().await else {
-            error!("TRACES | Failed to create HTTP client, skipping flush");
-            return None;
-        };
+        let http_client = &self.http_client;
 
         let mut failed_batch: Vec<SendData> = Vec::new();
 
@@ -165,32 +158,6 @@ impl TraceFlusher {
         }
 
         None
-    }
-
-    /// Returns a clone of the cached HTTP client, initializing it if necessary.
-    ///
-    /// The client is created once and reused for all subsequent flushes,
-    /// providing connection pooling and TLS session reuse.
-    ///
-    /// Returns `None` if client creation fails. The error is logged but not cached,
-    /// allowing retry on subsequent calls.
-    async fn get_or_init_http_client(&self) -> Option<HttpClient> {
-        match self
-            .http_client
-            .get_or_try_init(|| async {
-                http_client::create_client(
-                    self.config.proxy_https.as_ref(),
-                    self.config.tls_cert_file.as_ref(),
-                )
-            })
-            .await
-        {
-            Ok(client) => Some(client.clone()),
-            Err(e) => {
-                error!("TRACES | Failed to create HTTP client: {e}");
-                None
-            }
-        }
     }
 
     /// Sends traces to the Datadog intake endpoint using the provided HTTP client.

@@ -9,7 +9,6 @@ use tracing::{debug, error};
 
 use crate::{
     FLUSH_RETRY_COUNT, config,
-    http::get_client,
     tags::provider,
     traces::{
         DD_ADDITIONAL_TAGS_HEADER,
@@ -39,9 +38,8 @@ impl Flusher {
         aggregator: Arc<Mutex<Aggregator>>,
         tags_provider: Arc<provider::Provider>,
         config: Arc<config::Config>,
+        client: reqwest::Client,
     ) -> Self {
-        let client = get_client(&config);
-
         Flusher {
             client,
             aggregator,

@@ -5,7 +5,7 @@ use crate::metrics::enhanced::usage_metrics::{EnhancedMetricsHandle, EnhancedMet
 use crate::proc::{self, CPUData, NetworkData};
 use dogstatsd::metric::SortedTags;
 use dogstatsd::metric::{Metric, MetricValue};
-use dogstatsd::{aggregator_service::AggregatorHandle, metric};
+use dogstatsd::{aggregator::AggregatorHandle, metric};
 use std::collections::HashMap;
 use std::env::consts::ARCH;
 use std::sync::Arc;
@@ -809,7 +809,7 @@ mod tests {
     use super::*;
     use crate::config;
     use crate::extension::telemetry::events::{OnDemandReportMetrics, ReportMetrics};
-    use dogstatsd::aggregator_service::AggregatorService;
+    use dogstatsd::aggregator::AggregatorService;
     use dogstatsd::metric::EMPTY_TAGS;
     const PRECISION: f64 = 0.000_000_01;
 

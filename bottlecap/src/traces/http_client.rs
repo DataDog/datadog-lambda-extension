@@ -14,7 +14,7 @@ use rustls_pki_types::CertificateDer;
 use std::error::Error;
 use std::fs::File;
 use std::io::BufReader;
-use std::sync::LazyLock;
+use std::sync::{Arc, LazyLock};
 use tracing::debug;
 
 /// Type alias for the HTTP client used by trace and stats flushers.
@@ -27,12 +27,61 @@ pub type HttpClient =
 fn ensure_crypto_provider_initialized() {
     static INIT_CRYPTO_PROVIDER: LazyLock<()> = LazyLock::new(|| {
         #[cfg(unix)]
-        rustls::crypto::aws_lc_rs::default_provider()
-            .install_default()
-            .expect("Failed to install default CryptoProvider");
+        if let Err(_already_installed) =
+            rustls::crypto::aws_lc_rs::default_provider().install_default()
+        {
+            debug!(
+                "HTTP_CLIENT | Default CryptoProvider already installed, using existing provider"
+            );
+        }
     });
 
     let () = &*INIT_CRYPTO_PROVIDER;
+}
+
+/// A certificate verifier that accepts all server certificates without validation.
+///
+/// This is used when `DD_SKIP_SSL_VALIDATION` is set to `true`.
+#[derive(Debug)]
+struct NoVerifier;
+
+impl rustls::client::danger::ServerCertVerifier for NoVerifier {
+    fn verify_server_cert(
+        &self,
+        _end_entity: &CertificateDer<'_>,
+        _intermediates: &[CertificateDer<'_>],
+        _server_name: &rustls_pki_types::ServerName<'_>,
+        _ocsp_response: &[u8],
+        _now: rustls_pki_types::UnixTime,
+    ) -> Result<rustls::client::danger::ServerCertVerified, rustls::Error> {
+        Ok(rustls::client::danger::ServerCertVerified::assertion())
+    }
+
+    fn verify_tls12_signature(
+        &self,
+        _message: &[u8],
+        _cert: &CertificateDer<'_>,
+        _dss: &rustls::DigitallySignedStruct,
+    ) -> Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error> {
+        Ok(rustls::client::danger::HandshakeSignatureValid::assertion())
+    }
+
+    fn verify_tls13_signature(
+        &self,
+        _message: &[u8],
+        _cert: &CertificateDer<'_>,
+        _dss: &rustls::DigitallySignedStruct,
+    ) -> Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error> {
+        Ok(rustls::client::danger::HandshakeSignatureValid::assertion())
+    }
+
+    fn supported_verify_schemes(&self) -> Vec<rustls::SignatureScheme> {
+        // Safe to unwrap_or_default: the provider is always initialized via
+        // ensure_crypto_provider_initialized() before NoVerifier is used.
+        rustls::crypto::CryptoProvider::get_default()
+            .map(|p| p.signature_verification_algorithms.supported_schemes())
+            .unwrap_or_default()
+    }
 }
 
 /// Creates a new HTTP client with the given configuration.
@@ -40,11 +89,13 @@ fn ensure_crypto_provider_initialized() {
 /// This client is compatible with `libdd_trace_utils` and supports:
 /// - HTTPS proxy configuration
 /// - Custom TLS root certificates
+/// - Skipping TLS certificate validation
 ///
 /// # Arguments
 ///
 /// * `proxy_https` - Optional HTTPS proxy URL
 /// * `tls_cert_file` - Optional path to a PEM file containing root certificates
+/// * `skip_ssl_validation` - If true, skip TLS certificate validation
 ///
 /// # Errors
 ///
@@ -54,9 +105,34 @@ fn ensure_crypto_provider_initialized() {
 pub fn create_client(
     proxy_https: Option<&String>,
     tls_cert_file: Option<&String>,
+    skip_ssl_validation: bool,
 ) -> Result<HttpClient, Box<dyn Error>> {
+    if skip_ssl_validation && tls_cert_file.is_some() {
+        debug!(
+            "HTTP_CLIENT | skip_ssl_validation=true overrides tls_cert_file={:?}, custom certificate will be ignored",
+            tls_cert_file
+        );
+    }
+
     // Create the base connector with optional custom TLS config
-    let connector = if let Some(ca_cert_path) = tls_cert_file {
+    let connector = if skip_ssl_validation {
+        ensure_crypto_provider_initialized();
+
+        let tls_config = rustls::ClientConfig::builder()
+            .dangerous()
+            .with_custom_certificate_verifier(Arc::new(NoVerifier))
+            .with_no_client_auth();
+
+        let https_connector = HttpsConnectorBuilder::new()
+            .with_tls_config(tls_config)
+            .https_or_http()
+            .enable_http1()
+            .build();
+
+        debug!("HTTP_CLIENT | TLS certificate validation disabled (skip_ssl_validation=true)");
+
+        libdd_common::connector::Connector::Https(https_connector)
+    } else if let Some(ca_cert_path) = tls_cert_file {
         // Ensure crypto provider is initialized before creating TLS config
         ensure_crypto_provider_initialized();
 

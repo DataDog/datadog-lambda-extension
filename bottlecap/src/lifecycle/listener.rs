@@ -168,16 +168,19 @@ impl Listener {
         State((invocation_processor_handle, _, tasks)): State<ListenerState>,
         request: Request,
     ) -> Response {
+        // IMPORTANT: Extract the body synchronously before returning the response.
+        // If this is moved into the spawned task, PlatformRuntimeDone may be
+        // processed before the body is read, causing orphaned traces. (SLES-2666)
+        let (parts, body) = match extract_request_body(request).await {
+            Ok(r) => r,
+            Err(e) => {
+                error!("Failed to extract request body: {e}");
+                return (StatusCode::OK, json!({}).to_string()).into_response();
+            }
+        };
+
         let mut join_set = tasks.lock().await;
         join_set.spawn(async move {
-            let (parts, body) = match extract_request_body(request).await {
-                Ok(r) => r,
-                Err(e) => {
-                    error!("Failed to extract request body: {e}");
-                    return;
-                }
-            };
-
             Self::universal_instrumentation_end(&parts.headers, body, invocation_processor_handle)
                 .await;
         });

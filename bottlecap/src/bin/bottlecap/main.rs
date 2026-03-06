@@ -60,6 +60,7 @@ use bottlecap::{
         provider::Provider as TagProvider,
     },
     traces::{
+        http_client as trace_http_client,
         propagation::DatadogCompositePropagator,
         proxy_aggregator,
         proxy_flusher::Flusher as ProxyFlusher,
@@ -80,8 +81,9 @@ use bottlecap::{
 use datadog_fips::reqwest_adapter::create_reqwest_client_builder;
 use decrypt::resolve_secrets;
 use dogstatsd::{
-    aggregator_service::AggregatorHandle as MetricsAggregatorHandle,
-    aggregator_service::AggregatorService as MetricsAggregatorService,
+    aggregator::{
+        AggregatorHandle as MetricsAggregatorHandle, AggregatorService as MetricsAggregatorService,
+    },
     api_key::ApiKeyFactory,
     constants::CONTEXTS,
     datadog::{
@@ -95,7 +97,7 @@ use dogstatsd::{
 use libdd_trace_obfuscation::obfuscation_config;
 use reqwest::Client;
 use std::{collections::hash_map, env, path::Path, str::FromStr, sync::Arc};
-use tokio::time::{Duration, Instant};
+use tokio::time::Instant;
 use tokio::{sync::Mutex as TokioMutex, sync::mpsc::Sender};
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, warn};
@@ -291,6 +293,11 @@ async fn extension_loop_active(
     let account_id = r.account_id.as_ref().unwrap_or(&"none".to_string()).clone();
     let tags_provider = setup_tag_provider(&Arc::clone(&aws_config), config, &account_id);
 
+    // Build one shared reqwest::Client for metrics, logs, and trace proxy flushing.
+    // reqwest::Client is Arc-based internally, so cloning just increments a refcount
+    // and shares the connection pool.
+    let shared_client = bottlecap::http::get_client(config);
+
     let (
         logs_agent_channel,
         logs_flusher,
@@ -303,10 +310,16 @@ async fn extension_loop_active(
         &tags_provider,
         event_bus_tx.clone(),
         aws_config.is_managed_instance_mode(),
+        &shared_client,
     );
 
-    let (metrics_flushers, metrics_aggregator_handle, dogstatsd_cancel_token) =
-        start_dogstatsd(tags_provider.clone(), Arc::clone(&api_key_factory), config).await;
+    let (metrics_flushers, metrics_aggregator_handle, dogstatsd_cancel_token) = start_dogstatsd(
+        tags_provider.clone(),
+        Arc::clone(&api_key_factory),
+        config,
+        &shared_client,
+    )
+    .await;
 
     let propagator = Arc::new(DatadogCompositePropagator::new(Arc::clone(config)));
     // Lifecycle Invocation Processor
@@ -350,6 +363,7 @@ async fn extension_loop_active(
         invocation_processor_handle.clone(),
         appsec_processor.clone(),
         durable_context_tx,
+        &shared_client,
     );
 
     let api_runtime_proxy_shutdown_signal = start_api_runtime_proxy(
@@ -1025,6 +1039,7 @@ fn start_logs_agent(
     tags_provider: &Arc<TagProvider>,
     event_bus: Sender<Event>,
     is_managed_instance_mode: bool,
+    client: &Client,
 ) -> (
     Sender<TelemetryEvent>,
     LogsFlusher,
@@ -1054,7 +1069,12 @@ fn start_logs_agent(
         drop(agent);
     });
 
-    let flusher = LogsFlusher::new(api_key_factory, aggregator_handle.clone(), config.clone());
+    let flusher = LogsFlusher::new(
+        api_key_factory,
+        aggregator_handle.clone(),
+        config.clone(),
+        client.clone(),
+    );
     (
         tx,
         flusher,
@@ -1072,6 +1092,7 @@ fn start_trace_agent(
     invocation_processor_handle: InvocationProcessorHandle,
     appsec_processor: Option<Arc<TokioMutex<AppSecProcessor>>>,
     durable_context_tx: Sender<DurableContextUpdate>,
+    client: &Client,
 ) -> (
     Sender<SendDataBuilderInfo>,
     Arc<trace_flusher::TraceFlusher>,
@@ -1082,6 +1103,15 @@ fn start_trace_agent(
     StatsConcentratorHandle,
     TraceAggregatorHandle,
 ) {
+    // Build one shared hyper-based HTTP client for trace and stats flushing.
+    // This client type is required by libdd_trace_utils for SendData::send().
+    let trace_http_client = trace_http_client::create_client(
+        config.proxy_https.as_ref(),
+        config.tls_cert_file.as_ref(),
+        config.skip_ssl_validation,
+    )
+    .expect("Failed to create trace HTTP client");
+
     // Stats
     let (stats_concentrator_service, stats_concentrator_handle) =
         StatsConcentratorService::new(Arc::clone(config));
@@ -1093,6 +1123,7 @@ fn start_trace_agent(
         api_key_factory.clone(),
         stats_aggregator.clone(),
         Arc::clone(config),
+        trace_http_client.clone(),
     ));
 
     let stats_processor = Arc::new(stats_processor::ServerlessStatsProcessor {});
@@ -1105,6 +1136,7 @@ fn start_trace_agent(
         trace_aggregator_handle.clone(),
         config.clone(),
         api_key_factory.clone(),
+        trace_http_client,
     ));
 
     let obfuscation_config = obfuscation_config::ObfuscationConfig {
@@ -1130,6 +1162,7 @@ fn start_trace_agent(
         Arc::clone(&proxy_aggregator),
         Arc::clone(tags_provider),
         Arc::clone(config),
+        client.clone(),
     ));
 
     let trace_agent = trace_agent::TraceAgent::new(
@@ -1171,6 +1204,7 @@ async fn start_dogstatsd(
     tags_provider: Arc<TagProvider>,
     api_key_factory: Arc<ApiKeyFactory>,
     config: &Arc<Config>,
+    client: &Client,
 ) -> (
     Arc<Vec<MetricsFlusher>>,
     MetricsAggregatorHandle,
@@ -1198,6 +1232,7 @@ async fn start_dogstatsd(
         Arc::clone(&api_key_factory),
         &aggregator_handle,
         config,
+        client,
     ));
 
     // Create Dogstatsd server
@@ -1229,6 +1264,7 @@ fn start_metrics_flushers(
     api_key_factory: Arc<ApiKeyFactory>,
     metrics_aggr_handle: &MetricsAggregatorHandle,
     config: &Arc<Config>,
+    client: &Client,
 ) -> Vec<MetricsFlusher> {
     let mut flushers = Vec::new();
 
@@ -1252,9 +1288,7 @@ fn start_metrics_flushers(
         api_key_factory,
         aggregator_handle: metrics_aggr_handle.clone(),
         metrics_intake_url_prefix: metrics_intake_url.expect("can't parse site or override"),
-        https_proxy: config.proxy_https.clone(),
-        ca_cert_path: config.tls_cert_file.clone(),
-        timeout: Duration::from_secs(config.flush_timeout),
+        client: client.clone(),
         retry_strategy: DsdRetryStrategy::Immediate(3),
         compression_level: config.metrics_config_compression_level,
     };
@@ -1282,9 +1316,7 @@ fn start_metrics_flushers(
                 api_key_factory: additional_api_key_factory,
                 aggregator_handle: metrics_aggr_handle.clone(),
                 metrics_intake_url_prefix: metrics_intake_url.clone(),
-                https_proxy: config.proxy_https.clone(),
-                ca_cert_path: config.tls_cert_file.clone(),
-                timeout: Duration::from_secs(config.flush_timeout),
+                client: client.clone(),
                 retry_strategy: DsdRetryStrategy::Immediate(3),
                 compression_level: config.metrics_config_compression_level,
             };
