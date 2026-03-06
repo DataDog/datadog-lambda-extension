@@ -1331,10 +1331,7 @@ pub mod tests {
     fn test_parse_trace_propagation_style() {
         figment::Jail::expect_with(|jail| {
             jail.clear_env();
-            jail.set_env(
-                "DD_TRACE_PROPAGATION_STYLE",
-                "datadog,tracecontext",
-            );
+            jail.set_env("DD_TRACE_PROPAGATION_STYLE", "datadog,tracecontext");
             let config = get_config(Path::new(""));
 
             let expected_styles = vec![
