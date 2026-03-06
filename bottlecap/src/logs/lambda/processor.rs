@@ -58,7 +58,7 @@ pub struct LambdaProcessor {
     durable_context_order: VecDeque<String>,
 }
 
-const DURABLE_CONTEXT_MAP_CAPACITY: usize = 5;
+const DURABLE_CONTEXT_MAP_CAPACITY: usize = 100;
 
 const OOM_ERRORS: [&str; 7] = [
     "fatal error: runtime: out of memory",       // Go
