@@ -48,6 +48,40 @@ describe('Durable Function Log Tests', () => {
       expect(log).toBeDefined();
       expect(log?.attributes?.lambda?.durable_execution_name).toBeUndefined();
     });
+
+    it('platform START log should NOT have lambda.durable_execution_id or lambda.durable_execution_name attributes', () => {
+      const log = result.logs?.find((log: any) =>
+        log.message.includes('START RequestId:')
+      );
+      expect(log).toBeDefined();
+      expect(log?.attributes?.lambda?.durable_execution_id).toBeUndefined();
+      expect(log?.attributes?.lambda?.durable_execution_name).toBeUndefined();
+    });
+
+    it('platform END log should NOT have lambda.durable_execution_id or lambda.durable_execution_name attributes', () => {
+      const log = result.logs?.find((log: any) =>
+        log.message.includes('END RequestId:')
+      );
+      expect(log).toBeDefined();
+      expect(log?.attributes?.lambda?.durable_execution_id).toBeUndefined();
+      expect(log?.attributes?.lambda?.durable_execution_name).toBeUndefined();
+    });
+
+    it('extension logs should NOT have lambda.durable_execution_id or lambda.durable_execution_name attributes', () => {
+      // Extension logs (from debug!/info!/warn! in the Rust extension code) are forwarded
+      // in non-durable mode. They arrive without a request_id initially (orphan logs), then
+      // inherit the invocation request_id when PlatformStart fires.
+      // DD_LOG_LEVEL=DEBUG ensures these logs appear in Datadog.
+      const logs = result.logs?.filter((log: any) =>
+        log.message.includes('DD_EXTENSION')
+      );
+      expect(logs).toBeDefined();
+      expect(logs?.length).toBeGreaterThan(0);
+      for (const log of logs ?? []) {
+        expect(log?.attributes?.lambda?.durable_execution_id).toBeUndefined();
+        expect(log?.attributes?.lambda?.durable_execution_name).toBeUndefined();
+      }
+    });
   });
 
   // These tests require a Lambda runtime environment that reports 'DurableFunction' in
@@ -140,6 +174,46 @@ describe('Durable Function Log Tests', () => {
       const requestIds = concurrentResults.map(r => r.requestId);
       const uniqueRequestIds = new Set(requestIds);
       expect(uniqueRequestIds.size).toBe(concurrentResults.length);
+    });
+
+    it('platform START log should have lambda.durable_execution_id and lambda.durable_execution_name attributes', () => {
+      // PlatformStart generates "START RequestId: ... Version: ..." with a request_id.
+      // In durable mode the log is held in held_logs until the aws.lambda span arrives,
+      // then decorated with durable execution context and released.
+      const log = coldStartResult.logs?.find((log: any) =>
+        log.message.includes('START RequestId:')
+      );
+      expect(log).toBeDefined();
+      expect(log?.attributes?.lambda?.durable_execution_id).toBeDefined();
+      expect(log?.attributes?.lambda?.durable_execution_name).toBeDefined();
+    });
+
+    it('platform END log should have lambda.durable_execution_id and lambda.durable_execution_name attributes', () => {
+      // PlatformRuntimeDone generates "END RequestId: ..." with a request_id and is handled
+      // identically to START — held until durable context arrives, then decorated.
+      const log = coldStartResult.logs?.find((log: any) =>
+        log.message.includes('END RequestId:')
+      );
+      expect(log).toBeDefined();
+      expect(log?.attributes?.lambda?.durable_execution_id).toBeDefined();
+      expect(log?.attributes?.lambda?.durable_execution_name).toBeDefined();
+    });
+
+    it('extension logs should have lambda.durable_execution_id and lambda.durable_execution_name attributes', () => {
+      // Extension logs (debug!/info!/warn! from the Rust extension code) arrive without a
+      // request_id and are stashed as orphan logs. When PlatformStart fires they inherit the
+      // invocation request_id, then follow the same held-log path as other durable logs:
+      // held until the aws.lambda span provides durable execution context, then decorated.
+      // DD_LOG_LEVEL=DEBUG ensures these logs are emitted and appear in Datadog.
+      const logs = coldStartResult.logs?.filter((log: any) =>
+        log.message.includes('DD_EXTENSION')
+      );
+      expect(logs).toBeDefined();
+      expect(logs?.length).toBeGreaterThan(0);
+      for (const log of logs ?? []) {
+        expect(log?.attributes?.lambda?.durable_execution_id).toBeDefined();
+        expect(log?.attributes?.lambda?.durable_execution_name).toBeDefined();
+      }
     });
   });
 });

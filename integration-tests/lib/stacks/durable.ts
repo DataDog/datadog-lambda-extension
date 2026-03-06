@@ -33,6 +33,7 @@ export class Durable extends cdk.Stack {
         DD_TRACE_ENABLED: 'true',
         DD_LAMBDA_HANDLER: 'lambda_function.handler',
         DD_TRACE_AGENT_URL: 'http://127.0.0.1:8126',
+        DD_LOG_LEVEL: 'DEBUG',
       },
       logGroup: createLogGroup(this, pythonFunctionName),
     });
@@ -56,6 +57,7 @@ export class Durable extends cdk.Stack {
         DD_TRACE_ENABLED: 'true',
         DD_LAMBDA_HANDLER: 'lambda_durable_function.handler',
         DD_TRACE_AGENT_URL: 'http://127.0.0.1:8126',
+        DD_LOG_LEVEL: 'DEBUG',
       },
       logGroup: createLogGroup(this, durablePythonFunctionName),
       durableConfig: {
