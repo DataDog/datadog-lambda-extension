@@ -2,9 +2,7 @@ use std::sync::Arc;
 
 use crate::config;
 use datadog_opentelemetry::propagation::{
-    self as dd_propagation,
-    carrier::Extractor,
-    context::SpanContext,
+    self as dd_propagation, carrier::Extractor, context::SpanContext,
 };
 
 pub mod carrier;

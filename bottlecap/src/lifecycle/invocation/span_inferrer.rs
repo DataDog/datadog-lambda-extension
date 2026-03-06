@@ -7,9 +7,8 @@ use tracing::debug;
 
 use crate::config::Config;
 use crate::lifecycle::invocation::triggers::IdentifiedTrigger;
-use crate::traces::span_pointers::SpanPointer;
 use crate::traces::propagation::DatadogCompositePropagator;
-use datadog_opentelemetry::propagation::context::SpanContext;
+use crate::traces::span_pointers::SpanPointer;
 use crate::{
     config::aws::AwsConfig,
     lifecycle::invocation::{
@@ -22,6 +21,7 @@ use crate::{
         },
     },
 };
+use datadog_opentelemetry::propagation::context::SpanContext;
 
 #[derive(Default)]
 pub struct SpanInferrer {

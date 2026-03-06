@@ -19,10 +19,7 @@ use crate::{
         processor::Processor,
     },
     tags::provider,
-    traces::{
-        propagation::DatadogCompositePropagator,
-        trace_processor::SendingTraceProcessor,
-    },
+    traces::{propagation::DatadogCompositePropagator, trace_processor::SendingTraceProcessor},
 };
 
 #[derive(Error, Debug)]
