@@ -1,4 +1,5 @@
 import { invokeLambdaAndGetDatadogData, LambdaInvocationDatadogData } from './utils/util';
+import { publishVersion } from './utils/lambda';
 import { getIdentifier } from '../config';
 
 describe('Durable Function Log Tests', () => {
@@ -30,7 +31,7 @@ describe('Durable Function Log Tests', () => {
         log.message.includes('Hello from non-durable function!')
       );
       expect(log).toBeDefined();
-      expect(log?.attributes?.lambda?.request_id).toBeDefined();
+      expect(log?.attributes?.attributes?.lambda?.request_id).toBeDefined();
     });
 
     it('logs should NOT have lambda.durable_execution_id attribute', () => {
@@ -38,7 +39,7 @@ describe('Durable Function Log Tests', () => {
         log.message.includes('Hello from non-durable function!')
       );
       expect(log).toBeDefined();
-      expect(log?.attributes?.lambda?.durable_execution_id).toBeUndefined();
+      expect(log?.attributes?.attributes?.lambda?.durable_execution_id).toBeUndefined();
     });
 
     it('logs should NOT have lambda.durable_execution_name attribute', () => {
@@ -46,7 +47,7 @@ describe('Durable Function Log Tests', () => {
         log.message.includes('Hello from non-durable function!')
       );
       expect(log).toBeDefined();
-      expect(log?.attributes?.lambda?.durable_execution_name).toBeUndefined();
+      expect(log?.attributes?.attributes?.lambda?.durable_execution_name).toBeUndefined();
     });
 
     it('platform START log should NOT have lambda.durable_execution_id or lambda.durable_execution_name attributes', () => {
@@ -54,8 +55,8 @@ describe('Durable Function Log Tests', () => {
         log.message.includes('START RequestId:')
       );
       expect(log).toBeDefined();
-      expect(log?.attributes?.lambda?.durable_execution_id).toBeUndefined();
-      expect(log?.attributes?.lambda?.durable_execution_name).toBeUndefined();
+      expect(log?.attributes?.attributes?.lambda?.durable_execution_id).toBeUndefined();
+      expect(log?.attributes?.attributes?.lambda?.durable_execution_name).toBeUndefined();
     });
 
     it('platform END log should NOT have lambda.durable_execution_id or lambda.durable_execution_name attributes', () => {
@@ -63,8 +64,8 @@ describe('Durable Function Log Tests', () => {
         log.message.includes('END RequestId:')
       );
       expect(log).toBeDefined();
-      expect(log?.attributes?.lambda?.durable_execution_id).toBeUndefined();
-      expect(log?.attributes?.lambda?.durable_execution_name).toBeUndefined();
+      expect(log?.attributes?.attributes?.lambda?.durable_execution_id).toBeUndefined();
+      expect(log?.attributes?.attributes?.lambda?.durable_execution_name).toBeUndefined();
     });
 
     it('extension logs should NOT have lambda.durable_execution_id or lambda.durable_execution_name attributes', () => {
@@ -78,8 +79,8 @@ describe('Durable Function Log Tests', () => {
       expect(logs).toBeDefined();
       expect(logs?.length).toBeGreaterThan(0);
       for (const log of logs ?? []) {
-        expect(log?.attributes?.lambda?.durable_execution_id).toBeUndefined();
-        expect(log?.attributes?.lambda?.durable_execution_name).toBeUndefined();
+        expect(log?.attributes?.attributes?.lambda?.durable_execution_id).toBeUndefined();
+        expect(log?.attributes?.attributes?.lambda?.durable_execution_name).toBeUndefined();
       }
     });
   });
@@ -94,10 +95,16 @@ describe('Durable Function Log Tests', () => {
 
     beforeAll(async () => {
       const identifier = getIdentifier();
-      const functionName = `integ-${identifier}-durable-python-durable-lambda`;
+      const baseFunctionName = `integ-${identifier}-durable-python-durable-lambda`;
 
-      console.log('Invoking durable Python Lambda (cold start)...');
-      coldStartResult = await invokeLambdaAndGetDatadogData(functionName, {}, true);
+      // Durable functions require a qualified ARN (version or alias); publish a new version
+      // so the first invocation is a cold start and so we have a valid qualifier.
+      console.log('Publishing version for durable Python Lambda...');
+      const version = await publishVersion(baseFunctionName);
+      const functionName = `${baseFunctionName}:${version}`;
+
+      console.log('Invoking durable Python Lambda (cold start - first invocation of new version)...');
+      coldStartResult = await invokeLambdaAndGetDatadogData(functionName, {}, false);
 
       console.log('Invoking durable Python Lambda (warm start)...');
       warmStartResult = await invokeLambdaAndGetDatadogData(functionName, {}, false);
@@ -117,7 +124,7 @@ describe('Durable Function Log Tests', () => {
         log.message.includes('Hello from durable function!')
       );
       expect(log).toBeDefined();
-      expect(log?.attributes?.lambda?.durable_execution_id).toBeDefined();
+      expect(log?.attributes?.attributes?.lambda?.durable_execution_id).toBeDefined();
     });
 
     it('logs should have lambda.durable_execution_name attribute', () => {
@@ -125,7 +132,7 @@ describe('Durable Function Log Tests', () => {
         log.message.includes('Hello from durable function!')
       );
       expect(log).toBeDefined();
-      expect(log?.attributes?.lambda?.durable_execution_name).toBeDefined();
+      expect(log?.attributes?.attributes?.lambda?.durable_execution_name).toBeDefined();
     });
 
     it('logs arriving before the aws.lambda span should be held and released with durable execution context', () => {
@@ -137,8 +144,8 @@ describe('Durable Function Log Tests', () => {
         log.message.includes('Hello from durable function!')
       );
       expect(log).toBeDefined();
-      expect(log?.attributes?.lambda?.durable_execution_id).toBeDefined();
-      expect(log?.attributes?.lambda?.durable_execution_name).toBeDefined();
+      expect(log?.attributes?.attributes?.lambda?.durable_execution_id).toBeDefined();
+      expect(log?.attributes?.attributes?.lambda?.durable_execution_name).toBeDefined();
     });
 
     it('logs arriving after the aws.lambda span should be decorated immediately with durable execution context', () => {
@@ -151,8 +158,8 @@ describe('Durable Function Log Tests', () => {
         log.message.includes('Hello from durable function!')
       );
       expect(log).toBeDefined();
-      expect(log?.attributes?.lambda?.durable_execution_id).toBeDefined();
-      expect(log?.attributes?.lambda?.durable_execution_name).toBeDefined();
+      expect(log?.attributes?.attributes?.lambda?.durable_execution_id).toBeDefined();
+      expect(log?.attributes?.attributes?.lambda?.durable_execution_name).toBeDefined();
     });
 
     it('each invocation should have its own durable execution context when multiple concurrent invocations occur', () => {
@@ -165,8 +172,8 @@ describe('Durable Function Log Tests', () => {
           log.message.includes('Hello from durable function!')
         );
         expect(log).toBeDefined();
-        expect(log?.attributes?.lambda?.durable_execution_id).toBeDefined();
-        expect(log?.attributes?.lambda?.durable_execution_name).toBeDefined();
+        expect(log?.attributes?.attributes?.lambda?.durable_execution_id).toBeDefined();
+        expect(log?.attributes?.attributes?.lambda?.durable_execution_name).toBeDefined();
       }
 
       // Each concurrent invocation should report a valid request_id so we can distinguish
@@ -184,8 +191,8 @@ describe('Durable Function Log Tests', () => {
         log.message.includes('START RequestId:')
       );
       expect(log).toBeDefined();
-      expect(log?.attributes?.lambda?.durable_execution_id).toBeDefined();
-      expect(log?.attributes?.lambda?.durable_execution_name).toBeDefined();
+      expect(log?.attributes?.attributes?.lambda?.durable_execution_id).toBeDefined();
+      expect(log?.attributes?.attributes?.lambda?.durable_execution_name).toBeDefined();
     });
 
     it('platform END log should have lambda.durable_execution_id and lambda.durable_execution_name attributes', () => {
@@ -195,8 +202,8 @@ describe('Durable Function Log Tests', () => {
         log.message.includes('END RequestId:')
       );
       expect(log).toBeDefined();
-      expect(log?.attributes?.lambda?.durable_execution_id).toBeDefined();
-      expect(log?.attributes?.lambda?.durable_execution_name).toBeDefined();
+      expect(log?.attributes?.attributes?.lambda?.durable_execution_id).toBeDefined();
+      expect(log?.attributes?.attributes?.lambda?.durable_execution_name).toBeDefined();
     });
 
     it('extension logs should have lambda.durable_execution_id and lambda.durable_execution_name attributes', () => {
@@ -211,8 +218,8 @@ describe('Durable Function Log Tests', () => {
       expect(logs).toBeDefined();
       expect(logs?.length).toBeGreaterThan(0);
       for (const log of logs ?? []) {
-        expect(log?.attributes?.lambda?.durable_execution_id).toBeDefined();
-        expect(log?.attributes?.lambda?.durable_execution_name).toBeDefined();
+        expect(log?.attributes?.attributes?.lambda?.durable_execution_id).toBeDefined();
+        expect(log?.attributes?.attributes?.lambda?.durable_execution_name).toBeDefined();
       }
     });
   });
