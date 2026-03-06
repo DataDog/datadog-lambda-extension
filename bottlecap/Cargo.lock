@@ -470,8 +470,8 @@ dependencies = [
  "chrono",
  "cookie",
  "datadog-fips",
- "datadog-protos",
- "ddsketch-agent",
+ "datadog-protos 0.1.0 (git+https://github.com/DataDog/saluki/?rev=f863626dbfe3c59bb390985fa6530b0621c2a0a2)",
+ "ddsketch-agent 0.1.0 (git+https://github.com/DataDog/saluki/?rev=cd6db96ffd31eb0642fb5188bbe2c27f3c8023f5)",
  "dogstatsd",
  "figment",
  "fnv",
@@ -740,6 +740,19 @@ dependencies = [
 [[package]]
 name = "datadog-protos"
 version = "0.1.0"
+source = "git+https://github.com/DataDog/saluki/?rev=cd6db96ffd31eb0642fb5188bbe2c27f3c8023f5#cd6db96ffd31eb0642fb5188bbe2c27f3c8023f5"
+dependencies = [
+ "bytes",
+ "prost 0.13.5",
+ "protobuf",
+ "protobuf-codegen",
+ "tonic 0.12.3",
+ "tonic-build 0.12.3",
+]
+
+[[package]]
+name = "datadog-protos"
+version = "0.1.0"
 source = "git+https://github.com/DataDog/saluki/?rev=f863626dbfe3c59bb390985fa6530b0621c2a0a2#f863626dbfe3c59bb390985fa6530b0621c2a0a2"
 dependencies = [
  "bytes",
@@ -747,8 +760,19 @@ dependencies = [
  "prost-types",
  "protobuf",
  "protobuf-codegen",
- "tonic",
- "tonic-build",
+ "tonic 0.13.1",
+ "tonic-build 0.13.1",
+]
+
+[[package]]
+name = "ddsketch-agent"
+version = "0.1.0"
+source = "git+https://github.com/DataDog/saluki/?rev=cd6db96ffd31eb0642fb5188bbe2c27f3c8023f5#cd6db96ffd31eb0642fb5188bbe2c27f3c8023f5"
+dependencies = [
+ "datadog-protos 0.1.0 (git+https://github.com/DataDog/saluki/?rev=cd6db96ffd31eb0642fb5188bbe2c27f3c8023f5)",
+ "float-cmp",
+ "ordered-float 4.6.0",
+ "smallvec",
 ]
 
 [[package]]
@@ -756,7 +780,7 @@ name = "ddsketch-agent"
 version = "0.1.0"
 source = "git+https://github.com/DataDog/saluki/?rev=f863626dbfe3c59bb390985fa6530b0621c2a0a2#f863626dbfe3c59bb390985fa6530b0621c2a0a2"
 dependencies = [
- "datadog-protos",
+ "datadog-protos 0.1.0 (git+https://github.com/DataDog/saluki/?rev=f863626dbfe3c59bb390985fa6530b0621c2a0a2)",
  "float-cmp",
  "ordered-float 4.6.0",
  "smallvec",
@@ -840,8 +864,8 @@ name = "dogstatsd"
 version = "0.1.0"
 source = "git+https://github.com/DataDog/serverless-components?rev=28f796bf767fff56caf08153ade5cd80c8e8f705#28f796bf767fff56caf08153ade5cd80c8e8f705"
 dependencies = [
- "datadog-protos",
- "ddsketch-agent",
+ "datadog-protos 0.1.0 (git+https://github.com/DataDog/saluki/?rev=f863626dbfe3c59bb390985fa6530b0621c2a0a2)",
+ "ddsketch-agent 0.1.0 (git+https://github.com/DataDog/saluki/?rev=f863626dbfe3c59bb390985fa6530b0621c2a0a2)",
  "derive_more",
  "fnv",
  "hashbrown 0.15.5",
@@ -2141,7 +2165,7 @@ dependencies = [
  "opentelemetry_sdk",
  "prost 0.13.5",
  "serde",
- "tonic",
+ "tonic 0.13.1",
 ]
 
 [[package]]
@@ -3584,6 +3608,27 @@ dependencies = [
 
 [[package]]
 name = "tonic"
+version = "0.12.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "877c5b330756d856ffcc4553ab34a5684481ade925ecc54bcd1bf02b1d0d4d52"
+dependencies = [
+ "async-trait",
+ "base64 0.22.1",
+ "bytes",
+ "http 1.4.0",
+ "http-body 1.0.1",
+ "http-body-util",
+ "percent-encoding",
+ "pin-project",
+ "prost 0.13.5",
+ "tokio-stream",
+ "tower-layer",
+ "tower-service",
+ "tracing",
+]
+
+[[package]]
+name = "tonic"
 version = "0.13.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7e581ba15a835f4d9ea06c55ab1bd4dce26fc53752c69a04aac00703bfb49ba9"
@@ -3610,6 +3655,20 @@ dependencies = [
 
 [[package]]
 name = "tonic-build"
+version = "0.12.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9557ce109ea773b399c9b9e5dca39294110b74f1f342cb347a80d1fce8c26a11"
+dependencies = [
+ "prettyplease",
+ "proc-macro2",
+ "prost-build",
+ "prost-types",
+ "quote",
+ "syn 2.0.115",
+]
+
+[[package]]
+name = "tonic-build"
 version = "0.13.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "eac6f67be712d12f0b41328db3137e0d0757645d8904b4cb7d51cd9c2279e847"
@@ -3630,7 +3689,7 @@ checksum = "07439468da24d5f211d3f3bd7b63665d8f45072804457e838a87414a478e2db8"
 dependencies = [
  "prost 0.13.5",
  "prost-types",
- "tonic",
+ "tonic 0.13.1",
 ]
 
 [[package]]
