@@ -9,6 +9,13 @@ use axum::{
     routing::{get, post},
 };
 use bytes::Bytes;
+use datadog_opentelemetry::propagation::{
+    context::SpanContext,
+    datadog::{
+        DATADOG_HIGHER_ORDER_TRACE_ID_BITS_KEY, DATADOG_SAMPLING_PRIORITY_KEY, DATADOG_TAGS_KEY,
+        DATADOG_TRACE_ID_KEY,
+    },
+};
 use serde_json::{Value, json};
 use std::collections::HashMap;
 use std::net::SocketAddr;
@@ -21,16 +28,7 @@ use tracing::{debug, error, warn};
 use crate::{
     http::{extract_request_body_or_empty, headers_to_map},
     lifecycle::invocation::processor_service::InvocationProcessorHandle,
-    traces::{
-        context::SpanContext,
-        propagation::{
-            DatadogCompositePropagator,
-            text_map_propagator::{
-                DATADOG_HIGHER_ORDER_TRACE_ID_BITS_KEY, DATADOG_SAMPLING_PRIORITY_KEY,
-                DATADOG_TAGS_KEY, DATADOG_TRACE_ID_KEY,
-            },
-        },
-    },
+    traces::propagation::DatadogCompositePropagator,
 };
 
 const HELLO_PATH: &str = "/lambda/hello";
@@ -206,14 +204,13 @@ impl Listener {
     fn inject_span_context_to_headers(headers: &mut HeaderMap, span_context: &SpanContext) {
         headers.insert(
             DATADOG_TRACE_ID_KEY,
-            span_context
-                .trace_id
+            (span_context.trace_id as u64)
                 .to_string()
                 .parse()
                 .expect("Failed to parse trace id"),
         );
 
-        if let Some(priority) = span_context.sampling.and_then(|s| s.priority) {
+        if let Some(priority) = span_context.sampling.priority {
             headers.insert(
                 DATADOG_SAMPLING_PRIORITY_KEY,
                 priority

@@ -5,6 +5,13 @@ use std::{
 };
 
 use chrono::{DateTime, Utc};
+use datadog_opentelemetry::propagation::{
+    context::SpanContext,
+    datadog::{
+        DATADOG_PARENT_ID_KEY, DATADOG_SAMPLING_PRIORITY_KEY, DATADOG_TAGS_KEY,
+        DATADOG_TRACE_ID_KEY,
+    },
+};
 use libdd_trace_protobuf::pb::Span;
 use libdd_trace_utils::tracer_header_tags;
 use serde_json::Value;
@@ -31,14 +38,7 @@ use crate::{
     },
     tags::{lambda::tags::resolve_runtime_from_proc, provider},
     traces::{
-        context::SpanContext,
-        propagation::{
-            DatadogCompositePropagator, Propagator,
-            text_map_propagator::{
-                DATADOG_PARENT_ID_KEY, DATADOG_SAMPLING_PRIORITY_KEY, DATADOG_SPAN_ID_KEY,
-                DATADOG_TRACE_ID_KEY, DatadogHeaderPropagator,
-            },
-        },
+        propagation::{DatadogCompositePropagator, carrier::JsonCarrier},
         trace_processor::SendingTraceProcessor,
     },
 };
@@ -52,6 +52,7 @@ pub const DATADOG_INVOCATION_ERROR_MESSAGE_KEY: &str = "x-datadog-invocation-err
 pub const DATADOG_INVOCATION_ERROR_TYPE_KEY: &str = "x-datadog-invocation-error-type";
 pub const DATADOG_INVOCATION_ERROR_STACK_KEY: &str = "x-datadog-invocation-error-stack";
 pub const DATADOG_INVOCATION_ERROR_KEY: &str = "x-datadog-invocation-error";
+const DATADOG_SPAN_ID_KEY: &str = "x-datadog-span-id";
 const TAG_SAMPLING_PRIORITY: &str = "_sampling_priority_v1";
 
 pub struct Processor {
@@ -987,7 +988,7 @@ impl Processor {
 
         // Set the extracted trace context to the spans
         if let Some(sc) = &context.extracted_span_context {
-            context.invocation_span.trace_id = sc.trace_id;
+            context.invocation_span.trace_id = sc.trace_id as u64;
             context.invocation_span.parent_id = sc.span_id;
 
             // Set the right data to the correct root level span,
@@ -1090,7 +1091,7 @@ impl Processor {
     pub fn extract_span_context(
         headers: &HashMap<String, String>,
         payload_value: &Value,
-        propagator: Arc<impl Propagator>,
+        propagator: Arc<DatadogCompositePropagator>,
     ) -> Option<SpanContext> {
         if let Some(sc) =
             span_inferrer::extract_span_context(payload_value, Arc::clone(&propagator))
@@ -1101,14 +1102,14 @@ impl Processor {
         if let Some(sc) = payload_value
             .get("request")
             .and_then(|req| req.get("headers"))
-            .and_then(|headers| propagator.extract(headers))
+            .and_then(|headers| propagator.extract(&JsonCarrier(headers)))
         {
             debug!("Extracted trace context from event.request.headers");
             return Some(sc);
         }
 
         if let Some(payload_headers) = payload_value.get("headers")
-            && let Some(sc) = propagator.extract(payload_headers)
+            && let Some(sc) = propagator.extract(&JsonCarrier(payload_headers))
         {
             debug!("Extracted trace context from event headers");
             return Some(sc);
@@ -1210,14 +1211,14 @@ impl Processor {
             self.inferrer.set_status_code(status_code_as_string);
         }
 
-        let mut trace_id = 0;
-        let mut parent_id = 0;
+        let mut trace_id: u64 = 0;
+        let mut parent_id: u64 = 0;
         let mut tags: HashMap<String, String> = HashMap::new();
 
         // If we have a trace context, this means we got it from
         // distributed tracing
         if let Some(sc) = &context.extracted_span_context {
-            trace_id = sc.trace_id;
+            trace_id = sc.trace_id as u64;
             parent_id = sc.span_id;
             tags.extend(sc.tags.clone());
         }
@@ -1243,9 +1244,8 @@ impl Processor {
                     .insert(TAG_SAMPLING_PRIORITY.to_string(), priority);
             }
 
-            // Extract tags from headers
-            // Used for 128 bit trace ids
-            tags = DatadogHeaderPropagator::extract_tags(&headers);
+            // Extract _dd.p.* propagation tags from x-datadog-tags header
+            tags = extract_propagation_tags(&headers);
         }
 
         // We should always use the generated span id from the tracer
@@ -1351,6 +1351,21 @@ impl Processor {
                 .add_tracer_span(request_id, span, client_computed_stats);
         }
     }
+}
+
+fn extract_propagation_tags(carrier: &HashMap<String, String>) -> HashMap<String, String> {
+    let carrier_tags = carrier.get(DATADOG_TAGS_KEY).map_or("", String::as_str);
+    carrier_tags
+        .split(',')
+        .filter_map(|pair| {
+            let (k, v) = pair.split_once('=')?;
+            if k.starts_with("_dd.p.") {
+                Some((k.to_string(), v.to_string()))
+            } else {
+                None
+            }
+        })
+        .collect()
 }
 
 #[cfg(test)]
@@ -2057,8 +2072,8 @@ mod tests {
     fn test_extract_span_context_priority_order() {
         let config = Arc::new(config::Config {
             trace_propagation_style_extract: vec![
-                config::trace_propagation_style::TracePropagationStyle::Datadog,
-                config::trace_propagation_style::TracePropagationStyle::TraceContext,
+                datadog_opentelemetry::propagation::TracePropagationStyle::Datadog,
+                datadog_opentelemetry::propagation::TracePropagationStyle::TraceContext,
             ],
             ..config::Config::default()
         });
@@ -2095,8 +2110,8 @@ mod tests {
     fn test_extract_span_context_no_request_headers() {
         let config = Arc::new(config::Config {
             trace_propagation_style_extract: vec![
-                config::trace_propagation_style::TracePropagationStyle::Datadog,
-                config::trace_propagation_style::TracePropagationStyle::TraceContext,
+                datadog_opentelemetry::propagation::TracePropagationStyle::Datadog,
+                datadog_opentelemetry::propagation::TracePropagationStyle::TraceContext,
             ],
             ..config::Config::default()
         });
