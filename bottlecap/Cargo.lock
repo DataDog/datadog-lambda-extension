@@ -489,9 +489,9 @@ dependencies = [
  "itertools 0.14.0",
  "lazy_static",
  "libdd-common",
- "libdd-trace-normalization",
+ "libdd-trace-normalization 1.0.1",
  "libdd-trace-obfuscation",
- "libdd-trace-protobuf",
+ "libdd-trace-protobuf 1.0.0",
  "libdd-trace-stats",
  "libdd-trace-utils",
  "libddwaf",
@@ -1798,7 +1798,16 @@ version = "1.0.0"
 source = "git+https://github.com/DataDog/libdatadog?rev=c8121f422d2c8d219f8d421ff3cdb1fcbe9e8b09#c8121f422d2c8d219f8d421ff3cdb1fcbe9e8b09"
 dependencies = [
  "anyhow",
- "libdd-trace-protobuf",
+ "libdd-trace-protobuf 1.0.0",
+]
+
+[[package]]
+name = "libdd-trace-normalization"
+version = "1.0.1"
+source = "git+https://github.com/DataDog/libdatadog?rev=0f3d46b5046525c9046eb77727f6344753ba76f4#0f3d46b5046525c9046eb77727f6344753ba76f4"
+dependencies = [
+ "anyhow",
+ "libdd-trace-protobuf 1.1.0",
 ]
 
 [[package]]
@@ -1808,7 +1817,7 @@ source = "git+https://github.com/DataDog/libdatadog?rev=c8121f422d2c8d219f8d421f
 dependencies = [
  "anyhow",
  "libdd-common",
- "libdd-trace-protobuf",
+ "libdd-trace-protobuf 1.0.0",
  "libdd-trace-utils",
  "log",
  "percent-encoding",
@@ -1829,13 +1838,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "libdd-trace-protobuf"
+version = "1.1.0"
+source = "git+https://github.com/DataDog/libdatadog?rev=0f3d46b5046525c9046eb77727f6344753ba76f4#0f3d46b5046525c9046eb77727f6344753ba76f4"
+dependencies = [
+ "prost 0.14.3",
+ "serde",
+ "serde_bytes",
+]
+
+[[package]]
 name = "libdd-trace-stats"
 version = "1.0.0"
 source = "git+https://github.com/DataDog/libdatadog?rev=c8121f422d2c8d219f8d421ff3cdb1fcbe9e8b09#c8121f422d2c8d219f8d421ff3cdb1fcbe9e8b09"
 dependencies = [
  "hashbrown 0.15.5",
  "libdd-ddsketch",
- "libdd-trace-protobuf",
+ "libdd-trace-protobuf 1.0.0",
  "libdd-trace-utils",
 ]
 
@@ -1854,8 +1873,8 @@ dependencies = [
  "indexmap",
  "libdd-common",
  "libdd-tinybytes",
- "libdd-trace-normalization",
- "libdd-trace-protobuf",
+ "libdd-trace-normalization 1.0.0",
+ "libdd-trace-protobuf 1.0.0",
  "prost 0.14.3",
  "rand 0.8.5",
  "rmp",
