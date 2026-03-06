@@ -5,6 +5,5 @@ logger.setLevel(logging.INFO)
 
 def handler(event, context):
     logger.info('Hello from durable function!')
-    return {
-        'statusCode': 200
-    }
+    # Return None rather than an HTTP-style dict; the Lambda durable execution
+    # runtime rejects {'statusCode': 200} with "Invalid Status in invocation output."
