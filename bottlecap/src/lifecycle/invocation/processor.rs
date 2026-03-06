@@ -988,7 +988,10 @@ impl Processor {
 
         // Set the extracted trace context to the spans
         if let Some(sc) = &context.extracted_span_context {
-            context.invocation_span.trace_id = sc.trace_id as u64;
+            #[allow(clippy::cast_possible_truncation)] // Datadog protocol uses lower 64 bits
+            {
+                context.invocation_span.trace_id = sc.trace_id as u64;
+            }
             context.invocation_span.parent_id = sc.span_id;
 
             // Set the right data to the correct root level span,
@@ -1218,7 +1221,10 @@ impl Processor {
         // If we have a trace context, this means we got it from
         // distributed tracing
         if let Some(sc) = &context.extracted_span_context {
-            trace_id = sc.trace_id as u64;
+            #[allow(clippy::cast_possible_truncation)] // Datadog protocol uses lower 64 bits
+            {
+                trace_id = sc.trace_id as u64;
+            }
             parent_id = sc.span_id;
             tags.extend(sc.tags.clone());
         }

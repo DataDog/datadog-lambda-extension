@@ -204,10 +204,14 @@ impl Listener {
     fn inject_span_context_to_headers(headers: &mut HeaderMap, span_context: &SpanContext) {
         headers.insert(
             DATADOG_TRACE_ID_KEY,
-            (span_context.trace_id as u64)
-                .to_string()
-                .parse()
-                .expect("Failed to parse trace id"),
+            {
+                #[allow(clippy::cast_possible_truncation)] // Datadog protocol uses lower 64 bits
+                let trace_id = span_context.trace_id as u64;
+                trace_id
+            }
+            .to_string()
+            .parse()
+            .expect("Failed to parse trace id"),
         );
 
         if let Some(priority) = span_context.sampling.priority {
