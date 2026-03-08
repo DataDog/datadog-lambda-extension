@@ -46,12 +46,8 @@ impl Processor {
         encoding: OtlpEncoding,
     ) -> Result<Vec<Vec<DatadogSpan>>, Box<dyn Error>> {
         let request = match encoding {
-            OtlpEncoding::Json => {
-                serde_json::from_slice::<ExportTraceServiceRequest>(body)?
-            }
-            OtlpEncoding::Protobuf => {
-                ExportTraceServiceRequest::decode(body)?
-            }
+            OtlpEncoding::Json => serde_json::from_slice::<ExportTraceServiceRequest>(body)?,
+            OtlpEncoding::Protobuf => ExportTraceServiceRequest::decode(body)?,
         };
 
         let mut spans: Vec<Vec<DatadogSpan>> = Vec::new();
