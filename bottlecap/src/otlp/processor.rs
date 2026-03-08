@@ -47,11 +47,9 @@ impl Processor {
     ) -> Result<Vec<Vec<DatadogSpan>>, Box<dyn Error>> {
         let request = match encoding {
             OtlpEncoding::Json => {
-                tracing::debug!("Decoding OTLP traces as JSON");
                 serde_json::from_slice::<ExportTraceServiceRequest>(body)?
             }
             OtlpEncoding::Protobuf => {
-                tracing::debug!("Decoding OTLP traces as Protobuf");
                 ExportTraceServiceRequest::decode(body)?
             }
         };
