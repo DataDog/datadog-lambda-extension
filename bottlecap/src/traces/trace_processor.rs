@@ -34,6 +34,7 @@ use tracing::{debug, error};
 use crate::traces::stats_generator::StatsGenerator;
 use crate::traces::trace_aggregator::{OwnedTracerHeaderTags, SendDataBuilderInfo};
 use libdd_trace_normalization::normalizer::SamplerPriority;
+use prost014::Message as _;
 
 #[derive(Clone)]
 #[allow(clippy::module_name_repetitions)]
@@ -379,7 +380,7 @@ impl TraceProcessor for ServerlessTraceProcessor {
         // stats are still counted. SamplerPriority::None (-128) means no explicit priority
         // was set and the trace is kept; drop priorities are SamplerPriority::AutoDrop (0)
         // and UserDrop (-1, not represented in SamplerPriority).
-        if config.compute_trace_stats_on_extension
+        let body_size = if config.compute_trace_stats_on_extension
             && let TracerPayloadCollection::V07(ref mut tracer_payloads) = payload
         {
             for tp in tracer_payloads.iter_mut() {
@@ -391,7 +392,14 @@ impl TraceProcessor for ServerlessTraceProcessor {
             if tracer_payloads.is_empty() {
                 return (None, payloads_for_stats);
             }
-        }
+
+            // Use the protobuf-encoded size of the filtered payload so the
+            // TraceAggregator's 3.2 MB batch limit reflects only the data that
+            // will actually be sent to the backend.
+            tracer_payloads.iter().map(|tp| tp.encoded_len()).sum()
+        } else {
+            body_size
+        };
 
         let owned_header_tags = OwnedTracerHeaderTags::from(header_tags.clone());
 
@@ -1249,6 +1257,113 @@ mod tests {
         assert_eq!(
             stats_span_count, 2,
             "stats must include all traces even when all are sampled out"
+        );
+    }
+
+    /// Verifies that body_size in the returned SendDataBuilderInfo reflects the
+    /// protobuf-encoded size of the filtered payload, not the original request body.
+    #[test]
+    fn test_process_traces_body_size_reflects_filtered_payload() {
+        use libdd_trace_obfuscation::obfuscation_config::ObfuscationConfig;
+        use prost014::Message as _;
+
+        let config = Arc::new(Config {
+            apm_dd_url: "https://trace.agent.datadoghq.com".to_string(),
+            compute_trace_stats_on_extension: true,
+            ..Config::default()
+        });
+        let tags_provider = Arc::new(Provider::new(
+            config.clone(),
+            "lambda".to_string(),
+            &std::collections::HashMap::from([(
+                "function_arn".to_string(),
+                "test-arn".to_string(),
+            )]),
+        ));
+        let processor = ServerlessTraceProcessor {
+            obfuscation_config: Arc::new(
+                ObfuscationConfig::new().expect("Failed to create ObfuscationConfig"),
+            ),
+        };
+        let header_tags = tracer_header_tags::TracerHeaderTags {
+            lang: "rust",
+            lang_version: "1.0",
+            lang_interpreter: "",
+            lang_vendor: "",
+            tracer_version: "1.0",
+            container_id: "",
+            client_computed_top_level: false,
+            client_computed_stats: false,
+            dropped_p0_traces: 0,
+            dropped_p0_spans: 0,
+        };
+
+        let make_span = |trace_id: u64, priority: f64| -> pb::Span {
+            let mut metrics = HashMap::new();
+            metrics.insert("_sampling_priority_v1".to_string(), priority);
+            pb::Span {
+                trace_id,
+                span_id: trace_id,
+                parent_id: 0,
+                metrics,
+                service: "svc".to_string(),
+                name: "op".to_string(),
+                resource: "res".to_string(),
+                ..Default::default()
+            }
+        };
+
+        // 1 kept trace, 3 dropped traces; original body_size is intentionally large
+        let traces = vec![
+            vec![make_span(1, 1.0)],
+            vec![make_span(2, -1.0)],
+            vec![make_span(3, -1.0)],
+            vec![make_span(4, -1.0)],
+        ];
+
+        let (payload_info, stats_collection) =
+            processor.process_traces(config, tags_provider, header_tags, traces, 999_999, None);
+
+        let info = payload_info.expect("expected Some payload");
+
+        // The reported size must equal the sum of encoded_len() of the kept TracerPayloads.
+        // stats_collection has all 4 traces. Reconstruct the filtered payload (only trace_id=1
+        // was kept with priority=1) and compute its encoded_len.
+        let TracerPayloadCollection::V07(ref all_payloads) = stats_collection else {
+            panic!("expected V07");
+        };
+        let expected_size: usize = all_payloads
+            .iter()
+            .filter_map(|tp| {
+                let kept_chunks: Vec<pb::TraceChunk> = tp
+                    .chunks
+                    .iter()
+                    .filter(|c| c.spans.iter().any(|s| s.trace_id == 1))
+                    .cloned()
+                    .collect();
+                if kept_chunks.is_empty() {
+                    None
+                } else {
+                    Some(pb::TracerPayload {
+                        chunks: kept_chunks,
+                        ..tp.clone()
+                    })
+                }
+            })
+            .map(|tp| tp.encoded_len())
+            .sum();
+
+        assert!(
+            expected_size > 0,
+            "expected_size must be non-zero for a non-empty payload"
+        );
+        assert_eq!(
+            info.size, expected_size,
+            "body_size must equal protobuf encoded_len of the filtered payload"
+        );
+        assert!(
+            info.size < 999_999,
+            "body_size must be smaller than the original unfiltered request size"
         );
     }
 }
