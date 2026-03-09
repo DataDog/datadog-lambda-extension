@@ -33,6 +33,7 @@ use tracing::{debug, error};
 
 use crate::traces::stats_generator::StatsGenerator;
 use crate::traces::trace_aggregator::{OwnedTracerHeaderTags, SendDataBuilderInfo};
+use libdd_trace_normalization::normalizer::SamplerPriority;
 
 #[derive(Clone)]
 #[allow(clippy::module_name_repetitions)]
@@ -314,7 +315,7 @@ pub trait TraceProcessor {
         traces: Vec<Vec<pb::Span>>,
         body_size: usize,
         span_pointers: Option<Vec<SpanPointer>>,
-    ) -> (SendDataBuilderInfo, TracerPayloadCollection);
+    ) -> (Option<SendDataBuilderInfo>, TracerPayloadCollection);
 }
 
 #[async_trait]
@@ -327,7 +328,7 @@ impl TraceProcessor for ServerlessTraceProcessor {
         traces: Vec<Vec<pb::Span>>,
         body_size: usize,
         span_pointers: Option<Vec<SpanPointer>>,
-    ) -> (SendDataBuilderInfo, TracerPayloadCollection) {
+    ) -> (Option<SendDataBuilderInfo>, TracerPayloadCollection) {
         let mut payload = trace_utils::collect_pb_trace_chunks(
             traces,
             &header_tags,
@@ -362,6 +363,7 @@ impl TraceProcessor for ServerlessTraceProcessor {
 
         // Clone inner V07 payloads for stats generation (TracerPayload is Clone,
         // but TracerPayloadCollection is not).
+        // This clone is done BEFORE filtering so stats always include sampled-out traces.
         let payloads_for_stats = match &payload {
             TracerPayloadCollection::V07(payloads) => {
                 TracerPayloadCollection::V07(payloads.clone())
@@ -371,6 +373,25 @@ impl TraceProcessor for ServerlessTraceProcessor {
                 TracerPayloadCollection::V07(vec![])
             }
         };
+
+        // Remove sampled-out chunks so they won't be sent to Datadog.
+        // Sampled-out chunks are preserved in payloads_for_stats above so their
+        // stats are still counted. SamplerPriority::None (-128) means no explicit priority
+        // was set and the trace is kept; drop priorities are SamplerPriority::AutoDrop (0)
+        // and UserDrop (-1, not represented in SamplerPriority).
+        if config.compute_trace_stats_on_extension
+            && let TracerPayloadCollection::V07(ref mut tracer_payloads) = payload
+        {
+            for tp in tracer_payloads.iter_mut() {
+                tp.chunks.retain(|chunk| {
+                    chunk.priority > 0 || chunk.priority == SamplerPriority::None as i32
+                });
+            }
+            tracer_payloads.retain(|tp| !tp.chunks.is_empty());
+            if tracer_payloads.is_empty() {
+                return (None, payloads_for_stats);
+            }
+        }
 
         let owned_header_tags = OwnedTracerHeaderTags::from(header_tags.clone());
 
@@ -385,7 +406,11 @@ impl TraceProcessor for ServerlessTraceProcessor {
             ));
 
         (
-            SendDataBuilderInfo::new(builder, body_size, owned_header_tags),
+            Some(SendDataBuilderInfo::new(
+                builder,
+                body_size,
+                owned_header_tags,
+            )),
             payloads_for_stats,
         )
     }
@@ -474,7 +499,6 @@ impl SendingTraceProcessor {
             body_size,
             span_pointers,
         );
-        self.trace_tx.send(payload).await?;
 
         // This needs to be after process_traces() because process_traces()
         // performs obfuscation, and we need to compute stats on the obfuscated traces.
@@ -484,6 +508,10 @@ impl SendingTraceProcessor {
             // Just log the error. We don't think trace stats are critical, so we don't want to
             // return an error if only stats fail to send.
             error!("TRACE_PROCESSOR | Error sending traces to the stats concentrator: {err}");
+        }
+
+        if let Some(payload) = payload {
+            self.trace_tx.send(payload).await?;
         }
         Ok(())
     }
@@ -616,6 +644,7 @@ mod tests {
             100,
             None,
         );
+        let tracer_payload = tracer_payload.expect("expected Some payload");
 
         let expected_tracer_payload = pb::TracerPayload {
             container_id: "33".to_string(),
@@ -1047,6 +1076,179 @@ mod tests {
             chunk.spans.len(),
             2,
             "Trace should be kept when no filter tags are set."
+        );
+    }
+
+    /// Verifies that when `compute_trace_stats_on_extension` is true, `process_traces`
+    /// filters sampled-out chunks from the backend payload while preserving them in the
+    /// stats collection.
+    #[test]
+    #[allow(clippy::unwrap_used)]
+    fn test_process_traces_filters_sampled_out_chunks() {
+        use libdd_trace_obfuscation::obfuscation_config::ObfuscationConfig;
+
+        let config = Arc::new(Config {
+            apm_dd_url: "https://trace.agent.datadoghq.com".to_string(),
+            compute_trace_stats_on_extension: true,
+            ..Config::default()
+        });
+        let tags_provider = Arc::new(Provider::new(
+            config.clone(),
+            "lambda".to_string(),
+            &std::collections::HashMap::from([(
+                "function_arn".to_string(),
+                "test-arn".to_string(),
+            )]),
+        ));
+        let processor = ServerlessTraceProcessor {
+            obfuscation_config: Arc::new(
+                ObfuscationConfig::new().expect("Failed to create ObfuscationConfig"),
+            ),
+        };
+
+        let header_tags = tracer_header_tags::TracerHeaderTags {
+            lang: "rust",
+            lang_version: "1.0",
+            lang_interpreter: "",
+            lang_vendor: "",
+            tracer_version: "1.0",
+            container_id: "",
+            client_computed_top_level: false,
+            client_computed_stats: false,
+            dropped_p0_traces: 0,
+            dropped_p0_spans: 0,
+        };
+
+        let make_span = |trace_id: u64, priority: Option<f64>| -> pb::Span {
+            let mut metrics = HashMap::new();
+            if let Some(p) = priority {
+                metrics.insert("_sampling_priority_v1".to_string(), p);
+            }
+            pb::Span {
+                trace_id,
+                span_id: trace_id,
+                parent_id: 0,
+                metrics,
+                service: "svc".to_string(),
+                name: "op".to_string(),
+                resource: "res".to_string(),
+                ..Default::default()
+            }
+        };
+
+        // Three traces: kept (priority 1), dropped (priority 0), dropped (priority -1)
+        let traces = vec![
+            vec![make_span(1, Some(1.0))],
+            vec![make_span(2, Some(0.0))],
+            vec![make_span(3, Some(-1.0))],
+        ];
+
+        let (payload_info, stats_collection) =
+            processor.process_traces(config, tags_provider, header_tags, traces, 0, None);
+        let payload_info = payload_info.expect("expected Some payload");
+
+        // Stats collection must include all three traces
+        let TracerPayloadCollection::V07(ref stats_payloads) = stats_collection else {
+            panic!("expected V07");
+        };
+        let stats_span_count: usize = stats_payloads
+            .iter()
+            .flat_map(|tp| tp.chunks.iter())
+            .map(|c| c.spans.len())
+            .sum();
+        assert_eq!(stats_span_count, 3, "stats must include all traces");
+
+        // Backend payload must only contain the kept trace (priority 1)
+        let backend_send_data = payload_info.builder.build();
+        let TracerPayloadCollection::V07(backend_payloads) = backend_send_data.get_payloads()
+        else {
+            panic!("expected V07");
+        };
+        let backend_span_count: usize = backend_payloads
+            .iter()
+            .flat_map(|tp| tp.chunks.iter())
+            .map(|c| c.spans.len())
+            .sum();
+        assert_eq!(
+            backend_span_count, 1,
+            "backend must only include kept traces"
+        );
+    }
+
+    /// Verifies that `process_traces` returns `None` for the backend payload when all
+    /// traces are sampled out and `compute_trace_stats_on_extension` is true.
+    #[test]
+    fn test_process_traces_returns_none_when_all_sampled_out() {
+        use libdd_trace_obfuscation::obfuscation_config::ObfuscationConfig;
+
+        let config = Arc::new(Config {
+            apm_dd_url: "https://trace.agent.datadoghq.com".to_string(),
+            compute_trace_stats_on_extension: true,
+            ..Config::default()
+        });
+        let tags_provider = Arc::new(Provider::new(
+            config.clone(),
+            "lambda".to_string(),
+            &std::collections::HashMap::from([(
+                "function_arn".to_string(),
+                "test-arn".to_string(),
+            )]),
+        ));
+        let processor = ServerlessTraceProcessor {
+            obfuscation_config: Arc::new(
+                ObfuscationConfig::new().expect("Failed to create ObfuscationConfig"),
+            ),
+        };
+        let header_tags = tracer_header_tags::TracerHeaderTags {
+            lang: "rust",
+            lang_version: "1.0",
+            lang_interpreter: "",
+            lang_vendor: "",
+            tracer_version: "1.0",
+            container_id: "",
+            client_computed_top_level: false,
+            client_computed_stats: false,
+            dropped_p0_traces: 0,
+            dropped_p0_spans: 0,
+        };
+
+        let make_dropped_span = |trace_id: u64| -> pb::Span {
+            let mut metrics = HashMap::new();
+            metrics.insert("_sampling_priority_v1".to_string(), -1.0_f64);
+            pb::Span {
+                trace_id,
+                span_id: trace_id,
+                parent_id: 0,
+                metrics,
+                service: "svc".to_string(),
+                name: "op".to_string(),
+                resource: "res".to_string(),
+                ..Default::default()
+            }
+        };
+
+        let traces = vec![vec![make_dropped_span(1)], vec![make_dropped_span(2)]];
+
+        let (payload, stats_collection) =
+            processor.process_traces(config, tags_provider, header_tags, traces, 0, None);
+
+        assert!(
+            payload.is_none(),
+            "backend payload must be None when all traces are sampled out"
+        );
+
+        // Stats collection must still include both traces
+        let TracerPayloadCollection::V07(ref stats_payloads) = stats_collection else {
+            panic!("expected V07");
+        };
+        let stats_span_count: usize = stats_payloads
+            .iter()
+            .flat_map(|tp| tp.chunks.iter())
+            .map(|c| c.spans.len())
+            .sum();
+        assert_eq!(
+            stats_span_count, 2,
+            "stats must include all traces even when all are sampled out"
         );
     }
 }
