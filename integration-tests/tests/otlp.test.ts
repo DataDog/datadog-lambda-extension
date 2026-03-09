@@ -1,6 +1,5 @@
 import { invokeLambdaAndGetDatadogData, LambdaInvocationDatadogData, DATADOG_INDEXING_WAIT_5_MIN_MS } from './utils/util';
 import { getIdentifier } from '../config';
-import { LambdaClient, InvokeCommand } from '@aws-sdk/client-lambda';
 
 describe('OTLP Integration Tests', () => {
   const results: Record<string, LambdaInvocationDatadogData> = {};
@@ -12,6 +11,7 @@ describe('OTLP Integration Tests', () => {
       python: `integ-${identifier}-otlp-python-lambda`,
       java: `integ-${identifier}-otlp-java-lambda`,
       dotnet: `integ-${identifier}-otlp-dotnet-lambda`,
+      responseValidation: `integ-${identifier}-otlp-response-validation-lambda`,
     };
 
     console.log('Invoking all OTLP Lambda functions in parallel...');
@@ -22,6 +22,7 @@ describe('OTLP Integration Tests', () => {
       invokeLambdaAndGetDatadogData(functions.python, {}, true, true, DATADOG_INDEXING_WAIT_5_MIN_MS),
       invokeLambdaAndGetDatadogData(functions.java, {}, true, true, DATADOG_INDEXING_WAIT_5_MIN_MS),
       invokeLambdaAndGetDatadogData(functions.dotnet, {}, true, true, DATADOG_INDEXING_WAIT_5_MIN_MS),
+      invokeLambdaAndGetDatadogData(functions.responseValidation, {}, true, true, DATADOG_INDEXING_WAIT_5_MIN_MS),
     ]);
 
     // Store results
@@ -29,6 +30,7 @@ describe('OTLP Integration Tests', () => {
     results.python = invocationResults[1];
     results.java = invocationResults[2];
     results.dotnet = invocationResults[3];
+    results.responseValidation = invocationResults[4];
 
     console.log('All OTLP Lambda invocations and data fetching completed');
   }, 700000); // 11.6 minute timeout
@@ -94,30 +96,24 @@ describe('OTLP Integration Tests', () => {
   });
 
   describe('OTLP Response Validation', () => {
-    const lambdaClient = new LambdaClient({ region: 'us-east-1' });
-    const identifier = getIdentifier();
-    const functionName = `integ-${identifier}-otlp-response-validation-lambda`;
+    it('should invoke response validation Lambda successfully', () => {
+      expect(results.responseValidation.statusCode).toBe(200);
+    });
 
-    it('should return OTLP-compliant protobuf responses', async () => {
-      console.log(`Invoking ${functionName}...`);
+    it('should have JSON encoded span in Datadog', () => {
+      const allSpans = results.responseValidation.traces?.flatMap(t => t.spans) || [];
+      const hasJsonSpan = allSpans.some(s =>
+        s.attributes?.resource_name === 'test-span-json' && s.attributes?.custom?.encoding === 'json'
+      );
+      expect(hasJsonSpan).toBe(true);
+    });
 
-      const command = new InvokeCommand({
-        FunctionName: functionName,
-        Payload: Buffer.from(JSON.stringify({})),
-      });
-
-      const response = await lambdaClient.send(command);
-
-      expect(response.StatusCode).toBe(200);
-      expect(response.FunctionError).toBeUndefined();
-
-      const payload = JSON.parse(Buffer.from(response.Payload!).toString());
-
-      const validationResult = JSON.parse(payload.body);
-      expect(validationResult.success).toBe(true);
-      expect(validationResult.statusCode).toBe(200);
-      expect(validationResult.contentType).toBe('application/x-protobuf');
-      expect(validationResult.message).toBe('OTLP response is properly formatted and decodable');
-    }, 60000);
+    it('should have Protobuf encoded span in Datadog', () => {
+      const allSpans = results.responseValidation.traces?.flatMap(t => t.spans) || [];
+      const hasProtobufSpan = allSpans.some(s =>
+        s.attributes?.resource_name === 'test-span-protobuf' && s.attributes?.custom?.encoding === 'protobuf'
+      );
+      expect(hasProtobufSpan).toBe(true);
+    });
   });
 });
