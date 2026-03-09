@@ -168,24 +168,24 @@ impl Listener {
         State((invocation_processor_handle, _, tasks)): State<ListenerState>,
         request: Request,
     ) -> Response {
-        // Split the request upfront so headers are preserved even if body
-        // extraction fails (e.g. oversized MSK payloads exceeding 6MB).
+        // IMPORTANT: Extract the body synchronously before returning the response.
+        // If this is moved into the spawned task, PlatformRuntimeDone may be
+        // processed before the body is read, causing orphaned traces. (SLES-2666)
+        // On oversized payloads (>6MB) we gracefully degrade to an empty body
+        // so that processing still runs. (SLES-2722)
         let (parts, body) = request.into_parts();
-
-        let mut join_set = tasks.lock().await;
-        join_set.spawn(async move {
-            let body = match Bytes::from_request(
-                axum::extract::Request::from_parts(parts.clone(), body),
-                &(),
-            )
-            .await
-            {
-                Ok(b) => b,
-                Err(e) => {
-                    warn!("Failed to buffer end-invocation request body: {e}. Processing with empty payload.");
-                    Bytes::new()
-                }
-            };
+        let body = match Bytes::from_request(
+            axum::extract::Request::from_parts(parts.clone(), body),
+            &(),
+        )
+        .await
+        {
+            Ok(b) => b,
+            Err(e) => {
+                warn!("Failed to buffer end-invocation request body: {e}. Processing with empty payload.");
+                Bytes::new()
+            }
+        };
 
         let mut join_set = tasks.lock().await;
         join_set.spawn(async move {
@@ -412,8 +412,8 @@ mod tests {
     /// gracefully degrade to an empty body instead of failing outright.
     #[tokio::test]
     async fn test_end_invocation_oversized_payload_still_processes() {
-        // Mirrors the fixed handle_end_invocation logic: split the request
-        // upfront, attempt body extraction, fall back to empty bytes.
+        // Mirrors the fixed handle_end_invocation logic: synchronously attempt
+        // body extraction before spawning the task, fall back to empty bytes.
         async fn handler(request: axum::extract::Request) -> StatusCode {
             use axum::extract::FromRequest;
 
