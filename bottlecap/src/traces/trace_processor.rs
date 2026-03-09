@@ -1266,7 +1266,7 @@ mod tests {
         );
     }
 
-    /// Verifies that body_size in the returned SendDataBuilderInfo reflects the
+    /// Verifies that `body_size` in the returned `SendDataBuilderInfo` reflects the
     /// protobuf-encoded size of the filtered payload, not the original request body.
     #[test]
     fn test_process_traces_body_size_reflects_filtered_payload() {
