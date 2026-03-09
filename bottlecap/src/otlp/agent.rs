@@ -203,6 +203,7 @@ impl Agent {
                     return Self::otlp_error_response(
                         StatusCode::INTERNAL_SERVER_ERROR,
                         format!("Error sending traces to the trace aggregator: {err}"),
+                        encoding,
                     );
                 }
             }
