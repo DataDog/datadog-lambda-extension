@@ -182,7 +182,9 @@ impl Listener {
         {
             Ok(b) => b,
             Err(e) => {
-                warn!("Failed to buffer end-invocation request body: {e}. Processing with empty payload.");
+                warn!(
+                    "Failed to buffer end-invocation request body: {e}. Processing with empty payload."
+                );
                 Bytes::new()
             }
         };
@@ -418,15 +420,13 @@ mod tests {
             use axum::extract::FromRequest;
 
             let (parts, body) = request.into_parts();
-            let body = match Bytes::from_request(
-                axum::extract::Request::from_parts(parts, body),
-                &(),
-            )
-            .await
-            {
-                Ok(b) => b,
-                Err(_) => Bytes::new(),
-            };
+            let body =
+                match Bytes::from_request(axum::extract::Request::from_parts(parts, body), &())
+                    .await
+                {
+                    Ok(b) => b,
+                    Err(_) => Bytes::new(),
+                };
 
             if body.is_empty() {
                 // Body was too large and was replaced with empty bytes.
@@ -452,9 +452,8 @@ mod tests {
 
         let response = router.oneshot(req).await.expect("request failed");
 
-        // With the fix, the handler gracefully degrades to an empty payload
-        // instead of failing, so processing (universal_instrumentation_end)
-        // still runs.
+        // The handler gracefully degrades to an empty payload instead of failing,
+        // so processing (universal_instrumentation_end) still runs.
         assert_eq!(
             response.status(),
             StatusCode::OK,
