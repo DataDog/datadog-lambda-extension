@@ -1352,17 +1352,7 @@ impl Processor {
 
 fn extract_propagation_tags(carrier: &HashMap<String, String>) -> HashMap<String, String> {
     let carrier_tags = carrier.get(DATADOG_TAGS_KEY).map_or("", String::as_str);
-    carrier_tags
-        .split(',')
-        .filter_map(|pair| {
-            let (k, v) = pair.split_once('=')?;
-            if k.starts_with("_dd.p.") {
-                Some((k.to_string(), v.to_string()))
-            } else {
-                None
-            }
-        })
-        .collect()
+    crate::traces::propagation::extract_propagation_tags(carrier_tags)
 }
 
 #[cfg(test)]

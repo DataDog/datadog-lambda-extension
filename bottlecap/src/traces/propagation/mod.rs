@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use crate::config;
@@ -8,6 +9,22 @@ use datadog_opentelemetry::propagation::{
 pub mod carrier;
 
 const BAGGAGE_PREFIX: &str = "ot-baggage-";
+const PROPAGATION_TAG_PREFIX: &str = "_dd.p.";
+
+#[must_use]
+pub fn extract_propagation_tags(tags_str: &str) -> HashMap<String, String> {
+    tags_str
+        .split(',')
+        .filter_map(|pair| {
+            let (k, v) = pair.split_once('=')?;
+            if k.starts_with(PROPAGATION_TAG_PREFIX) {
+                Some((k.to_string(), v.to_string()))
+            } else {
+                None
+            }
+        })
+        .collect()
+}
 
 // Thin wrapper around dd-trace-rs's propagator to add `ot-baggage-*` header
 // extraction, which is not yet supported upstream in datadog-opentelemetry.
@@ -37,7 +54,8 @@ impl DatadogCompositePropagator {
         let keys = carrier.keys();
 
         for key in keys {
-            if let Some(stripped) = key.strip_prefix(BAGGAGE_PREFIX) {
+            let lower = key.to_ascii_lowercase();
+            if let Some(stripped) = lower.strip_prefix(BAGGAGE_PREFIX) {
                 context.tags.insert(
                     stripped.to_string(),
                     carrier.get(key).unwrap_or_default().to_string(),
@@ -197,5 +215,29 @@ pub mod tests {
 
         assert_eq!(context.tags.len(), 1);
         assert_eq!(context.tags.get("key1").expect("Missing tag"), "value1");
+    }
+
+    #[test]
+    fn test_attach_baggage_multiple_keys() {
+        let mut context = SpanContext::default();
+        let carrier = HashMap::from([
+            ("ot-baggage-key1".to_string(), "value1".to_string()),
+            ("ot-baggage-key2".to_string(), "value2".to_string()),
+            ("x-datadog-trace-id".to_string(), "123".to_string()),
+        ]);
+
+        DatadogCompositePropagator::attach_baggage(&mut context, &carrier);
+
+        assert_eq!(context.tags.len(), 2);
+        assert_eq!(context.tags.get("key1").expect("Missing tag"), "value1");
+        assert_eq!(context.tags.get("key2").expect("Missing tag"), "value2");
+    }
+
+    #[test]
+    fn test_extract_propagation_tags() {
+        let tags = extract_propagation_tags("_dd.p.tid=abc123,any=tag,_dd.p.dm=-4");
+        assert_eq!(tags.len(), 2);
+        assert_eq!(tags.get("_dd.p.tid").expect("Missing tag"), "abc123");
+        assert_eq!(tags.get("_dd.p.dm").expect("Missing tag"), "-4");
     }
 }
