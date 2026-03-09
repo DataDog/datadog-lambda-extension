@@ -376,7 +376,9 @@ mod tests {
             Some("7431398482019833808")
         );
         assert_eq!(
-            carrier.get("x-datadog-sampling-priority").map(String::as_str),
+            carrier
+                .get("x-datadog-sampling-priority")
+                .map(String::as_str),
             Some("1")
         );
     }
