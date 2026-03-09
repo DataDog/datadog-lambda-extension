@@ -121,18 +121,15 @@ pub async fn extract_request_body(
 /// errors (e.g. an oversized payload exceeding `DefaultBodyLimit`), the body
 /// is replaced with empty bytes so that processing can continue with headers
 /// only.
-pub async fn extract_request_body_or_empty(
-    request: Request,
-) -> (http::request::Parts, Bytes) {
+pub async fn extract_request_body_or_empty(request: Request) -> (http::request::Parts, Bytes) {
     let (parts, body) = request.into_parts();
-    let bytes =
-        match Bytes::from_request(Request::from_parts(parts.clone(), body), &()).await {
-            Ok(b) => b,
-            Err(e) => {
-                warn!("Failed to buffer request body: {e}. Processing with empty payload.");
-                Bytes::new()
-            }
-        };
+    let bytes = match Bytes::from_request(Request::from_parts(parts.clone(), body), &()).await {
+        Ok(b) => b,
+        Err(e) => {
+            warn!("Failed to buffer request body: {e}. Processing with empty payload.");
+            Bytes::new()
+        }
+    };
     (parts, bytes)
 }
 
