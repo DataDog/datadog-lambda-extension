@@ -355,7 +355,11 @@ mod tests {
         let payload = serde_json::from_str(&json).expect("Failed to deserialize into Value");
         let result = MSKEvent::new(payload).expect("Failed to deserialize into MSKEvent");
 
-        let record = result.records.values().find_map(|arr| arr.first()).expect("Expected at least one record");
+        let record = result
+            .records
+            .values()
+            .find_map(|arr| arr.first())
+            .expect("Expected at least one record");
         assert_eq!(record.topic, "topic1");
         assert_eq!(record.headers.len(), 3);
     }
