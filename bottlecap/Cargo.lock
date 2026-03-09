@@ -768,7 +768,7 @@ dependencies = [
 [[package]]
 name = "datadog-opentelemetry"
 version = "0.3.0"
-source = "git+https://github.com/DataDog/dd-trace-rs?rev=d5b07ee235f169d166d5f7f7f749444ad36d5fe8#d5b07ee235f169d166d5f7f7f749444ad36d5fe8"
+source = "git+https://github.com/DataDog/dd-trace-rs?rev=f51cefc4ad24bec81b38fb2f36b1ed93f21ae913#f51cefc4ad24bec81b38fb2f36b1ed93f21ae913"
 dependencies = [
  "anyhow",
  "arc-swap",
