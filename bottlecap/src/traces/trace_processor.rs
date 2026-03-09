@@ -34,7 +34,7 @@ use tracing::{debug, error};
 use crate::traces::stats_generator::StatsGenerator;
 use crate::traces::trace_aggregator::{OwnedTracerHeaderTags, SendDataBuilderInfo};
 use libdd_trace_normalization::normalizer::SamplerPriority;
-use prost014::Message as _;
+use prost::Message as _;
 
 #[derive(Clone)]
 #[allow(clippy::module_name_repetitions)]
@@ -1265,7 +1265,7 @@ mod tests {
     #[test]
     fn test_process_traces_body_size_reflects_filtered_payload() {
         use libdd_trace_obfuscation::obfuscation_config::ObfuscationConfig;
-        use prost014::Message as _;
+        use prost::Message as _;
 
         let config = Arc::new(Config {
             apm_dd_url: "https://trace.agent.datadoghq.com".to_string(),
