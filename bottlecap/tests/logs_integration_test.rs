@@ -62,7 +62,7 @@ async fn test_logs() {
         logs_aggr_service.run().await;
     });
 
-    let (mut logs_agent, logs_agent_tx) = LogsAgent::new(
+    let (mut logs_agent, logs_agent_tx, _durable_context_tx) = LogsAgent::new(
         tags_provider,
         Arc::clone(&arc_conf),
         bus_tx.clone(),
