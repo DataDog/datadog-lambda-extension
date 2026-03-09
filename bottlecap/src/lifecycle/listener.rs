@@ -3,7 +3,7 @@
 
 use axum::{
     Router,
-    extract::{DefaultBodyLimit, FromRequest, Request, State},
+    extract::{DefaultBodyLimit, Request, State},
     http::{HeaderMap, StatusCode},
     response::{IntoResponse, Response},
     routing::{get, post},
@@ -19,7 +19,7 @@ use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, warn};
 
 use crate::{
-    http::{extract_request_body, headers_to_map},
+    http::{extract_request_body_or_empty, headers_to_map},
     lifecycle::invocation::processor_service::InvocationProcessorHandle,
     traces::{
         context::SpanContext,
@@ -125,17 +125,7 @@ impl Listener {
         State((invocation_processor_handle, propagator, tasks)): State<ListenerState>,
         request: Request,
     ) -> Response {
-        let (parts, body) = match extract_request_body(request).await {
-            Ok(r) => r,
-            Err(e) => {
-                error!("Failed to extract request body: {e}");
-                return (
-                    StatusCode::BAD_REQUEST,
-                    "Could not read start invocation request body",
-                )
-                    .into_response();
-            }
-        };
+        let (parts, body) = extract_request_body_or_empty(request).await;
 
         let headers = headers_to_map(&parts.headers);
         let payload_value = serde_json::from_slice::<Value>(&body).unwrap_or_else(|_| json!({}));
@@ -173,21 +163,7 @@ impl Listener {
         // processed before the body is read, causing orphaned traces. (SLES-2666)
         // On oversized payloads (>6MB) we gracefully degrade to an empty body
         // so that processing still runs. (SLES-2722)
-        let (parts, body) = request.into_parts();
-        let body = match Bytes::from_request(
-            axum::extract::Request::from_parts(parts.clone(), body),
-            &(),
-        )
-        .await
-        {
-            Ok(b) => b,
-            Err(e) => {
-                warn!(
-                    "Failed to buffer end-invocation request body: {e}. Processing with empty payload."
-                );
-                Bytes::new()
-            }
-        };
+        let (parts, body) = extract_request_body_or_empty(request).await;
 
         let mut join_set = tasks.lock().await;
         join_set.spawn(async move {

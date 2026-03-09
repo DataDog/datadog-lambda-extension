@@ -9,7 +9,7 @@ use core::time::Duration;
 use datadog_fips::reqwest_adapter::create_reqwest_client_builder;
 use std::sync::Arc;
 use std::{collections::HashMap, error::Error, fs::File, io::BufReader};
-use tracing::{debug, error};
+use tracing::{debug, error, warn};
 
 #[must_use]
 pub fn get_client(config: &Arc<config::Config>) -> reqwest::Client {
@@ -115,6 +115,25 @@ pub async fn extract_request_body(
     let bytes = Bytes::from_request(Request::from_parts(parts.clone(), body), &()).await?;
 
     Ok((parts, bytes))
+}
+
+/// Like [`extract_request_body`], but never fails: if buffering the body
+/// errors (e.g. an oversized payload exceeding `DefaultBodyLimit`), the body
+/// is replaced with empty bytes so that processing can continue with headers
+/// only.
+pub async fn extract_request_body_or_empty(
+    request: Request,
+) -> (http::request::Parts, Bytes) {
+    let (parts, body) = request.into_parts();
+    let bytes =
+        match Bytes::from_request(Request::from_parts(parts.clone(), body), &()).await {
+            Ok(b) => b,
+            Err(e) => {
+                warn!("Failed to buffer request body: {e}. Processing with empty payload.");
+                Bytes::new()
+            }
+        };
+    (parts, bytes)
 }
 
 #[must_use]
