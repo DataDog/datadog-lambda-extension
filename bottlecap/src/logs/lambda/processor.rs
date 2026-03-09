@@ -58,7 +58,9 @@ pub struct LambdaProcessor {
     durable_context_order: VecDeque<String>,
 }
 
-const DURABLE_CONTEXT_MAP_CAPACITY: usize = 100;
+// Matches `lifecycle::invocation::ContextBuffer` default capacity: sized to absorb async
+// event backlog where invocation contexts may arrive out of order.
+const DURABLE_CONTEXT_MAP_CAPACITY: usize = 500;
 
 const OOM_ERRORS: [&str; 7] = [
     "fatal error: runtime: out of memory",       // Go
