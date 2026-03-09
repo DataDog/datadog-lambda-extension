@@ -268,8 +268,8 @@ mod tests {
         trace_processor::TraceProcessor,
     };
     use async_trait::async_trait;
-    use axum::http::Request;
     use axum::body::Body;
+    use axum::http::Request;
     use libdd_trace_protobuf::pb;
     use libdd_trace_utils::tracer_header_tags::TracerHeaderTags;
     use libdd_trace_utils::tracer_payload::TracerPayloadCollection;
@@ -322,10 +322,19 @@ mod tests {
         let (tx, _rx) = mpsc::channel(16);
         let (_, concentrator_handle) = StatsConcentratorService::new(config.clone());
         let stats_generator = Arc::new(StatsGenerator::new(concentrator_handle));
-        (config, tags_provider, otlp_processor, trace_processor, tx, stats_generator)
+        (
+            config,
+            tags_provider,
+            otlp_processor,
+            trace_processor,
+            tx,
+            stats_generator,
+        )
     }
 
-    fn make_router_with_processor(trace_processor: Arc<dyn TraceProcessor + Send + Sync>) -> axum::Router {
+    fn make_router_with_processor(
+        trace_processor: Arc<dyn TraceProcessor + Send + Sync>,
+    ) -> axum::Router {
         let state = make_state(trace_processor);
         axum::Router::new()
             .route("/v1/traces", axum::routing::post(Agent::v1_traces))
@@ -346,7 +355,9 @@ mod tests {
         let processor = Arc::new(NoopTraceProcessor::new());
         let router = make_router_with_processor(processor);
 
-        let body = encode_otlp_request(&ExportTraceServiceRequest { resource_spans: vec![] });
+        let body = encode_otlp_request(&ExportTraceServiceRequest {
+            resource_spans: vec![],
+        });
         let request = Request::builder()
             .method("POST")
             .uri("/v1/traces")
@@ -363,7 +374,9 @@ mod tests {
     #[tokio::test]
     async fn test_v1_traces_body_size_equals_request_body_len() {
         let processor = Arc::new(NoopTraceProcessor::new());
-        let router = make_router_with_processor(Arc::clone(&processor) as Arc<dyn TraceProcessor + Send + Sync>);
+        let router = make_router_with_processor(
+            Arc::clone(&processor) as Arc<dyn TraceProcessor + Send + Sync>
+        );
 
         use opentelemetry_proto::tonic::common::v1::InstrumentationScope;
         use opentelemetry_proto::tonic::resource::v1::Resource;
