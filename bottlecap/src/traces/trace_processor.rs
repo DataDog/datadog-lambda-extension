@@ -395,6 +395,7 @@ impl TraceProcessor for ServerlessTraceProcessor {
                 return (None, payloads_for_stats);
             }
 
+            // Update body_size after dropping sampled-out traces.
             // Use the protobuf-encoded size of the filtered payload so the
             // TraceAggregator's 3.2 MB batch limit reflects only the data that
             // will actually be sent to the backend.
