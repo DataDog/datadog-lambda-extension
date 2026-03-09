@@ -33,9 +33,7 @@ use tracing::{debug, error};
 
 use crate::traces::stats_generator::StatsGenerator;
 use crate::traces::trace_aggregator::{OwnedTracerHeaderTags, SendDataBuilderInfo};
-
-/// Sentinel value used by `collect_pb_trace_chunks` when `_sampling_priority_v1` is absent.
-const CHUNK_PRIORITY_NOT_SET: i32 = i8::MIN as i32;
+use libdd_trace_normalization::normalizer::SamplerPriority;
 
 #[derive(Clone)]
 #[allow(clippy::module_name_repetitions)]
@@ -378,15 +376,16 @@ impl TraceProcessor for ServerlessTraceProcessor {
 
         // Remove sampled-out chunks so they won't be sent to Datadog.
         // Sampled-out chunks are preserved in payloads_for_stats above so their
-        // stats are still counted. CHUNK_PRIORITY_NOT_SET (-128) means no explicit priority
-        // was set and the trace is kept; valid drop priorities are -1 (USER_DROP) and 0
-        // (AUTO_DROP).
+        // stats are still counted. SamplerPriority::None (-128) means no explicit priority
+        // was set and the trace is kept; drop priorities are SamplerPriority::AutoDrop (0)
+        // and UserDrop (-1, not represented in SamplerPriority).
         if config.compute_trace_stats_on_extension
             && let TracerPayloadCollection::V07(ref mut tracer_payloads) = payload
         {
             for tp in tracer_payloads.iter_mut() {
-                tp.chunks
-                    .retain(|chunk| chunk.priority > 0 || chunk.priority == CHUNK_PRIORITY_NOT_SET);
+                tp.chunks.retain(|chunk| {
+                    chunk.priority > 0 || chunk.priority == SamplerPriority::None as i32
+                });
             }
             tracer_payloads.retain(|tp| !tp.chunks.is_empty());
             if tracer_payloads.is_empty() {
