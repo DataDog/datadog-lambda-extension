@@ -240,17 +240,7 @@ impl StepFunctionEvent {
 }
 
 fn extract_propagation_tags(tags_str: &str) -> HashMap<String, String> {
-    tags_str
-        .split(',')
-        .filter_map(|pair| {
-            let (k, v) = pair.split_once('=')?;
-            if k.starts_with("_dd.p.") {
-                Some((k.to_string(), v.to_string()))
-            } else {
-                None
-            }
-        })
-        .collect()
+    crate::traces::propagation::extract_propagation_tags(tags_str)
 }
 
 impl ServiceNameResolver for StepFunctionEvent {
