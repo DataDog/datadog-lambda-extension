@@ -34,6 +34,8 @@ use tracing::{debug, error};
 use crate::traces::stats_generator::StatsGenerator;
 use crate::traces::trace_aggregator::{OwnedTracerHeaderTags, SendDataBuilderInfo};
 use libdd_trace_normalization::normalizer::SamplerPriority;
+// Import the prost::Message trait to bring encoded_len() into scope on TracerPayload.
+// `as _` avoids a name conflict with the Message name used elsewhere.
 use prost::Message as _;
 
 #[derive(Clone)]
