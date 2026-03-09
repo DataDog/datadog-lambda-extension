@@ -66,101 +66,12 @@ impl DatadogCompositePropagator {
 }
 
 #[cfg(test)]
-pub mod tests {
+mod tests {
     use std::collections::HashMap;
-    use std::sync::LazyLock;
 
     use datadog_opentelemetry::propagation::TracePropagationStyle;
 
     use super::*;
-
-    fn lower_64_bits(value: u128) -> u64 {
-        (value & 0xFFFF_FFFF_FFFF_FFFF) as u64
-    }
-
-    static TRACE_ID: LazyLock<u128> =
-        LazyLock::new(|| 171_395_628_812_617_415_352_188_477_958_425_669_623);
-    static TRACE_ID_LOWER_ORDER_BITS: LazyLock<u64> = LazyLock::new(|| lower_64_bits(*TRACE_ID));
-    static TRACE_ID_HEX: LazyLock<String> =
-        LazyLock::new(|| String::from("80f198ee56343ba864fe8b2a57d3eff7"));
-
-    // TraceContext Headers
-    static VALID_TRACECONTEXT_HEADERS_BASIC: LazyLock<HashMap<String, String>> =
-        LazyLock::new(|| {
-            HashMap::from([
-                (
-                    "traceparent".to_string(),
-                    format!("00-{}-00f067aa0ba902b7-01", *TRACE_ID_HEX),
-                ),
-                (
-                    "tracestate".to_string(),
-                    "dd=p:00f067aa0ba902b7;s:2;o:rum".to_string(),
-                ),
-            ])
-        });
-    static VALID_TRACECONTEXT_HEADERS_VALID_64_BIT_TRACE_ID: LazyLock<HashMap<String, String>> =
-        LazyLock::new(|| {
-            HashMap::from([
-                (
-                    "traceparent".to_string(),
-                    "00-000000000000000064fe8b2a57d3eff7-00f067aa0ba902b7-01".to_string(),
-                ),
-                (
-                    "tracestate".to_string(),
-                    "dd=s:2;o:rum;t.dm:-4;t.usr.id:baz64,congo=t61rcWkgMzE".to_string(),
-                ),
-            ])
-        });
-
-    // Datadog Headers
-    static VALID_DATADOG_HEADERS: LazyLock<HashMap<String, String>> = LazyLock::new(|| {
-        HashMap::from([
-            (
-                "x-datadog-trace-id".to_string(),
-                "13088165645273925489".to_string(),
-            ),
-            ("x-datadog-parent-id".to_string(), "5678".to_string()),
-            ("x-datadog-sampling-priority".to_string(), "1".to_string()),
-            ("x-datadog-origin".to_string(), "synthetics".to_string()),
-        ])
-    });
-    static VALID_DATADOG_HEADERS_MATCHING_TRACE_CONTEXT_VALID_TRACE_ID: LazyLock<
-        HashMap<String, String>,
-    > = LazyLock::new(|| {
-        HashMap::from([
-            (
-                "x-datadog-trace-id".to_string(),
-                TRACE_ID_LOWER_ORDER_BITS.to_string(),
-            ),
-            ("x-datadog-parent-id".to_string(), "5678".to_string()),
-            ("x-datadog-origin".to_string(), "synthetics".to_string()),
-            ("x-datadog-sampling-priority".to_string(), "1".to_string()),
-        ])
-    });
-
-    // Fixtures
-    static ALL_VALID_HEADERS: LazyLock<HashMap<String, String>> = LazyLock::new(|| {
-        let mut h = HashMap::new();
-        h.extend(VALID_DATADOG_HEADERS.clone());
-        h.extend(HashMap::from([
-            (
-                "traceparent".to_string(),
-                format!("00-{}-00f067aa0ba902b7-01", *TRACE_ID_HEX),
-            ),
-            (
-                "tracestate".to_string(),
-                "dd=s:2;o:rum;t.dm:-4;t.usr.id:baz64,congo=t61rcWkgMz".to_string(),
-            ),
-        ]));
-        h
-    });
-    static DATADOG_TRACECONTEXT_MATCHING_TRACE_ID_HEADERS: LazyLock<HashMap<String, String>> =
-        LazyLock::new(|| {
-            let mut h = HashMap::new();
-            h.extend(VALID_DATADOG_HEADERS_MATCHING_TRACE_CONTEXT_VALID_TRACE_ID.clone());
-            h.extend(VALID_TRACECONTEXT_HEADERS_VALID_64_BIT_TRACE_ID.clone());
-            h
-        });
 
     #[test]
     fn test_extract_available_contexts() {
