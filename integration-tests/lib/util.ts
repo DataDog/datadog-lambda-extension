@@ -10,12 +10,12 @@ export const datadogSecretArn = process.env.DATADOG_API_SECRET_ARN!;
 export const extensionLayerArn = process.env.EXTENSION_LAYER_ARN!;
 
 export const defaultNodeRuntime = lambda.Runtime.NODEJS_24_X;
-export const defaultPythonRuntime = lambda.Runtime.PYTHON_3_13;
+export const defaultPythonRuntime = lambda.Runtime.PYTHON_3_14;
 export const defaultJavaRuntime = lambda.Runtime.JAVA_21;
 export const defaultDotnetRuntime = lambda.Runtime.DOTNET_8;
 
 export const defaultNodeLayerArn = 'arn:aws:lambda:us-east-1:464622532012:layer:Datadog-Node24-x:132';
-export const defaultPythonLayerArn = 'arn:aws:lambda:us-east-1:464622532012:layer:Datadog-Python313-ARM:123';
+export const defaultPythonLayerArn = 'arn:aws:lambda:us-east-1:464622532012:layer:Datadog-Python314-ARM:123';
 export const defaultJavaLayerArn = 'arn:aws:lambda:us-east-1:464622532012:layer:dd-trace-java:25';
 export const defaultDotnetLayerArn = 'arn:aws:lambda:us-east-1:464622532012:layer:dd-trace-dotnet-ARM:23';
 

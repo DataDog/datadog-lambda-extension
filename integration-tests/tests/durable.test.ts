@@ -10,6 +10,7 @@ describe('Durable Function Log Tests', () => {
       const identifier = getIdentifier();
       const functionName = `integ-${identifier}-durable-python-lambda`;
 
+      console.log(`CloudWatch log group: /aws/lambda/${functionName}`);
       console.log('Invoking non-durable Python Lambda...');
       result = await invokeLambdaAndGetDatadogData(functionName, {}, true);
       console.log('Non-durable Lambda invocation and data fetching completed');
@@ -97,6 +98,7 @@ describe('Durable Function Log Tests', () => {
       const identifier = getIdentifier();
       const baseFunctionName = `integ-${identifier}-durable-python-durable-lambda`;
 
+      console.log(`CloudWatch log group: /aws/lambda/${baseFunctionName}`);
       // Durable functions require a qualified ARN (version or alias); publish a new version
       // so the first invocation is a cold start and so we have a valid qualifier.
       console.log('Publishing version for durable Python Lambda...');
