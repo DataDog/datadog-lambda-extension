@@ -399,7 +399,10 @@ impl TraceProcessor for ServerlessTraceProcessor {
             // Use the protobuf-encoded size of the filtered payload so the
             // TraceAggregator's 3.2 MB batch limit reflects only the data that
             // will actually be sent to the backend.
-            tracer_payloads.iter().map(prost::Message::encoded_len).sum()
+            tracer_payloads
+                .iter()
+                .map(prost::Message::encoded_len)
+                .sum()
         } else {
             body_size
         };
