@@ -193,17 +193,18 @@ impl Agent {
             None,
         );
 
-        match trace_tx.send(send_data_builder).await {
-            Ok(()) => {
-                debug!("OTLP | Successfully buffered traces to be aggregated.");
-            }
-            Err(err) => {
-                error!("OTLP | Error sending traces to the trace aggregator: {err}");
-                return Self::otlp_error_response(
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    format!("Error sending traces to the trace aggregator: {err}"),
-                    encoding,
-                );
+        if let Some(send_data_builder) = send_data_builder {
+            match trace_tx.send(send_data_builder).await {
+                Ok(()) => {
+                    debug!("OTLP | Successfully buffered traces to be aggregated.");
+                }
+                Err(err) => {
+                    error!("OTLP | Error sending traces to the trace aggregator: {err}");
+                    return Self::otlp_error_response(
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        format!("Error sending traces to the trace aggregator: {err}"),
+                    );
+                }
             }
         }
 
