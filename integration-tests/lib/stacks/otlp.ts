@@ -52,7 +52,6 @@ export class Otlp extends cdk.Stack {
       environment: {
         ...defaultDatadogEnvVariables,
         DD_SERVICE: validationFunctionName,
-        OTEL_EXPORTER_OTLP_PROTOCOL: 'http/protobuf',
         DD_OTLP_CONFIG_RECEIVER_PROTOCOLS_HTTP_ENDPOINT: 'localhost:4318',
       },
       logGroup: createLogGroup(this, validationFunctionName)
