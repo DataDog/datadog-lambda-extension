@@ -1358,14 +1358,12 @@ impl Processor {
             span.meta.get("request_id"),
             span.meta.get("durable_function_execution_id"),
             span.meta.get("durable_function_execution_name"),
-        ) {
-            if let Err(e) = self.durable_context_tx.try_send((
-                request_id.clone(),
-                exec_id.clone(),
-                exec_name.clone(),
-            )) {
-                warn!("LIFECYCLE | Failed to forward durable context to logs pipeline: {e}");
-            }
+        ) && let Err(e) = self.durable_context_tx.try_send((
+            request_id.clone(),
+            exec_id.clone(),
+            exec_name.clone(),
+        )) {
+            warn!("LIFECYCLE | Failed to forward durable context to logs pipeline: {e}");
         }
     }
 }
