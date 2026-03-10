@@ -151,7 +151,7 @@ impl StepFunctionEvent {
                     .parse()
                     .unwrap_or(Self::generate_trace_id(self.execution.id.clone()).0);
 
-                let tags = extract_propagation_tags(trace_tags);
+                let tags = crate::traces::propagation::extract_propagation_tags(trace_tags);
 
                 (lo_tid, tags)
             } else {
@@ -237,10 +237,6 @@ impl StepFunctionEvent {
         // Return 1 if result is 0
         if result == 0 { 1 } else { result }
     }
-}
-
-fn extract_propagation_tags(tags_str: &str) -> HashMap<String, String> {
-    crate::traces::propagation::extract_propagation_tags(tags_str)
 }
 
 impl ServiceNameResolver for StepFunctionEvent {
