@@ -11,6 +11,8 @@ use serde_json::Value;
 use tokio::time::Instant;
 use tracing::{debug, trace, warn};
 
+use tokio::sync::mpsc;
+
 use crate::{
     config::{self, aws::AwsConfig},
     extension::telemetry::events::{
@@ -24,6 +26,7 @@ use crate::{
         span_inferrer::{self, SpanInferrer},
         triggers::get_default_service_name,
     },
+    logs::agent::DurableContextUpdate,
     metrics::enhanced::lambda::{EnhancedMetricData, Lambda as EnhancedMetrics},
     proc::{
         self, CPUData, NetworkData,
@@ -88,6 +91,10 @@ pub struct Processor {
     /// Tracks whether if first invocation after init has been received in Managed Instance mode.
     /// Used to determine if we should search for the empty context on an invocation.
     awaiting_first_invocation: bool,
+    /// Sender used to forward durable execution context extracted from `aws.lambda` spans to the
+    /// logs pipeline. Decouples the trace agent from the logs agent: the trace agent sends spans
+    /// to the lifecycle processor, which extracts durable context and relays it here.
+    durable_context_tx: mpsc::Sender<DurableContextUpdate>,
 }
 
 impl Processor {
@@ -98,6 +105,7 @@ impl Processor {
         aws_config: Arc<AwsConfig>,
         metrics_aggregator: dogstatsd::aggregator::AggregatorHandle,
         propagator: Arc<DatadogCompositePropagator>,
+        durable_context_tx: mpsc::Sender<DurableContextUpdate>,
     ) -> Self {
         let resource = tags_provider
             .get_canonical_resource_name()
@@ -127,6 +135,7 @@ impl Processor {
             dynamic_tags: HashMap::new(),
             active_invocations: 0,
             awaiting_first_invocation: false,
+            durable_context_tx,
         }
     }
 
@@ -1337,9 +1346,26 @@ impl Processor {
     ///
     /// This is used to enrich the invocation span with additional metadata from the tracers
     /// top level span, since we discard the tracer span when we create the invocation span.
+    ///
+    /// Also forwards durable execution context to the logs pipeline when the span carries
+    /// `durable_function_execution_id` and `durable_function_execution_name` metadata.
     pub fn add_tracer_span(&mut self, span: &Span) {
         if let Some(request_id) = span.meta.get("request_id") {
             self.context_buffer.add_tracer_span(request_id, span);
+        }
+
+        if let (Some(request_id), Some(exec_id), Some(exec_name)) = (
+            span.meta.get("request_id"),
+            span.meta.get("durable_function_execution_id"),
+            span.meta.get("durable_function_execution_name"),
+        ) {
+            if let Err(e) = self.durable_context_tx.try_send((
+                request_id.clone(),
+                exec_id.clone(),
+                exec_name.clone(),
+            )) {
+                warn!("LIFECYCLE | Failed to forward durable context to logs pipeline: {e}");
+            }
         }
     }
 }
@@ -1387,7 +1413,8 @@ mod tests {
         tokio::spawn(service.run());
 
         let propagator = Arc::new(DatadogCompositePropagator::new(Arc::clone(&config)));
-        Processor::new(tags_provider, config, aws_config, handle, propagator)
+        let (durable_context_tx, _) = tokio::sync::mpsc::channel(1);
+        Processor::new(tags_provider, config, aws_config, handle, propagator, durable_context_tx)
     }
 
     #[test]
@@ -1924,7 +1951,8 @@ mod tests {
 
         let propagator = Arc::new(DatadogCompositePropagator::new(Arc::clone(&config)));
 
-        let processor = Processor::new(tags_provider, config, aws_config, handle, propagator);
+        let (durable_context_tx, _) = tokio::sync::mpsc::channel(1);
+        let processor = Processor::new(tags_provider, config, aws_config, handle, propagator, durable_context_tx);
 
         assert!(
             processor.is_managed_instance_mode(),

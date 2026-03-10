@@ -21,7 +21,6 @@ use tokio_util::sync::CancellationToken;
 use tower_http::limit::RequestBodyLimitLayer;
 use tracing::{debug, error, warn};
 
-use crate::logs::agent::DurableContextUpdate;
 use crate::traces::trace_processor::SendingTraceProcessor;
 use crate::{
     appsec::processor::Processor as AppSecProcessor,
@@ -92,7 +91,6 @@ pub struct TraceState {
     pub invocation_processor_handle: InvocationProcessorHandle,
     pub tags_provider: Arc<provider::Provider>,
     pub span_deduper: DedupHandle,
-    pub durable_context_tx: Sender<DurableContextUpdate>,
 }
 
 #[derive(Clone)]
@@ -120,7 +118,6 @@ pub struct TraceAgent {
     tx: Sender<SendDataBuilderInfo>,
     stats_concentrator: StatsConcentratorHandle,
     span_deduper: DedupHandle,
-    durable_context_tx: Sender<DurableContextUpdate>,
 }
 
 #[derive(Clone, Copy)]
@@ -144,7 +141,6 @@ impl TraceAgent {
         tags_provider: Arc<provider::Provider>,
         stats_concentrator: StatsConcentratorHandle,
         span_deduper: DedupHandle,
-        durable_context_tx: Sender<DurableContextUpdate>,
     ) -> TraceAgent {
         // Set up a channel to send processed traces to our trace aggregator. tx is passed through each
         // endpoint_handler to the trace processor, which uses it to send de-serialized
@@ -174,7 +170,6 @@ impl TraceAgent {
             shutdown_token: CancellationToken::new(),
             stats_concentrator,
             span_deduper,
-            durable_context_tx,
         }
     }
 
@@ -230,7 +225,6 @@ impl TraceAgent {
             invocation_processor_handle: self.invocation_processor_handle.clone(),
             tags_provider: Arc::clone(&self.tags_provider),
             span_deduper: self.span_deduper.clone(),
-            durable_context_tx: self.durable_context_tx.clone(),
         };
 
         let stats_state = StatsState {
@@ -310,7 +304,6 @@ impl TraceAgent {
             state.invocation_processor_handle,
             state.tags_provider,
             state.span_deduper,
-            state.durable_context_tx,
             ApiVersion::V04,
         )
         .await
@@ -324,7 +317,6 @@ impl TraceAgent {
             state.invocation_processor_handle,
             state.tags_provider,
             state.span_deduper,
-            state.durable_context_tx,
             ApiVersion::V05,
         )
         .await
@@ -481,7 +473,6 @@ impl TraceAgent {
         invocation_processor_handle: InvocationProcessorHandle,
         tags_provider: Arc<provider::Provider>,
         deduper: DedupHandle,
-        durable_context_tx: Sender<DurableContextUpdate>,
         version: ApiVersion,
     ) -> Response {
         let start = Instant::now();
@@ -593,7 +584,7 @@ impl TraceAgent {
                     }
                 }
 
-                if span.resource == INVOCATION_SPAN_RESOURCE
+                if (span.resource == INVOCATION_SPAN_RESOURCE || span.name == "aws.lambda")
                     && let Err(e) = invocation_processor_handle
                         .add_tracer_span(span.clone())
                         .await
@@ -601,24 +592,6 @@ impl TraceAgent {
                     error!("Failed to add tracer span to processor: {}", e);
                 }
                 handle_reparenting(&mut reparenting_info, &mut span);
-
-                if span.name == "aws.lambda" {
-                    // If this aws.lambda span carries durable function context, forward it to
-                    // the logs agent so it can release any held logs and set durable execution context on them.
-                    if let (Some(request_id), Some(execution_id), Some(execution_name)) = (
-                        span.meta.get("request_id"),
-                        span.meta.get("durable_function_execution_id"),
-                        span.meta.get("durable_function_execution_name"),
-                    ) {
-                        let _ = durable_context_tx
-                            .send((
-                                request_id.clone(),
-                                execution_id.clone(),
-                                execution_name.clone(),
-                            ))
-                            .await;
-                    }
-                }
 
                 // Keep the span
                 chunk.push(span);

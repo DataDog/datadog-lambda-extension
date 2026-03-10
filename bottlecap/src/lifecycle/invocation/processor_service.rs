@@ -17,6 +17,7 @@ use crate::{
         context::{Context, ReparentingInfo},
         processor::Processor,
     },
+    logs::agent::DurableContextUpdate,
     tags::provider,
     traces::{
         context::SpanContext, propagation::DatadogCompositePropagator,
@@ -430,6 +431,7 @@ impl InvocationProcessorService {
         aws_config: Arc<AwsConfig>,
         metrics_aggregator_handle: AggregatorHandle,
         propagator: Arc<DatadogCompositePropagator>,
+        durable_context_tx: mpsc::Sender<DurableContextUpdate>,
     ) -> (InvocationProcessorHandle, Self) {
         let (sender, receiver) = mpsc::channel(1000);
 
@@ -439,6 +441,7 @@ impl InvocationProcessorService {
             aws_config,
             metrics_aggregator_handle,
             propagator,
+            durable_context_tx,
         );
 
         let handle = InvocationProcessorHandle { sender };

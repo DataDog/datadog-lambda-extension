@@ -330,6 +330,7 @@ async fn extension_loop_active(
             Arc::clone(&aws_config),
             metrics_aggregator_handle.clone(),
             Arc::clone(&propagator),
+            durable_context_tx,
         );
     tokio::spawn(async move {
         invocation_processor_service.run().await;
@@ -362,7 +363,6 @@ async fn extension_loop_active(
         &tags_provider,
         invocation_processor_handle.clone(),
         appsec_processor.clone(),
-        durable_context_tx,
         &shared_client,
     );
 
@@ -1091,7 +1091,6 @@ fn start_trace_agent(
     tags_provider: &Arc<TagProvider>,
     invocation_processor_handle: InvocationProcessorHandle,
     appsec_processor: Option<Arc<TokioMutex<AppSecProcessor>>>,
-    durable_context_tx: Sender<DurableContextUpdate>,
     client: &Client,
 ) -> (
     Sender<SendDataBuilderInfo>,
@@ -1177,7 +1176,6 @@ fn start_trace_agent(
         Arc::clone(tags_provider),
         stats_concentrator_handle.clone(),
         span_dedup_handle,
-        durable_context_tx,
     );
     let trace_agent_channel = trace_agent.get_sender_copy();
     let shutdown_token = trace_agent.shutdown_token();
