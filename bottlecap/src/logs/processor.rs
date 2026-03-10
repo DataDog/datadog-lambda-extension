@@ -7,9 +7,9 @@ use crate::LAMBDA_RUNTIME_SLUG;
 use crate::config::{self, processing_rule};
 use crate::event_bus::Event;
 use crate::extension::telemetry::events::TelemetryEvent;
-use crate::logs::aggregator_service::AggregatorHandle;
 use crate::logs::lambda::processor::LambdaProcessor;
 use crate::tags;
+use datadog_log_agent::AggregatorHandle;
 
 impl LogsProcessor {
     #[must_use]

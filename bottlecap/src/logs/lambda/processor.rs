@@ -11,33 +11,11 @@ use crate::event_bus::Event;
 use crate::extension::telemetry::events::ReportMetrics;
 use crate::extension::telemetry::events::{Status, TelemetryEvent, TelemetryRecord};
 use crate::lifecycle::invocation::context::Context as InvocationContext;
-use crate::logs::aggregator_service::AggregatorHandle;
 use crate::logs::processor::{Processor, Rule};
 use crate::tags::provider;
 
-use crate::logs::lambda::{IntakeLog, Message};
-
-#[allow(clippy::module_name_repetitions)]
-#[derive(Clone, Debug)]
-pub struct LambdaProcessor {
-    function_arn: String,
-    service: String,
-    tags: String,
-    // Global Processing Rules
-    rules: Option<Vec<Rule>>,
-    // Current Invocation Context
-    invocation_context: InvocationContext,
-    // Logs which don't have a `request_id`
-    orphan_logs: Vec<IntakeLog>,
-    // Logs which are ready to be aggregated
-    ready_logs: Vec<String>,
-    // Main event bus
-    event_bus: Sender<Event>,
-    // Logs enabled
-    logs_enabled: bool,
-    // Managed Instance mode
-    is_managed_instance_mode: bool,
-}
+use crate::logs::lambda::Message;
+use datadog_log_agent::{AggregatorHandle, LogEntry};
 
 const OOM_ERRORS: [&str; 7] = [
     "fatal error: runtime: out of memory",       // Go
@@ -53,6 +31,28 @@ fn is_oom_error(error_msg: &str) -> bool {
     OOM_ERRORS
         .iter()
         .any(|&oom_str| error_msg.contains(oom_str))
+}
+
+#[allow(clippy::module_name_repetitions)]
+#[derive(Clone, Debug)]
+pub struct LambdaProcessor {
+    function_arn: String,
+    service: String,
+    tags: String,
+    // Global Processing Rules
+    rules: Option<Vec<Rule>>,
+    // Current Invocation Context
+    invocation_context: InvocationContext,
+    // Logs which don't have a `request_id`
+    orphan_logs: Vec<LogEntry>,
+    // Logs which are ready to be aggregated
+    ready_logs: Vec<LogEntry>,
+    // Main event bus
+    event_bus: Sender<Event>,
+    // Logs enabled
+    logs_enabled: bool,
+    // Managed Instance mode
+    is_managed_instance_mode: bool,
 }
 
 /// Maps AWS/common log level strings to Datadog log status values.
@@ -71,7 +71,7 @@ fn map_log_level_to_status(level: &str) -> Option<&'static str> {
     }
 }
 
-impl Processor<IntakeLog> for LambdaProcessor {}
+impl Processor<LogEntry> for LambdaProcessor {}
 
 impl LambdaProcessor {
     #[must_use]
@@ -354,10 +354,10 @@ impl LambdaProcessor {
         }
     }
 
-    fn get_intake_log(&mut self, mut lambda_message: Message) -> Result<IntakeLog, Box<dyn Error>> {
+    fn get_log_entry(&mut self, mut lambda_message: Message) -> Result<LogEntry, Box<dyn Error>> {
         // Assign request_id from message or context if available
         lambda_message.lambda.request_id = match lambda_message.lambda.request_id {
-            Some(request_id) => Some(request_id.clone()),
+            Some(request_id) => Some(request_id),
             None => {
                 // If there is no request_id available in the current invocation context,
                 // then set to None, same goes if we are in a Managed Instance – as concurrent
@@ -374,58 +374,71 @@ impl LambdaProcessor {
         let parsed_json =
             serde_json::from_str::<serde_json::Value>(lambda_message.message.as_str());
 
-        let log = if let Ok(serde_json::Value::Object(mut json_obj)) = parsed_json {
-            let mut tags = self.tags.clone();
-            let final_message = Self::extract_tags_and_get_message(
-                &mut json_obj,
-                &mut tags,
-                lambda_message.message.clone(),
-            );
-
-            // Extract log level from JSON (AWS JSON log format / Powertools).
-            // Try "level" first (standard), then fall back to "status" (Datadog convention).
-            let status = json_obj
-                .get("level")
-                .or_else(|| json_obj.get("status"))
-                .and_then(|v| v.as_str())
-                .and_then(map_log_level_to_status)
-                .map_or(
-                    lambda_message.status.clone(),
-                    std::string::ToString::to_string,
+        let (final_message, tags, status) =
+            if let Ok(serde_json::Value::Object(mut json_obj)) = parsed_json {
+                let mut tags = self.tags.clone();
+                let msg = Self::extract_tags_and_get_message(
+                    &mut json_obj,
+                    &mut tags,
+                    lambda_message.message.clone(),
                 );
 
-            IntakeLog {
-                hostname: self.function_arn.clone(),
-                source: LAMBDA_RUNTIME_SLUG.to_string(),
-                service: self.service.clone(),
-                tags,
-                message: Message {
-                    message: final_message,
-                    lambda: lambda_message.lambda,
-                    timestamp: lambda_message.timestamp,
-                    status,
-                },
-            }
-        } else {
-            // Not JSON or not an object - use message as-is
-            IntakeLog {
-                hostname: self.function_arn.clone(),
-                source: LAMBDA_RUNTIME_SLUG.to_string(),
-                service: self.service.clone(),
-                tags: self.tags.clone(),
-                message: lambda_message,
-            }
+                // Extract log level from JSON (AWS JSON log format / Powertools).
+                // Try "level" first (standard), then fall back to "status" (Datadog convention).
+                let status = json_obj
+                    .get("level")
+                    .or_else(|| json_obj.get("status"))
+                    .and_then(|v| v.as_str())
+                    .and_then(map_log_level_to_status)
+                    .map_or(
+                        lambda_message.status.clone(),
+                        std::string::ToString::to_string,
+                    );
+
+                (msg, tags, status)
+            } else {
+                (
+                    lambda_message.message,
+                    self.tags.clone(),
+                    lambda_message.status,
+                )
+            };
+
+        let mut attrs = serde_json::Map::new();
+        attrs.insert(
+            "lambda".to_string(),
+            serde_json::json!({
+                "arn": lambda_message.lambda.arn,
+                "request_id": lambda_message.lambda.request_id,
+            }),
+        );
+
+        let entry = LogEntry {
+            message: final_message,
+            timestamp: lambda_message.timestamp,
+            hostname: Some(self.function_arn.clone()),
+            service: Some(self.service.clone()),
+            ddsource: Some(LAMBDA_RUNTIME_SLUG.to_string()),
+            ddtags: Some(tags),
+            status: Some(status),
+            attributes: attrs,
         };
 
-        if log.message.lambda.request_id.is_some() || self.is_managed_instance_mode {
+        let has_request_id = entry
+            .attributes
+            .get("lambda")
+            .and_then(|l| l.get("request_id"))
+            .is_some_and(|v| !v.is_null());
+
+        if has_request_id || self.is_managed_instance_mode {
             // In On-Demand mode, ship logs with request_id.
             // In Managed Instance mode, ship logs without request_id immediately as well.
             // These are inter-invocation/sandbox logs that should be aggregated without
             // waiting to be attached to the next invocation.
-            Ok(log)
+            Ok(entry)
         } else {
             // In On-Demand mode, if no request_id is available, queue as orphan log
-            self.orphan_logs.push(log);
+            self.orphan_logs.push(entry);
             Err("No request_id available, queueing for later".into())
         }
     }
@@ -459,23 +472,20 @@ impl LambdaProcessor {
         original_message
     }
 
-    async fn make_log(&mut self, event: TelemetryEvent) -> Result<IntakeLog, Box<dyn Error>> {
+    async fn make_log(&mut self, event: TelemetryEvent) -> Result<LogEntry, Box<dyn Error>> {
         match self.get_message(event).await {
-            Ok(lambda_message) => self.get_intake_log(lambda_message),
+            Ok(lambda_message) => self.get_log_entry(lambda_message),
             // TODO: Check what to do when we can't process the event
             Err(e) => Err(e),
         }
     }
 
-    /// Processes a log, applies filtering rules, serializes it, and queues it for aggregation
-    fn process_and_queue_log(&mut self, mut log: IntakeLog) {
-        let should_send_log = self.logs_enabled
-            && LambdaProcessor::apply_rules(&self.rules, &mut log.message.message);
-        if should_send_log && let Ok(serialized_log) = serde_json::to_string(&log) {
-            // explicitly drop log so we don't accidentally re-use it and push
-            // duplicate logs to the aggregator
-            drop(log);
-            self.ready_logs.push(serialized_log);
+    /// Processes a log, applies filtering rules, and queues it for aggregation
+    fn process_and_queue_log(&mut self, mut log: LogEntry) {
+        let should_send_log =
+            self.logs_enabled && LambdaProcessor::apply_rules(&self.rules, &mut log.message);
+        if should_send_log {
+            self.ready_logs.push(log);
         }
     }
 
@@ -486,8 +496,14 @@ impl LambdaProcessor {
             // Process orphan logs, since we have a `request_id` now
             let orphan_logs = std::mem::take(&mut self.orphan_logs);
             for mut orphan_log in orphan_logs {
-                orphan_log.message.lambda.request_id =
-                    Some(self.invocation_context.request_id.clone());
+                if let Some(lambda_val) = orphan_log.attributes.get_mut("lambda")
+                    && let Some(obj) = lambda_val.as_object_mut()
+                {
+                    obj.insert(
+                        "request_id".to_string(),
+                        serde_json::Value::String(self.invocation_context.request_id.clone()),
+                    );
+                }
                 self.process_and_queue_log(orphan_log);
             }
         }
@@ -514,8 +530,8 @@ mod tests {
         InitPhase, InitType, ManagedInstanceReportMetrics, OnDemandReportMetrics, ReportMetrics,
         RuntimeDoneMetrics, Status,
     };
-    use crate::logs::aggregator_service::AggregatorService;
     use crate::logs::lambda::Lambda;
+    use datadog_log_agent::{AggregatorService, LogEntry};
 
     macro_rules! get_message_tests {
         ($($name:ident: $value:expr,)*) => {
@@ -875,23 +891,37 @@ mod tests {
         };
 
         let lambda_message = processor.get_message(event.clone()).await.unwrap();
-        let intake_log = processor.get_intake_log(lambda_message).unwrap();
+        let intake_log = processor.get_log_entry(lambda_message).unwrap();
 
-        assert_eq!(intake_log.source, LAMBDA_RUNTIME_SLUG.to_string());
-        assert_eq!(intake_log.hostname, "test-arn".to_string());
-        assert_eq!(intake_log.service, "test-service".to_string());
-        assert!(intake_log.tags.contains("test:tags"));
+        assert_eq!(intake_log.ddsource.as_deref(), Some(LAMBDA_RUNTIME_SLUG));
+        assert_eq!(intake_log.hostname.as_deref(), Some("test-arn"));
+        assert_eq!(intake_log.service.as_deref(), Some("test-service"));
+        assert!(
+            intake_log
+                .ddtags
+                .as_deref()
+                .unwrap_or("")
+                .contains("test:tags")
+        );
         assert_eq!(
             intake_log.message,
-            Message {
-                message: "START RequestId: test-request-id Version: test".to_string(),
-                lambda: Lambda {
-                    arn: "test-arn".to_string(),
-                    request_id: Some("test-request-id".to_string()),
-                },
-                timestamp: 1_673_061_827_000,
-                status: "info".to_string(),
-            },
+            "START RequestId: test-request-id Version: test"
+        );
+        assert_eq!(
+            intake_log
+                .attributes
+                .get("lambda")
+                .and_then(|l| l.get("request_id"))
+                .and_then(|v| v.as_str()),
+            Some("test-request-id")
+        );
+        assert_eq!(
+            intake_log
+                .attributes
+                .get("lambda")
+                .and_then(|l| l.get("arn"))
+                .and_then(|v| v.as_str()),
+            Some("test-arn")
         );
     }
 
@@ -921,7 +951,7 @@ mod tests {
         let lambda_message = processor.get_message(event.clone()).await.unwrap();
         assert_eq!(lambda_message.lambda.request_id, None);
 
-        let intake_log = processor.get_intake_log(lambda_message).unwrap_err();
+        let intake_log = processor.get_log_entry(lambda_message).unwrap_err();
         assert_eq!(
             intake_log.to_string(),
             "No request_id available, queueing for later"
@@ -956,7 +986,7 @@ mod tests {
         };
 
         let start_lambda_message = processor.get_message(start_event.clone()).await.unwrap();
-        processor.get_intake_log(start_lambda_message).unwrap();
+        processor.get_log_entry(start_lambda_message).unwrap();
 
         // This could be any event that doesn't have a `request_id`
         let event = TelemetryEvent {
@@ -965,10 +995,14 @@ mod tests {
         };
 
         let lambda_message = processor.get_message(event.clone()).await.unwrap();
-        let intake_log = processor.get_intake_log(lambda_message).unwrap();
+        let intake_log = processor.get_log_entry(lambda_message).unwrap();
         assert_eq!(
-            intake_log.message.lambda.request_id,
-            Some("test-request-id".to_string())
+            intake_log
+                .attributes
+                .get("lambda")
+                .and_then(|l| l.get("request_id"))
+                .and_then(|v| v.as_str()),
+            Some("test-request-id")
         );
     }
 
@@ -1000,15 +1034,24 @@ mod tests {
         let lambda_message = processor.get_message(event.clone()).await.unwrap();
         assert_eq!(lambda_message.lambda.request_id, None);
 
-        let intake_log = processor.get_intake_log(lambda_message).unwrap();
-        assert_eq!(intake_log.message.lambda.request_id, None);
+        let intake_log = processor.get_log_entry(lambda_message).unwrap();
+        assert!(
+            intake_log
+                .attributes
+                .get("lambda")
+                .and_then(|l| l.get("request_id"))
+                .is_none_or(serde_json::Value::is_null)
+        );
         assert_eq!(processor.orphan_logs.len(), 0);
 
-        assert_eq!(intake_log.source, LAMBDA_RUNTIME_SLUG.to_string());
-        assert_eq!(intake_log.hostname, "test-arn".to_string());
-        assert_eq!(intake_log.service, "test-service".to_string());
-        assert_eq!(intake_log.message.message, "test-function".to_string());
-        assert_eq!(intake_log.tags, tags_provider.get_tags_string());
+        assert_eq!(intake_log.ddsource.as_deref(), Some(LAMBDA_RUNTIME_SLUG));
+        assert_eq!(intake_log.hostname.as_deref(), Some("test-arn"));
+        assert_eq!(intake_log.service.as_deref(), Some("test-service"));
+        assert_eq!(intake_log.message, "test-function");
+        assert_eq!(
+            intake_log.ddtags.as_deref(),
+            Some(tags_provider.get_tags_string().as_str())
+        );
     }
 
     // process
@@ -1027,7 +1070,7 @@ mod tests {
         ));
 
         let (tx, _rx) = tokio::sync::mpsc::channel(2);
-        let (aggregator_service, aggregator_handle) = AggregatorService::default();
+        let (aggregator_service, aggregator_handle) = AggregatorService::new();
 
         let service_handle = tokio::spawn(async move {
             aggregator_service.run().await;
@@ -1053,23 +1096,36 @@ mod tests {
         let batches = aggregator_handle.get_batches().await.unwrap();
         assert_eq!(batches.len(), 1);
 
-        let log = IntakeLog {
-            message: Message {
-                message: "START RequestId: test-request-id Version: test".to_string(),
-                lambda: Lambda {
-                    arn: "test-arn".to_string(),
-                    request_id: Some("test-request-id".to_string()),
-                },
-                timestamp: 1_673_061_827_000,
-                status: "info".to_string(),
-            },
-            hostname: "test-arn".to_string(),
-            source: LAMBDA_RUNTIME_SLUG.to_string(),
-            service: "test-service".to_string(),
-            tags: tags_provider.get_tags_string(),
-        };
-        let serialized_log = format!("[{}]", serde_json::to_string(&log).unwrap());
-        assert_eq!(batches[0], serialized_log.as_bytes());
+        let entries: Vec<LogEntry> = serde_json::from_slice(&batches[0]).unwrap();
+        assert_eq!(entries.len(), 1);
+        let entry = &entries[0];
+        assert_eq!(
+            entry.message,
+            "START RequestId: test-request-id Version: test"
+        );
+        assert_eq!(entry.hostname.as_deref(), Some("test-arn"));
+        assert_eq!(entry.ddsource.as_deref(), Some(LAMBDA_RUNTIME_SLUG));
+        assert_eq!(entry.service.as_deref(), Some("test-service"));
+        assert_eq!(
+            entry.ddtags.as_deref(),
+            Some(tags_provider.get_tags_string().as_str())
+        );
+        assert_eq!(
+            entry
+                .attributes
+                .get("lambda")
+                .and_then(|l| l.get("request_id"))
+                .and_then(|v| v.as_str()),
+            Some("test-request-id")
+        );
+        assert_eq!(
+            entry
+                .attributes
+                .get("lambda")
+                .and_then(|l| l.get("arn"))
+                .and_then(|v| v.as_str()),
+            Some("test-arn")
+        );
 
         aggregator_handle
             .shutdown()
@@ -1096,7 +1152,7 @@ mod tests {
 
         let (tx, _rx) = tokio::sync::mpsc::channel(2);
 
-        let (aggregator_service, aggregator_handle) = AggregatorService::default();
+        let (aggregator_service, aggregator_handle) = AggregatorService::new();
         let service_handle = tokio::spawn(async move {
             aggregator_service.run().await;
         });
@@ -1145,7 +1201,7 @@ mod tests {
 
         let (tx, _rx) = tokio::sync::mpsc::channel(2);
 
-        let (aggregator_service, aggregator_handle) = AggregatorService::default();
+        let (aggregator_service, aggregator_handle) = AggregatorService::new();
         let service_handle = tokio::spawn(async move {
             aggregator_service.run().await;
         });
@@ -1188,7 +1244,7 @@ mod tests {
 
         let (tx, _rx) = tokio::sync::mpsc::channel(2);
 
-        let (aggregator_service, aggregator_handle) = AggregatorService::default();
+        let (aggregator_service, aggregator_handle) = AggregatorService::new();
         let service_handle = tokio::spawn(async move {
             aggregator_service.run().await;
         });
@@ -1227,42 +1283,31 @@ mod tests {
         let batches = aggregator_handle.get_batches().await.unwrap();
         assert_eq!(batches.len(), 1);
 
-        let start_log = IntakeLog {
-            message: Message {
-                message: "START RequestId: test-request-id Version: test".to_string(),
-                lambda: Lambda {
-                    arn: "test-arn".to_string(),
-                    request_id: Some("test-request-id".to_string()),
-                },
-                timestamp: 1_673_061_827_000,
-                status: "info".to_string(),
-            },
-            hostname: "test-arn".to_string(),
-            source: LAMBDA_RUNTIME_SLUG.to_string(),
-            service: "test-service".to_string(),
-            tags: tags_provider.get_tags_string(),
-        };
-        let function_log = IntakeLog {
-            message: Message {
-                message: "test-function".to_string(),
-                lambda: Lambda {
-                    arn: "test-arn".to_string(),
-                    request_id: Some("test-request-id".to_string()),
-                },
-                timestamp: 1_673_061_827_000,
-                status: "info".to_string(),
-            },
-            hostname: "test-arn".to_string(),
-            source: LAMBDA_RUNTIME_SLUG.to_string(),
-            service: "test-service".to_string(),
-            tags: tags_provider.get_tags_string(),
-        };
-        let serialized_log = format!(
-            "[{},{}]",
-            serde_json::to_string(&start_log).unwrap(),
-            serde_json::to_string(&function_log).unwrap()
+        let entries: Vec<LogEntry> = serde_json::from_slice(&batches[0]).unwrap();
+        assert_eq!(entries.len(), 2);
+        let start_entry = &entries[0];
+        assert_eq!(
+            start_entry.message,
+            "START RequestId: test-request-id Version: test"
         );
-        assert_eq!(batches[0], serialized_log.as_bytes());
+        assert_eq!(
+            start_entry
+                .attributes
+                .get("lambda")
+                .and_then(|l| l.get("request_id"))
+                .and_then(|v| v.as_str()),
+            Some("test-request-id")
+        );
+        let function_entry = &entries[1];
+        assert_eq!(function_entry.message, "test-function");
+        assert_eq!(
+            function_entry
+                .attributes
+                .get("lambda")
+                .and_then(|l| l.get("request_id"))
+                .and_then(|v| v.as_str()),
+            Some("test-request-id")
+        );
 
         aggregator_handle
             .shutdown()
@@ -1303,36 +1348,47 @@ mod tests {
         };
 
         let start_lambda_message = processor.get_message(start_event.clone()).await.unwrap();
-        processor.get_intake_log(start_lambda_message).unwrap();
+        processor.get_log_entry(start_lambda_message).unwrap();
         let event = TelemetryEvent {
             time: Utc.with_ymd_and_hms(2023, 1, 7, 3, 23, 47).unwrap(),
             record: TelemetryRecord::Function(Value::String(r#"{"message":{"custom_details": "my-structured-message","ddtags":"added_tag1:added_value1,added_tag2:added_value2"}}"#.to_string())),
         };
 
         let lambda_message = processor.get_message(event.clone()).await.unwrap();
-        let intake_log = processor.get_intake_log(lambda_message).unwrap();
+        let intake_log = processor.get_log_entry(lambda_message).unwrap();
 
-        assert_eq!(intake_log.source, LAMBDA_RUNTIME_SLUG.to_string());
-        assert_eq!(intake_log.hostname, "test-arn".to_string());
-        assert_eq!(intake_log.service, "test-service".to_string());
-        assert!(intake_log.tags.contains("added_tag1:added_value1"));
-        let function_log = IntakeLog {
-            message: Message {
-                message: r#"{"custom_details":"my-structured-message"}"#.to_string(),
-                lambda: Lambda {
-                    arn: "test-arn".to_string(),
-                    request_id: Some("test-request-id".to_string()),
-                },
-                timestamp: 1_673_061_827_000,
-                status: "info".to_string(),
-            },
-            hostname: "test-arn".to_string(),
-            source: LAMBDA_RUNTIME_SLUG.to_string(),
-            service: "test-service".to_string(),
-            tags: tags_provider.get_tags_string()
-                + ",added_tag1:added_value1,added_tag2:added_value2",
-        };
-        assert_eq!(intake_log, function_log);
+        assert_eq!(intake_log.ddsource.as_deref(), Some(LAMBDA_RUNTIME_SLUG));
+        assert_eq!(intake_log.hostname.as_deref(), Some("test-arn"));
+        assert_eq!(intake_log.service.as_deref(), Some("test-service"));
+        assert!(
+            intake_log
+                .ddtags
+                .as_deref()
+                .unwrap_or("")
+                .contains("added_tag1:added_value1")
+        );
+        assert_eq!(
+            intake_log.message,
+            r#"{"custom_details":"my-structured-message"}"#
+        );
+        assert_eq!(
+            intake_log.ddtags.as_deref(),
+            Some(
+                format!(
+                    "{},added_tag1:added_value1,added_tag2:added_value2",
+                    tags_provider.get_tags_string()
+                )
+                .as_str()
+            )
+        );
+        assert_eq!(
+            intake_log
+                .attributes
+                .get("lambda")
+                .and_then(|l| l.get("request_id"))
+                .and_then(|v| v.as_str()),
+            Some("test-request-id")
+        );
     }
     #[tokio::test]
     async fn test_process_logs_structured_no_ddtags() {
@@ -1365,34 +1421,34 @@ mod tests {
         };
 
         let start_lambda_message = processor.get_message(start_event.clone()).await.unwrap();
-        processor.get_intake_log(start_lambda_message).unwrap();
+        processor.get_log_entry(start_lambda_message).unwrap();
         let event = TelemetryEvent {
             time: Utc.with_ymd_and_hms(2023, 1, 7, 3, 23, 47).unwrap(),
             record: TelemetryRecord::Function(Value::String(r#"{"message":{"custom_details":"my-structured-message"},"my_other_details":"included"}"#.to_string())),
         };
 
         let lambda_message = processor.get_message(event.clone()).await.unwrap();
-        let intake_log = processor.get_intake_log(lambda_message).unwrap();
+        let intake_log = processor.get_log_entry(lambda_message).unwrap();
 
-        assert_eq!(intake_log.source, LAMBDA_RUNTIME_SLUG.to_string());
-        assert_eq!(intake_log.hostname, "test-arn".to_string());
-        assert_eq!(intake_log.service, "test-service".to_string());
-        let function_log = IntakeLog {
-            message: Message {
-                message: r#"{"message":{"custom_details":"my-structured-message"},"my_other_details":"included"}"#.to_string(),
-                lambda: Lambda {
-                    arn: "test-arn".to_string(),
-                    request_id: Some("test-request-id".to_string()),
-                },
-                timestamp: 1_673_061_827_000,
-                status: "info".to_string(),
-            },
-            hostname: "test-arn".to_string(),
-            source: LAMBDA_RUNTIME_SLUG.to_string(),
-            service: "test-service".to_string(),
-            tags: tags_provider.get_tags_string(),
-        };
-        assert_eq!(intake_log, function_log);
+        assert_eq!(intake_log.ddsource.as_deref(), Some(LAMBDA_RUNTIME_SLUG));
+        assert_eq!(intake_log.hostname.as_deref(), Some("test-arn"));
+        assert_eq!(intake_log.service.as_deref(), Some("test-service"));
+        assert_eq!(
+            intake_log.message,
+            r#"{"message":{"custom_details":"my-structured-message"},"my_other_details":"included"}"#
+        );
+        assert_eq!(
+            intake_log.ddtags.as_deref(),
+            Some(tags_provider.get_tags_string().as_str())
+        );
+        assert_eq!(
+            intake_log
+                .attributes
+                .get("lambda")
+                .and_then(|l| l.get("request_id"))
+                .and_then(|v| v.as_str()),
+            Some("test-request-id")
+        );
     }
 
     #[tokio::test]
@@ -1422,7 +1478,7 @@ mod tests {
         ));
 
         let (tx, _rx) = tokio::sync::mpsc::channel(2);
-        let (aggregator_service, aggregator_handle) = AggregatorService::default();
+        let (aggregator_service, aggregator_handle) = AggregatorService::new();
         let service_handle = tokio::spawn(async move {
             aggregator_service.run().await;
         });
@@ -1536,7 +1592,12 @@ mod tests {
             )),
         };
         let log1 = processor.make_log(function_event).await.unwrap();
-        assert_eq!(log1.message.lambda.request_id, None);
+        assert!(
+            log1.attributes
+                .get("lambda")
+                .and_then(|l| l.get("request_id"))
+                .is_none_or(serde_json::Value::is_null)
+        );
         assert_eq!(processor.orphan_logs.len(), 0);
 
         // Now send a PlatformStart event with a request_id to set the context
@@ -1560,7 +1621,12 @@ mod tests {
         let log2 = processor.make_log(another_function_event).await.unwrap();
 
         // In managed instance mode, logs should not inherit request_id from context
-        assert_eq!(log2.message.lambda.request_id, None);
+        assert!(
+            log2.attributes
+                .get("lambda")
+                .and_then(|l| l.get("request_id"))
+                .is_none_or(serde_json::Value::is_null)
+        );
         assert_eq!(processor.orphan_logs.len(), 0);
     }
 
@@ -1730,7 +1796,7 @@ mod tests {
             },
         };
         let start_msg = processor.get_message(start_event).await.unwrap();
-        processor.get_intake_log(start_msg).unwrap();
+        processor.get_log_entry(start_msg).unwrap();
 
         // Test WARN level
         let event = TelemetryEvent {
@@ -1740,8 +1806,8 @@ mod tests {
             )),
         };
         let lambda_message = processor.get_message(event).await.unwrap();
-        let intake_log = processor.get_intake_log(lambda_message).unwrap();
-        assert_eq!(intake_log.message.status, "warn");
+        let intake_log = processor.get_log_entry(lambda_message).unwrap();
+        assert_eq!(intake_log.status.as_deref().unwrap_or("info"), "warn");
 
         // Test ERROR level
         let event = TelemetryEvent {
@@ -1751,8 +1817,8 @@ mod tests {
             )),
         };
         let lambda_message = processor.get_message(event).await.unwrap();
-        let intake_log = processor.get_intake_log(lambda_message).unwrap();
-        assert_eq!(intake_log.message.status, "error");
+        let intake_log = processor.get_log_entry(lambda_message).unwrap();
+        assert_eq!(intake_log.status.as_deref().unwrap_or("info"), "error");
 
         // Test FATAL level
         let event = TelemetryEvent {
@@ -1762,8 +1828,8 @@ mod tests {
             )),
         };
         let lambda_message = processor.get_message(event).await.unwrap();
-        let intake_log = processor.get_intake_log(lambda_message).unwrap();
-        assert_eq!(intake_log.message.status, "critical");
+        let intake_log = processor.get_log_entry(lambda_message).unwrap();
+        assert_eq!(intake_log.status.as_deref().unwrap_or("info"), "critical");
 
         // Test DEBUG level
         let event = TelemetryEvent {
@@ -1773,8 +1839,8 @@ mod tests {
             )),
         };
         let lambda_message = processor.get_message(event).await.unwrap();
-        let intake_log = processor.get_intake_log(lambda_message).unwrap();
-        assert_eq!(intake_log.message.status, "debug");
+        let intake_log = processor.get_log_entry(lambda_message).unwrap();
+        assert_eq!(intake_log.status.as_deref().unwrap_or("info"), "debug");
 
         // Test INFO level (should remain "info")
         let event = TelemetryEvent {
@@ -1784,8 +1850,8 @@ mod tests {
             )),
         };
         let lambda_message = processor.get_message(event).await.unwrap();
-        let intake_log = processor.get_intake_log(lambda_message).unwrap();
-        assert_eq!(intake_log.message.status, "info");
+        let intake_log = processor.get_log_entry(lambda_message).unwrap();
+        assert_eq!(intake_log.status.as_deref().unwrap_or("info"), "info");
     }
 
     #[tokio::test]
@@ -1815,7 +1881,7 @@ mod tests {
             },
         };
         let start_msg = processor.get_message(start_event).await.unwrap();
-        processor.get_intake_log(start_msg).unwrap();
+        processor.get_log_entry(start_msg).unwrap();
 
         // JSON without level field
         let event = TelemetryEvent {
@@ -1825,8 +1891,8 @@ mod tests {
             )),
         };
         let lambda_message = processor.get_message(event).await.unwrap();
-        let intake_log = processor.get_intake_log(lambda_message).unwrap();
-        assert_eq!(intake_log.message.status, "info");
+        let intake_log = processor.get_log_entry(lambda_message).unwrap();
+        assert_eq!(intake_log.status.as_deref().unwrap_or("info"), "info");
     }
 
     #[tokio::test]
@@ -1856,7 +1922,7 @@ mod tests {
             },
         };
         let start_msg = processor.get_message(start_event).await.unwrap();
-        processor.get_intake_log(start_msg).unwrap();
+        processor.get_log_entry(start_msg).unwrap();
 
         // JSON with unrecognized level
         let event = TelemetryEvent {
@@ -1866,8 +1932,8 @@ mod tests {
             )),
         };
         let lambda_message = processor.get_message(event).await.unwrap();
-        let intake_log = processor.get_intake_log(lambda_message).unwrap();
-        assert_eq!(intake_log.message.status, "info");
+        let intake_log = processor.get_log_entry(lambda_message).unwrap();
+        assert_eq!(intake_log.status.as_deref().unwrap_or("info"), "info");
     }
 
     #[tokio::test]
@@ -1906,8 +1972,8 @@ mod tests {
         assert_eq!(lambda_message.status, "error");
 
         // The intake log should preserve the "error" status (message is not JSON)
-        let intake_log = processor.get_intake_log(lambda_message).unwrap();
-        assert_eq!(intake_log.message.status, "error");
+        let intake_log = processor.get_log_entry(lambda_message).unwrap();
+        assert_eq!(intake_log.status.as_deref().unwrap_or("info"), "error");
     }
 
     #[tokio::test]
@@ -1938,14 +2004,9 @@ mod tests {
             )),
         };
         let lambda_message = processor.get_message(event).await.unwrap();
-        let intake_log = processor.get_intake_log(lambda_message).unwrap();
-        assert_eq!(intake_log.message.status, "error");
-        assert!(
-            intake_log
-                .message
-                .message
-                .contains("DD_EXTENSION | ERROR |")
-        );
+        let intake_log = processor.get_log_entry(lambda_message).unwrap();
+        assert_eq!(intake_log.status.as_deref().unwrap_or("info"), "error");
+        assert!(intake_log.message.contains("DD_EXTENSION | ERROR |"));
 
         // DEBUG level
         let event = TelemetryEvent {
@@ -1956,8 +2017,8 @@ mod tests {
             )),
         };
         let lambda_message = processor.get_message(event).await.unwrap();
-        let intake_log = processor.get_intake_log(lambda_message).unwrap();
-        assert_eq!(intake_log.message.status, "debug");
+        let intake_log = processor.get_log_entry(lambda_message).unwrap();
+        assert_eq!(intake_log.status.as_deref().unwrap_or("info"), "debug");
     }
 
     #[tokio::test]
@@ -1987,7 +2048,7 @@ mod tests {
             },
         };
         let start_msg = processor.get_message(start_event).await.unwrap();
-        processor.get_intake_log(start_msg).unwrap();
+        processor.get_log_entry(start_msg).unwrap();
 
         // level as a number
         let event = TelemetryEvent {
@@ -1997,8 +2058,8 @@ mod tests {
             )),
         };
         let lambda_message = processor.get_message(event).await.unwrap();
-        let intake_log = processor.get_intake_log(lambda_message).unwrap();
-        assert_eq!(intake_log.message.status, "info");
+        let intake_log = processor.get_log_entry(lambda_message).unwrap();
+        assert_eq!(intake_log.status.as_deref().unwrap_or("info"), "info");
 
         // level as null
         let event = TelemetryEvent {
@@ -2008,8 +2069,8 @@ mod tests {
             )),
         };
         let lambda_message = processor.get_message(event).await.unwrap();
-        let intake_log = processor.get_intake_log(lambda_message).unwrap();
-        assert_eq!(intake_log.message.status, "info");
+        let intake_log = processor.get_log_entry(lambda_message).unwrap();
+        assert_eq!(intake_log.status.as_deref().unwrap_or("info"), "info");
 
         // level as a boolean
         let event = TelemetryEvent {
@@ -2019,8 +2080,8 @@ mod tests {
             )),
         };
         let lambda_message = processor.get_message(event).await.unwrap();
-        let intake_log = processor.get_intake_log(lambda_message).unwrap();
-        assert_eq!(intake_log.message.status, "info");
+        let intake_log = processor.get_log_entry(lambda_message).unwrap();
+        assert_eq!(intake_log.status.as_deref().unwrap_or("info"), "info");
     }
 
     #[tokio::test]
@@ -2050,7 +2111,7 @@ mod tests {
             },
         };
         let start_msg = processor.get_message(start_event).await.unwrap();
-        processor.get_intake_log(start_msg).unwrap();
+        processor.get_log_entry(start_msg).unwrap();
 
         // JSON log with both ddtags and level
         let event = TelemetryEvent {
@@ -2061,15 +2122,27 @@ mod tests {
             )),
         };
         let lambda_message = processor.get_message(event).await.unwrap();
-        let intake_log = processor.get_intake_log(lambda_message).unwrap();
+        let intake_log = processor.get_log_entry(lambda_message).unwrap();
 
         // Level should be extracted
-        assert_eq!(intake_log.message.status, "warn");
+        assert_eq!(intake_log.status.as_deref().unwrap_or("info"), "warn");
         // Tags should be extracted and appended
-        assert!(intake_log.tags.contains("env:staging"));
-        assert!(intake_log.tags.contains("team:backend"));
+        assert!(
+            intake_log
+                .ddtags
+                .as_deref()
+                .unwrap_or("")
+                .contains("env:staging")
+        );
+        assert!(
+            intake_log
+                .ddtags
+                .as_deref()
+                .unwrap_or("")
+                .contains("team:backend")
+        );
         // ddtags should be removed from the message
-        assert!(!intake_log.message.message.contains("ddtags"));
+        assert!(!intake_log.message.contains("ddtags"));
     }
 
     #[tokio::test]
@@ -2099,7 +2172,7 @@ mod tests {
             },
         };
         let start_msg = processor.get_message(start_event).await.unwrap();
-        processor.get_intake_log(start_msg).unwrap();
+        processor.get_log_entry(start_msg).unwrap();
 
         // JSON log with "status" field instead of "level" (Datadog convention)
         let event = TelemetryEvent {
@@ -2109,8 +2182,8 @@ mod tests {
             )),
         };
         let lambda_message = processor.get_message(event).await.unwrap();
-        let intake_log = processor.get_intake_log(lambda_message).unwrap();
-        assert_eq!(intake_log.message.status, "error");
+        let intake_log = processor.get_log_entry(lambda_message).unwrap();
+        assert_eq!(intake_log.status.as_deref().unwrap_or("info"), "error");
 
         // "level" takes priority over "status" when both are present
         let event = TelemetryEvent {
@@ -2120,7 +2193,7 @@ mod tests {
             )),
         };
         let lambda_message = processor.get_message(event).await.unwrap();
-        let intake_log = processor.get_intake_log(lambda_message).unwrap();
-        assert_eq!(intake_log.message.status, "warn");
+        let intake_log = processor.get_log_entry(lambda_message).unwrap();
+        assert_eq!(intake_log.status.as_deref().unwrap_or("info"), "warn");
     }
 }
