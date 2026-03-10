@@ -1414,7 +1414,14 @@ mod tests {
 
         let propagator = Arc::new(DatadogCompositePropagator::new(Arc::clone(&config)));
         let (durable_context_tx, _) = tokio::sync::mpsc::channel(1);
-        Processor::new(tags_provider, config, aws_config, handle, propagator, durable_context_tx)
+        Processor::new(
+            tags_provider,
+            config,
+            aws_config,
+            handle,
+            propagator,
+            durable_context_tx,
+        )
     }
 
     #[test]
@@ -1952,7 +1959,14 @@ mod tests {
         let propagator = Arc::new(DatadogCompositePropagator::new(Arc::clone(&config)));
 
         let (durable_context_tx, _) = tokio::sync::mpsc::channel(1);
-        let processor = Processor::new(tags_provider, config, aws_config, handle, propagator, durable_context_tx);
+        let processor = Processor::new(
+            tags_provider,
+            config,
+            aws_config,
+            handle,
+            propagator,
+            durable_context_tx,
+        );
 
         assert!(
             processor.is_managed_instance_mode(),

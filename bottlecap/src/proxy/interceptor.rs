@@ -499,8 +499,7 @@ mod tests {
             initialization_type: "on-demand".into(),
         });
         let propagator = Arc::new(DatadogCompositePropagator::new(Arc::clone(&config)));
-        let (durable_context_tx, _durable_context_rx) =
-            tokio::sync::mpsc::channel(1);
+        let (durable_context_tx, _durable_context_rx) = tokio::sync::mpsc::channel(1);
         let (invocation_processor_handle, invocation_processor_service) =
             InvocationProcessorService::new(
                 Arc::clone(&tags_provider),
