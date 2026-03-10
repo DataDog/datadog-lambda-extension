@@ -1243,7 +1243,8 @@ impl Processor {
             }
 
             // Extract _dd.p.* propagation tags from x-datadog-tags header
-            tags = extract_propagation_tags(&headers);
+            let carrier_tags = headers.get(DATADOG_TAGS_KEY).map_or("", String::as_str);
+            tags = crate::traces::propagation::extract_propagation_tags(carrier_tags);
         }
 
         // We should always use the generated span id from the tracer
@@ -1348,11 +1349,6 @@ impl Processor {
             self.context_buffer.add_tracer_span(request_id, span);
         }
     }
-}
-
-fn extract_propagation_tags(carrier: &HashMap<String, String>) -> HashMap<String, String> {
-    let carrier_tags = carrier.get(DATADOG_TAGS_KEY).map_or("", String::as_str);
-    crate::traces::propagation::extract_propagation_tags(carrier_tags)
 }
 
 #[cfg(test)]
