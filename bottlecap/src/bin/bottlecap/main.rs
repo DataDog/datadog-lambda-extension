@@ -45,13 +45,7 @@ use bottlecap::{
         listener::Listener as LifecycleListener,
     },
     logger,
-    logs::{
-        agent::LogsAgent,
-        aggregator_service::{
-            AggregatorHandle as LogsAggregatorHandle, AggregatorService as LogsAggregatorService,
-        },
-        flusher::LogsFlusher,
-    },
+    logs::agent::LogsAgent,
     otlp::{agent::Agent as OtlpAgent, should_enable_otlp_agent},
     proxy::{interceptor, should_start_proxy},
     secrets::decrypt,
@@ -79,6 +73,10 @@ use bottlecap::{
     },
 };
 use datadog_fips::reqwest_adapter::create_reqwest_client_builder;
+use datadog_log_agent::{
+    AggregatorHandle as LogsAggregatorHandle, AggregatorService as LogsAggregatorService,
+    FlusherMode, LogFlusher, LogFlusherConfig, LogsAdditionalEndpoint,
+};
 use decrypt::resolve_secrets;
 use dogstatsd::{
     aggregator::{
@@ -306,7 +304,8 @@ async fn extension_loop_active(
             event_bus_tx.clone(),
             aws_config.is_managed_instance_mode(),
             &shared_client,
-        );
+        )
+        .await;
 
     let (metrics_flushers, metrics_aggregator_handle, dogstatsd_cancel_token) = start_dogstatsd(
         tags_provider.clone(),
@@ -1027,7 +1026,7 @@ fn setup_tag_provider(
     ))
 }
 
-fn start_logs_agent(
+async fn start_logs_agent(
     config: &Arc<Config>,
     api_key_factory: Arc<ApiKeyFactory>,
     tags_provider: &Arc<TagProvider>,
@@ -1036,11 +1035,11 @@ fn start_logs_agent(
     client: &Client,
 ) -> (
     Sender<TelemetryEvent>,
-    LogsFlusher,
+    LogFlusher,
     CancellationToken,
     LogsAggregatorHandle,
 ) {
-    let (aggregator_service, aggregator_handle) = LogsAggregatorService::default();
+    let (aggregator_service, aggregator_handle) = LogsAggregatorService::new();
     // Start service in background
     tokio::spawn(async move {
         aggregator_service.run().await;
@@ -1062,12 +1061,37 @@ fn start_logs_agent(
         drop(agent);
     });
 
-    let flusher = LogsFlusher::new(
-        api_key_factory,
-        aggregator_handle.clone(),
-        config.clone(),
-        client.clone(),
-    );
+    let api_key = api_key_factory.get_api_key().await.unwrap_or_default();
+
+    let mode = if config.observability_pipelines_worker_logs_enabled {
+        FlusherMode::ObservabilityPipelinesWorker {
+            url: config.observability_pipelines_worker_logs_url.clone(),
+        }
+    } else {
+        FlusherMode::Datadog
+    };
+
+    let additional_endpoints: Vec<LogsAdditionalEndpoint> = config
+        .logs_config_additional_endpoints
+        .iter()
+        .map(|ep| LogsAdditionalEndpoint {
+            api_key: ep.api_key.clone(),
+            url: format!("https://{}:{}/api/v2/logs", ep.host, ep.port),
+            is_reliable: ep.is_reliable,
+        })
+        .collect();
+
+    let flusher_config = LogFlusherConfig {
+        api_key,
+        site: config.site.clone(),
+        mode,
+        additional_endpoints,
+        use_compression: config.logs_config_use_compression,
+        compression_level: config.logs_config_compression_level,
+        flush_timeout: std::time::Duration::from_secs(config.flush_timeout),
+    };
+
+    let flusher = LogFlusher::new(flusher_config, client.clone(), aggregator_handle.clone());
     (tx, flusher, cancel_token, aggregator_handle)
 }
 

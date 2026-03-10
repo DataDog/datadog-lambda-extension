@@ -6,9 +6,10 @@ use tracing::debug;
 
 use crate::event_bus::Event;
 use crate::extension::telemetry::events::TelemetryEvent;
-use crate::logs::{aggregator_service::AggregatorHandle, processor::LogsProcessor};
+use crate::logs::processor::LogsProcessor;
 use crate::tags;
 use crate::{LAMBDA_RUNTIME_SLUG, config};
+use datadog_log_agent::AggregatorHandle;
 
 const DRAIN_LOG_INTERVAL: Duration = Duration::from_millis(100);
 
