@@ -27,8 +27,8 @@ pub struct MetricsRetryBatch {
 pub struct FlushHandles {
     /// Handles for trace flush operations. Returns failed traces for retry.
     pub trace_flush_handles: Vec<JoinHandle<Vec<SendData>>>,
-    /// Handles for log flush operations. Returns true on success, false on any failure.
-    pub log_flush_handles: Vec<JoinHandle<bool>>,
+    /// Handles for log flush operations. Returns builders for transient failures to retry next invocation.
+    pub log_flush_handles: Vec<JoinHandle<Vec<reqwest::RequestBuilder>>>,
     /// Handles for metrics flush operations. Returns batch info for retry.
     pub metric_flush_handles: Vec<JoinHandle<MetricsRetryBatch>>,
     /// Handles for proxy flush operations. Returns failed request builders for retry.

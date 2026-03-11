@@ -16,6 +16,7 @@ pub fn should_enable_otlp_agent(config: &Arc<Config>) -> bool {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::result_large_err)]
     use super::*;
 
     use std::path::Path;
