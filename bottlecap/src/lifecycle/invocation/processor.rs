@@ -1363,7 +1363,7 @@ impl Processor {
             exec_id.clone(),
             exec_name.clone(),
         )) {
-            warn!("LIFECYCLE | Failed to forward durable context to logs pipeline: {e}");
+            warn!("Invocation Processor | Failed to forward durable context to logs pipeline: {e}");
         }
     }
 }

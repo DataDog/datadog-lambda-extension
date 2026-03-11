@@ -42,7 +42,7 @@ impl LogsAgent {
         );
 
         let (tx, rx) = mpsc::channel::<TelemetryEvent>(1000);
-        let (durable_context_tx, durable_context_rx) = mpsc::channel::<DurableContextUpdate>(100);
+        let (durable_context_tx, durable_context_rx) = mpsc::channel::<DurableContextUpdate>(500);
         let cancel_token = CancellationToken::new();
 
         let agent = Self {

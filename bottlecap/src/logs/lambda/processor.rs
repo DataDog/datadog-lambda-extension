@@ -161,6 +161,9 @@ impl LambdaProcessor {
                         } else {
                             None
                         };
+                        // When a message is logged from the durable execution SDK, it contains an `executionArn` field.
+                        // In this case, extract the durable execution context from the `executionArn` field, and later
+                        // set durable execution id and name as log attributes.
                         let durable_ctx = obj.get("executionArn")
                             .and_then(|v| v.as_str())
                             .and_then(parse_durable_execution_arn);
@@ -186,6 +189,8 @@ impl LambdaProcessor {
                         event.time.timestamp_millis(),
                         None,
                     );
+                    // If the message is logged from the durable execution SDK, 
+                    // set durable execution id and name as log attributes.
                     if let Some((exec_id, exec_name)) = durable_ctx {
                         msg.lambda.durable_execution_id = Some(exec_id);
                         msg.lambda.durable_execution_name = Some(exec_name);
@@ -2484,7 +2489,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_function_log_without_execution_arn_is_still_held_in_durable_mode() {
+    async fn test_function_log_without_execution_arn_is_held_in_durable_mode() {
         let mut processor = make_processor_for_durable_arn_tests();
         processor.is_durable_function = Some(true);
         // Simulate a known request_id with no durable context yet
