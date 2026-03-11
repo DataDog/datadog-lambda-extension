@@ -475,7 +475,7 @@ impl Default for Config {
             lambda_proc_enhanced_metrics: true,
             capture_lambda_payload: false,
             capture_lambda_payload_max_depth: 10,
-            compute_trace_stats_on_extension: false,
+            compute_trace_stats_on_extension: true,
             span_dedup_timeout: None,
             api_key_secret_reload_interval: None,
 
