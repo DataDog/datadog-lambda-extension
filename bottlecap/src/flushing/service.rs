@@ -77,7 +77,7 @@ impl FlushingService {
         let lf = self.logs_flusher.clone();
         self.handles
             .log_flush_handles
-            .push(tokio::spawn(async move { lf.flush().await }));
+            .push(tokio::spawn(async move { lf.flush(vec![]).await }));
 
         // Spawn traces flush
         let tf = self.trace_flusher.clone();
@@ -192,18 +192,32 @@ impl FlushingService {
             }
         }
 
-        // Await log handles — retries are handled internally by LogFlusher
+        // Await log handles with retry
         for handle in self.handles.log_flush_handles.drain(..) {
             match handle.await {
-                Ok(success) => {
-                    if !success {
-                        debug!("FLUSHING_SERVICE | log flush reported a failure");
-                        flush_error = true;
+                Ok(retry) => {
+                    if !retry.is_empty() {
+                        debug!(
+                            "FLUSHING_SERVICE | redriving {:?} log payloads",
+                            retry.len()
+                        );
+                    }
+                    for item in retry {
+                        let lf = self.logs_flusher.clone();
+                        match item.try_clone() {
+                            Some(item_clone) => {
+                                joinset.spawn(async move {
+                                    lf.flush(vec![item_clone]).await;
+                                });
+                            }
+                            None => {
+                                error!("FLUSHING_SERVICE | Can't clone redrive log payloads");
+                            }
+                        }
                     }
                 }
                 Err(e) => {
-                    error!("FLUSHING_SERVICE | log flush task error {e:?}");
-                    flush_error = true;
+                    error!("FLUSHING_SERVICE | redrive log error {e:?}");
                 }
             }
         }
@@ -312,7 +326,7 @@ impl FlushingService {
             .collect();
 
         tokio::join!(
-            self.logs_flusher.flush(),
+            self.logs_flusher.flush(vec![]),
             futures::future::join_all(metrics_futures),
             self.trace_flusher.flush(None),
             self.stats_flusher.flush(force_stats, None),

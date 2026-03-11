@@ -811,6 +811,7 @@ pub fn deserialize_optional_duration_from_seconds_ignore_zero<'de, D: Deserializ
 #[cfg_attr(coverage_nightly, coverage(off))] // Test modules skew coverage metrics
 #[cfg(test)]
 pub mod tests {
+    #![allow(clippy::result_large_err)]
     use libdd_trace_obfuscation::replacer::parse_rules_from_string;
 
     use super::*;
