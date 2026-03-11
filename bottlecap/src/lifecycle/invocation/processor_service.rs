@@ -1,6 +1,7 @@
 use std::{collections::HashMap, sync::Arc};
 
 use chrono::{DateTime, Utc};
+use datadog_opentelemetry::propagation::context::SpanContext;
 use dogstatsd::aggregator::AggregatorHandle;
 use libdd_trace_protobuf::pb::Span;
 use serde_json::Value;
@@ -18,10 +19,7 @@ use crate::{
         processor::Processor,
     },
     tags::provider,
-    traces::{
-        context::SpanContext, propagation::DatadogCompositePropagator,
-        trace_processor::SendingTraceProcessor,
-    },
+    traces::{propagation::DatadogCompositePropagator, trace_processor::SendingTraceProcessor},
 };
 
 #[derive(Error, Debug)]
