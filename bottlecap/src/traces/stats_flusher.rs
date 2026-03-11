@@ -122,12 +122,12 @@ impl StatsFlusher {
         }
 
         let payload = StatsPayload {
-            agent_env: "rey",
+            agent_env: self.config.env.as_deref().unwrap_or(""),
             agent_version: "6.0.0",
             stats: stats.iter().map(|csp| ClientStatsPayload {
-                env: "rey",
+                env: &csp.env,
                 version: "1",
-                lang: "python",
+                lang: "rust",
                 stats: csp.stats.iter().map(|csb| ClientStatsBucket {
                     start: csb.start,
                     duration: csb.duration,
