@@ -1,6 +1,7 @@
 // Copyright 2023-Present Datadog, Inc. https://www.datadoghq.com/
 // SPDX-License-Identifier: Apache-2.0
 
+use std::io::Write as _;
 use std::str::FromStr;
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -12,9 +13,77 @@ use crate::traces::http_client::HttpClient;
 use crate::traces::stats_aggregator::StatsAggregator;
 use dogstatsd::api_key::ApiKeyFactory;
 use libdd_common::Endpoint;
+use base64::Engine as _;
+use base64::engine::general_purpose::STANDARD as BASE64;
 use libdd_trace_protobuf::pb;
 use libdd_trace_utils::{config_utils::trace_stats_url, stats_utils};
+use serde::Serialize;
+use serde::Serializer;
 use tracing::{debug, error};
+
+fn serialize_bytes<S: Serializer>(bytes: &[u8], s: S) -> Result<S::Ok, S::Error> {
+    if s.is_human_readable() {
+        s.serialize_str(&BASE64.encode(bytes))
+    } else {
+        s.serialize_bytes(bytes)
+    }
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "PascalCase")]
+struct StatsPayload<'a> {
+    agent_env: &'a str,
+    agent_version: &'a str,
+    #[serde(rename = "Stats")]
+    stats: Vec<ClientStatsPayload<'a>>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "PascalCase")]
+struct ClientStatsPayload<'a> {
+    env: &'a str,
+    version: &'a str,
+    lang: &'a str,
+    #[serde(rename = "Stats")]
+    stats: Vec<ClientStatsBucket<'a>>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "PascalCase")]
+struct ClientStatsBucket<'a> {
+    start: u64,
+    duration: u64,
+    #[serde(rename = "Stats")]
+    stats: Vec<ClientGroupedStats<'a>>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "PascalCase")]
+struct ClientGroupedStats<'a> {
+    service: &'a str,
+    name: &'a str,
+    resource: &'a str,
+    #[serde(rename = "HTTPStatusCode")]
+    http_status_code: u32,
+    #[serde(rename = "Type")]
+    r#type: &'a str,
+    hits: u64,
+    duration: u64,
+    #[serde(serialize_with = "serialize_bytes")]
+    ok_summary: &'a [u8],
+    #[serde(serialize_with = "serialize_bytes")]
+    error_summary: &'a [u8],
+    top_level_hits: u64,
+    span_kind: &'a str,
+    is_trace_root: i32,
+}
+
+fn serialize_payload(payload: &StatsPayload<'_>) -> anyhow::Result<Vec<u8>> {
+    let msgpack = rmp_serde::to_vec_named(payload)?;
+    let mut encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::fast());
+    encoder.write_all(&msgpack)?;
+    encoder.finish().map_err(|e| anyhow::anyhow!("Error compressing stats payload: {e}"))
+}
 
 pub struct StatsFlusher {
     aggregator: Arc<Mutex<StatsAggregator>>,
@@ -52,6 +121,39 @@ impl StatsFlusher {
             return None;
         }
 
+        let payload = StatsPayload {
+            agent_env: "rey",
+            agent_version: "6.0.0",
+            stats: stats.iter().map(|csp| ClientStatsPayload {
+                env: "rey",
+                version: "1",
+                lang: "python",
+                stats: csp.stats.iter().map(|csb| ClientStatsBucket {
+                    start: csb.start,
+                    duration: csb.duration,
+                    stats: csb.stats.iter().map(|cgs| ClientGroupedStats {
+                        service: &cgs.service,
+                        name: &cgs.name,
+                        resource: &cgs.resource,
+                        http_status_code: cgs.http_status_code,
+                        r#type: &cgs.r#type,
+                        hits: cgs.hits,
+                        duration: cgs.duration,
+                        ok_summary: &cgs.ok_summary,
+                        error_summary: &cgs.error_summary,
+                        top_level_hits: cgs.top_level_hits,
+                        span_kind: &cgs.span_kind,
+                        is_trace_root: cgs.is_trace_root,
+                    }).collect(),
+                }).collect(),
+            }).collect(),
+        };
+
+        match serde_json::to_string(&payload) {
+            Ok(json) => debug!("STATS | DEBUG: stats payload being sent: {json}"),
+            Err(e) => debug!("STATS | DEBUG: could not serialize stats payload for logging: {e}"),
+        }
+
         let Some(api_key) = self.api_key_factory.get_api_key().await else {
             error!("STATS | Skipping flushing stats: Failed to resolve API key");
             // No API key means we can't send - don't retry as it won't help
@@ -76,13 +178,7 @@ impl StatsFlusher {
             })
             .await;
 
-        debug!("STATS | Flushing {} stats", stats.len());
-
-        let stats_payload = stats_utils::construct_stats_payload(stats.clone());
-
-        debug!("STATS | Stats payload to be sent: {stats_payload:?}");
-
-        let serialized_stats_payload = match stats_utils::serialize_stats_payload(stats_payload) {
+        let serialized_stats_payload = match serialize_payload(&payload) {
             Ok(res) => res,
             Err(err) => {
                 // Serialization errors are permanent - data is malformed, don't retry
