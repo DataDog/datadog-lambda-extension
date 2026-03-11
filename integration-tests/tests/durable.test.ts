@@ -16,57 +16,24 @@ describe('Durable Function Log Tests', () => {
       console.log('Non-durable Lambda invocation and data fetching completed');
     }, 300000); // 5 minute timeout
 
-    it('should invoke Lambda successfully', () => {
+    it('should invoke Lambda successfully and log message should have request_id but no durable execution context', () => {
       expect(result.statusCode).toBe(200);
-    });
-
-    it('should have "Hello from non-durable function!" log message', () => {
-      const log = result.logs?.find((log: any) =>
-        log.message.includes('Hello from non-durable function!')
-      );
-      expect(log).toBeDefined();
-    });
-
-    it('logs should have lambda.request_id attribute', () => {
       const log = result.logs?.find((log: any) =>
         log.message.includes('Hello from non-durable function!')
       );
       expect(log).toBeDefined();
       expect(log?.attributes?.attributes?.lambda?.request_id).toBeDefined();
-    });
-
-    it('logs should NOT have lambda.durable_execution_id attribute', () => {
-      const log = result.logs?.find((log: any) =>
-        log.message.includes('Hello from non-durable function!')
-      );
-      expect(log).toBeDefined();
-      expect(log?.attributes?.attributes?.lambda?.durable_execution_id).toBeUndefined();
-    });
-
-    it('logs should NOT have lambda.durable_execution_name attribute', () => {
-      const log = result.logs?.find((log: any) =>
-        log.message.includes('Hello from non-durable function!')
-      );
-      expect(log).toBeDefined();
-      expect(log?.attributes?.attributes?.lambda?.durable_execution_name).toBeUndefined();
-    });
-
-    it('platform START log should NOT have lambda.durable_execution_id or lambda.durable_execution_name attributes', () => {
-      const log = result.logs?.find((log: any) =>
-        log.message.includes('START RequestId:')
-      );
-      expect(log).toBeDefined();
       expect(log?.attributes?.attributes?.lambda?.durable_execution_id).toBeUndefined();
       expect(log?.attributes?.attributes?.lambda?.durable_execution_name).toBeUndefined();
     });
 
-    it('platform END log should NOT have lambda.durable_execution_id or lambda.durable_execution_name attributes', () => {
-      const log = result.logs?.find((log: any) =>
-        log.message.includes('END RequestId:')
-      );
-      expect(log).toBeDefined();
-      expect(log?.attributes?.attributes?.lambda?.durable_execution_id).toBeUndefined();
-      expect(log?.attributes?.attributes?.lambda?.durable_execution_name).toBeUndefined();
+    it('platform logs should NOT have durable execution context', () => {
+      for (const marker of ['START RequestId:', 'END RequestId:']) {
+        const log = result.logs?.find((log: any) => log.message.includes(marker));
+        expect(log).toBeDefined();
+        expect(log?.attributes?.attributes?.lambda?.durable_execution_id).toBeUndefined();
+        expect(log?.attributes?.attributes?.lambda?.durable_execution_name).toBeUndefined();
+      }
     });
 
     it('extension logs should NOT have lambda.durable_execution_id or lambda.durable_execution_name attributes', () => {
@@ -121,22 +88,6 @@ describe('Durable Function Log Tests', () => {
       console.log('All durable Lambda invocations and data fetching completed');
     }, 600000); // 10 minute timeout
 
-    it('logs should have lambda.durable_execution_id attribute', () => {
-      const log = coldStartResult.logs?.find((log: any) =>
-        log.message.includes('Hello from durable function!')
-      );
-      expect(log).toBeDefined();
-      expect(log?.attributes?.attributes?.lambda?.durable_execution_id).toBeDefined();
-    });
-
-    it('logs should have lambda.durable_execution_name attribute', () => {
-      const log = coldStartResult.logs?.find((log: any) =>
-        log.message.includes('Hello from durable function!')
-      );
-      expect(log).toBeDefined();
-      expect(log?.attributes?.attributes?.lambda?.durable_execution_name).toBeDefined();
-    });
-
     it('logs arriving before the aws.lambda span should be held and released with durable execution context', () => {
       // On cold start, function logs likely arrive before the tracer flushes the aws.lambda span.
       // The extension stashes these logs in held_logs[request_id] (because is_durable_function
@@ -185,27 +136,15 @@ describe('Durable Function Log Tests', () => {
       expect(uniqueRequestIds.size).toBe(concurrentResults.length);
     });
 
-    it('platform START log should have lambda.durable_execution_id and lambda.durable_execution_name attributes', () => {
-      // PlatformStart generates "START RequestId: ... Version: ..." with a request_id.
-      // In durable mode the log is held in held_logs until the aws.lambda span arrives,
-      // then decorated with durable execution context and released.
-      const log = coldStartResult.logs?.find((log: any) =>
-        log.message.includes('START RequestId:')
-      );
-      expect(log).toBeDefined();
-      expect(log?.attributes?.attributes?.lambda?.durable_execution_id).toBeDefined();
-      expect(log?.attributes?.attributes?.lambda?.durable_execution_name).toBeDefined();
-    });
-
-    it('platform END log should have lambda.durable_execution_id and lambda.durable_execution_name attributes', () => {
-      // PlatformRuntimeDone generates "END RequestId: ..." with a request_id and is handled
-      // identically to START — held until durable context arrives, then decorated.
-      const log = coldStartResult.logs?.find((log: any) =>
-        log.message.includes('END RequestId:')
-      );
-      expect(log).toBeDefined();
-      expect(log?.attributes?.attributes?.lambda?.durable_execution_id).toBeDefined();
-      expect(log?.attributes?.attributes?.lambda?.durable_execution_name).toBeDefined();
+    it('platform logs should have durable execution context', () => {
+      // PlatformStart ("START RequestId:") and PlatformRuntimeDone ("END RequestId:") logs
+      // are held until the aws.lambda span arrives, then decorated with durable execution context.
+      for (const marker of ['START RequestId:', 'END RequestId:']) {
+        const log = coldStartResult.logs?.find((log: any) => log.message.includes(marker));
+        expect(log).toBeDefined();
+        expect(log?.attributes?.attributes?.lambda?.durable_execution_id).toBeDefined();
+        expect(log?.attributes?.attributes?.lambda?.durable_execution_name).toBeDefined();
+      }
     });
 
     it('extension logs should have lambda.durable_execution_id and lambda.durable_execution_name attributes', () => {
