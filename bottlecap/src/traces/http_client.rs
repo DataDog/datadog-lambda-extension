@@ -173,7 +173,14 @@ pub fn create_client(
         let proxy =
             hyper_http_proxy::Proxy::new(hyper_http_proxy::Intercept::Https, proxy.parse()?);
         let proxy_connector = hyper_http_proxy::ProxyConnector::from_proxy(connector, proxy)?;
-        let client = http_common::client_builder().build(proxy_connector);
+        // Disable connection pooling to avoid stale connections after Lambda freeze/resume.
+        // In Lambda, the execution environment can be frozen for seconds to minutes between
+        // invocations. Pooled connections become stale during this time, causing failures
+        // when reused. Setting pool_max_idle_per_host(0) ensures each request gets a fresh
+        // connection, matching the pattern used in libdatadog's new_client_periodic().
+        let client = http_common::client_builder()
+            .pool_max_idle_per_host(0)
+            .build(proxy_connector);
         debug!(
             "HTTP_CLIENT | Proxy connector created with proxy: {:?}",
             proxy_https
@@ -181,6 +188,10 @@ pub fn create_client(
         Ok(client)
     } else {
         let proxy_connector = hyper_http_proxy::ProxyConnector::new(connector)?;
-        Ok(http_common::client_builder().build(proxy_connector))
+        // Disable connection pooling to avoid stale connections after Lambda freeze/resume.
+        // See comment above for detailed explanation.
+        Ok(http_common::client_builder()
+            .pool_max_idle_per_host(0)
+            .build(proxy_connector))
     }
 }
