@@ -12,6 +12,8 @@ aws-lc-sys,https://github.com/aws/aws-lc-rs,ISC AND (Apache-2.0 OR ISC) AND Open
 axum,https://github.com/tokio-rs/axum,MIT,The axum Authors
 axum-core,https://github.com/tokio-rs/axum,MIT,The axum-core Authors
 base64,https://github.com/marshallpierce/rust-base64,MIT OR Apache-2.0,Marshall Pierce <marshall@mpierce.org>
+bit-set,https://github.com/contain-rs/bit-set,Apache-2.0 OR MIT,Alexis Beingessner <a.beingessner@gmail.com>
+bit-vec,https://github.com/contain-rs/bit-vec,Apache-2.0 OR MIT,Alexis Beingessner <a.beingessner@gmail.com>
 bitflags,https://github.com/bitflags/bitflags,MIT OR Apache-2.0,The Rust Project Developers
 block-buffer,https://github.com/RustCrypto/utils,MIT OR Apache-2.0,RustCrypto Developers
 buf_redux,https://github.com/abonander/buf_redux,MIT OR Apache-2.0,Austin Bonander <austin.bonander@gmail.com>
@@ -22,6 +24,7 @@ bytes,https://github.com/tokio-rs/bytes,MIT,"Carl Lerche <me@carllerche.com>, Se
 cc,https://github.com/rust-lang/cc-rs,MIT OR Apache-2.0,Alex Crichton <alex@alexcrichton.com>
 cfg-if,https://github.com/rust-lang/cfg-if,MIT OR Apache-2.0,Alex Crichton <alex@alexcrichton.com>
 chrono,https://github.com/chronotope/chrono,MIT OR Apache-2.0,The chrono Authors
+const-hex,https://github.com/danipopes/const-hex,MIT OR Apache-2.0,DaniPopes <57450786+DaniPopes@users.noreply.github.com>
 const_format,https://github.com/rodrimati1992/const_format_crates,Zlib,rodrimati1992 <rodrimatt1985@gmail.com>
 const_format_proc_macros,https://github.com/rodrimati1992/const_format_crates,Zlib,rodrimati1992 <rodrimatt1985@gmail.com>
 cookie,https://github.com/SergioBenitez/cookie-rs,MIT OR Apache-2.0,"Sergio Benitez <sb@sergio.bz>, Alex Crichton <alex@alexcrichton.com>"
@@ -144,6 +147,7 @@ powerfmt,https://github.com/jhpratt/powerfmt,MIT OR Apache-2.0,Jacob Pratt <jaco
 ppv-lite86,https://github.com/cryptocorrosion/cryptocorrosion,MIT OR Apache-2.0,The CryptoCorrosion Contributors
 proc-macro2,https://github.com/dtolnay/proc-macro2,MIT OR Apache-2.0,"David Tolnay <dtolnay@gmail.com>, Alex Crichton <alex@alexcrichton.com>"
 proc-macro2-diagnostics,https://github.com/SergioBenitez/proc-macro2-diagnostics,MIT OR Apache-2.0,Sergio Benitez <sb@sergio.bz>
+proptest,https://github.com/proptest-rs/proptest,MIT OR Apache-2.0,Jason Lingle
 prost,https://github.com/tokio-rs/prost,Apache-2.0,"Dan Burkert <dan@danburkert.com>, Lucio Franco <luciofranco14@gmail.com>, Casper Meijn <casper@meijn.net>, Tokio Contributors <team@tokio.rs>"
 prost-derive,https://github.com/tokio-rs/prost,Apache-2.0,"Dan Burkert <dan@danburkert.com>, Lucio Franco <luciofranco14@gmail.com>, Casper Meijn <casper@meijn.net>, Tokio Contributors <team@tokio.rs>"
 prost-types,https://github.com/tokio-rs/prost,Apache-2.0,"Dan Burkert <dan@danburkert.com>, Lucio Franco <luciofranco14@gmail.com>, Casper Meijn <casper@meijn.net>, Tokio Contributors <team@tokio.rs>"
@@ -158,6 +162,7 @@ r-efi,https://github.com/r-efi/r-efi,MIT OR Apache-2.0 OR LGPL-2.1-or-later,The 
 rand,https://github.com/rust-random/rand,MIT OR Apache-2.0,"The Rand Project Developers, The Rust Project Developers"
 rand_chacha,https://github.com/rust-random/rand,MIT OR Apache-2.0,"The Rand Project Developers, The Rust Project Developers, The CryptoCorrosion Contributors"
 rand_core,https://github.com/rust-random/rand,MIT OR Apache-2.0,"The Rand Project Developers, The Rust Project Developers"
+rand_xorshift,https://github.com/rust-random/rngs,MIT OR Apache-2.0,"The Rand Project Developers, The Rust Project Developers"
 redox_syscall,https://gitlab.redox-os.org/redox-os/syscall,MIT,Jeremy Soller <jackpot51@gmail.com>
 regex,https://github.com/rust-lang/regex,MIT OR Apache-2.0,"The Rust Project Developers, Andrew Gallant <jamslam@gmail.com>"
 regex-automata,https://github.com/rust-lang/regex,MIT OR Apache-2.0,"The Rust Project Developers, Andrew Gallant <jamslam@gmail.com>"
@@ -174,6 +179,7 @@ rustls-native-certs,https://github.com/rustls/rustls-native-certs,Apache-2.0 OR 
 rustls-pemfile,https://github.com/rustls/pemfile,Apache-2.0 OR ISC OR MIT,The rustls-pemfile Authors
 rustls-pki-types,https://github.com/rustls/pki-types,MIT OR Apache-2.0,The rustls-pki-types Authors
 rustls-webpki,https://github.com/rustls/webpki,ISC,The rustls-webpki Authors
+rusty-fork,https://github.com/altsysrq/rusty-fork,MIT OR Apache-2.0,Jason Lingle
 ryu,https://github.com/dtolnay/ryu,Apache-2.0 OR BSL-1.0,David Tolnay <dtolnay@gmail.com>
 safemem,https://github.com/abonander/safemem,MIT OR Apache-2.0,Austin Bonander <austin.bonander@gmail.com>
 schannel,https://github.com/steffengy/schannel-rs,MIT,"Steven Fackler <sfackler@gmail.com>, Steffen Butzer <steffen.butzer@outlook.com>"
@@ -224,6 +230,7 @@ tokio-rustls,https://github.com/rustls/tokio-rustls,MIT OR Apache-2.0,The tokio-
 tokio-stream,https://github.com/tokio-rs/tokio,MIT,Tokio Contributors <team@tokio.rs>
 tokio-util,https://github.com/tokio-rs/tokio,MIT,Tokio Contributors <team@tokio.rs>
 tonic,https://github.com/hyperium/tonic,MIT,Lucio Franco <luciofranco14@gmail.com>
+tonic-prost,https://github.com/hyperium/tonic,MIT,Lucio Franco <luciofranco14@gmail.com>
 tonic-types,https://github.com/hyperium/tonic,MIT,"Lucio Franco <luciofranco14@gmail.com>, Rafael Lemos <flemos.rafael.dev@gmail.com>"
 tower,https://github.com/tower-rs/tower,MIT,Tower Maintainers <team@tower-rs.com>
 tower-http,https://github.com/tower-rs/tower-http,MIT,Tower Maintainers <team@tower-rs.com>
@@ -237,6 +244,7 @@ tracing-subscriber,https://github.com/tokio-rs/tracing,MIT,"Eliza Weisman <eliza
 try-lock,https://github.com/seanmonstar/try-lock,MIT,Sean McArthur <sean@seanmonstar.com>
 twoway,https://github.com/bluss/twoway,MIT OR Apache-2.0,bluss
 typenum,https://github.com/paholg/typenum,MIT OR Apache-2.0,"Paho Lurie-Gregg <paho@paholg.com>, Andre Bogus <bogusandre@gmail.com>"
+unarray,https://github.com/cameron1024/unarray,MIT OR Apache-2.0,The unarray Authors
 uncased,https://github.com/SergioBenitez/uncased,MIT OR Apache-2.0,Sergio Benitez <sb@sergio.bz>
 unicase,https://github.com/seanmonstar/unicase,MIT OR Apache-2.0,Sean McArthur <sean@seanmonstar.com>
 unicode-ident,https://github.com/dtolnay/unicode-ident,(MIT OR Apache-2.0) AND Unicode-3.0,David Tolnay <dtolnay@gmail.com>
@@ -248,6 +256,7 @@ ustr,https://github.com/anderslanglands/ustr,BSD-2-Clause-Patent,Anders Langland
 utf8_iter,https://github.com/hsivonen/utf8_iter,Apache-2.0 OR MIT,Henri Sivonen <hsivonen@hsivonen.fi>
 valuable,https://github.com/tokio-rs/valuable,MIT,The valuable Authors
 value-bag,https://github.com/sval-rs/value-bag,Apache-2.0 OR MIT,Ashley Mannix <ashleymannix@live.com.au>
+wait-timeout,https://github.com/alexcrichton/wait-timeout,MIT OR Apache-2.0,Alex Crichton <alex@alexcrichton.com>
 want,https://github.com/seanmonstar/want,MIT,Sean McArthur <sean@seanmonstar.com>
 wasi,https://github.com/bytecodealliance/wasi,Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT,The Cranelift Project Developers
 wasip2,https://github.com/bytecodealliance/wasi-rs,Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT,The wasip2 Authors
