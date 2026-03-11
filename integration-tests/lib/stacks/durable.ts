@@ -31,7 +31,7 @@ export class Durable extends cdk.Stack {
         ...defaultDatadogEnvVariables,
         DD_SERVICE: pythonFunctionName,
         DD_TRACE_ENABLED: 'true',
-        DD_LAMBDA_HANDLER: 'lambda_function.handler',
+        DD_LAMBDA_HANDLER: 'lambda_non_durable_function.handler',
         DD_TRACE_AGENT_URL: 'http://127.0.0.1:8126',
         DD_LOG_LEVEL: 'DEBUG',
       },
