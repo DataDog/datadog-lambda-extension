@@ -112,6 +112,11 @@ pub enum ProcessorCommand {
     AddTracerSpan {
         span: Box<Span>,
     },
+    ForwardDurableContext {
+        request_id: String,
+        execution_id: String,
+        execution_name: String,
+    },
     OnOutOfMemoryError {
         timestamp: i64,
     },
@@ -381,6 +386,21 @@ impl InvocationProcessorHandle {
             .await
     }
 
+    pub async fn forward_durable_context(
+        &self,
+        request_id: String,
+        execution_id: String,
+        execution_name: String,
+    ) -> Result<(), mpsc::error::SendError<ProcessorCommand>> {
+        self.sender
+            .send(ProcessorCommand::ForwardDurableContext {
+                request_id,
+                execution_id,
+                execution_name,
+            })
+            .await
+    }
+
     pub async fn on_out_of_memory_error(
         &self,
         timestamp: i64,
@@ -590,6 +610,14 @@ impl InvocationProcessorService {
                 }
                 ProcessorCommand::AddTracerSpan { span } => {
                     self.processor.add_tracer_span(&span);
+                }
+                ProcessorCommand::ForwardDurableContext {
+                    request_id,
+                    execution_id,
+                    execution_name,
+                } => {
+                    self.processor
+                        .forward_durable_context(&request_id, &execution_id, &execution_name);
                 }
                 ProcessorCommand::OnOutOfMemoryError { timestamp } => {
                     self.processor.on_out_of_memory_error(timestamp);

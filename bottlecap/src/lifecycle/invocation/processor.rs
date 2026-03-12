@@ -1346,22 +1346,24 @@ impl Processor {
     ///
     /// This is used to enrich the invocation span with additional metadata from the tracers
     /// top level span, since we discard the tracer span when we create the invocation span.
-    ///
-    /// Also forwards durable execution context to the logs pipeline when the span carries
-    /// `durable_function_execution_id` and `durable_function_execution_name` metadata.
     pub fn add_tracer_span(&mut self, span: &Span) {
         if let Some(request_id) = span.meta.get("request_id") {
             self.context_buffer.add_tracer_span(request_id, span);
         }
+    }
 
-        if let (Some(request_id), Some(exec_id), Some(exec_name)) = (
-            span.meta.get("request_id"),
-            span.meta.get("durable_function_execution_id"),
-            span.meta.get("durable_function_execution_name"),
-        ) && let Err(e) = self.durable_context_tx.try_send((
-            request_id.clone(),
-            exec_id.clone(),
-            exec_name.clone(),
+    /// Forwards durable execution context extracted from an `aws.lambda` span to the logs
+    /// pipeline so it can release held logs and tag them with durable execution metadata.
+    pub fn forward_durable_context(
+        &mut self,
+        request_id: &str,
+        execution_id: &str,
+        execution_name: &str,
+    ) {
+        if let Err(e) = self.durable_context_tx.try_send((
+            request_id.to_owned(),
+            execution_id.to_owned(),
+            execution_name.to_owned(),
         )) {
             warn!("Invocation Processor | Failed to forward durable context to logs pipeline: {e}");
         }

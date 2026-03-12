@@ -584,13 +584,30 @@ impl TraceAgent {
                     }
                 }
 
-                if (span.resource == INVOCATION_SPAN_RESOURCE || span.name == "aws.lambda")
+                if span.resource == INVOCATION_SPAN_RESOURCE
                     && let Err(e) = invocation_processor_handle
                         .add_tracer_span(span.clone())
                         .await
                 {
                     error!("Failed to add tracer span to processor: {}", e);
                 }
+
+                if span.name == "aws.lambda"
+                    && let (Some(request_id), Some(execution_id), Some(execution_name)) = (
+                        span.meta.get("request_id"),
+                        span.meta.get("durable_function_execution_id"),
+                        span.meta.get("durable_function_execution_name"),
+                    ) && let Err(e) = invocation_processor_handle
+                        .forward_durable_context(
+                            request_id.clone(),
+                            execution_id.clone(),
+                            execution_name.clone(),
+                        )
+                        .await
+                {
+                    error!("Failed to forward durable context to processor: {e}");
+                }
+
                 handle_reparenting(&mut reparenting_info, &mut span);
 
                 // Keep the span
