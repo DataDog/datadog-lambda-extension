@@ -50,7 +50,9 @@ impl LogsProcessor {
     ) {
         self.insert_to_durable_map(&request_id, &execution_id, &execution_name);
         let ready_logs = self.take_ready_logs();
-        if !ready_logs.is_empty() && let Err(e) = aggregator_handle.insert_batch(ready_logs) {
+        if !ready_logs.is_empty()
+            && let Err(e) = aggregator_handle.insert_batch(ready_logs)
+        {
             error!("LOGS_PROCESSOR | Failed to insert batch: {}", e);
         }
     }

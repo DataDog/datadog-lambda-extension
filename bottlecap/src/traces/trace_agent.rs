@@ -597,7 +597,8 @@ impl TraceAgent {
                         span.meta.get("request_id"),
                         span.meta.get("durable_function_execution_id"),
                         span.meta.get("durable_function_execution_name"),
-                    ) && let Err(e) = invocation_processor_handle
+                    )
+                    && let Err(e) = invocation_processor_handle
                         .forward_durable_context(
                             request_id.clone(),
                             execution_id.clone(),
