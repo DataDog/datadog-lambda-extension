@@ -15,7 +15,7 @@ use crate::logs::processor::{Processor, Rule};
 use crate::tags::provider;
 
 use crate::logs::lambda::Message;
-use datadog_log_agent::{AggregatorHandle, LogEntry};
+use datadog_log_agent::{AggregatorHandle, IntakeEntry};
 
 const OOM_ERRORS: [&str; 7] = [
     "fatal error: runtime: out of memory",       // Go
@@ -44,9 +44,9 @@ pub struct LambdaProcessor {
     // Current Invocation Context
     invocation_context: InvocationContext,
     // Logs which don't have a `request_id`
-    orphan_logs: Vec<LogEntry>,
+    orphan_logs: Vec<IntakeEntry>,
     // Logs which are ready to be aggregated
-    ready_logs: Vec<LogEntry>,
+    ready_logs: Vec<IntakeEntry>,
     // Main event bus
     event_bus: Sender<Event>,
     // Logs enabled
@@ -71,7 +71,7 @@ fn map_log_level_to_status(level: &str) -> Option<&'static str> {
     }
 }
 
-impl Processor<LogEntry> for LambdaProcessor {}
+impl Processor<IntakeEntry> for LambdaProcessor {}
 
 impl LambdaProcessor {
     #[must_use]
@@ -354,7 +354,10 @@ impl LambdaProcessor {
         }
     }
 
-    fn get_log_entry(&mut self, mut lambda_message: Message) -> Result<LogEntry, Box<dyn Error>> {
+    fn get_log_entry(
+        &mut self,
+        mut lambda_message: Message,
+    ) -> Result<IntakeEntry, Box<dyn Error>> {
         // Assign request_id from message or context if available
         lambda_message.lambda.request_id = match lambda_message.lambda.request_id {
             Some(request_id) => Some(request_id),
@@ -413,7 +416,7 @@ impl LambdaProcessor {
             }),
         );
 
-        let entry = LogEntry {
+        let entry = IntakeEntry {
             message: final_message,
             timestamp: lambda_message.timestamp,
             hostname: Some(self.function_arn.clone()),
@@ -472,7 +475,7 @@ impl LambdaProcessor {
         original_message
     }
 
-    async fn make_log(&mut self, event: TelemetryEvent) -> Result<LogEntry, Box<dyn Error>> {
+    async fn make_log(&mut self, event: TelemetryEvent) -> Result<IntakeEntry, Box<dyn Error>> {
         match self.get_message(event).await {
             Ok(lambda_message) => self.get_log_entry(lambda_message),
             // TODO: Check what to do when we can't process the event
@@ -481,7 +484,7 @@ impl LambdaProcessor {
     }
 
     /// Processes a log, applies filtering rules, and queues it for aggregation
-    fn process_and_queue_log(&mut self, mut log: LogEntry) {
+    fn process_and_queue_log(&mut self, mut log: IntakeEntry) {
         let should_send_log =
             self.logs_enabled && LambdaProcessor::apply_rules(&self.rules, &mut log.message);
         if should_send_log {
@@ -531,7 +534,7 @@ mod tests {
         RuntimeDoneMetrics, Status,
     };
     use crate::logs::lambda::Lambda;
-    use datadog_log_agent::{AggregatorService, LogEntry};
+    use datadog_log_agent::{AggregatorService, IntakeEntry};
 
     macro_rules! get_message_tests {
         ($($name:ident: $value:expr,)*) => {
@@ -1096,7 +1099,7 @@ mod tests {
         let batches = aggregator_handle.get_batches().await.unwrap();
         assert_eq!(batches.len(), 1);
 
-        let entries: Vec<LogEntry> = serde_json::from_slice(&batches[0]).unwrap();
+        let entries: Vec<IntakeEntry> = serde_json::from_slice(&batches[0]).unwrap();
         assert_eq!(entries.len(), 1);
         let entry = &entries[0];
         assert_eq!(
@@ -1283,7 +1286,7 @@ mod tests {
         let batches = aggregator_handle.get_batches().await.unwrap();
         assert_eq!(batches.len(), 1);
 
-        let entries: Vec<LogEntry> = serde_json::from_slice(&batches[0]).unwrap();
+        let entries: Vec<IntakeEntry> = serde_json::from_slice(&batches[0]).unwrap();
         assert_eq!(entries.len(), 2);
         let start_entry = &entries[0];
         assert_eq!(
