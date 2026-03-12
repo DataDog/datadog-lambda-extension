@@ -41,13 +41,13 @@ pub struct LambdaProcessor {
     // Whether this is a Durable Function runtime.
     // None = not yet determined (hold all logs until known). Happens during cold start.
     // Some(true) = durable function. Hold logs for a request_id until
-    // the durable execution id and execution name for this invocationare known.
+    // the durable execution id and execution name for this invocation are known.
     // These two fields are extracted from the aws.lambda span sent by the tracer.
     // Some(false) = not a durable function; mark logs as ready to be aggregated as normal.
     is_durable_function: Option<bool>,
     // Logs held pending resolution, keyed by request_id.
-    // While is_durable_function is None, every incoming log is stashed here so
-    // we can decide whether to filter/tag it once the flag is known.
+    // While is_durable_function is None, every incoming log (except durable execution SDK logs)
+    // is stashed here so we can decide whether to filter/tag it once the flag is known.
     // While is_durable_function is Some(true), logs whose request_id has no
     // durable execution context yet are also stashed here; they are drained
     // the moment that context arrives.
@@ -547,7 +547,7 @@ impl LambdaProcessor {
             request_id.to_string(),
             (execution_id.to_string(), execution_name.to_string()),
         );
-        self.drain_held_for_request_id(request_id);
+        self.drain_held_logs_for_request_id(request_id);
     }
 
     pub fn take_ready_logs(&mut self) -> Vec<String> {
@@ -556,7 +556,7 @@ impl LambdaProcessor {
 
     /// Moves all logs held for `request_id` into `ready_logs`, tagging each with the
     /// durable execution context that is now known for that `request_id`.
-    fn drain_held_for_request_id(&mut self, request_id: &str) {
+    fn drain_held_logs_for_request_id(&mut self, request_id: &str) {
         let Some(held) = self.held_logs.remove(request_id) else {
             return;
         };

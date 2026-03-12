@@ -92,7 +92,7 @@ pub struct Processor {
     /// Used to determine if we should search for the empty context on an invocation.
     awaiting_first_invocation: bool,
     /// Sender used to forward durable execution context extracted from `aws.lambda` spans to the
-    /// logs pipeline. Decouples the trace agent from the logs agent: the trace agent sends spans
+    /// logs agent. Decouples the trace agent from the logs agent: the trace agent sends spans
     /// to the lifecycle processor, which extracts durable context and relays it here.
     durable_context_tx: mpsc::Sender<DurableContextUpdate>,
 }
@@ -1365,7 +1365,7 @@ impl Processor {
             execution_id.to_owned(),
             execution_name.to_owned(),
         )) {
-            warn!("Invocation Processor | Failed to forward durable context to logs pipeline: {e}");
+            warn!("Invocation Processor | Failed to forward durable context to logs agent: {e}");
         }
     }
 }
