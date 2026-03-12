@@ -9,7 +9,7 @@ use libdd_trace_protobuf::pb::Span;
 use libdd_trace_utils::tracer_header_tags;
 use serde_json::Value;
 use tokio::time::Instant;
-use tracing::{debug, trace, warn};
+use tracing::{debug, error, trace, warn};
 
 use tokio::sync::mpsc;
 
@@ -1365,7 +1365,7 @@ impl Processor {
             execution_id: execution_id.to_owned(),
             execution_name: execution_name.to_owned(),
         }) {
-            warn!("Invocation Processor | Failed to forward durable context to logs agent: {e}");
+            error!("Invocation Processor | Failed to forward durable context to logs agent: {e}");
         }
     }
 }

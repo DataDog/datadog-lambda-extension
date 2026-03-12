@@ -52,6 +52,7 @@ pub struct LambdaProcessor {
     // durable execution context yet are also stashed here; they are drained
     // the moment that context arrives.
     held_logs: HashMap<String, Vec<IntakeLog>>,
+    // Maps request_id -> (durable execution id, durable execution name)
     durable_context_map: HashMap<String, DurableExecutionContext>,
     // Insertion order for FIFO eviction when map reaches capacity
     durable_context_order: VecDeque<String>,
@@ -590,7 +591,8 @@ impl LambdaProcessor {
                     // and execution name, and add logs to ready_logs.
                     for mut log in logs {
                         log.message.lambda.durable_execution_id = Some(ctx.execution_id.clone());
-                        log.message.lambda.durable_execution_name = Some(ctx.execution_name.clone());
+                        log.message.lambda.durable_execution_name =
+                            Some(ctx.execution_name.clone());
                         if let Ok(s) = serde_json::to_string(&log) {
                             self.ready_logs.push(s);
                         }

@@ -47,11 +47,11 @@ use bottlecap::{
     logger,
     logs::{
         agent::LogsAgent,
-        lambda::DurableContextUpdate,
         aggregator_service::{
             AggregatorHandle as LogsAggregatorHandle, AggregatorService as LogsAggregatorService,
         },
         flusher::LogsFlusher,
+        lambda::DurableContextUpdate,
     },
     otlp::{agent::Agent as OtlpAgent, should_enable_otlp_agent},
     proxy::{interceptor, should_start_proxy},
