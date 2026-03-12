@@ -95,7 +95,7 @@ jobs:
 
       - name: Build and push
         id: docker_build
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: ./scripts
           file: ./scripts/${{ matrix.arrays.dockerFile }}
@@ -106,7 +106,7 @@ jobs:
 
       - name: Build and push latest
         id: docker_build_latest
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         if: ${{ github.event.inputs.latestTag == 'yes' }}
         with:
           context: ./scripts
