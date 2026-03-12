@@ -1,7 +1,7 @@
 use std::sync::Arc;
 use tokio::sync::mpsc::Sender;
 
-use tracing::debug;
+use tracing::{debug, error};
 
 use crate::LAMBDA_RUNTIME_SLUG;
 use crate::config::{self, processing_rule};
@@ -34,11 +34,24 @@ impl LogsProcessor {
         }
     }
 
+    // TODO: rename this method to process_telemetry_event()
     pub async fn process(&mut self, event: TelemetryEvent, aggregator_handle: &AggregatorHandle) {
         match self {
             LogsProcessor::Lambda(lambda_processor) => {
                 lambda_processor.process(event, aggregator_handle).await;
             }
+        }
+    }
+
+    pub fn process_durable_context_update(
+        &mut self,
+        (request_id, execution_id, execution_name): (String, String, String),
+        aggregator_handle: &AggregatorHandle,
+    ) {
+        self.insert_to_durable_map(&request_id, &execution_id, &execution_name);
+        let ready_logs = self.take_ready_logs();
+        if !ready_logs.is_empty() && let Err(e) = aggregator_handle.insert_batch(ready_logs) {
+            error!("LOGS_PROCESSOR | Failed to insert batch: {}", e);
         }
     }
 

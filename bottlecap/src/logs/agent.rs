@@ -2,7 +2,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::mpsc::{self, Sender};
 use tokio_util::sync::CancellationToken;
-use tracing::{debug, error};
+use tracing::debug;
 
 use crate::event_bus::Event;
 use crate::extension::telemetry::events::TelemetryEvent;
@@ -62,12 +62,8 @@ impl LogsAgent {
                 Some(event) = self.rx.recv() => {
                     self.processor.process(event, &self.aggregator_handle).await;
                 }
-                Some((request_id, execution_id, execution_name)) = self.durable_context_rx.recv() => {
-                    self.processor.insert_to_durable_map(&request_id, &execution_id, &execution_name);
-                    let ready_logs = self.processor.take_ready_logs();
-                    if !ready_logs.is_empty() && let Err(e) = self.aggregator_handle.insert_batch(ready_logs) {
-                        error!("LOGS_AGENT | Failed to insert batch: {}", e);
-                    }
+                Some(update) = self.durable_context_rx.recv() => {
+                    self.processor.process_durable_context_update(update, &self.aggregator_handle);
                 }
                 () = self.cancel_token.cancelled() => {
                     debug!("LOGS_AGENT | Received shutdown signal, draining remaining events");
