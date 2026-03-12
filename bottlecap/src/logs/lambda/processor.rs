@@ -15,7 +15,7 @@ use crate::logs::processor::{Processor, Rule};
 use crate::tags::provider;
 
 use crate::logs::lambda::Message;
-use datadog_log_agent::{AggregatorHandle, IntakeEntry};
+use datadog_logs_agent::{AggregatorHandle, IntakeEntry};
 
 const OOM_ERRORS: [&str; 7] = [
     "fatal error: runtime: out of memory",       // Go
@@ -534,7 +534,7 @@ mod tests {
         RuntimeDoneMetrics, Status,
     };
     use crate::logs::lambda::Lambda;
-    use datadog_log_agent::{AggregatorService, IntakeEntry};
+    use datadog_logs_agent::{AggregatorService, IntakeEntry};
 
     macro_rules! get_message_tests {
         ($($name:ident: $value:expr,)*) => {

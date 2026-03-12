@@ -4,7 +4,7 @@ use bottlecap::event_bus::EventBus;
 use bottlecap::extension::telemetry::events::TelemetryEvent;
 use bottlecap::logs::agent::LogsAgent;
 use bottlecap::tags::provider::Provider;
-use datadog_log_agent::{AggregatorService, Destination, LogFlusher, LogFlusherConfig};
+use datadog_logs_agent::{AggregatorService, Destination, LogFlusher, LogFlusherConfig};
 use httpmock::prelude::*;
 use std::collections::HashMap;
 use std::sync::Arc;

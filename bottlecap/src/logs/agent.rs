@@ -9,7 +9,7 @@ use crate::extension::telemetry::events::TelemetryEvent;
 use crate::logs::processor::LogsProcessor;
 use crate::tags;
 use crate::{LAMBDA_RUNTIME_SLUG, config};
-use datadog_log_agent::AggregatorHandle;
+use datadog_logs_agent::AggregatorHandle;
 
 const DRAIN_LOG_INTERVAL: Duration = Duration::from_millis(100);
 

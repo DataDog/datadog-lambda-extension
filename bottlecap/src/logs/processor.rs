@@ -9,7 +9,7 @@ use crate::event_bus::Event;
 use crate::extension::telemetry::events::TelemetryEvent;
 use crate::logs::lambda::processor::LambdaProcessor;
 use crate::tags;
-use datadog_log_agent::AggregatorHandle;
+use datadog_logs_agent::AggregatorHandle;
 
 impl LogsProcessor {
     #[must_use]

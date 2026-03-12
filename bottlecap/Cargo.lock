@@ -470,7 +470,7 @@ dependencies = [
  "chrono",
  "cookie",
  "datadog-fips 0.1.0 (git+https://github.com/DataDog/serverless-components?rev=28f796bf767fff56caf08153ade5cd80c8e8f705)",
- "datadog-log-agent",
+ "datadog-logs-agent",
  "datadog-protos",
  "ddsketch-agent",
  "dogstatsd",
@@ -742,6 +742,15 @@ dependencies = [
 [[package]]
 name = "datadog-fips"
 version = "0.1.0"
+source = "git+https://github.com/DataDog/serverless-components?rev=1210ecbf338b4125c3c18d72fadd15a440238945#1210ecbf338b4125c3c18d72fadd15a440238945"
+dependencies = [
+ "reqwest",
+ "tracing",
+]
+
+[[package]]
+name = "datadog-fips"
+version = "0.1.0"
 source = "git+https://github.com/DataDog/serverless-components?rev=28f796bf767fff56caf08153ade5cd80c8e8f705#28f796bf767fff56caf08153ade5cd80c8e8f705"
 dependencies = [
  "reqwest",
@@ -751,20 +760,11 @@ dependencies = [
 ]
 
 [[package]]
-name = "datadog-fips"
+name = "datadog-logs-agent"
 version = "0.1.0"
-source = "git+https://github.com/DataDog/serverless-components?rev=51700e5a2eaf9dd73aff5b83b3139124847d3037#51700e5a2eaf9dd73aff5b83b3139124847d3037"
+source = "git+https://github.com/DataDog/serverless-components?rev=1210ecbf338b4125c3c18d72fadd15a440238945#1210ecbf338b4125c3c18d72fadd15a440238945"
 dependencies = [
- "reqwest",
- "tracing",
-]
-
-[[package]]
-name = "datadog-log-agent"
-version = "0.1.0"
-source = "git+https://github.com/DataDog/serverless-components?rev=51700e5a2eaf9dd73aff5b83b3139124847d3037#51700e5a2eaf9dd73aff5b83b3139124847d3037"
-dependencies = [
- "datadog-fips 0.1.0 (git+https://github.com/DataDog/serverless-components?rev=51700e5a2eaf9dd73aff5b83b3139124847d3037)",
+ "datadog-fips 0.1.0 (git+https://github.com/DataDog/serverless-components?rev=1210ecbf338b4125c3c18d72fadd15a440238945)",
  "futures",
  "http-body-util",
  "hyper 1.8.1",

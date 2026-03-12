@@ -73,7 +73,7 @@ use bottlecap::{
     },
 };
 use datadog_fips::reqwest_adapter::create_reqwest_client_builder;
-use datadog_log_agent::{
+use datadog_logs_agent::{
     AggregatorHandle as LogsAggregatorHandle, AggregatorService as LogsAggregatorService,
     Destination, LogFlusher, LogFlusherConfig, LogsAdditionalEndpoint,
 };
