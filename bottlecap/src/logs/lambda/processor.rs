@@ -39,7 +39,7 @@ pub struct LambdaProcessor {
     // Managed Instance mode
     is_managed_instance_mode: bool,
     // Whether this is a Durable Function runtime.
-    // None = not yet determined (hold all logs until known).
+    // None = not yet determined (hold all logs until known). Happens during cold start.
     // Some(true) = durable function. Hold logs for a request_id until
     // the durable execution id and execution name for this invocationare known.
     // These two fields are extracted from the aws.lambda span sent by the tracer.
@@ -648,6 +648,7 @@ impl LambdaProcessor {
         }
 
         match self.is_durable_function {
+            // We don't yet know if this is a durable function. Hold the log until we know.
             None => {
                 if let Some(rid) = log.message.lambda.request_id.clone() {
                     self.held_logs.entry(rid).or_default().push(log);
@@ -656,6 +657,7 @@ impl LambdaProcessor {
                     drop(log);
                 }
             }
+            // Not a durable function. Serialize and push the log.
             Some(false) => {
                 if let Ok(serialized_log) = serde_json::to_string(&log) {
                     // explicitly drop log so we don't accidentally re-use it and push
@@ -664,9 +666,8 @@ impl LambdaProcessor {
                     self.ready_logs.push(serialized_log);
                 }
             }
+            // Durable function. Mark this log as ready to be aggregated if its request_id already has context; otherwise hold.
             Some(true) => {
-                // Durable context is populated by span processing (insert_to_durable_context_map).
-                // Mark this log as ready to be aggregated if its request_id already has context; otherwise hold.
                 let durable_ctx = log
                     .message
                     .lambda
