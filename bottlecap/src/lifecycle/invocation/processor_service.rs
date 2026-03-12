@@ -17,7 +17,7 @@ use crate::{
         context::{Context, ReparentingInfo},
         processor::Processor,
     },
-    logs::agent::DurableContextUpdate,
+    logs::lambda::DurableContextUpdate,
     tags::provider,
     traces::{
         context::SpanContext, propagation::DatadogCompositePropagator,

@@ -16,7 +16,7 @@ use crate::logs::aggregator_service::AggregatorHandle;
 use crate::logs::processor::{Processor, Rule};
 use crate::tags::provider;
 
-use crate::logs::lambda::{IntakeLog, Message};
+use crate::logs::lambda::{DurableExecutionContext, IntakeLog, Message};
 
 #[allow(clippy::module_name_repetitions)]
 #[derive(Clone, Debug)]
@@ -52,8 +52,7 @@ pub struct LambdaProcessor {
     // durable execution context yet are also stashed here; they are drained
     // the moment that context arrives.
     held_logs: HashMap<String, Vec<IntakeLog>>,
-    // Maps request_id -> (durable_execution_id, durable_execution_name)
-    durable_context_map: HashMap<String, (String, String)>,
+    durable_context_map: HashMap<String, DurableExecutionContext>,
     // Insertion order for FIFO eviction when map reaches capacity
     durable_context_order: VecDeque<String>,
 }
@@ -545,7 +544,10 @@ impl LambdaProcessor {
         self.durable_context_order.push_back(request_id.to_string());
         self.durable_context_map.insert(
             request_id.to_string(),
-            (execution_id.to_string(), execution_name.to_string()),
+            DurableExecutionContext {
+                execution_id: execution_id.to_string(),
+                execution_name: execution_name.to_string(),
+            },
         );
         self.drain_held_logs_for_request_id(request_id);
     }
@@ -560,14 +562,11 @@ impl LambdaProcessor {
         let Some(held) = self.held_logs.remove(request_id) else {
             return;
         };
-        let durable_ctx = self
-            .durable_context_map
-            .get(request_id)
-            .map(|(id, name)| (id.clone(), name.clone()));
-        if let Some((exec_id, exec_name)) = durable_ctx {
+        let durable_ctx = self.durable_context_map.get(request_id).cloned();
+        if let Some(ctx) = durable_ctx {
             for mut log in held {
-                log.message.lambda.durable_execution_id = Some(exec_id.clone());
-                log.message.lambda.durable_execution_name = Some(exec_name.clone());
+                log.message.lambda.durable_execution_id = Some(ctx.execution_id.clone());
+                log.message.lambda.durable_execution_name = Some(ctx.execution_name.clone());
                 if let Ok(s) = serde_json::to_string(&log) {
                     drop(log);
                     self.ready_logs.push(s);
@@ -585,16 +584,13 @@ impl LambdaProcessor {
         if is_durable {
             // Drain logs whose request_id is already in the map.
             for (request_id, logs) in held {
-                let durable_ctx = self
-                    .durable_context_map
-                    .get(&request_id)
-                    .map(|(id, name)| (id.clone(), name.clone()));
-                if let Some((exec_id, exec_name)) = durable_ctx {
+                let durable_ctx = self.durable_context_map.get(&request_id).cloned();
+                if let Some(ctx) = durable_ctx {
                     // If the request_id is in the durable context map, set durable execution id
                     // and execution name, and add logs to ready_logs.
                     for mut log in logs {
-                        log.message.lambda.durable_execution_id = Some(exec_id.clone());
-                        log.message.lambda.durable_execution_name = Some(exec_name.clone());
+                        log.message.lambda.durable_execution_id = Some(ctx.execution_id.clone());
+                        log.message.lambda.durable_execution_name = Some(ctx.execution_name.clone());
                         if let Ok(s) = serde_json::to_string(&log) {
                             self.ready_logs.push(s);
                         }
@@ -674,12 +670,12 @@ impl LambdaProcessor {
                     .request_id
                     .as_ref()
                     .and_then(|rid| self.durable_context_map.get(rid))
-                    .map(|(id, name)| (id.clone(), name.clone()));
+                    .cloned();
 
                 match durable_ctx {
-                    Some((exec_id, exec_name)) => {
-                        log.message.lambda.durable_execution_id = Some(exec_id);
-                        log.message.lambda.durable_execution_name = Some(exec_name);
+                    Some(ctx) => {
+                        log.message.lambda.durable_execution_id = Some(ctx.execution_id);
+                        log.message.lambda.durable_execution_name = Some(ctx.execution_name);
                         if let Ok(serialized_log) = serde_json::to_string(&log) {
                             // explicitly drop log so we don't accidentally re-use it and push
                             // duplicate logs to the aggregator

@@ -12,8 +12,7 @@ use crate::{LAMBDA_RUNTIME_SLUG, config};
 
 const DRAIN_LOG_INTERVAL: Duration = Duration::from_millis(100);
 
-/// `(request_id, execution_id, execution_name)` extracted from an `aws.lambda` span.
-pub type DurableContextUpdate = (String, String, String);
+use crate::logs::lambda::DurableContextUpdate;
 
 #[allow(clippy::module_name_repetitions)]
 pub struct LogsAgent {

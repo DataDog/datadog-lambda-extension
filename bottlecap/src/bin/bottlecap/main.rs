@@ -46,7 +46,8 @@ use bottlecap::{
     },
     logger,
     logs::{
-        agent::{DurableContextUpdate, LogsAgent},
+        agent::LogsAgent,
+        lambda::DurableContextUpdate,
         aggregator_service::{
             AggregatorHandle as LogsAggregatorHandle, AggregatorService as LogsAggregatorService,
         },

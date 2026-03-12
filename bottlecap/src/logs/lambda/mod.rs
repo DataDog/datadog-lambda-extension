@@ -2,6 +2,21 @@ use serde::Serialize;
 
 pub mod processor;
 
+/// Context extracted from an `aws.lambda` span and forwarded to the logs pipeline.
+#[derive(Clone)]
+pub struct DurableContextUpdate {
+    pub request_id: String,
+    pub execution_id: String,
+    pub execution_name: String,
+}
+
+/// Durable execution context stored per `request_id` in `LambdaProcessor::durable_context_map`.
+#[derive(Clone, Debug)]
+pub struct DurableExecutionContext {
+    pub execution_id: String,
+    pub execution_name: String,
+}
+
 ///
 /// Intake Log for AWS Lambda Telemetry Events.
 ///

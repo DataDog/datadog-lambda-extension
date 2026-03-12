@@ -26,7 +26,7 @@ use crate::{
         span_inferrer::{self, SpanInferrer},
         triggers::get_default_service_name,
     },
-    logs::agent::DurableContextUpdate,
+    logs::lambda::DurableContextUpdate,
     metrics::enhanced::lambda::{EnhancedMetricData, Lambda as EnhancedMetrics},
     proc::{
         self, CPUData, NetworkData,
@@ -1360,11 +1360,11 @@ impl Processor {
         execution_id: &str,
         execution_name: &str,
     ) {
-        if let Err(e) = self.durable_context_tx.try_send((
-            request_id.to_owned(),
-            execution_id.to_owned(),
-            execution_name.to_owned(),
-        )) {
+        if let Err(e) = self.durable_context_tx.try_send(DurableContextUpdate {
+            request_id: request_id.to_owned(),
+            execution_id: execution_id.to_owned(),
+            execution_name: execution_name.to_owned(),
+        }) {
             warn!("Invocation Processor | Failed to forward durable context to logs agent: {e}");
         }
     }
