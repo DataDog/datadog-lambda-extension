@@ -75,7 +75,7 @@ use bottlecap::{
 use datadog_fips::reqwest_adapter::create_reqwest_client_builder;
 use datadog_log_agent::{
     AggregatorHandle as LogsAggregatorHandle, AggregatorService as LogsAggregatorService,
-    FlusherMode, LogFlusher, LogFlusherConfig, LogsAdditionalEndpoint,
+    Destination, LogFlusher, LogFlusherConfig, LogsAdditionalEndpoint,
 };
 use decrypt::resolve_secrets;
 use dogstatsd::{
@@ -1064,11 +1064,11 @@ async fn start_logs_agent(
     let api_key = api_key_factory.get_api_key().await.unwrap_or_default();
 
     let mode = if config.observability_pipelines_worker_logs_enabled {
-        FlusherMode::ObservabilityPipelinesWorker {
+        Destination::ObservabilityPipelinesWorker {
             url: config.observability_pipelines_worker_logs_url.clone(),
         }
     } else {
-        FlusherMode::Datadog
+        Destination::Datadog
     };
 
     let additional_endpoints: Vec<LogsAdditionalEndpoint> = config

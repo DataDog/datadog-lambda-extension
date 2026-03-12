@@ -4,7 +4,7 @@ use bottlecap::event_bus::EventBus;
 use bottlecap::extension::telemetry::events::TelemetryEvent;
 use bottlecap::logs::agent::LogsAgent;
 use bottlecap::tags::provider::Provider;
-use datadog_log_agent::{AggregatorService, FlusherMode, LogFlusher, LogFlusherConfig};
+use datadog_log_agent::{AggregatorService, Destination, LogFlusher, LogFlusherConfig};
 use httpmock::prelude::*;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -78,7 +78,7 @@ async fn test_logs() {
     let flusher_config = LogFlusherConfig {
         api_key: dd_api_key.to_string(),
         site: "datadoghq.com".to_string(),
-        mode: FlusherMode::ObservabilityPipelinesWorker {
+        mode: Destination::ObservabilityPipelinesWorker {
             url: format!("{}/api/v2/logs", server.url("")),
         },
         additional_endpoints: Vec::new(),
