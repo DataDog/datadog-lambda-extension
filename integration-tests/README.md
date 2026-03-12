@@ -44,6 +44,26 @@ export DATADOG_API_SECRET_ARN="arn:aws:secretsmanager:us-east-1:ACCOUNT_ID:secre
 
 **Docker**: Required for building Lambda functions.
 
+### Configuration
+
+#### Tracer Layer ARNs (Optional)
+
+By default, integration tests use hardcoded Datadog tracer layers. To test with custom tracer versions, set these environment variables:
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `NODE_TRACER_LAYER_ARN` | Node.js tracer layer ARN | `arn:aws:lambda:us-east-1:464622532012:layer:Datadog-Node24-x:132` |
+| `PYTHON_TRACER_LAYER_ARN` | Python tracer layer ARN | `arn:aws:lambda:us-east-1:464622532012:layer:Datadog-Python313-ARM:117` |
+| `JAVA_TRACER_LAYER_ARN` | Java tracer layer ARN | `arn:aws:lambda:us-east-1:464622532012:layer:dd-trace-java:25` |
+| `DOTNET_TRACER_LAYER_ARN` | .NET tracer layer ARN | `arn:aws:lambda:us-east-1:464622532012:layer:dd-trace-dotnet-ARM:23` |
+
+**Example:**
+```bash
+# Test with a custom Node.js tracer layer
+export NODE_TRACER_LAYER_ARN="arn:aws:lambda:us-east-1:464622532012:layer:Datadog-Node24-x:135"
+./scripts/local_deploy.sh base
+```
+
 ### Workflow
 
 #### 1. Build and Publish Extension Layer
