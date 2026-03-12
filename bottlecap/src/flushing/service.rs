@@ -8,7 +8,7 @@ use dogstatsd::{
     aggregator::AggregatorHandle as MetricsAggregatorHandle, flusher::Flusher as MetricsFlusher,
 };
 
-use datadog_log_agent::LogFlusher;
+use datadog_logs_agent::LogFlusher;
 
 use crate::flushing::handles::{FlushHandles, MetricsRetryBatch};
 use crate::traces::{
