@@ -2,6 +2,21 @@ use serde::Serialize;
 
 pub mod processor;
 
+/// Context extracted from an `aws.lambda` span and forwarded to the logs pipeline.
+#[derive(Clone)]
+pub struct DurableContextUpdate {
+    pub request_id: String,
+    pub execution_id: String,
+    pub execution_name: String,
+}
+
+/// Durable execution context stored per `request_id` in `LambdaProcessor::durable_context_map`.
+#[derive(Clone, Debug)]
+pub struct DurableExecutionContext {
+    pub execution_id: String,
+    pub execution_name: String,
+}
+
 ///
 /// Intake Log for AWS Lambda Telemetry Events.
 ///
@@ -30,10 +45,14 @@ pub struct Message {
     pub status: String,
 }
 
-#[derive(Serialize, Debug, Clone, PartialEq)]
+#[derive(Serialize, Debug, Clone, Default, PartialEq)]
 pub struct Lambda {
     pub arn: String,
     pub request_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub durable_execution_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub durable_execution_name: Option<String>,
 }
 
 impl Message {
@@ -50,6 +69,7 @@ impl Message {
             lambda: Lambda {
                 arn: function_arn,
                 request_id,
+                ..Lambda::default()
             },
             timestamp,
             status: status.unwrap_or("info".to_string()),

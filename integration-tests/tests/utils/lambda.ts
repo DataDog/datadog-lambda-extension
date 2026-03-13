@@ -4,6 +4,9 @@ const lambdaClient = new LambdaClient({ region: 'us-east-1' });
 
 export interface LambdaInvocationResult {
   requestId: string;
+  // Lambda execution request ID extracted from tail logs (START RequestId: ...).
+  // Undefined for durable functions because they do not support LogType=Tail.
+  executionRequestId?: string;
   statusCode: number;
   payload: any;
 }
@@ -45,19 +48,36 @@ export async function invokeLambda(
   }
 
   let responsePayload;
+  const rawPayload = new TextDecoder().decode(response.Payload);
   try {
-    responsePayload = JSON.parse(new TextDecoder().decode(response.Payload));
+    responsePayload = rawPayload ? JSON.parse(rawPayload) : null;
     console.log(`Response payload: ${JSON.stringify(responsePayload)}`);
   } catch (error: any) {
     console.error('Failed to parse response payload:', error.message);
-    console.log('Raw payload:', new TextDecoder().decode(response.Payload));
-    throw error;
+    console.log('Raw payload:', rawPayload);
+    responsePayload = null;
   }
 
   const requestId: string = response.$metadata.requestId || '';
 
+  // For durable functions, $metadata.requestId is the HTTP orchestration request ID which
+  // does NOT match the Lambda execution request ID stored as @lambda.request_id in Datadog.
+  // Durable functions also do not support LogType=Tail, so LogResult is absent.
+  // When LogResult is available, extract the real execution request ID from the START line.
+  let executionRequestId: string | undefined;
+  if (response.LogResult) {
+    const decodedLogs = Buffer.from(response.LogResult, 'base64').toString('utf-8');
+    console.log(`Tail logs: ${decodedLogs}`);
+    const startMatch = decodedLogs.match(/START RequestId: ([a-f0-9-]+)/);
+    if (startMatch?.[1]) {
+      executionRequestId = startMatch[1];
+      console.log(`Extracted execution requestId from tail logs: ${executionRequestId}`);
+    }
+  }
+
   return {
     requestId,
+    executionRequestId,
     statusCode: response.StatusCode || 200,
     payload: responsePayload,
   };

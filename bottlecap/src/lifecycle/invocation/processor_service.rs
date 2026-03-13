@@ -17,6 +17,7 @@ use crate::{
         context::{Context, ReparentingInfo},
         processor::Processor,
     },
+    logs::lambda::DurableContextUpdate,
     tags::provider,
     traces::{
         context::SpanContext, propagation::DatadogCompositePropagator,
@@ -110,6 +111,11 @@ pub enum ProcessorCommand {
     },
     AddTracerSpan {
         span: Box<Span>,
+    },
+    ForwardDurableContext {
+        request_id: String,
+        execution_id: String,
+        execution_name: String,
     },
     OnOutOfMemoryError {
         timestamp: i64,
@@ -380,6 +386,21 @@ impl InvocationProcessorHandle {
             .await
     }
 
+    pub async fn forward_durable_context(
+        &self,
+        request_id: String,
+        execution_id: String,
+        execution_name: String,
+    ) -> Result<(), mpsc::error::SendError<ProcessorCommand>> {
+        self.sender
+            .send(ProcessorCommand::ForwardDurableContext {
+                request_id,
+                execution_id,
+                execution_name,
+            })
+            .await
+    }
+
     pub async fn on_out_of_memory_error(
         &self,
         timestamp: i64,
@@ -430,6 +451,7 @@ impl InvocationProcessorService {
         aws_config: Arc<AwsConfig>,
         metrics_aggregator_handle: AggregatorHandle,
         propagator: Arc<DatadogCompositePropagator>,
+        durable_context_tx: mpsc::Sender<DurableContextUpdate>,
     ) -> (InvocationProcessorHandle, Self) {
         let (sender, receiver) = mpsc::channel(1000);
 
@@ -439,6 +461,7 @@ impl InvocationProcessorService {
             aws_config,
             metrics_aggregator_handle,
             propagator,
+            durable_context_tx,
         );
 
         let handle = InvocationProcessorHandle { sender };
@@ -587,6 +610,17 @@ impl InvocationProcessorService {
                 }
                 ProcessorCommand::AddTracerSpan { span } => {
                     self.processor.add_tracer_span(&span);
+                }
+                ProcessorCommand::ForwardDurableContext {
+                    request_id,
+                    execution_id,
+                    execution_name,
+                } => {
+                    self.processor.forward_durable_context(
+                        &request_id,
+                        &execution_id,
+                        &execution_name,
+                    );
                 }
                 ProcessorCommand::OnOutOfMemoryError { timestamp } => {
                     self.processor.on_out_of_memory_error(timestamp);

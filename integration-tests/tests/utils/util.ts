@@ -31,7 +31,10 @@ export async function invokeLambdaAndGetDatadogData(
     const baseFunctionName = functionName.split(':')[0];
 
     const traces = await getTraces(baseFunctionName, result.requestId);
-    const logs = await getLogs(baseFunctionName, result.requestId);
+    // Use the Lambda execution request ID (from tail logs) for log filtering when available.
+    // For durable functions, tail logs are unsupported and executionRequestId is undefined,
+    // so getLogs falls back to a service-only query and returns all logs for that function.
+    const logs = await getLogs(baseFunctionName, result.executionRequestId);
 
     const lambdaInvocationData: LambdaInvocationDatadogData = {
         requestId: result.requestId,
