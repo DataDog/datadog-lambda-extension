@@ -56,7 +56,10 @@ describe('Base Integration Tests', () => {
         attributes: {
           operation_name: 'aws.lambda',
           custom: {
-            cold_start: 'true'
+            cold_start: 'true',
+            span: {
+              kind: 'server'
+            }
           }
         }
       });
@@ -109,7 +112,10 @@ describe('Base Integration Tests', () => {
         attributes: {
           operation_name: 'aws.lambda',
           custom: {
-            cold_start: 'true'
+            cold_start: 'true',
+            span: {
+              kind: 'server'
+            }
           }
         }
       });
@@ -166,7 +172,10 @@ describe('Base Integration Tests', () => {
         attributes: {
           operation_name: 'aws.lambda',
           custom: {
-            cold_start: 'true'
+            cold_start: 'true',
+            span: {
+              kind: 'server'
+            }
           }
         }
       });
@@ -208,7 +217,10 @@ describe('Base Integration Tests', () => {
         attributes: {
           operation_name: 'aws.lambda',
           custom: {
-            cold_start: 'true'
+            cold_start: 'true',
+            span: {
+              kind: 'server'
+            }
           }
         }
       });
