@@ -115,9 +115,7 @@ describe('Base Integration Tests', () => {
       });
     });
 
-    // TODO: These spans are being created but not with the same traceId as the 'aws.lambda' span
-    //       Need to investigate why this is happening and fix it.
-    it.failing('[failing] should have aws.lambda.cold_start span', () => {
+    it('should have aws.lambda.cold_start span', () => {
       const trace = results.python.traces![0];
       const awsLambdaColdStartSpan = trace.spans.find((span: any) => span.attributes.operation_name === 'aws.lambda.cold_start');
       expect(awsLambdaColdStartSpan).toBeDefined();
@@ -128,9 +126,7 @@ describe('Base Integration Tests', () => {
       });
     });
 
-    // TODO: These spans are being created but not with the same traceId as the 'aws.lambda' span
-    //       Need to investigate why this is happening and fix it.
-    it.failing('[failing] should have aws.lambda.load span', () => {
+    it('should have aws.lambda.load span', () => {
       const trace = results.python.traces![0];
       const awsLambdaLoadSpan = trace.spans.find((span: any) => span.attributes.operation_name === 'aws.lambda.load');
       expect(awsLambdaLoadSpan).toBeDefined();
