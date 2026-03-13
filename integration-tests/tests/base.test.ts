@@ -115,6 +115,12 @@ describe('Base Integration Tests', () => {
       });
     });
 
+    it('should have exactly one aws.lambda span', () => {
+      const trace = results.python.traces![0];
+      const awsLambdaSpans = trace.spans.filter((span: any) => span.attributes.operation_name === 'aws.lambda');
+      expect(awsLambdaSpans.length).toEqual(1);
+    });
+
     it('should have aws.lambda.cold_start span', () => {
       const trace = results.python.traces![0];
       const awsLambdaColdStartSpan = trace.spans.find((span: any) => span.attributes.operation_name === 'aws.lambda.cold_start');
