@@ -35,7 +35,7 @@ fn bytes_from_header_value(val: &Value) -> Option<Vec<u8>> {
         Value::Array(arr) => arr
             .iter()
             .map(|v| match v {
-                Value::Number(n) => n.as_u64().map(|n| n as u8),
+                Value::Number(n) => n.as_u64().and_then(|n| u8::try_from(n).ok()),
                 Value::String(s) => s.parse::<u8>().ok(),
                 _ => None,
             })
@@ -76,10 +76,10 @@ fn carrier_from_headers(headers: &Value) -> HashMap<String, String> {
     for entry in entries {
         if let Value::Object(header_map) = entry {
             for (key, val) in header_map {
-                if let Some(bytes) = bytes_from_header_value(val) {
-                    if let Ok(s) = String::from_utf8(bytes) {
-                        carrier.insert(key.to_lowercase(), s);
-                    }
+                if let Some(bytes) = bytes_from_header_value(val)
+                    && let Ok(s) = String::from_utf8(bytes)
+                {
+                    carrier.insert(key.to_lowercase(), s);
                 }
             }
         }
@@ -430,7 +430,7 @@ mod tests {
             .expect("Expected at least one record");
         assert_eq!(record.topic, "demo-topic");
         // headers is an object with 6 entries (2 non-datadog + 4 datadog)
-        assert_eq!(record.headers.as_object().map(|o| o.len()), Some(6));
+        assert_eq!(record.headers.as_object().map(serde_json::Map::len), Some(6));
     }
 
     #[test]
