@@ -1,7 +1,7 @@
 variables:
   DOCKER_TARGET_IMAGE: registry.ddbuild.io/ci/datadog-lambda-extension
   DOCKER_TARGET_VERSION: latest
-  #  Default version for development builds
+  # Default version for development builds
   # This will be overwritten by the tag version if it is a release.
   VERSION: dev
   # Manual trigger variables
