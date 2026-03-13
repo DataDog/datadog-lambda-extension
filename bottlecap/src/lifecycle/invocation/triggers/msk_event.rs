@@ -430,7 +430,10 @@ mod tests {
             .expect("Expected at least one record");
         assert_eq!(record.topic, "demo-topic");
         // headers is an object with 6 entries (2 non-datadog + 4 datadog)
-        assert_eq!(record.headers.as_object().map(serde_json::Map::len), Some(6));
+        assert_eq!(
+            record.headers.as_object().map(serde_json::Map::len),
+            Some(6)
+        );
     }
 
     #[test]
