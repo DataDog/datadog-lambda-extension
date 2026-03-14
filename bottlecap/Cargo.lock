@@ -469,7 +469,8 @@ dependencies = [
  "bytes",
  "chrono",
  "cookie",
- "datadog-fips",
+ "datadog-fips 0.1.0 (git+https://github.com/DataDog/serverless-components?rev=28f796bf767fff56caf08153ade5cd80c8e8f705)",
+ "datadog-logs-agent",
  "datadog-protos",
  "ddsketch-agent",
  "dogstatsd",
@@ -747,6 +748,34 @@ dependencies = [
  "rustls",
  "rustls-native-certs",
  "tracing",
+]
+
+[[package]]
+name = "datadog-fips"
+version = "0.1.0"
+source = "git+https://github.com/DataDog/serverless-components?rev=8cb5daa7679df7d0f814aad016b592288e91cea5#8cb5daa7679df7d0f814aad016b592288e91cea5"
+dependencies = [
+ "reqwest",
+ "tracing",
+]
+
+[[package]]
+name = "datadog-logs-agent"
+version = "0.1.0"
+source = "git+https://github.com/DataDog/serverless-components?rev=8cb5daa7679df7d0f814aad016b592288e91cea5#8cb5daa7679df7d0f814aad016b592288e91cea5"
+dependencies = [
+ "datadog-fips 0.1.0 (git+https://github.com/DataDog/serverless-components?rev=8cb5daa7679df7d0f814aad016b592288e91cea5)",
+ "futures",
+ "http-body-util",
+ "hyper 1.8.1",
+ "hyper-util",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "thiserror 1.0.69",
+ "tokio",
+ "tracing",
+ "zstd",
 ]
 
 [[package]]
