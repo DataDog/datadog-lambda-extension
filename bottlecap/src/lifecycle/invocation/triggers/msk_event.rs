@@ -56,7 +56,7 @@ fn bytes_from_header_value(val: &Value) -> Option<Vec<u8>> {
 }
 
 /// Decodes an MSK record's `headers` field into a `HashMap<String, String>` by converting
-/// each header's byte values to a UTF-8 string. The `headers` field may be either a JSON 
+/// each header's byte values to a UTF-8 string. The `headers` field may be either a JSON
 /// array or a JSON object with numeric string keys, one entry per Kafka header, ordered by index.
 fn headers_to_string_map(headers: &Value) -> HashMap<String, String> {
     let mut carrier = HashMap::new();
@@ -186,7 +186,9 @@ impl Trigger for MSKEvent {
         self.records
             .values()
             .find_map(|arr| arr.first())
-            .map_or_else(HashMap::new, |record| headers_to_string_map(&record.headers))
+            .map_or_else(HashMap::new, |record| {
+                headers_to_string_map(&record.headers)
+            })
     }
 
     fn is_async(&self) -> bool {
