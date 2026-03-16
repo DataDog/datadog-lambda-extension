@@ -32,7 +32,7 @@ export class LambdaManagedInstancesStack extends cdk.Stack {
       runtime: defaultNodeRuntime,
       architecture: lambda.Architecture.ARM_64,
       handler: '/opt/nodejs/node_modules/datadog-lambda-js/handler.handler',
-      code: lambda.Code.fromAsset('./lambda/lmi-node'),
+      code: lambda.Code.fromAsset('./lambda/default-node'),
       functionName: nodeFunctionName,
       timeout: cdk.Duration.seconds(30),
       memorySize: 2048,
@@ -41,6 +41,7 @@ export class LambdaManagedInstancesStack extends cdk.Stack {
         DD_SERVICE: nodeFunctionName,
         DD_TRACE_ENABLED: 'true',
         DD_LAMBDA_HANDLER: 'index.handler',
+        RETURN_REQUEST_ID: 'true',
       },
       logGroup: createLogGroup(this, nodeFunctionName)
     });
@@ -58,7 +59,7 @@ export class LambdaManagedInstancesStack extends cdk.Stack {
       runtime: defaultPythonRuntime,
       architecture: lambda.Architecture.ARM_64,
       handler: 'datadog_lambda.handler.handler',
-      code: lambda.Code.fromAsset('./lambda/lmi-python'),
+      code: lambda.Code.fromAsset('./lambda/default-python'),
       functionName: pythonFunctionName,
       timeout: cdk.Duration.seconds(30),
       memorySize: 2048,
@@ -67,7 +68,8 @@ export class LambdaManagedInstancesStack extends cdk.Stack {
         DD_SERVICE: pythonFunctionName,
         DD_TRACE_ENABLED: 'true',
         DD_LAMBDA_HANDLER: 'lambda_function.handler',
-        DD_TRACE_AGENT_URL: 'http://127.0.0.1:8126'
+        DD_TRACE_AGENT_URL: 'http://127.0.0.1:8126',
+        RETURN_REQUEST_ID: 'true',
       },
       logGroup: createLogGroup(this, pythonFunctionName)
     });
@@ -85,7 +87,7 @@ export class LambdaManagedInstancesStack extends cdk.Stack {
       runtime: defaultJavaRuntime,
       architecture: lambda.Architecture.ARM_64,
       handler: 'example.Handler::handleRequest',
-      code: lambda.Code.fromAsset('./lambda/lmi-java/target/function.jar'),
+      code: lambda.Code.fromAsset('./lambda/default-java/target/function.jar'),
       functionName: javaFunctionName,
       timeout: cdk.Duration.seconds(30),
       memorySize: 2048,
@@ -94,6 +96,7 @@ export class LambdaManagedInstancesStack extends cdk.Stack {
         AWS_LAMBDA_EXEC_WRAPPER: '/opt/datadog_wrapper',
         DD_SERVICE: javaFunctionName,
         DD_TRACE_ENABLED: 'true',
+        RETURN_REQUEST_ID: 'true',
       },
       logGroup: createLogGroup(this, javaFunctionName)
     });
@@ -111,7 +114,7 @@ export class LambdaManagedInstancesStack extends cdk.Stack {
       runtime: defaultDotnetRuntime,
       architecture: lambda.Architecture.ARM_64,
       handler: 'Function::Function.Handler::FunctionHandler',
-      code: lambda.Code.fromAsset('./lambda/lmi-dotnet/bin/function.zip'),
+      code: lambda.Code.fromAsset('./lambda/default-dotnet/bin/function.zip'),
       functionName: dotnetFunctionName,
       timeout: cdk.Duration.seconds(30),
       memorySize: 2048,
@@ -120,6 +123,7 @@ export class LambdaManagedInstancesStack extends cdk.Stack {
         AWS_LAMBDA_EXEC_WRAPPER: '/opt/datadog_wrapper',
         DD_SERVICE: dotnetFunctionName,
         DD_TRACE_ENABLED: 'true',
+        RETURN_REQUEST_ID: 'true',
       },
       logGroup: createLogGroup(this, dotnetFunctionName)
     });
