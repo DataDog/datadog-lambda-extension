@@ -16,24 +16,22 @@ import {
   defaultDotnetRuntime
 } from '../util';
 
-export class Base extends cdk.Stack {
+export class OnDemand extends cdk.Stack {
   constructor(scope: Construct, id: string, props: cdk.StackProps) {
     super(scope, id, props);
 
-    // Get layers once for the entire stack
     const extensionLayer = getExtensionLayer(this);
     const nodeLayer = getDefaultNodeLayer(this);
     const pythonLayer = getDefaultPythonLayer(this);
     const javaLayer = getDefaultJavaLayer(this);
     const dotnetLayer = getDefaultDotnetLayer(this);
 
-    // Node.js Lambda
     const nodeFunctionName = `${id}-node-lambda`;
     const nodeFunction = new lambda.Function(this, nodeFunctionName, {
       runtime: defaultNodeRuntime,
       architecture: lambda.Architecture.ARM_64,
       handler: '/opt/nodejs/node_modules/datadog-lambda-js/handler.handler',
-      code: lambda.Code.fromAsset('./lambda/base-node'),
+      code: lambda.Code.fromAsset('./lambda/default-node'),
       functionName: nodeFunctionName,
       timeout: cdk.Duration.seconds(30),
       memorySize: 256,
@@ -49,13 +47,12 @@ export class Base extends cdk.Stack {
     nodeFunction.addLayers(extensionLayer);
     nodeFunction.addLayers(nodeLayer);
 
-    // Python Lambda
     const pythonFunctionName = `${id}-python-lambda`;
     const pythonFunction = new lambda.Function(this, pythonFunctionName, {
       runtime: defaultPythonRuntime,
       architecture: lambda.Architecture.ARM_64,
       handler: 'datadog_lambda.handler.handler',
-      code: lambda.Code.fromAsset('./lambda/base-python'),
+      code: lambda.Code.fromAsset('./lambda/default-python'),
       functionName: pythonFunctionName,
       timeout: cdk.Duration.seconds(30),
       memorySize: 256,
@@ -74,13 +71,12 @@ export class Base extends cdk.Stack {
     pythonFunction.addLayers(extensionLayer);
     pythonFunction.addLayers(pythonLayer);
 
-    // Java Lambda
     const javaFunctionName = `${id}-java-lambda`;
     const javaFunction = new lambda.Function(this, javaFunctionName, {
       runtime: defaultJavaRuntime,
       architecture: lambda.Architecture.ARM_64,
       handler: 'example.Handler::handleRequest',
-      code: lambda.Code.fromAsset('./lambda/base-java/target/function.jar'),
+      code: lambda.Code.fromAsset('./lambda/default-java/target/function.jar'),
       functionName: javaFunctionName,
       timeout: cdk.Duration.seconds(30),
       memorySize: 256,
@@ -96,13 +92,12 @@ export class Base extends cdk.Stack {
     javaFunction.addLayers(extensionLayer);
     javaFunction.addLayers(javaLayer);
 
-    // .NET Lambda
     const dotnetFunctionName = `${id}-dotnet-lambda`;
     const dotnetFunction = new lambda.Function(this, dotnetFunctionName, {
       runtime: defaultDotnetRuntime,
       architecture: lambda.Architecture.ARM_64,
       handler: 'Function::Function.Handler::FunctionHandler',
-      code: lambda.Code.fromAsset('./lambda/base-dotnet/bin/function.zip'),
+      code: lambda.Code.fromAsset('./lambda/default-dotnet/bin/function.zip'),
       functionName: dotnetFunctionName,
       timeout: cdk.Duration.seconds(30),
       memorySize: 256,

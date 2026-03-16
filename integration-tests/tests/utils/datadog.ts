@@ -17,6 +17,13 @@ const datadogClient: AxiosInstance = axios.create({
   timeout: 30000,
 });
 
+export interface DatadogTelemetry {
+  requestId: string;
+  statusCode?: number;
+  traces?: DatadogTrace[];
+  logs?: DatadogLog[];
+}
+
 export interface DatadogTrace {
   trace_id: string;
   spans: DatadogSpan[];
@@ -35,26 +42,41 @@ export interface DatadogLog {
 }
 
 /**
+ * Extracts the base service name from a function name by stripping any
+ * version qualifier (:N) or alias qualifier (:alias)
+ */
+function getServiceName(functionName: string): string {
+  const colonIndex = functionName.lastIndexOf(':');
+  if (colonIndex === -1) {
+    return functionName;
+  }
+  return functionName.substring(0, colonIndex);
+}
+
+export async function getDatadogTelemetryByRequestId(functionName: string, requestId: string): Promise<DatadogTelemetry> {
+  const serviceName = getServiceName(functionName);
+  const traces = await getTraces(serviceName, requestId);
+  const logs = await getLogs(serviceName, requestId);
+  return { requestId, traces, logs };
+}
+
+/**
  * Search for traces in Datadog using the v2 API
  * @param serviceName - Datadog service name
- * @param requestId - Optional AWS Lambda request ID to filter by
+ * @param requestId - AWS Lambda request ID to filter by
  */
 export async function getTraces(
   serviceName: string,
-  requestId?: string,
+  requestId: string,
 ): Promise<DatadogTrace[]> {
   const now = Date.now();
-  const fromTime = now - (2 * 60 * 60 * 1000); // 2 hours ago
+  const fromTime = now - (1 * 60 * 60 * 1000); // 1 hour ago
   const toTime = now;
   try {
     // Convert service name to lowercase as Datadog stores it that way
     const serviceNameLower = serviceName.toLowerCase();
 
-    // Build query with service name and optional request ID
-    let query = `service:${serviceNameLower}`;
-    if (requestId) {
-      query += ` @request_id:${requestId}`;
-    }
+    const query = `service:${serviceNameLower} @request_id:${requestId}`;
 
     console.log(`Searching for traces: ${query}`);
 
@@ -148,24 +170,20 @@ export async function getTraces(
   }
 }
 
-
 /**
  * Search for logs in Datadog
  * @param serviceName - Datadog service name
- * @param requestId - Optional AWS Lambda request ID to filter by
+ * @param requestId - AWS Lambda request ID to filter by
  */
 export async function getLogs(
   serviceName: string,
-  requestId?: string,
+  requestId: string,
 ): Promise<DatadogLog[]> {
   const now = Date.now();
   const fromTime = now - (2 * 60 * 60 * 1000); // 2 hours ago
   const toTime = now;
   try {
-    let query = `service:${serviceName}`;
-    if (requestId) {
-      query += ` @lambda.request_id:${requestId}`;
-    }
+    const query = `service:${serviceName} @lambda.request_id:${requestId}`;
 
     console.log(`Searching for logs: ${query}`);
 
