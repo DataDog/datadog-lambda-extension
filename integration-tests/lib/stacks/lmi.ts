@@ -41,7 +41,6 @@ export class LambdaManagedInstancesStack extends cdk.Stack {
         DD_SERVICE: nodeFunctionName,
         DD_TRACE_ENABLED: 'true',
         DD_LAMBDA_HANDLER: 'index.handler',
-        RETURN_REQUEST_ID: 'true',
       },
       logGroup: createLogGroup(this, nodeFunctionName)
     });
@@ -69,7 +68,6 @@ export class LambdaManagedInstancesStack extends cdk.Stack {
         DD_TRACE_ENABLED: 'true',
         DD_LAMBDA_HANDLER: 'lambda_function.handler',
         DD_TRACE_AGENT_URL: 'http://127.0.0.1:8126',
-        RETURN_REQUEST_ID: 'true',
       },
       logGroup: createLogGroup(this, pythonFunctionName)
     });
@@ -96,7 +94,6 @@ export class LambdaManagedInstancesStack extends cdk.Stack {
         AWS_LAMBDA_EXEC_WRAPPER: '/opt/datadog_wrapper',
         DD_SERVICE: javaFunctionName,
         DD_TRACE_ENABLED: 'true',
-        RETURN_REQUEST_ID: 'true',
       },
       logGroup: createLogGroup(this, javaFunctionName)
     });
@@ -123,7 +120,6 @@ export class LambdaManagedInstancesStack extends cdk.Stack {
         AWS_LAMBDA_EXEC_WRAPPER: '/opt/datadog_wrapper',
         DD_SERVICE: dotnetFunctionName,
         DD_TRACE_ENABLED: 'true',
-        RETURN_REQUEST_ID: 'true',
       },
       logGroup: createLogGroup(this, dotnetFunctionName)
     });

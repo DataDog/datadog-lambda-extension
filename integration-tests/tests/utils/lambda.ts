@@ -3,7 +3,7 @@ import { LambdaClient, UpdateFunctionConfigurationCommand, GetFunctionConfigurat
 const lambdaClient = new LambdaClient({ region: 'us-east-1' });
 
 export async function forceColdStart(functionName: string): Promise<void> {
-  setTimestampEnvVar(functionName)
+  await setTimestampEnvVar(functionName);
   await new Promise(resolve => setTimeout(resolve, 10000));
 }
 

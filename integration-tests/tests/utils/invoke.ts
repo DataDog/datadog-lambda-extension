@@ -25,16 +25,6 @@ export async function invokeLambda(
     throw error;
   }
 
-  let responsePayload;
-  try {
-    responsePayload = JSON.parse(new TextDecoder().decode(response.Payload));
-    console.log(`Response payload: ${JSON.stringify(responsePayload)}`);
-  } catch (error: any) {
-    console.error('Failed to parse response payload:', error.message);
-    console.log('Raw payload:', new TextDecoder().decode(response.Payload));
-    throw error;
-  }
-
   const requestId: string = response.$metadata.requestId || '';
 
   return {

@@ -14,6 +14,21 @@ public class Handler implements RequestHandler<Map<String, Object>, Map<String, 
     public Map<String, Object> handleRequest(Map<String, Object> event, Context context) {
         context.getLogger().log("Hello world!");
 
+        String sleepMsStr = System.getenv("SLEEP_MS");
+        if (sleepMsStr != null && !sleepMsStr.isEmpty()) {
+            try {
+                int sleepMs = Integer.parseInt(sleepMsStr);
+                if (sleepMs > 0) {
+                    context.getLogger().log("Sleeping for " + sleepMs + "ms");
+                    Thread.sleep(sleepMs);
+                }
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            } catch (NumberFormatException e) {
+                context.getLogger().log("Invalid SLEEP_MS value: " + sleepMsStr);
+            }
+        }
+
         Map<String, Object> body = new HashMap<>();
         body.put("message", "Success");
         body.put("requestId", context.getAwsRequestId());

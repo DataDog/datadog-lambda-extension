@@ -70,7 +70,7 @@ export async function getTraces(
   requestId: string,
 ): Promise<DatadogTrace[]> {
   const now = Date.now();
-  const fromTime = now - (1 * 60 * 60 * 1000); // 1 hours ago
+  const fromTime = now - (1 * 60 * 60 * 1000); // 1 hour ago
   const toTime = now;
   try {
     // Convert service name to lowercase as Datadog stores it that way
