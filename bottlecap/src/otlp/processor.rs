@@ -105,6 +105,25 @@ impl Processor {
         Self { config }
     }
 
+    /// Process an OTLP trace request that has already been deserialized.
+    /// This is the core processing logic used by both HTTP and gRPC paths.
+    pub fn process_request(
+        &self,
+        request: ExportTraceServiceRequest,
+    ) -> Result<Vec<Vec<DatadogSpan>>, Box<dyn Error>> {
+        let mut spans: Vec<Vec<DatadogSpan>> = Vec::new();
+        for resource_spans in &request.resource_spans {
+            spans.extend(otel_resource_spans_to_dd_spans(
+                resource_spans,
+                self.config.clone(),
+            ));
+        }
+
+        Ok(spans)
+    }
+
+    /// Process raw bytes from an HTTP request.
+    /// Decodes based on content-type and delegates to `process_request`.
     pub fn process(
         &self,
         body: &[u8],
@@ -119,15 +138,7 @@ impl Processor {
             OtlpEncoding::Protobuf => ExportTraceServiceRequest::decode(body)?,
         };
 
-        let mut spans: Vec<Vec<DatadogSpan>> = Vec::new();
-        for resource_spans in &request.resource_spans {
-            spans.extend(otel_resource_spans_to_dd_spans(
-                resource_spans,
-                self.config.clone(),
-            ));
-        }
-
-        Ok(spans)
+        self.process_request(request)
     }
 }
 

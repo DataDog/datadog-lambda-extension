@@ -3,14 +3,37 @@ use std::sync::Arc;
 use crate::config::Config;
 
 pub mod agent;
+pub mod grpc_agent;
 pub mod processor;
 pub mod transform;
 
+/// Check if any OTLP agent (HTTP or gRPC) should be enabled.
 #[must_use]
 pub fn should_enable_otlp_agent(config: &Arc<Config>) -> bool {
     config.otlp_config_traces_enabled
+        && (config
+            .otlp_config_receiver_protocols_http_endpoint
+            .is_some()
+            || config
+                .otlp_config_receiver_protocols_grpc_endpoint
+                .is_some())
+}
+
+/// Check if the HTTP OTLP agent should be enabled.
+#[must_use]
+pub fn should_enable_http(config: &Arc<Config>) -> bool {
+    config.otlp_config_traces_enabled
         && config
             .otlp_config_receiver_protocols_http_endpoint
+            .is_some()
+}
+
+/// Check if the gRPC OTLP agent should be enabled.
+#[must_use]
+pub fn should_enable_grpc(config: &Arc<Config>) -> bool {
+    config.otlp_config_traces_enabled
+        && config
+            .otlp_config_receiver_protocols_grpc_endpoint
             .is_some()
 }
 
@@ -77,6 +100,67 @@ mod tests {
             let config = get_config(Path::new(""));
 
             assert!(!should_enable_otlp_agent(&Arc::new(config)));
+
+            Ok(())
+        });
+    }
+
+    #[test]
+    fn test_should_enable_otlp_agent_with_grpc_endpoint() {
+        figment::Jail::expect_with(|jail| {
+            jail.clear_env();
+            jail.set_env(
+                "DD_OTLP_CONFIG_RECEIVER_PROTOCOLS_GRPC_ENDPOINT",
+                "0.0.0.0:4317",
+            );
+
+            let config = Arc::new(get_config(Path::new("")));
+
+            assert!(should_enable_otlp_agent(&config));
+            assert!(should_enable_grpc(&config));
+            assert!(!should_enable_http(&config));
+
+            Ok(())
+        });
+    }
+
+    #[test]
+    fn test_should_enable_both_http_and_grpc() {
+        figment::Jail::expect_with(|jail| {
+            jail.clear_env();
+            jail.set_env(
+                "DD_OTLP_CONFIG_RECEIVER_PROTOCOLS_HTTP_ENDPOINT",
+                "0.0.0.0:4318",
+            );
+            jail.set_env(
+                "DD_OTLP_CONFIG_RECEIVER_PROTOCOLS_GRPC_ENDPOINT",
+                "0.0.0.0:4317",
+            );
+
+            let config = Arc::new(get_config(Path::new("")));
+
+            assert!(should_enable_otlp_agent(&config));
+            assert!(should_enable_http(&config));
+            assert!(should_enable_grpc(&config));
+
+            Ok(())
+        });
+    }
+
+    #[test]
+    fn test_should_not_enable_grpc_if_traces_disabled() {
+        figment::Jail::expect_with(|jail| {
+            jail.clear_env();
+            jail.set_env("DD_OTLP_CONFIG_TRACES_ENABLED", "false");
+            jail.set_env(
+                "DD_OTLP_CONFIG_RECEIVER_PROTOCOLS_GRPC_ENDPOINT",
+                "0.0.0.0:4317",
+            );
+
+            let config = Arc::new(get_config(Path::new("")));
+
+            assert!(!should_enable_otlp_agent(&config));
+            assert!(!should_enable_grpc(&config));
 
             Ok(())
         });
