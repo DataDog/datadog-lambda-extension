@@ -3,7 +3,7 @@ use opentelemetry_proto::tonic::collector::trace::v1::{
     ExportTraceServiceRequest, ExportTraceServiceResponse,
     trace_service_server::{TraceService, TraceServiceServer},
 };
-use std::mem::size_of_val;
+use prost::Message;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::sync::mpsc::Sender;
@@ -23,6 +23,7 @@ use crate::{
 
 const OTLP_AGENT_GRPC_PORT: u16 = 4317;
 const DEFAULT_MAX_RECV_MSG_SIZE: usize = 4 * 1024 * 1024; // 4MB default
+const MAX_RECV_MSG_SIZE_CAP: usize = 64 * 1024 * 1024; // 64MB cap to prevent DoS
 
 struct OtlpGrpcService {
     config: Arc<Config>,
@@ -41,6 +42,9 @@ impl TraceService for OtlpGrpcService {
     ) -> Result<Response<ExportTraceServiceResponse>, Status> {
         let inner_request = request.into_inner();
 
+        // Capture encoded size before processing for metrics
+        let body_size = inner_request.encoded_len();
+
         let traces = match self.processor.process_request(inner_request) {
             Ok(traces) => traces,
             Err(e) => {
@@ -49,14 +53,15 @@ impl TraceService for OtlpGrpcService {
             }
         };
 
-        let tracer_header_tags = DatadogTracerHeaderTags::default();
-        let body_size = size_of_val(&traces);
-        if body_size == 0 {
+        // Check if processor returned any actual traces
+        if traces.iter().all(Vec::is_empty) {
             error!("OTLP gRPC | Not sending traces, processor returned empty data");
             return Err(Status::internal(
                 "Not sending traces, processor returned empty data",
             ));
         }
+
+        let tracer_header_tags = DatadogTracerHeaderTags::default();
 
         let compute_trace_stats_on_extension = self.config.compute_trace_stats_on_extension;
         let (send_data_builder, processed_traces) = self.trace_processor.process_traces(
@@ -136,15 +141,24 @@ impl GrpcAgent {
 
     fn parse_port(endpoint: Option<&String>, default_port: u16) -> u16 {
         if let Some(endpoint) = endpoint {
-            let port = endpoint.split(':').nth(1);
-            if let Some(port) = port {
-                return port.parse::<u16>().unwrap_or_else(|_| {
-                    error!("Invalid OTLP gRPC port, using default port {default_port}");
-                    default_port
-                });
+            // Strip scheme if present (e.g., "http://localhost:4317" -> "localhost:4317")
+            let without_scheme = endpoint
+                .strip_prefix("http://")
+                .or_else(|| endpoint.strip_prefix("https://"))
+                .unwrap_or(endpoint);
+
+            // Use rsplit to get port from the last colon (handles IPv6 like [::1]:4317)
+            if let Some(port_str) = without_scheme.rsplit(':').next() {
+                // Ensure we got a port, not part of IPv6 address
+                if let Ok(port) = port_str.parse::<u16>() {
+                    return port;
+                }
             }
 
-            error!("Invalid OTLP gRPC endpoint format, using default port {default_port}");
+            error!(
+                "Invalid OTLP gRPC endpoint format '{}', using default port {}",
+                endpoint, default_port
+            );
         }
 
         default_port
@@ -157,7 +171,26 @@ impl GrpcAgent {
             .config
             .otlp_config_receiver_protocols_grpc_max_recv_msg_size_mib
             .map_or(DEFAULT_MAX_RECV_MSG_SIZE, |mib| {
-                mib.unsigned_abs() as usize * 1024 * 1024
+                if mib <= 0 {
+                    error!(
+                        "Invalid gRPC max message size {}MiB, using default {}MiB",
+                        mib,
+                        DEFAULT_MAX_RECV_MSG_SIZE / (1024 * 1024)
+                    );
+                    return DEFAULT_MAX_RECV_MSG_SIZE;
+                }
+                // Safe: we validated mib > 0 above
+                #[allow(clippy::cast_sign_loss)]
+                let size = (mib as usize) * 1024 * 1024;
+                if size > MAX_RECV_MSG_SIZE_CAP {
+                    error!(
+                        "gRPC max message size {}MiB exceeds cap, limiting to {}MiB",
+                        mib,
+                        MAX_RECV_MSG_SIZE_CAP / (1024 * 1024)
+                    );
+                    return MAX_RECV_MSG_SIZE_CAP;
+                }
+                size
             });
 
         let service = OtlpGrpcService {
@@ -209,6 +242,24 @@ mod tests {
         assert_eq!(
             GrpcAgent::parse_port(endpoint.as_ref(), OTLP_AGENT_GRPC_PORT),
             9999
+        );
+    }
+
+    #[test]
+    fn test_parse_port_with_http_scheme() {
+        let endpoint = Some("http://localhost:4317".to_string());
+        assert_eq!(
+            GrpcAgent::parse_port(endpoint.as_ref(), OTLP_AGENT_GRPC_PORT),
+            4317
+        );
+    }
+
+    #[test]
+    fn test_parse_port_with_https_scheme() {
+        let endpoint = Some("https://localhost:4317".to_string());
+        assert_eq!(
+            GrpcAgent::parse_port(endpoint.as_ref(), OTLP_AGENT_GRPC_PORT),
+            4317
         );
     }
 
