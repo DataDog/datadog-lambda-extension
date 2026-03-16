@@ -44,7 +44,7 @@ jobs:
           unzip "protoc-${{ env.PB_VERSION }}-${{ env.PB_TARGET }}.zip" -d "$HOME/.local"
           export PATH="$PATH:$HOME/.local/bin"
 
-      - uses: actions-rust-lang/setup-rust-toolchain@a0b538fa0b742a6aa35d6e2c169b4bd06d225a98 # v1.15.3
+      - uses: actions-rust-lang/setup-rust-toolchain@150fca883cd4034361b621bd4e6a9d34e5143606 # v1.15.4
         with:
           cache: false
       - uses: mozilla-actions/sccache-action@7d986dd989559c6ecdb630a3fd2557667be217ad # v0.0.9
@@ -72,7 +72,7 @@ jobs:
           unzip "protoc-${{ env.PB_VERSION }}-${{ env.PB_TARGET }}.zip" -d "$HOME/.local"
           export PATH="$PATH:$HOME/.local/bin"
 
-      - uses: actions-rust-lang/setup-rust-toolchain@a0b538fa0b742a6aa35d6e2c169b4bd06d225a98 # v1.15.3
+      - uses: actions-rust-lang/setup-rust-toolchain@150fca883cd4034361b621bd4e6a9d34e5143606 # v1.15.4
         with:
           components: clippy
           cache: false
@@ -104,7 +104,7 @@ jobs:
           unzip "protoc-${{ env.PB_VERSION }}-${{ env.PB_TARGET }}.zip" -d "$HOME/.local"
           export PATH="$PATH:$HOME/.local/bin"
 
-      - uses: actions-rust-lang/setup-rust-toolchain@a0b538fa0b742a6aa35d6e2c169b4bd06d225a98 # v1.15.3
+      - uses: actions-rust-lang/setup-rust-toolchain@150fca883cd4034361b621bd4e6a9d34e5143606 # v1.15.4
         with:
           cache: false
       - uses: mozilla-actions/sccache-action@7d986dd989559c6ecdb630a3fd2557667be217ad # v0.0.9
@@ -132,7 +132,7 @@ jobs:
           unzip "protoc-${{ env.PB_VERSION }}-${{ env.PB_TARGET }}.zip" -d "$HOME/.local"
           export PATH="$PATH:$HOME/.local/bin"
 
-      - uses: actions-rust-lang/setup-rust-toolchain@a0b538fa0b742a6aa35d6e2c169b4bd06d225a98 # v1.15.3
+      - uses: actions-rust-lang/setup-rust-toolchain@150fca883cd4034361b621bd4e6a9d34e5143606 # v1.15.4
         with:
           cache: false
       - uses: taiki-e/install-action@cbb1dcaa26e1459e2876c39f61c1e22a1258aac5 # v2.68.33
@@ -150,7 +150,7 @@ jobs:
         os: [ubuntu-22.04, macos-latest]
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-      - uses: actions-rust-lang/setup-rust-toolchain@a0b538fa0b742a6aa35d6e2c169b4bd06d225a98 # v1.15.3
+      - uses: actions-rust-lang/setup-rust-toolchain@150fca883cd4034361b621bd4e6a9d34e5143606 # v1.15.4
         with:
           components: rustfmt
           cache: false
