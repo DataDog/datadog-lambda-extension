@@ -114,11 +114,10 @@ describe('OTLP Integration Tests', () => {
       expect(hasGrpcSpan).toBe(true);
     });
 
-    it('should preserve span parent-child relationships', () => {
+    it('should have spans in the trace', () => {
       const result = getResult();
       expect(result).toBeDefined();
       const trace = result.traces![0];
-      // Verify that the trace has at least one span
       expect(trace.spans.length).toBeGreaterThan(0);
     });
   });
