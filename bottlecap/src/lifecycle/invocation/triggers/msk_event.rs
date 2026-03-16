@@ -437,6 +437,14 @@ mod tests {
     }
 
     #[test]
+    fn test_is_match_with_headers() {
+        let json = read_json_file("msk_event_with_headers.json");
+        let payload = serde_json::from_str(&json).expect("Failed to deserialize into Value");
+
+        assert!(MSKEvent::is_match(&payload));
+    }
+
+    #[test]
     fn test_get_carrier_with_headers() {
         let json = read_json_file("msk_event_with_headers.json");
         let payload = serde_json::from_str(&json).expect("Failed to deserialize into Value");
