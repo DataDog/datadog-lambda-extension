@@ -51,6 +51,7 @@ use bottlecap::{
             AggregatorHandle as LogsAggregatorHandle, AggregatorService as LogsAggregatorService,
         },
         flusher::LogsFlusher,
+        lambda::DurableContextUpdate,
     },
     otlp::{agent::Agent as OtlpAgent, should_enable_otlp_agent},
     proxy::{interceptor, should_start_proxy},
@@ -298,15 +299,20 @@ async fn extension_loop_active(
     // and shares the connection pool.
     let shared_client = bottlecap::http::get_client(config);
 
-    let (logs_agent_channel, logs_flusher, logs_agent_cancel_token, logs_aggregator_handle) =
-        start_logs_agent(
-            config,
-            Arc::clone(&api_key_factory),
-            &tags_provider,
-            event_bus_tx.clone(),
-            aws_config.is_managed_instance_mode(),
-            &shared_client,
-        );
+    let (
+        logs_agent_channel,
+        logs_flusher,
+        logs_agent_cancel_token,
+        logs_aggregator_handle,
+        durable_context_tx,
+    ) = start_logs_agent(
+        config,
+        Arc::clone(&api_key_factory),
+        &tags_provider,
+        event_bus_tx.clone(),
+        aws_config.is_managed_instance_mode(),
+        &shared_client,
+    );
 
     let (metrics_flushers, metrics_aggregator_handle, dogstatsd_cancel_token) = start_dogstatsd(
         tags_provider.clone(),
@@ -325,6 +331,7 @@ async fn extension_loop_active(
             Arc::clone(&aws_config),
             metrics_aggregator_handle.clone(),
             Arc::clone(&propagator),
+            durable_context_tx,
         );
     tokio::spawn(async move {
         invocation_processor_service.run().await;
@@ -1039,6 +1046,7 @@ fn start_logs_agent(
     LogsFlusher,
     CancellationToken,
     LogsAggregatorHandle,
+    Sender<DurableContextUpdate>,
 ) {
     let (aggregator_service, aggregator_handle) = LogsAggregatorService::default();
     // Start service in background
@@ -1046,7 +1054,7 @@ fn start_logs_agent(
         aggregator_service.run().await;
     });
 
-    let (mut agent, tx) = LogsAgent::new(
+    let (mut agent, tx, durable_context_tx) = LogsAgent::new(
         Arc::clone(tags_provider),
         Arc::clone(config),
         event_bus,
@@ -1068,7 +1076,13 @@ fn start_logs_agent(
         config.clone(),
         client.clone(),
     );
-    (tx, flusher, cancel_token, aggregator_handle)
+    (
+        tx,
+        flusher,
+        cancel_token,
+        aggregator_handle,
+        durable_context_tx,
+    )
 }
 
 #[allow(clippy::type_complexity)]
