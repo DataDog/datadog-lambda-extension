@@ -27,8 +27,8 @@ export class Snapstart extends cdk.Stack {
     const javaFunction = new lambda.Function(this, javaFunctionName, {
       runtime: defaultJavaRuntime,
       architecture: lambda.Architecture.ARM_64,
-      handler: 'example.SnapstartHandler::handleRequest',
-      code: lambda.Code.fromAsset('./lambda/snapstart-java/target/function.jar'),
+      handler: 'example.Handler::handleRequest',
+      code: lambda.Code.fromAsset('./lambda/default-java/target/function.jar'),
       functionName: javaFunctionName,
       timeout: cdk.Duration.seconds(30),
       memorySize: 512,
@@ -38,6 +38,7 @@ export class Snapstart extends cdk.Stack {
         DD_SERVICE: javaFunctionName,
         AWS_LAMBDA_EXEC_WRAPPER: '/opt/datadog_wrapper',
         DD_TRACE_ENABLED: 'true',
+        SLEEP_MS: '10000',
       },
       logGroup: createLogGroup(this, javaFunctionName)
     });
@@ -55,7 +56,7 @@ export class Snapstart extends cdk.Stack {
       runtime: defaultPythonRuntime,
       architecture: lambda.Architecture.ARM_64,
       handler: 'datadog_lambda.handler.handler',
-      code: lambda.Code.fromAsset('./lambda/snapstart-python'),
+      code: lambda.Code.fromAsset('./lambda/default-python'),
       functionName: pythonFunctionName,
       timeout: cdk.Duration.seconds(30),
       memorySize: 512,
@@ -68,6 +69,7 @@ export class Snapstart extends cdk.Stack {
         DD_TRACE_AGENT_URL: 'http://127.0.0.1:8126',
         DD_COLD_START_TRACING: 'true',
         DD_MIN_COLD_START_DURATION: '0',
+        SLEEP_MS: '10000',
       },
       logGroup: createLogGroup(this, pythonFunctionName)
     });
@@ -84,8 +86,8 @@ export class Snapstart extends cdk.Stack {
     const dotnetFunction = new lambda.Function(this, dotnetFunctionName, {
       runtime: defaultDotnetRuntime,
       architecture: lambda.Architecture.ARM_64,
-      handler: 'Function::Function.SnapstartHandler::FunctionHandler',
-      code: lambda.Code.fromAsset('./lambda/snapstart-dotnet/bin/function.zip'),
+      handler: 'Function::Function.Handler::FunctionHandler',
+      code: lambda.Code.fromAsset('./lambda/default-dotnet/bin/function.zip'),
       functionName: dotnetFunctionName,
       timeout: cdk.Duration.seconds(30),
       memorySize: 512,
@@ -94,6 +96,7 @@ export class Snapstart extends cdk.Stack {
         ...defaultDatadogEnvVariables,
         DD_SERVICE: dotnetFunctionName,
         AWS_LAMBDA_EXEC_WRAPPER: '/opt/datadog_wrapper',
+        SLEEP_MS: '10000',
       },
       logGroup: createLogGroup(this, dotnetFunctionName)
     });
