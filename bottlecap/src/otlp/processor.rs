@@ -146,7 +146,8 @@ mod tests {
     #[test]
     fn test_split_object_timestamp_reconstructed() {
         // Some old JS SDKs send 64-bit ints as {"low": u32, "high": u32}
-        let mut value = json!({"startTimeUnixNano": {"low": 1_029_784_000_u64, "high": 395_146_000_u64}});
+        let mut value =
+            json!({"startTimeUnixNano": {"low": 1_029_784_000_u64, "high": 395_146_000_u64}});
         normalize_timestamps(&mut value);
         let expected = (395_146_000_u64 << 32) | 1_029_784_000_u64;
         assert_eq!(value["startTimeUnixNano"], json!(expected.to_string()));
