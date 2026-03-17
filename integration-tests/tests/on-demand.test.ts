@@ -1,5 +1,5 @@
 import { invokeAndCollectTelemetry, FunctionConfig } from './utils/default';
-import { RuntimeTelemetry, MetricPoint, ENHANCED_METRICS_CONFIG, isMetricsApiAvailable } from './utils/datadog';
+import { DatadogTelemetry, MetricPoint, ENHANCED_METRICS_CONFIG } from './utils/datadog';
 import { forceColdStart } from './utils/lambda';
 import { getIdentifier } from '../config';
 
@@ -10,7 +10,7 @@ const identifier = getIdentifier();
 const stackName = `integ-${identifier}-on-demand`;
 
 describe('On-Demand Integration Tests', () => {
-  let telemetry: Record<string, RuntimeTelemetry>;
+  let telemetry: Record<string, DatadogTelemetry>;
 
   beforeAll(async () => {
     const functions: FunctionConfig[] = runtimes.map(runtime => ({
@@ -23,7 +23,7 @@ describe('On-Demand Integration Tests', () => {
 
     // Add 5s delay between invocations to ensure warm container is reused
     // Required because there is post-runtime processing with 'end' flush strategy
-    // invokeAndCollectTelemetry now returns RuntimeTelemetry with metrics included
+    // invokeAndCollectTelemetry now returns DatadogTelemetry with metrics included
     telemetry = await invokeAndCollectTelemetry(functions, 2, 1, 5000);
 
     console.log('All invocations and data fetching completed');
@@ -155,15 +155,6 @@ describe('On-Demand Integration Tests', () => {
     });
 
     describe('duration metrics', () => {
-      // Helper to check if metrics API is available and skip if not
-      const skipIfNoMetricsApi = () => {
-        if (!isMetricsApiAvailable()) {
-          console.log('⚠️  Skipping metrics test - API unavailable (missing timeseries_query scope)');
-          return true;
-        }
-        return false;
-      };
-
       // Helper to get latest value from points
       const getLatestValue = (points: MetricPoint[]) =>
         points.length > 0 ? points[points.length - 1].value : null;
@@ -175,7 +166,6 @@ describe('On-Demand Integration Tests', () => {
 
       describe.each(durationMetrics)('%s', (metricName) => {
         it('should be emitted', () => {
-          if (skipIfNoMetricsApi()) return;
           const { duration } = getTelemetry().metrics;
           // Metrics may not be indexed in the query time window for all runtimes
           if (duration[metricName].length === 0) {
@@ -186,7 +176,6 @@ describe('On-Demand Integration Tests', () => {
         });
 
         it('should have a positive value', () => {
-          if (skipIfNoMetricsApi()) return;
           const { duration } = getTelemetry().metrics;
           const value = getLatestValue(duration[metricName]);
           // Skip if no data available
@@ -201,14 +190,12 @@ describe('On-Demand Integration Tests', () => {
       // Count validation
       describe('count validation', () => {
         it('should emit runtime_duration for each invocation', () => {
-          if (skipIfNoMetricsApi()) return;
           const { duration } = getTelemetry().metrics;
           // Enhanced metrics may aggregate points, so we check >= 1 instead of exact count
           expect(duration['runtime_duration'].length).toBeGreaterThanOrEqual(1);
         });
 
         it('should emit init_duration only on cold start', () => {
-          if (skipIfNoMetricsApi()) return;
           const { duration } = getTelemetry().metrics;
           // init_duration should exist for cold start (may be 0 or 1 depending on runtime/timing)
           // Some runtimes may not emit init_duration in all cases
@@ -220,7 +207,6 @@ describe('On-Demand Integration Tests', () => {
 
       // Relationship tests
       it('duration and runtime_duration should be comparable', () => {
-        if (skipIfNoMetricsApi()) return;
         const { duration } = getTelemetry().metrics;
         const durationValue = getLatestValue(duration['duration']);
         const runtimeValue = getLatestValue(duration['runtime_duration']);
@@ -238,7 +224,6 @@ describe('On-Demand Integration Tests', () => {
       });
 
       it('post_runtime_duration should be reasonable', () => {
-        if (skipIfNoMetricsApi()) return;
         const { duration } = getTelemetry().metrics;
         const value = getLatestValue(duration['post_runtime_duration']);
         // Skip if metric has no data
