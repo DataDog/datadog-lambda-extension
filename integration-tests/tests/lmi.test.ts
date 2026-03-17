@@ -1,5 +1,5 @@
 import { invokeAndCollectTelemetry, FunctionConfig } from './utils/default';
-import { DatadogTelemetry } from './utils/datadog';
+import { RuntimeTelemetry } from './utils/datadog';
 import { getIdentifier } from '../config';
 
 const runtimes = ['node', 'python', 'java', 'dotnet'] as const;
@@ -9,7 +9,7 @@ const identifier = getIdentifier();
 const stackName = `integ-${identifier}-lmi`;
 
 describe('LMI Integration Tests', () => {
-  let results: Record<string, DatadogTelemetry[][]>;
+  let telemetry: Record<string, RuntimeTelemetry>;
 
   beforeAll(async () => {
     const functions: FunctionConfig[] = runtimes.map(runtime => ({
@@ -20,13 +20,13 @@ describe('LMI Integration Tests', () => {
     console.log('Invoking LMI functions...');
 
     // Invoke all LMI functions and collect telemetry
-    results = await invokeAndCollectTelemetry(functions, 1);
+    telemetry = await invokeAndCollectTelemetry(functions, 1);
 
     console.log('LMI invocation and data fetching completed');
   }, 600000);
 
   describe.each(runtimes)('%s Runtime with LMI', (runtime) => {
-    const getResult = () => results[runtime]?.[0]?.[0];
+    const getResult = () => telemetry[runtime]?.threads[0]?.[0];
 
     it('should invoke Lambda successfully', () => {
       const result = getResult();

@@ -1,5 +1,5 @@
 import { invokeAndCollectTelemetry, FunctionConfig } from './utils/default';
-import { DatadogTelemetry } from './utils/datadog';
+import { RuntimeTelemetry } from './utils/datadog';
 import { publishVersion, waitForSnapStartReady } from './utils/lambda';
 import { getIdentifier } from '../config';
 
@@ -10,7 +10,7 @@ const identifier = getIdentifier();
 const stackName = `integ-${identifier}-snapstart`;
 
 describe('Snapstart Integration Tests', () => {
-  let results: Record<string, DatadogTelemetry[][]>;
+  let telemetry: Record<string, RuntimeTelemetry>;
 
   beforeAll(async () => {
     // Publish new versions and wait for SnapStart optimization
@@ -43,20 +43,20 @@ describe('Snapstart Integration Tests', () => {
     // - Second invocation: warm (no snapstart_restore span)
     // - 5s delay ensures warm container reuse
     // - 2 threads for trace isolation testing
-    results = await invokeAndCollectTelemetry(functions, 2, 2, 5000);
+    telemetry = await invokeAndCollectTelemetry(functions, 2, 2, 5000);
 
     console.log('All Snapstart Lambda invocations and data fetching completed');
   }, 900000);
 
   describe.each(runtimes)('%s Runtime with SnapStart', (runtime) => {
     // With concurrency=2, invocations=2:
-    // - results[runtime][0][0] = thread 0, first invocation (restore)
-    // - results[runtime][0][1] = thread 0, second invocation (warm)
-    // - results[runtime][1][0] = thread 1, first invocation (restore)
-    // - results[runtime][1][1] = thread 1, second invocation (warm)
-    const getRestoreInvocation = () => results[runtime]?.[0]?.[0];
-    const getWarmInvocation = () => results[runtime]?.[0]?.[1];
-    const getOtherThreadInvocation = () => results[runtime]?.[1]?.[0];
+    // - telemetry[runtime].threads[0][0] = thread 0, first invocation (restore)
+    // - telemetry[runtime].threads[0][1] = thread 0, second invocation (warm)
+    // - telemetry[runtime].threads[1][0] = thread 1, first invocation (restore)
+    // - telemetry[runtime].threads[1][1] = thread 1, second invocation (warm)
+    const getRestoreInvocation = () => telemetry[runtime]?.threads[0]?.[0];
+    const getWarmInvocation = () => telemetry[runtime]?.threads[0]?.[1];
+    const getOtherThreadInvocation = () => telemetry[runtime]?.threads[1]?.[0];
 
     describe('first invocation (restore from snapshot)', () => {
       it('should invoke successfully', () => {
@@ -150,10 +150,10 @@ describe('Snapstart Integration Tests', () => {
 
     describe('trace isolation', () => {
       it('should have different trace IDs for all 4 invocations', () => {
-        const thread0Restore = results[runtime]?.[0]?.[0];
-        const thread0Warm = results[runtime]?.[0]?.[1];
-        const thread1Restore = results[runtime]?.[1]?.[0];
-        const thread1Warm = results[runtime]?.[1]?.[1];
+        const thread0Restore = telemetry[runtime]?.threads[0]?.[0];
+        const thread0Warm = telemetry[runtime]?.threads[0]?.[1];
+        const thread1Restore = telemetry[runtime]?.threads[1]?.[0];
+        const thread1Warm = telemetry[runtime]?.threads[1]?.[1];
 
         expect(thread0Restore).toBeDefined();
         expect(thread0Warm).toBeDefined();
