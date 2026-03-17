@@ -41,8 +41,6 @@ impl TraceService for OtlpGrpcService {
         request: Request<ExportTraceServiceRequest>,
     ) -> Result<Response<ExportTraceServiceResponse>, Status> {
         let inner_request = request.into_inner();
-
-        // Capture encoded size before processing for metrics
         let body_size = inner_request.encoded_len();
 
         let traces = match self.processor.process_request(inner_request) {
@@ -53,7 +51,6 @@ impl TraceService for OtlpGrpcService {
             }
         };
 
-        // Check if processor returned any actual traces
         if traces.iter().all(Vec::is_empty) {
             error!("OTLP gRPC | Not sending traces, processor returned empty data");
             return Err(Status::internal(
@@ -83,11 +80,9 @@ impl TraceService for OtlpGrpcService {
             debug!("OTLP gRPC | Successfully buffered traces to be aggregated.");
         }
 
-        // Compute trace stats after process_traces() which performs obfuscation
         if compute_trace_stats_on_extension
             && let Err(err) = self.stats_generator.send(&processed_traces)
         {
-            // Just log the error. Stats are not critical.
             error!("OTLP gRPC | Error sending traces to the stats concentrator: {err}");
         }
 
@@ -136,18 +131,16 @@ impl GrpcAgent {
 
     fn parse_port(endpoint: Option<&String>, default_port: u16) -> u16 {
         if let Some(endpoint) = endpoint {
-            // Strip scheme if present (e.g., "http://localhost:4317" -> "localhost:4317")
             let without_scheme = endpoint
                 .strip_prefix("http://")
                 .or_else(|| endpoint.strip_prefix("https://"))
                 .unwrap_or(endpoint);
 
-            // Use rsplit to get port from the last colon (handles IPv6 like [::1]:4317)
-            if let Some(port_str) = without_scheme.rsplit(':').next() {
-                // Ensure we got a port, not part of IPv6 address
-                if let Ok(port) = port_str.parse::<u16>() {
-                    return port;
-                }
+            // rsplit handles IPv6 like [::1]:4317
+            if let Some(port_str) = without_scheme.rsplit(':').next()
+                && let Ok(port) = port_str.parse::<u16>()
+            {
+                return port;
             }
 
             error!(
