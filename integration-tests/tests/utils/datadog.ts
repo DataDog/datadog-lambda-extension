@@ -314,8 +314,9 @@ async function getMetrics(
   fromTime: number,
   toTime: number
 ): Promise<MetricPoint[]> {
-  const functionNameLower = functionName.toLowerCase();
-  const query = `avg:${metricName}{functionname:${functionNameLower}}`;
+  // Strip alias/version from function name - metrics are tagged with base name only
+  const baseFunctionName = getServiceName(functionName).toLowerCase();
+  const query = `avg:${metricName}{functionname:${baseFunctionName}}`;
 
   console.log(`Querying metrics: ${query}`);
 
