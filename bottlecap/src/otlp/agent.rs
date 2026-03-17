@@ -204,13 +204,9 @@ impl Agent {
             }
         }
 
-        // This needs to be after process_traces() because process_traces()
-        // performs obfuscation, and we need to compute stats on the obfuscated traces.
         if compute_trace_stats_on_extension
             && let Err(err) = stats_generator.send(&processed_traces)
         {
-            // Just log the error. We don't think trace stats are critical, so we don't want to
-            // return an error if only stats fail to send.
             error!("OTLP | Error sending traces to the stats concentrator: {err}");
         }
 
@@ -307,7 +303,6 @@ mod tests {
 
     #[test]
     fn test_parse_port_with_valid_endpoint() {
-        // Test with a valid endpoint containing a port
         let endpoint = Some("localhost:8080".to_string());
         assert_eq!(
             Agent::parse_port(endpoint.as_ref(), OTLP_AGENT_HTTP_PORT),
@@ -317,7 +312,6 @@ mod tests {
 
     #[test]
     fn test_parse_port_with_invalid_port_format() {
-        // Test with an endpoint containing an invalid port format
         let endpoint = Some("localhost:invalid".to_string());
         assert_eq!(
             Agent::parse_port(endpoint.as_ref(), OTLP_AGENT_HTTP_PORT),
@@ -327,7 +321,6 @@ mod tests {
 
     #[test]
     fn test_parse_port_with_missing_port() {
-        // Test with an endpoint missing a port
         let endpoint = Some("localhost".to_string());
         assert_eq!(
             Agent::parse_port(endpoint.as_ref(), OTLP_AGENT_HTTP_PORT),
@@ -337,7 +330,6 @@ mod tests {
 
     #[test]
     fn test_parse_port_with_none_endpoint() {
-        // Test with None endpoint
         let endpoint: Option<String> = None;
         assert_eq!(
             Agent::parse_port(endpoint.as_ref(), OTLP_AGENT_HTTP_PORT),
@@ -347,7 +339,6 @@ mod tests {
 
     #[test]
     fn test_parse_port_with_empty_endpoint() {
-        // Test with an empty endpoint
         let endpoint = Some(String::new());
         assert_eq!(
             Agent::parse_port(endpoint.as_ref(), OTLP_AGENT_HTTP_PORT),
