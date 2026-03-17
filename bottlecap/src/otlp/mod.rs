@@ -7,18 +7,16 @@ pub mod grpc_agent;
 pub mod processor;
 pub mod transform;
 
-/// Check if the HTTP OTLP agent should be enabled.
 #[must_use]
-pub fn should_enable_http(config: &Arc<Config>) -> bool {
+pub fn should_enable_otlp_http(config: &Arc<Config>) -> bool {
     config.otlp_config_traces_enabled
         && config
             .otlp_config_receiver_protocols_http_endpoint
             .is_some()
 }
 
-/// Check if the gRPC OTLP agent should be enabled.
 #[must_use]
-pub fn should_enable_grpc(config: &Arc<Config>) -> bool {
+pub fn should_enable_otlp_grpc(config: &Arc<Config>) -> bool {
     config.otlp_config_traces_enabled
         && config
             .otlp_config_receiver_protocols_grpc_endpoint
@@ -34,7 +32,7 @@ mod tests {
     use crate::config::get_config;
 
     #[test]
-    fn test_should_enable_http_from_yaml() {
+    fn test_should_enable_otlp_http_from_yaml() {
         figment::Jail::expect_with(|jail| {
             jail.clear_env();
             jail.create_file(
@@ -50,15 +48,15 @@ mod tests {
 
             let config = Arc::new(get_config(Path::new("")));
 
-            assert!(should_enable_http(&config));
-            assert!(!should_enable_grpc(&config));
+            assert!(should_enable_otlp_http(&config));
+            assert!(!should_enable_otlp_grpc(&config));
 
             Ok(())
         });
     }
 
     #[test]
-    fn test_should_enable_http_from_env_vars() {
+    fn test_should_enable_otlp_http_from_env_vars() {
         figment::Jail::expect_with(|jail| {
             jail.clear_env();
             jail.set_env(
@@ -68,8 +66,8 @@ mod tests {
 
             let config = Arc::new(get_config(Path::new("")));
 
-            assert!(should_enable_http(&config));
-            assert!(!should_enable_grpc(&config));
+            assert!(should_enable_otlp_http(&config));
+            assert!(!should_enable_otlp_grpc(&config));
 
             Ok(())
         });
@@ -87,14 +85,14 @@ mod tests {
 
             let config = Arc::new(get_config(Path::new("")));
 
-            assert!(!should_enable_http(&config));
+            assert!(!should_enable_otlp_http(&config));
 
             Ok(())
         });
     }
 
     #[test]
-    fn test_should_enable_grpc_from_env_vars() {
+    fn test_should_enable_otlp_grpc_from_env_vars() {
         figment::Jail::expect_with(|jail| {
             jail.clear_env();
             jail.set_env(
@@ -104,8 +102,8 @@ mod tests {
 
             let config = Arc::new(get_config(Path::new("")));
 
-            assert!(should_enable_grpc(&config));
-            assert!(!should_enable_http(&config));
+            assert!(should_enable_otlp_grpc(&config));
+            assert!(!should_enable_otlp_http(&config));
 
             Ok(())
         });
@@ -126,8 +124,8 @@ mod tests {
 
             let config = Arc::new(get_config(Path::new("")));
 
-            assert!(should_enable_http(&config));
-            assert!(should_enable_grpc(&config));
+            assert!(should_enable_otlp_http(&config));
+            assert!(should_enable_otlp_grpc(&config));
 
             Ok(())
         });
@@ -145,7 +143,7 @@ mod tests {
 
             let config = Arc::new(get_config(Path::new("")));
 
-            assert!(!should_enable_grpc(&config));
+            assert!(!should_enable_otlp_grpc(&config));
 
             Ok(())
         });

@@ -53,8 +53,8 @@ use bottlecap::{
         flusher::LogsFlusher,
     },
     otlp::{
-        agent::Agent as OtlpAgent, grpc_agent::GrpcAgent as OtlpGrpcAgent, should_enable_grpc,
-        should_enable_http,
+        agent::Agent as OtlpAgent, grpc_agent::GrpcAgent as OtlpGrpcAgent, should_enable_otlp_grpc,
+        should_enable_otlp_http,
     },
     proxy::{interceptor, should_start_proxy},
     secrets::decrypt,
@@ -1357,8 +1357,8 @@ fn start_otlp_agent(
     trace_tx: Sender<SendDataBuilderInfo>,
     stats_concentrator: StatsConcentratorHandle,
 ) -> Option<CancellationToken> {
-    let http_enabled = should_enable_http(config);
-    let grpc_enabled = should_enable_grpc(config);
+    let http_enabled = should_enable_otlp_http(config);
+    let grpc_enabled = should_enable_otlp_grpc(config);
 
     if !http_enabled && !grpc_enabled {
         return None;
