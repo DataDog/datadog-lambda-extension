@@ -56,12 +56,12 @@ impl Agent {
         trace_processor: Arc<dyn TraceProcessor + Send + Sync>,
         trace_tx: Sender<SendDataBuilderInfo>,
         stats_generator: Arc<StatsGenerator>,
+        cancel_token: CancellationToken,
     ) -> Self {
         let port = Self::parse_port(
             config.otlp_config_receiver_protocols_http_endpoint.as_ref(),
             OTLP_AGENT_HTTP_PORT,
         );
-        let cancel_token = CancellationToken::new();
 
         Self {
             config: Arc::clone(&config),
@@ -73,11 +73,6 @@ impl Agent {
             port,
             cancel_token,
         }
-    }
-
-    #[must_use]
-    pub fn cancel_token(&self) -> CancellationToken {
-        self.cancel_token.clone()
     }
 
     fn parse_port(endpoint: Option<&String>, default_port: u16) -> u16 {

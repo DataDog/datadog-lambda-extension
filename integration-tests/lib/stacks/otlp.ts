@@ -40,7 +40,6 @@ export class Otlp extends cdk.Stack {
     nodeFunction.addToRolePolicy(defaultDatadogSecretPolicy);
     nodeFunction.addLayers(extensionLayer);
 
-    // Node.js Lambda with gRPC OTLP export
     const nodeGrpcFunctionName = `${id}-node-grpc-lambda`;
     const nodeGrpcFunction = new lambda.Function(this, nodeGrpcFunctionName, {
       runtime: defaultNodeRuntime,
