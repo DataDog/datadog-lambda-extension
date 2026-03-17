@@ -1,6 +1,36 @@
-import { LambdaClient, UpdateFunctionConfigurationCommand, GetFunctionConfigurationCommand, PublishVersionCommand } from '@aws-sdk/client-lambda';
+import {
+  LambdaClient,
+  UpdateFunctionConfigurationCommand,
+  GetFunctionConfigurationCommand,
+  PublishVersionCommand,
+  TooManyRequestsException,
+  ServiceException,
+} from '@aws-sdk/client-lambda';
 
 const lambdaClient = new LambdaClient({ region: 'us-east-1' });
+
+function formatLambdaError(error: unknown): string {
+  if (error instanceof TooManyRequestsException) {
+    const parts = [error.name, error.message];
+    if (error.Reason) {
+      parts.push(`(Reason: ${error.Reason})`);
+    }
+    if (error.retryAfterSeconds !== undefined) {
+      parts.push(`(retryAfterSeconds: ${error.retryAfterSeconds})`);
+    }
+    return parts.join(' - ');
+  }
+
+  if (error instanceof ServiceException) {
+    return `${error.name} - ${error.message}`;
+  }
+
+  if (error instanceof Error) {
+    return error.message;
+  }
+
+  return String(error);
+}
 
 export async function forceColdStart(functionName: string): Promise<void> {
   await setTimestampEnvVar(functionName);
@@ -19,8 +49,8 @@ export async function publishVersion(functionName: string): Promise<string> {
     const version = response.Version || '$LATEST';
     console.debug(`Published version: ${version} for ${functionName}`);
     return version;
-  } catch (error: any) {
-    console.error('Failed to publish Lambda version:', error.message);
+  } catch (error: unknown) {
+    console.error(`Failed to publish Lambda version for '${functionName}': ${formatLambdaError(error)}`);
     throw error;
   }
 }
@@ -45,8 +75,8 @@ export async function setTimestampEnvVar(functionName: string): Promise<void> {
       Environment: updatedEnvironment,
     });
     await lambdaClient.send(updateConfigCommand);
-  } catch (error: any) {
-    console.error('Failed to set timestamp environment variable:', error.message);
+  } catch (error: unknown) {
+    console.error(`Failed to set timestamp environment variable for '${functionName}': ${formatLambdaError(error)}`);
     throw error;
   }
 }
@@ -71,8 +101,8 @@ export async function waitForSnapStartReady(functionName: string, version: strin
       }
 
       await new Promise(resolve => setTimeout(resolve, 10000));
-    } catch (error: any) {
-      console.error(`Error checking SnapStart status: ${error.message}`);
+    } catch (error: unknown) {
+      console.error(`Error checking SnapStart status for '${functionName}:${version}': ${formatLambdaError(error)}`);
       await new Promise(resolve => setTimeout(resolve, 10_000));
     }
   }
