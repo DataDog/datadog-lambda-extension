@@ -137,78 +137,58 @@ mod tests {
     use serde_json::json;
 
     #[test]
-    fn test_normalize_timestamp_string_unchanged() {
-        let mut value = json!("1581452772000000321");
-        normalize_timestamp_value(&mut value);
-        assert_eq!(value, json!("1581452772000000321"));
+    fn test_integer_timestamp_converted_to_string() {
+        let mut value = json!({"startTimeUnixNano": 1_581_452_772_000_000_321_u64});
+        normalize_timestamps(&mut value);
+        assert_eq!(value["startTimeUnixNano"], json!("1581452772000000321"));
     }
 
     #[test]
-    fn test_normalize_timestamp_integer_to_string() {
-        let mut value = json!(1_581_452_772_000_000_321_u64);
-        normalize_timestamp_value(&mut value);
-        assert_eq!(value, json!("1581452772000000321"));
-    }
-
-    #[test]
-    fn test_normalize_timestamp_object_to_string() {
-        // {"low": 1029784000, "high": 395146000} represents a split 64-bit int
-        // high << 32 | low = 395146000 << 32 | 1029784000 = 1697551827029784000
-        let mut value = json!({"low": 1_029_784_000_u64, "high": 395_146_000_u64});
-        normalize_timestamp_value(&mut value);
+    fn test_split_object_timestamp_reconstructed() {
+        // Some old JS SDKs send 64-bit ints as {"low": u32, "high": u32}
+        let mut value = json!({"startTimeUnixNano": {"low": 1_029_784_000_u64, "high": 395_146_000_u64}});
+        normalize_timestamps(&mut value);
         let expected = (395_146_000_u64 << 32) | 1_029_784_000_u64;
-        assert_eq!(value, json!(expected.to_string()));
+        assert_eq!(value["startTimeUnixNano"], json!(expected.to_string()));
     }
 
     #[test]
-    fn test_normalize_timestamps_nested_structure() {
+    fn test_non_timestamp_integers_unchanged() {
+        // Verify we only convert timestamp fields, not all integers
+        let mut value = json!({
+            "kind": 1,
+            "droppedAttributesCount": 5,
+            "attributes": [{"value": {"intValue": 42}}],
+            "startTimeUnixNano": 12345_u64
+        });
+        normalize_timestamps(&mut value);
+
+        // These should remain as integers
+        assert_eq!(value["kind"], json!(1));
+        assert_eq!(value["droppedAttributesCount"], json!(5));
+        assert_eq!(value["attributes"][0]["value"]["intValue"], json!(42));
+        // Only this should be converted
+        assert_eq!(value["startTimeUnixNano"], json!("12345"));
+    }
+
+    #[test]
+    fn test_nested_event_timestamps_normalized() {
         let mut value = json!({
             "resourceSpans": [{
                 "scopeSpans": [{
                     "spans": [{
-                        "name": "test-span",
-                        "startTimeUnixNano": 1_581_452_772_000_000_321_u64,
-                        "endTimeUnixNano": "1581452772000000999",
-                        "events": [{
-                            "timeUnixNano": {"low": 1_029_784_000_u64, "high": 395_146_000_u64}
-                        }]
+                        "startTimeUnixNano": 100_u64,
+                        "endTimeUnixNano": "200",
+                        "events": [{"timeUnixNano": 300_u64}]
                     }]
                 }]
             }]
         });
-
         normalize_timestamps(&mut value);
 
-        // Check startTimeUnixNano was converted from integer to string
-        let start_time =
-            &value["resourceSpans"][0]["scopeSpans"][0]["spans"][0]["startTimeUnixNano"];
-        assert_eq!(start_time, &json!("1581452772000000321"));
-
-        // Check endTimeUnixNano was left as string
-        let end_time = &value["resourceSpans"][0]["scopeSpans"][0]["spans"][0]["endTimeUnixNano"];
-        assert_eq!(end_time, &json!("1581452772000000999"));
-
-        // Check event timeUnixNano was converted from object to string
-        let event_time =
-            &value["resourceSpans"][0]["scopeSpans"][0]["spans"][0]["events"][0]["timeUnixNano"];
-        let expected = (395_146_000_u64 << 32) | 1_029_784_000_u64;
-        assert_eq!(event_time, &json!(expected.to_string()));
-    }
-
-    #[test]
-    fn test_normalize_timestamps_preserves_other_fields() {
-        let mut value = json!({
-            "name": "test",
-            "kind": 1,
-            "attributes": [{"key": "foo", "value": {"intValue": 42}}],
-            "startTimeUnixNano": 12345_u64
-        });
-
-        normalize_timestamps(&mut value);
-
-        assert_eq!(value["name"], json!("test"));
-        assert_eq!(value["kind"], json!(1));
-        assert_eq!(value["attributes"][0]["value"]["intValue"], json!(42));
-        assert_eq!(value["startTimeUnixNano"], json!("12345"));
+        let span = &value["resourceSpans"][0]["scopeSpans"][0]["spans"][0];
+        assert_eq!(span["startTimeUnixNano"], json!("100"));
+        assert_eq!(span["endTimeUnixNano"], json!("200")); // Already string
+        assert_eq!(span["events"][0]["timeUnixNano"], json!("300"));
     }
 }
