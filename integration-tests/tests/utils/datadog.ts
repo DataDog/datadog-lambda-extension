@@ -18,6 +18,11 @@ const datadogClient: AxiosInstance = axios.create({
 });
 
 export interface DatadogTelemetry {
+  threads: InvocationTracesLogs[][];  // [thread][invocation]
+  metrics: EnhancedMetrics;
+}
+
+export interface InvocationTracesLogs {
   requestId: string;
   statusCode?: number;
   traces?: DatadogTrace[];
@@ -41,6 +46,27 @@ export interface DatadogLog {
   tags: string[];
 }
 
+export const ENHANCED_METRICS_CONFIG = {
+  duration: [
+    'aws.lambda.enhanced.runtime_duration',
+    'aws.lambda.enhanced.billed_duration',
+    'aws.lambda.enhanced.duration',
+    'aws.lambda.enhanced.post_runtime_duration',
+    'aws.lambda.enhanced.init_duration',
+  ],
+} as const;
+
+export type MetricCategory = keyof typeof ENHANCED_METRICS_CONFIG;
+
+export type EnhancedMetrics = {
+  [K in MetricCategory]: Record<string, MetricPoint[]>;
+};
+
+export interface MetricPoint {
+  timestamp: number;
+  value: number;
+}
+
 /**
  * Extracts the base service name from a function name by stripping any
  * version qualifier (:N) or alias qualifier (:alias)
@@ -53,7 +79,7 @@ function getServiceName(functionName: string): string {
   return functionName.substring(0, colonIndex);
 }
 
-export async function getDatadogTelemetryByRequestId(functionName: string, requestId: string): Promise<DatadogTelemetry> {
+export async function getInvocationTracesLogsByRequestId(functionName: string, requestId: string): Promise<InvocationTracesLogs> {
   const serviceName = getServiceName(functionName);
   const traces = await getTraces(serviceName, requestId);
   const logs = await getLogs(serviceName, requestId);
@@ -218,4 +244,99 @@ export async function getLogs(
     console.error('Error searching logs:', error.response?.data || error.message);
     throw error;
   }
+}
+
+/**
+ * Fetch all enhanced metrics for a function based on config
+ */
+export async function getEnhancedMetrics(
+  functionName: string,
+  fromTime: number,
+  toTime: number
+): Promise<EnhancedMetrics> {
+  const result: Partial<EnhancedMetrics> = {};
+
+  // Fetch all categories in parallel
+  const categoryPromises = Object.entries(ENHANCED_METRICS_CONFIG).map(
+    async ([category, metricNames]) => {
+      const categoryMetrics = await fetchMetricCategory(
+        metricNames as readonly string[],
+        functionName,
+        fromTime,
+        toTime
+      );
+      return { category, metrics: categoryMetrics };
+    }
+  );
+
+  const categoryResults = await Promise.all(categoryPromises);
+
+  for (const { category, metrics } of categoryResults) {
+    result[category as MetricCategory] = metrics;
+  }
+
+  return result as EnhancedMetrics;
+}
+
+/**
+ * Fetch all metrics in a category in parallel
+ */
+async function fetchMetricCategory(
+  metricNames: readonly string[],
+  functionName: string,
+  fromTime: number,
+  toTime: number
+): Promise<Record<string, MetricPoint[]>> {
+  const promises = metricNames.map(async (metricName) => {
+    const points = await getMetrics(metricName, functionName, fromTime, toTime);
+    // Use short name (last part after the last dot)
+    const shortName = metricName.split('.').pop()!;
+    return { shortName, points };
+  });
+
+  const results = await Promise.all(promises);
+
+  const metrics: Record<string, MetricPoint[]> = {};
+  for (const { shortName, points } of results) {
+    metrics[shortName] = points;
+  }
+
+  return metrics;
+}
+
+/**
+ * Query Datadog Metrics API v1 for a specific metric.
+ * Requires the DD_API_KEY to have 'timeseries_query' scope.
+ */
+async function getMetrics(
+  metricName: string,
+  functionName: string,
+  fromTime: number,
+  toTime: number
+): Promise<MetricPoint[]> {
+  const functionNameLower = functionName.toLowerCase();
+  const query = `avg:${metricName}{functionname:${functionNameLower}}`;
+
+  console.log(`Querying metrics: ${query}`);
+
+  const response = await datadogClient.get('/api/v1/query', {
+    params: {
+      query,
+      from: Math.floor(fromTime / 1000),
+      to: Math.floor(toTime / 1000),
+    },
+  });
+
+  const series = response.data.series || [];
+  console.log(`Found ${series.length} series for ${metricName}`);
+
+  if (series.length === 0) {
+    return [];
+  }
+
+  // Return points from first series
+  return (series[0].pointlist || []).map((p: [number, number]) => ({
+    timestamp: p[0],
+    value: p[1],
+  }));
 }
