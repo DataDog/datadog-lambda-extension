@@ -1365,8 +1365,8 @@ fn start_otlp_agent(
     }
 
     let stats_generator = Arc::new(StatsGenerator::new(stats_concentrator));
+    let cancel_token = CancellationToken::new();
 
-    // Start HTTP agent if configured
     if http_enabled {
         let agent = OtlpAgent::new(
             config.clone(),
@@ -1374,6 +1374,7 @@ fn start_otlp_agent(
             trace_processor.clone(),
             trace_tx.clone(),
             stats_generator.clone(),
+            cancel_token.clone(),
         );
 
         tokio::spawn(async move {
@@ -1383,31 +1384,24 @@ fn start_otlp_agent(
         });
     }
 
-    // Start gRPC agent if configured
-    let grpc_cancel_token = if grpc_enabled {
+    if grpc_enabled {
         let grpc_agent = OtlpGrpcAgent::new(
             config.clone(),
             tags_provider,
             trace_processor,
             trace_tx,
             stats_generator,
+            cancel_token.clone(),
         );
-        let cancel_token = grpc_agent.cancel_token();
 
         tokio::spawn(async move {
             if let Err(e) = grpc_agent.start().await {
                 error!("Error starting OTLP gRPC agent: {e:?}");
             }
         });
+    }
 
-        Some(cancel_token)
-    } else {
-        None
-    };
-
-    // Return the gRPC cancel token if available, or create a dummy one
-    // We need to return a token for the caller to cancel OTLP agents on shutdown
-    grpc_cancel_token.or_else(|| Some(CancellationToken::new()))
+    Some(cancel_token)
 }
 
 fn start_api_runtime_proxy(

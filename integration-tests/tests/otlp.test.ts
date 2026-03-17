@@ -101,7 +101,7 @@ describe('OTLP Integration Tests', () => {
     it('should send traces via gRPC to Datadog', () => {
       const result = getResult();
       expect(result).toBeDefined();
-      expect(result.traces?.length).toBeGreaterThan(0);
+      expect(result.traces?.length).toEqual(1);
     });
 
     it('should have gRPC handler span with correct attributes', () => {
