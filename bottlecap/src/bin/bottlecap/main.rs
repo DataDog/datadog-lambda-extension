@@ -54,7 +54,7 @@ use bottlecap::{
     },
     otlp::{
         agent::Agent as OtlpAgent, grpc_agent::GrpcAgent as OtlpGrpcAgent, should_enable_grpc,
-        should_enable_http, should_enable_otlp_agent,
+        should_enable_http,
     },
     proxy::{interceptor, should_start_proxy},
     secrets::decrypt,
@@ -1357,13 +1357,17 @@ fn start_otlp_agent(
     trace_tx: Sender<SendDataBuilderInfo>,
     stats_concentrator: StatsConcentratorHandle,
 ) -> Option<CancellationToken> {
-    if !should_enable_otlp_agent(config) {
+    let http_enabled = should_enable_http(config);
+    let grpc_enabled = should_enable_grpc(config);
+
+    if !http_enabled && !grpc_enabled {
         return None;
     }
+
     let stats_generator = Arc::new(StatsGenerator::new(stats_concentrator));
 
     // Start HTTP agent if configured
-    if should_enable_http(config) {
+    if http_enabled {
         let agent = OtlpAgent::new(
             config.clone(),
             tags_provider.clone(),
@@ -1380,7 +1384,7 @@ fn start_otlp_agent(
     }
 
     // Start gRPC agent if configured
-    let grpc_cancel_token = if should_enable_grpc(config) {
+    let grpc_cancel_token = if grpc_enabled {
         let grpc_agent = OtlpGrpcAgent::new(
             config.clone(),
             tags_provider,
