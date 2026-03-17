@@ -55,6 +55,11 @@ function formatDatadogError(error: unknown, query: string): string {
 }
 
 export interface DatadogTelemetry {
+  threads: InvocationTracesLogs[][];  // [thread][invocation]
+  metrics: EnhancedMetrics;
+}
+
+export interface InvocationTracesLogs {
   requestId: string;
   statusCode?: number;
   traces?: DatadogTrace[];
@@ -78,6 +83,27 @@ export interface DatadogLog {
   tags: string[];
 }
 
+export const ENHANCED_METRICS_CONFIG = {
+  duration: [
+    'aws.lambda.enhanced.runtime_duration',
+    'aws.lambda.enhanced.billed_duration',
+    'aws.lambda.enhanced.duration',
+    'aws.lambda.enhanced.post_runtime_duration',
+    'aws.lambda.enhanced.init_duration',
+  ],
+} as const;
+
+export type MetricCategory = keyof typeof ENHANCED_METRICS_CONFIG;
+
+export type EnhancedMetrics = {
+  [K in MetricCategory]: Record<string, MetricPoint[]>;
+};
+
+export interface MetricPoint {
+  timestamp: number;
+  value: number;
+}
+
 /**
  * Extracts the base service name from a function name by stripping any
  * version qualifier (:N) or alias qualifier (:alias)
@@ -90,7 +116,7 @@ function getServiceName(functionName: string): string {
   return functionName.substring(0, colonIndex);
 }
 
-export async function getDatadogTelemetryByRequestId(functionName: string, requestId: string): Promise<DatadogTelemetry> {
+export async function getInvocationTracesLogsByRequestId(functionName: string, requestId: string): Promise<InvocationTracesLogs> {
   const serviceName = getServiceName(functionName);
   const traces = await getTraces(serviceName, requestId);
   const logs = await getLogs(serviceName, requestId);
@@ -256,53 +282,6 @@ export async function getLogs(
   }
 }
 
-// ============================================================================
-// Enhanced Metrics
-// ============================================================================
-
-/**
- * Configuration for which metrics to fetch.
- * Add new metrics here - no code changes needed.
- */
-export const ENHANCED_METRICS_CONFIG = {
-  duration: [
-    'aws.lambda.enhanced.runtime_duration',
-    'aws.lambda.enhanced.billed_duration',
-    'aws.lambda.enhanced.duration',
-    'aws.lambda.enhanced.post_runtime_duration',
-    'aws.lambda.enhanced.init_duration',
-  ],
-  // Future categories - just add metric names:
-  // memory: [
-  //   'aws.lambda.enhanced.max_memory_used',
-  //   'aws.lambda.enhanced.memory_size',
-  // ],
-} as const;
-
-export type MetricCategory = keyof typeof ENHANCED_METRICS_CONFIG;
-
-export interface MetricPoint {
-  timestamp: number;
-  value: number;
-}
-
-/**
- * Wrapper combining per-invocation telemetry with aggregated metrics.
- * Threads are preserved for tests that use concurrency > 1.
- */
-export interface RuntimeTelemetry {
-  threads: DatadogTelemetry[][];  // [thread][invocation]
-  metrics: EnhancedMetrics;
-}
-
-/**
- * Enhanced metrics organized by category.
- * Each category maps metric names to their points (for count validation).
- */
-export type EnhancedMetrics = {
-  [K in MetricCategory]: Record<string, MetricPoint[]>;
-};
-
 /**
  * Fetch all enhanced metrics for a function based on config
  */
@@ -345,7 +324,7 @@ async function fetchMetricCategory(
   toTime: number
 ): Promise<Record<string, MetricPoint[]>> {
   const promises = metricNames.map(async (metricName) => {
-    const points = await getMetricPoints(metricName, functionName, fromTime, toTime);
+    const points = await getMetrics(metricName, functionName, fromTime, toTime);
     // Use short name (last part after the last dot)
     const shortName = metricName.split('.').pop()!;
     return { shortName, points };
@@ -361,13 +340,9 @@ async function fetchMetricCategory(
   return metrics;
 }
 
-// Track if metrics API is available (set once on first failure)
-let metricsApiAvailable: boolean | null = null;
-
 /**
  * Query Datadog Metrics API v1 for a specific metric.
  * Requires the DD_API_KEY to have 'timeseries_query' scope.
- * Returns empty array if API is unavailable (permissions issue).
  */
 async function getMetrics(
   metricName: string,
@@ -375,70 +350,29 @@ async function getMetrics(
   fromTime: number,
   toTime: number
 ): Promise<MetricPoint[]> {
-  // Skip if we've already determined the API is unavailable
-  if (metricsApiAvailable === false) {
+  const functionNameLower = functionName.toLowerCase();
+  const query = `avg:${metricName}{functionname:${functionNameLower}}`;
+
+  console.log(`Querying metrics: ${query}`);
+
+  const response = await datadogClient.get('/api/v1/query', {
+    params: {
+      query,
+      from: Math.floor(fromTime / 1000),
+      to: Math.floor(toTime / 1000),
+    },
+  });
+
+  const series = response.data.series || [];
+  console.log(`Found ${series.length} series for ${metricName}`);
+
+  if (series.length === 0) {
     return [];
   }
 
-  try {
-    const functionNameLower = functionName.toLowerCase();
-    const query = `avg:${metricName}{functionname:${functionNameLower}}`;
-
-    console.log(`Querying metrics: ${query}`);
-
-    const response = await datadogClient.get('/api/v1/query', {
-      params: {
-        query,
-        from: Math.floor(fromTime / 1000),
-        to: Math.floor(toTime / 1000),
-      },
-    });
-
-    metricsApiAvailable = true;
-
-    const series = response.data.series || [];
-    console.log(`Found ${series.length} series for ${metricName}`);
-
-    if (series.length === 0) {
-      return [];
-    }
-
-    // Return points from first series
-    return (series[0].pointlist || []).map((p: [number, number]) => ({
-      timestamp: p[0],
-      value: p[1],
-    }));
-  } catch (error: any) {
-    const errorData = error.response?.data;
-    // Check if this is a permissions error
-    if (errorData?.errors?.some((e: string) => e.includes('Forbidden') || e.includes('permission'))) {
-      if (metricsApiAvailable === null) {
-        console.warn('⚠️  Metrics API unavailable (missing timeseries_query scope). Metrics tests will be skipped.');
-        console.warn('   To enable metrics tests, ensure DD_API_KEY has the timeseries_query scope.');
-      }
-      metricsApiAvailable = false;
-      return [];
-    }
-    console.error('Error querying metrics:', errorData || error.message);
-    throw error;
-  }
-}
-
-/**
- * Check if metrics API is available
- */
-export function isMetricsApiAvailable(): boolean {
-  return metricsApiAvailable === true;
-}
-
-/**
- * Get all metric points in time window
- */
-async function getMetricPoints(
-  metricName: string,
-  functionName: string,
-  fromTime: number,
-  toTime: number
-): Promise<MetricPoint[]> {
-  return getMetrics(metricName, functionName, fromTime, toTime);
+  // Return points from first series
+  return (series[0].pointlist || []).map((p: [number, number]) => ({
+    timestamp: p[0],
+    value: p[1],
+  }));
 }

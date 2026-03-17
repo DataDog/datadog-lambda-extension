@@ -1,5 +1,5 @@
 import { invokeAndCollectTelemetry, FunctionConfig } from './utils/default';
-import { RuntimeTelemetry } from './utils/datadog';
+import { DatadogTelemetry } from './utils/datadog';
 import { publishVersion, waitForSnapStartReady } from './utils/lambda';
 import { getIdentifier } from '../config';
 
@@ -10,7 +10,7 @@ const identifier = getIdentifier();
 const stackName = `integ-${identifier}-snapstart`;
 
 describe('Snapstart Integration Tests', () => {
-  let telemetry: Record<string, RuntimeTelemetry>;
+  let telemetry: Record<string, DatadogTelemetry>;
 
   beforeAll(async () => {
     // Publish new versions and wait for SnapStart optimization
