@@ -1,4 +1,4 @@
-import { invokeLambda, InvocationResult } from './invoke';
+import { invokeLambda, InvocationResult } from './lambda';
 import { getDatadogTelemetryByRequestId, DatadogTelemetry } from './datadog';
 import { DEFAULT_DATADOG_INDEXING_WAIT_MS } from '../../config';
 
