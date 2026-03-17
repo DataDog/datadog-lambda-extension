@@ -112,11 +112,6 @@ impl Processor {
     ) -> Result<Vec<Vec<DatadogSpan>>, Box<dyn Error>> {
         let request = match encoding {
             OtlpEncoding::Json => {
-                // Parse JSON, normalize timestamp fields, then deserialize.
-                // This handles various timestamp formats:
-                // - Strings (proto3 JSON spec compliant)
-                // - Integers (common in some SDKs)
-                // - Objects {"low": n, "high": m} (buggy older JS SDKs)
                 let mut json_value: Value = serde_json::from_slice(body)?;
                 normalize_timestamps(&mut json_value);
                 serde_json::from_value::<ExportTraceServiceRequest>(json_value)?
