@@ -185,7 +185,8 @@ mod tests {
         normalize_timestamps(&mut value);
 
         // Check startTimeUnixNano was converted from integer to string
-        let start_time = &value["resourceSpans"][0]["scopeSpans"][0]["spans"][0]["startTimeUnixNano"];
+        let start_time =
+            &value["resourceSpans"][0]["scopeSpans"][0]["spans"][0]["startTimeUnixNano"];
         assert_eq!(start_time, &json!("1581452772000000321"));
 
         // Check endTimeUnixNano was left as string
@@ -193,7 +194,8 @@ mod tests {
         assert_eq!(end_time, &json!("1581452772000000999"));
 
         // Check event timeUnixNano was converted from object to string
-        let event_time = &value["resourceSpans"][0]["scopeSpans"][0]["spans"][0]["events"][0]["timeUnixNano"];
+        let event_time =
+            &value["resourceSpans"][0]["scopeSpans"][0]["spans"][0]["events"][0]["timeUnixNano"];
         let expected = (395_146_000_u64 << 32) | 1_029_784_000_u64;
         assert_eq!(event_time, &json!(expected.to_string()));
     }
