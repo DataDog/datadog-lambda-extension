@@ -23,7 +23,7 @@ use crate::{
 
 const OTLP_AGENT_GRPC_PORT: u16 = 4317;
 const DEFAULT_MAX_RECV_MSG_SIZE: usize = 4 * 1024 * 1024; // 4MB default
-const MAX_RECV_MSG_SIZE_CAP: usize = 64 * 1024 * 1024; // 64MB cap to prevent DoS
+const MAX_RECV_MSG_SIZE_CAP: usize = 50 * 1024 * 1024; // 50MB cap (matches trace agent)
 
 struct OtlpGrpcService {
     config: Arc<Config>,
