@@ -13,7 +13,7 @@ describe('LMI Integration Tests', () => {
 
   beforeAll(async () => {
     const functions: FunctionConfig[] = runtimes.map(runtime => ({
-      functionName: `${stackName}-${runtime}-lambda:lmi`,
+      functionName: `${stackName}-${runtime}-lambda`,
       runtime,
     }));
 
