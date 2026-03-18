@@ -593,7 +593,30 @@ impl TraceAgent {
                 }
                 handle_reparenting(&mut reparenting_info, &mut span);
 
-                // Keep the span
+                // SnapStart spans may have timestamps from when the snapshot was created,
+                // not when the Lambda was restored. Detect and adjust these stale timestamps.
+                if let Some(request_id) = span.meta.get("request_id")
+                    && let Ok(Some(restore_time)) = invocation_processor_handle
+                        .get_snapstart_restore_time(request_id.clone())
+                        .await
+                {
+                    const SIXTY_SECONDS_NS: i64 = 60 * 1_000_000_000;
+                    let threshold = restore_time - SIXTY_SECONDS_NS;
+                    if span.start < threshold {
+                        debug!(
+                            "Adjusting SnapStart span timestamp: original start {} is before restore time {}, shifting forward",
+                            span.start, restore_time
+                        );
+                        span.meta
+                            .insert("_dd.snapstart_adjusted".to_string(), "true".to_string());
+                        span.meta.insert(
+                            "_dd.snapstart_original_start".to_string(),
+                            span.start.to_string(),
+                        );
+                        span.start = restore_time;
+                    }
+                }
+
                 chunk.push(span);
             }
         }

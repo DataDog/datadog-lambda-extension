@@ -111,6 +111,10 @@ pub enum ProcessorCommand {
     AddTracerSpan {
         span: Box<Span>,
     },
+    GetSnapstartRestoreTime {
+        request_id: String,
+        response: oneshot::Sender<Result<Option<i64>, ProcessorError>>,
+    },
     OnOutOfMemoryError {
         timestamp: i64,
     },
@@ -380,6 +384,25 @@ impl InvocationProcessorHandle {
             .await
     }
 
+    pub async fn get_snapstart_restore_time(
+        &self,
+        request_id: String,
+    ) -> Result<Option<i64>, ProcessorError> {
+        let (response_tx, response_rx) = oneshot::channel();
+
+        self.sender
+            .send(ProcessorCommand::GetSnapstartRestoreTime {
+                request_id,
+                response: response_tx,
+            })
+            .await
+            .map_err(|e| ProcessorError::ChannelSend(e.to_string()))?;
+
+        response_rx
+            .await
+            .map_err(|e| ProcessorError::ChannelReceive(e.to_string()))?
+    }
+
     pub async fn on_out_of_memory_error(
         &self,
         timestamp: i64,
@@ -587,6 +610,13 @@ impl InvocationProcessorService {
                 }
                 ProcessorCommand::AddTracerSpan { span } => {
                     self.processor.add_tracer_span(&span);
+                }
+                ProcessorCommand::GetSnapstartRestoreTime {
+                    request_id,
+                    response,
+                } => {
+                    let result = Ok(self.processor.get_snapstart_restore_time(&request_id));
+                    let _ = response.send(result);
                 }
                 ProcessorCommand::OnOutOfMemoryError { timestamp } => {
                     self.processor.on_out_of_memory_error(timestamp);
