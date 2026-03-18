@@ -1036,6 +1036,11 @@ api_security_sample_delay: 60 # Seconds
                 dogstatsd_so_rcvbuf: Some(1_048_576),
                 dogstatsd_buffer_size: Some(65507),
                 dogstatsd_queue_size: Some(2048),
+
+                // Delegated Authentication (not set in yaml, should be defaults)
+                delegated_auth_enabled: false,
+                org_uuid: String::default(),
+                delegated_auth_refresh_interval: Duration::from_secs(3600),
             };
 
             // Assert that
