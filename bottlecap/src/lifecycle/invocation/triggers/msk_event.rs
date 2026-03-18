@@ -176,10 +176,9 @@ impl Trigger for MSKEvent {
             // Fallback: no record with Datadog trace context; normalize to the very first record
             // without cloning the full record payload.
             let records_map = payload.get_mut("records").and_then(Value::as_object_mut)?;
-            if let Some((first_key, group)) = records_map.iter_mut().next() {
-                let chosen_key = first_key.clone();
-                // Retain only the chosen topic/partition group.
-                records_map.retain(|k, _| k == &chosen_key);
+            let first_key = records_map.keys().next()?.to_owned();
+            records_map.retain(|k, _| k == &first_key);
+            if let Some(group) = records_map.get_mut(&first_key) {
                 match group {
                     Value::Array(arr) => {
                         if !arr.is_empty() {
