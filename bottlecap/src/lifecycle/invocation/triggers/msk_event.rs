@@ -55,6 +55,28 @@ fn bytes_from_header_value(val: &Value) -> Option<Vec<u8>> {
     }
 }
 
+/// Scans all records in the records map and returns the `(topic_key, record_value)` of the first
+/// record whose headers contain a tracecontext key. Returns `None` if none found.
+fn find_record_with_trace_context(
+    records_map: &serde_json::Map<String, Value>,
+) -> Option<(String, Value)> {
+    for (key, group) in records_map {
+        let records: Vec<&Value> = match group {
+            Value::Array(arr) => arr.iter().collect(),
+            Value::Object(obj) => obj.values().collect(),
+            _ => continue,
+        };
+        for record in records {
+            let headers = record.get("headers").unwrap_or(&Value::Null);
+            let carrier = headers_to_string_map(headers);
+            if carrier.contains_key("x-datadog-trace-id") || carrier.contains_key("traceparent") {
+                return Some((key.clone(), record.clone()));
+            }
+        }
+    }
+    None
+}
+
 /// Decodes an MSK record's `headers` field into a `HashMap<String, String>` by converting
 /// each header's byte values to a UTF-8 string. The `headers` field may be either a JSON
 /// array or a JSON object with numeric string keys, one entry per Kafka header, ordered by index.
@@ -63,14 +85,9 @@ fn headers_to_string_map(headers: &Value) -> HashMap<String, String> {
 
     let entries: Vec<&Value> = match headers {
         Value::Array(arr) => arr.iter().collect(),
-        Value::Object(obj) => {
-            let mut pairs: Vec<(u64, &Value)> = obj
-                .iter()
-                .filter_map(|(k, v)| k.parse::<u64>().ok().map(|n| (n, v)))
-                .collect();
-            pairs.sort_by_key(|(n, _)| *n);
-            pairs.into_iter().map(|(_, v)| v).collect()
-        }
+        // Object format: numeric string keys are just ordering artifacts from the Java runtime;
+        // insertion order into the HashMap doesn't matter so no sort needed.
+        Value::Object(obj) => obj.values().collect(),
         _ => return carrier,
     };
 
@@ -91,25 +108,31 @@ fn headers_to_string_map(headers: &Value) -> HashMap<String, String> {
 
 impl Trigger for MSKEvent {
     fn new(mut payload: Value) -> Option<Self> {
-        // We only care about the first item in the first record, so drop the others before
-        // deserializing. Records may be delivered as a JSON object with numeric string keys;
-        // normalize to a single-element array before deserializing.
-        if let Some(records_map) = payload.get_mut("records").and_then(Value::as_object_mut) {
-            let first_key = records_map.keys().next()?.clone();
-            {
-                let entry = records_map.get_mut(&first_key)?;
-                match entry {
-                    // Truncate in place — no clone needed since payload is already mutable.
-                    Value::Array(arr) => arr.truncate(1),
-                    // Object format: extract the first record and replace with a single-element array.
-                    Value::Object(obj) => {
-                        let first_record = obj.values().next()?.clone();
-                        *entry = Value::Array(vec![first_record]);
-                    }
-                    _ => return None,
-                }
+        // We only need one record: prefer the first one carrying Datadog trace context so we can
+        // propagate the trace, falling back to the very first record otherwise. Records may be
+        // delivered as a JSON object with numeric string keys; normalize to a single-element array
+        // before deserializing.
+        let chosen = payload
+            .get("records")
+            .and_then(Value::as_object)
+            .and_then(|records_map| {
+                find_record_with_trace_context(records_map).or_else(|| {
+                    let (first_key, group) = records_map.iter().next()?;
+                    let first_record = match group {
+                        Value::Array(arr) => arr.first()?.clone(),
+                        Value::Object(obj) => obj.values().next()?.clone(),
+                        _ => return None,
+                    };
+                    Some((first_key.clone(), first_record))
+                })
+            });
+
+        if let Some((chosen_key, chosen_record)) = chosen {
+            let records_map = payload.get_mut("records").and_then(Value::as_object_mut)?;
+            records_map.retain(|k, _| k == &chosen_key);
+            if let Some(entry) = records_map.get_mut(&chosen_key) {
+                *entry = Value::Array(vec![chosen_record]);
             }
-            records_map.retain(|k, _| k == &first_key);
         }
 
         match serde_json::from_value::<Self>(payload) {
@@ -443,6 +466,41 @@ mod tests {
         let payload = serde_json::from_str(&json).expect("Failed to deserialize into Value");
 
         assert!(MSKEvent::is_match(&payload));
+    }
+
+    #[test]
+    fn test_new_prefers_record_with_trace_context() {
+        // Two records in topic1: first has no headers, second has x-datadog-trace-id.
+        // [49, 50, 51] = ASCII "123"
+        let payload = serde_json::json!({
+            "eventSource": "aws:kafka",
+            "eventSourceArn": "arn:aws:kafka:us-east-1:123456789012:cluster/demo-cluster/751d2973-a626-431c-9d4e-d7975eb44dd7-2",
+            "bootstrapServers": "b-1.demo-cluster.a1bcde.c1.kafka.us-east-1.amazonaws.com:9092",
+            "records": {
+                "topic1": [
+                    {
+                        "topic": "topic1", "partition": 0, "offset": 100,
+                        "timestamp": 1000.0, "timestampType": "CREATE_TIME",
+                        "key": null, "value": null,
+                        "headers": []
+                    },
+                    {
+                        "topic": "topic1", "partition": 0, "offset": 101,
+                        "timestamp": 2000.0, "timestampType": "CREATE_TIME",
+                        "key": null, "value": null,
+                        "headers": [{"x-datadog-trace-id": [49, 50, 51]}]
+                    }
+                ]
+            }
+        });
+
+        let event = MSKEvent::new(payload).expect("Failed to deserialize MSKEvent");
+        let carrier = event.get_carrier();
+        assert_eq!(
+            carrier.get("x-datadog-trace-id").map(String::as_str),
+            Some("123"),
+            "Should pick the record with trace context, not the first one"
+        );
     }
 
     #[test]
