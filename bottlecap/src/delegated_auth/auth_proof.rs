@@ -247,14 +247,18 @@ mod tests {
         assert_eq!(parts.len(), 4);
 
         // Verify body is base64-encoded GET_CALLER_IDENTITY_BODY
-        let body = String::from_utf8(BASE64_STANDARD.decode(parts[0]).unwrap()).unwrap();
+        let body = String::from_utf8(
+            BASE64_STANDARD.decode(parts[0]).expect("Failed to decode base64 body")
+        ).expect("Failed to convert body to UTF-8");
         assert_eq!(body, GET_CALLER_IDENTITY_BODY);
 
         // Verify method
         assert_eq!(parts[2], "POST");
 
         // Verify URL is base64-encoded STS URL
-        let url = String::from_utf8(BASE64_STANDARD.decode(parts[3]).unwrap()).unwrap();
+        let url = String::from_utf8(
+            BASE64_STANDARD.decode(parts[3]).expect("Failed to decode base64 URL")
+        ).expect("Failed to convert URL to UTF-8");
         assert!(url.contains("sts.us-east-1.amazonaws.com"));
     }
 
@@ -271,12 +275,15 @@ mod tests {
         let result = generate_auth_proof(&creds, "us-east-1", "my-org-uuid");
         assert!(result.is_ok());
 
-        let proof = result.unwrap();
+        let proof = result.expect("Failed to generate auth proof");
         let parts: Vec<&str> = proof.split('|').collect();
 
         // Decode and parse headers
-        let headers_json = String::from_utf8(BASE64_STANDARD.decode(parts[1]).unwrap()).unwrap();
-        let headers: BTreeMap<String, String> = serde_json::from_str(&headers_json).unwrap();
+        let headers_json = String::from_utf8(
+            BASE64_STANDARD.decode(parts[1]).expect("Failed to decode base64 headers")
+        ).expect("Failed to convert headers to UTF-8");
+        let headers: BTreeMap<String, String> = serde_json::from_str(&headers_json)
+            .expect("Failed to parse headers JSON");
 
         // Verify required headers
         assert!(headers.contains_key("Authorization"));
@@ -287,7 +294,10 @@ mod tests {
         assert!(headers.contains_key("x-ddog-org-id"));
 
         // Verify org-id header value
-        assert_eq!(headers.get("x-ddog-org-id").unwrap(), "my-org-uuid");
+        assert_eq!(
+            headers.get("x-ddog-org-id").expect("Missing x-ddog-org-id header"),
+            "my-org-uuid"
+        );
     }
 
     #[test]
@@ -304,9 +314,11 @@ mod tests {
         let result = generate_auth_proof(&creds, "", "test-org-uuid");
         assert!(result.is_ok());
 
-        let proof = result.unwrap();
+        let proof = result.expect("Failed to generate auth proof");
         let parts: Vec<&str> = proof.split('|').collect();
-        let url = String::from_utf8(BASE64_STANDARD.decode(parts[3]).unwrap()).unwrap();
+        let url = String::from_utf8(
+            BASE64_STANDARD.decode(parts[3]).expect("Failed to decode base64 URL")
+        ).expect("Failed to convert URL to UTF-8");
         assert!(url.contains("sts.amazonaws.com"));
     }
 }
