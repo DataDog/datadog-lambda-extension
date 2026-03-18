@@ -59,28 +59,21 @@ fn bytes_from_header_value(val: &Value) -> Option<Vec<u8>> {
 /// This performs a lightweight scan of the raw JSON structure without decoding
 /// header values or allocating intermediate collections.
 fn headers_has_trace_context(headers: &Value) -> bool {
-    // The `headers` field may be either:
-    // - an array of header entries
-    // - an object with numeric string keys mapping to header entries
-    let iter: Box<dyn Iterator<Item = &Value> + '_> = match headers {
-        Value::Array(arr) => Box::new(arr.iter()),
-        Value::Object(obj) => Box::new(obj.values()),
-        _ => return false,
-    };
-
-    for entry in iter {
+    let is_trace_context_entry = |entry: &Value| {
         if let Value::Object(header_map) = entry {
-            for key in header_map.keys() {
-                if key.eq_ignore_ascii_case("x-datadog-trace-id")
-                    || key.eq_ignore_ascii_case("traceparent")
-                {
-                    return true;
-                }
-            }
+            header_map.keys().any(|k| {
+                k.eq_ignore_ascii_case("x-datadog-trace-id")
+                    || k.eq_ignore_ascii_case("traceparent")
+            })
+        } else {
+            false
         }
+    };
+    match headers {
+        Value::Array(arr) => arr.iter().any(is_trace_context_entry),
+        Value::Object(obj) => obj.values().any(is_trace_context_entry),
+        _ => false,
     }
-
-    false
 }
 
 /// Scans all records in the records map and returns the `(topic_key, record_value)` of the first
@@ -178,29 +171,14 @@ impl Trigger for MSKEvent {
             let records_map = payload.get_mut("records").and_then(Value::as_object_mut)?;
             let first_key = records_map.keys().next()?.to_owned();
             records_map.retain(|k, _| k == &first_key);
-            if let Some(group) = records_map.get_mut(&first_key) {
-                match group {
-                    Value::Array(arr) => {
-                        if !arr.is_empty() {
-                            // Move the first record out, drop the rest.
-                            let first = arr.swap_remove(0);
-                            arr.clear();
-                            arr.push(first);
-                        }
-                    }
+            if let Some(entry) = records_map.get_mut(&first_key) {
+                match entry {
+                    Value::Array(arr) => arr.truncate(1),
                     Value::Object(obj) => {
-                        if let Some((subkey, val)) = obj.iter_mut().next() {
-                            // Move the first record out under its original key, drop the rest.
-                            let first = std::mem::take(val);
-                            let subkey_cloned = subkey.clone();
-                            obj.clear();
-                            obj.insert(subkey_cloned, first);
-                        }
+                        let first_record = obj.values().next()?.clone();
+                        *entry = Value::Array(vec![first_record]);
                     }
-                    _ => {
-                        // Non-array and non-object groups are left as-is, but only the first
-                        // outer key is retained above.
-                    }
+                    _ => return None,
                 }
             }
         }
@@ -600,5 +578,39 @@ mod tests {
             carrier.get("x-datadog-tags").map(String::as_str),
             Some("_dd.p.dm=-1,_dd.p.tid=699c836500000000")
         );
+    }
+
+    /// Verifies that a Java-runtime-format payload (records as object with numeric string keys)
+    /// without any trace context falls back to the first record and deserializes successfully.
+    #[test]
+    fn test_new_java_format_no_trace_context() {
+        let payload = serde_json::json!({
+            "eventSource": "aws:kafka",
+            "eventSourceArn": "arn:aws:kafka:us-east-1:123456789012:cluster/demo-cluster/751d2973-a626-431c-9d4e-d7975eb44dd7-2",
+            "bootstrapServers": "b-1.demo-cluster.a1bcde.c1.kafka.us-east-1.amazonaws.com:9092",
+            "records": {
+                "demo-topic-0": {
+                    "0": {
+                        "topic": "demo-topic", "partition": 0, "offset": 5,
+                        "timestamp": 1000.0, "timestampType": "CREATE_TIME",
+                        "key": null, "value": null,
+                        "headers": {}
+                    },
+                    "1": {
+                        "topic": "demo-topic", "partition": 0, "offset": 6,
+                        "timestamp": 2000.0, "timestampType": "CREATE_TIME",
+                        "key": null, "value": null,
+                        "headers": {}
+                    }
+                }
+            }
+        });
+
+        let event = MSKEvent::new(payload).expect("Should deserialize despite no trace context");
+        let record = event.records.values().find_map(|arr| arr.first())
+            .expect("Expected at least one record");
+        assert_eq!(record.topic, "demo-topic");
+        assert_eq!(record.partition, 0);
+        assert!(event.get_carrier().is_empty());
     }
 }
