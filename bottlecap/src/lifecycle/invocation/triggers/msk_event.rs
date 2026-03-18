@@ -55,23 +55,60 @@ fn bytes_from_header_value(val: &Value) -> Option<Vec<u8>> {
     }
 }
 
+/// Returns true if the `headers` JSON contains a trace context header key.
+/// This performs a lightweight scan of the raw JSON structure without decoding
+/// header values or allocating intermediate collections.
+fn headers_has_trace_context(headers: &Value) -> bool {
+    // The `headers` field may be either:
+    // - an array of header entries
+    // - an object with numeric string keys mapping to header entries
+    let iter: Box<dyn Iterator<Item = &Value> + '_> = match headers {
+        Value::Array(arr) => Box::new(arr.iter()),
+        Value::Object(obj) => Box::new(obj.values()),
+        _ => return false,
+    };
+
+    for entry in iter {
+        if let Value::Object(header_map) = entry {
+            for key in header_map.keys() {
+                if key.eq_ignore_ascii_case("x-datadog-trace-id")
+                    || key.eq_ignore_ascii_case("traceparent")
+                {
+                    return true;
+                }
+            }
+        }
+    }
+
+    false
+}
+
 /// Scans all records in the records map and returns the `(topic_key, record_value)` of the first
 /// record whose headers contain a tracecontext key. Returns `None` if none found.
 fn find_record_with_trace_context(
     records_map: &serde_json::Map<String, Value>,
 ) -> Option<(String, Value)> {
     for (key, group) in records_map {
-        let records: Vec<&Value> = match group {
-            Value::Array(arr) => arr.iter().collect(),
-            Value::Object(obj) => obj.values().collect(),
-            _ => continue,
-        };
-        for record in records {
-            let headers = record.get("headers").unwrap_or(&Value::Null);
-            let carrier = headers_to_string_map(headers);
-            if carrier.contains_key("x-datadog-trace-id") || carrier.contains_key("traceparent") {
-                return Some((key.clone(), record.clone()));
+        match group {
+            Value::Array(arr) => {
+                for record in arr {
+                    if let Some(headers) = record.get("headers") {
+                        if headers_has_trace_context(headers) {
+                            return Some((key.clone(), record.clone()));
+                        }
+                    }
+                }
             }
+            Value::Object(obj) => {
+                for record in obj.values() {
+                    if let Some(headers) = record.get("headers") {
+                        if headers_has_trace_context(headers) {
+                            return Some((key.clone(), record.clone()));
+                        }
+                    }
+                }
+            }
+            _ => continue,
         }
     }
     None
@@ -83,24 +120,36 @@ fn find_record_with_trace_context(
 fn headers_to_string_map(headers: &Value) -> HashMap<String, String> {
     let mut carrier = HashMap::new();
 
-    let entries: Vec<&Value> = match headers {
-        Value::Array(arr) => arr.iter().collect(),
-        // Object format: numeric string keys are just ordering artifacts from the Java runtime;
-        // insertion order into the HashMap doesn't matter so no sort needed.
-        Value::Object(obj) => obj.values().collect(),
-        _ => return carrier,
-    };
-
-    for entry in entries {
-        if let Value::Object(header_map) = entry {
-            for (key, val) in header_map {
-                if let Some(bytes) = bytes_from_header_value(val)
-                    && let Ok(s) = String::from_utf8(bytes)
-                {
-                    carrier.insert(key.to_lowercase(), s);
+    match headers {
+        Value::Array(arr) => {
+            for entry in arr {
+                if let Value::Object(header_map) = entry {
+                    for (key, val) in header_map {
+                        if let Some(bytes) = bytes_from_header_value(val)
+                            && let Ok(s) = String::from_utf8(bytes)
+                        {
+                            carrier.insert(key.to_lowercase(), s);
+                        }
+                    }
                 }
             }
         }
+        // Object format: numeric string keys are just ordering artifacts from the Java runtime;
+        // insertion order into the HashMap doesn't matter so no sort needed.
+        Value::Object(obj) => {
+            for entry in obj.values() {
+                if let Value::Object(header_map) = entry {
+                    for (key, val) in header_map {
+                        if let Some(bytes) = bytes_from_header_value(val)
+                            && let Ok(s) = String::from_utf8(bytes)
+                        {
+                            carrier.insert(key.to_lowercase(), s);
+                        }
+                    }
+                }
+            }
+        }
+        _ => {}
     }
 
     carrier
