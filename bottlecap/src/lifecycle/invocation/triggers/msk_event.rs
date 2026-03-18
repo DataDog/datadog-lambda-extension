@@ -164,23 +164,45 @@ impl Trigger for MSKEvent {
         let chosen = payload
             .get("records")
             .and_then(Value::as_object)
-            .and_then(|records_map| {
-                find_record_with_trace_context(records_map).or_else(|| {
-                    let (first_key, group) = records_map.iter().next()?;
-                    let first_record = match group {
-                        Value::Array(arr) => arr.first()?.clone(),
-                        Value::Object(obj) => obj.values().next()?.clone(),
-                        _ => return None,
-                    };
-                    Some((first_key.clone(), first_record))
-                })
-            });
+            .and_then(|records_map| find_record_with_trace_context(records_map));
 
         if let Some((chosen_key, chosen_record)) = chosen {
             let records_map = payload.get_mut("records").and_then(Value::as_object_mut)?;
             records_map.retain(|k, _| k == &chosen_key);
             if let Some(entry) = records_map.get_mut(&chosen_key) {
                 *entry = Value::Array(vec![chosen_record]);
+            }
+        } else {
+            // Fallback: no record with Datadog trace context; normalize to the very first record
+            // without cloning the full record payload.
+            let records_map = payload.get_mut("records").and_then(Value::as_object_mut)?;
+            if let Some((first_key, group)) = records_map.iter_mut().next() {
+                let chosen_key = first_key.clone();
+                // Retain only the chosen topic/partition group.
+                records_map.retain(|k, _| k == &chosen_key);
+                match group {
+                    Value::Array(arr) => {
+                        if !arr.is_empty() {
+                            // Move the first record out, drop the rest.
+                            let first = arr.swap_remove(0);
+                            arr.clear();
+                            arr.push(first);
+                        }
+                    }
+                    Value::Object(obj) => {
+                        if let Some((subkey, val)) = obj.iter_mut().next() {
+                            // Move the first record out under its original key, drop the rest.
+                            let first = std::mem::take(val);
+                            let subkey_cloned = subkey.clone();
+                            obj.clear();
+                            obj.insert(subkey_cloned, first);
+                        }
+                    }
+                    _ => {
+                        // Non-array and non-object groups are left as-is, but only the first
+                        // outer key is retained above.
+                    }
+                }
             }
         }
 
