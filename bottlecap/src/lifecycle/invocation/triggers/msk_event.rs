@@ -607,7 +607,10 @@ mod tests {
         });
 
         let event = MSKEvent::new(payload).expect("Should deserialize despite no trace context");
-        let record = event.records.values().find_map(|arr| arr.first())
+        let record = event
+            .records
+            .values()
+            .find_map(|arr| arr.first())
             .expect("Expected at least one record");
         assert_eq!(record.topic, "demo-topic");
         assert_eq!(record.partition, 0);
