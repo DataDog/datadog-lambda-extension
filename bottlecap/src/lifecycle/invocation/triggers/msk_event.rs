@@ -92,23 +92,23 @@ fn find_record_with_trace_context(
         match group {
             Value::Array(arr) => {
                 for record in arr {
-                    if let Some(headers) = record.get("headers") {
-                        if headers_has_trace_context(headers) {
-                            return Some((key.clone(), record.clone()));
-                        }
+                    if let Some(headers) = record.get("headers")
+                        && headers_has_trace_context(headers)
+                    {
+                        return Some((key.clone(), record.clone()));
                     }
                 }
             }
             Value::Object(obj) => {
                 for record in obj.values() {
-                    if let Some(headers) = record.get("headers") {
-                        if headers_has_trace_context(headers) {
-                            return Some((key.clone(), record.clone()));
-                        }
+                    if let Some(headers) = record.get("headers")
+                        && headers_has_trace_context(headers)
+                    {
+                        return Some((key.clone(), record.clone()));
                     }
                 }
             }
-            _ => continue,
+            _ => {}
         }
     }
     None
@@ -164,7 +164,7 @@ impl Trigger for MSKEvent {
         let chosen = payload
             .get("records")
             .and_then(Value::as_object)
-            .and_then(|records_map| find_record_with_trace_context(records_map));
+            .and_then(find_record_with_trace_context);
 
         if let Some((chosen_key, chosen_record)) = chosen {
             let records_map = payload.get_mut("records").and_then(Value::as_object_mut)?;
