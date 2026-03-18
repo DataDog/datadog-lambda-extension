@@ -1,4 +1,4 @@
-import axios, { AxiosInstance } from 'axios';
+import axios, { AxiosInstance, AxiosError } from 'axios';
 
 const DD_API_KEY = process.env.DD_API_KEY;
 const DD_APP_KEY = process.env.DD_APP_KEY;
@@ -16,6 +16,43 @@ const datadogClient: AxiosInstance = axios.create({
   },
   timeout: 30000,
 });
+
+function formatDatadogError(error: unknown, query: string): string {
+  if (error instanceof AxiosError && error.response) {
+    const status = error.response.status;
+    const statusText = error.response.statusText || '';
+    let message = `HTTP ${status} ${statusText}`.trim();
+
+    // Include rate limit info for 429 errors
+    if (status === 429) {
+      const retryAfter = error.response.headers['x-ratelimit-reset'] || error.response.headers['retry-after'];
+      if (retryAfter) {
+        message += ` (retry-after: ${retryAfter}s)`;
+      }
+      const remaining = error.response.headers['x-ratelimit-remaining'];
+      if (remaining !== undefined) {
+        message += ` (remaining: ${remaining})`;
+      }
+    }
+
+    // Include response body if available
+    const responseData = error.response.data;
+    if (responseData) {
+      const bodyStr = typeof responseData === 'string' ? responseData : JSON.stringify(responseData);
+      if (bodyStr && bodyStr !== '{}') {
+        message += ` - ${bodyStr}`;
+      }
+    }
+
+    return `Error (query: '${query}'): ${message}`;
+  }
+
+  if (error instanceof Error) {
+    return `Error (query: '${query}'): ${error.message}`;
+  }
+
+  return `Error (query: '${query}'): ${String(error)}`;
+}
 
 export interface DatadogTelemetry {
   requestId: string;
@@ -72,12 +109,11 @@ export async function getTraces(
   const now = Date.now();
   const fromTime = now - (1 * 60 * 60 * 1000); // 1 hour ago
   const toTime = now;
+  // Convert service name to lowercase as Datadog stores it that way
+  const serviceNameLower = serviceName.toLowerCase();
+  const query = `service:${serviceNameLower} @request_id:${requestId}`;
+
   try {
-    // Convert service name to lowercase as Datadog stores it that way
-    const serviceNameLower = serviceName.toLowerCase();
-
-    const query = `service:${serviceNameLower} @request_id:${requestId}`;
-
     console.log(`Searching for traces: ${query}`);
 
     // First, find spans matching the request_id to get trace IDs
@@ -164,8 +200,8 @@ export async function getTraces(
     }
 
     return traces;
-  } catch (error: any) {
-    console.error('Error searching traces:', error.response?.data || error.message);
+  } catch (error: unknown) {
+    console.error(`Error searching traces: ${formatDatadogError(error, query)}`);
     throw error;
   }
 }
@@ -182,9 +218,9 @@ export async function getLogs(
   const now = Date.now();
   const fromTime = now - (2 * 60 * 60 * 1000); // 2 hours ago
   const toTime = now;
-  try {
-    const query = `service:${serviceName} @lambda.request_id:${requestId}`;
+  const query = `service:${serviceName} @lambda.request_id:${requestId}`;
 
+  try {
     console.log(`Searching for logs: ${query}`);
 
     const response = await datadogClient.post('/api/v2/logs/events/search', {
@@ -214,8 +250,8 @@ export async function getLogs(
     });
 
     return logs;
-  } catch (error: any) {
-    console.error('Error searching logs:', error.response?.data || error.message);
+  } catch (error: unknown) {
+    console.error(`Error searching logs: ${formatDatadogError(error, query)}`);
     throw error;
   }
 }
