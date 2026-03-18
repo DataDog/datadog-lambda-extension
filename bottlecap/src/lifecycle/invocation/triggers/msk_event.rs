@@ -92,26 +92,24 @@ fn headers_to_string_map(headers: &Value) -> HashMap<String, String> {
 impl Trigger for MSKEvent {
     fn new(mut payload: Value) -> Option<Self> {
         // We only care about the first item in the first record, so drop the others before
-        // deserializing. Records are delivered as a JSON object with numeric string keys;
+        // deserializing. Records may be delivered as a JSON object with numeric string keys;
         // normalize to a single-element array before deserializing.
         if let Some(records_map) = payload.get_mut("records").and_then(Value::as_object_mut) {
             let first_key = records_map.keys().next()?.clone();
-            let normalized = match records_map.get(&first_key)? {
-                Value::Array(arr) => Value::Array(vec![arr.first()?.clone()]),
-                Value::Object(obj) => {
-                    // Records delivered as object with numeric string keys: {"0": {...}, "1": {...}, ...}
-                    // Take the record with the lowest numeric key.
-                    let mut pairs: Vec<(u64, Value)> = obj
-                        .iter()
-                        .filter_map(|(k, v)| k.parse::<u64>().ok().map(|n| (n, v.clone())))
-                        .collect();
-                    pairs.sort_by_key(|(n, _)| *n);
-                    let (_, first_record) = pairs.into_iter().next()?;
-                    Value::Array(vec![first_record])
+            {
+                let entry = records_map.get_mut(&first_key)?;
+                match entry {
+                    // Truncate in place — no clone needed since payload is already mutable.
+                    Value::Array(arr) => arr.truncate(1),
+                    // Object format: extract the first record and replace with a single-element array.
+                    Value::Object(obj) => {
+                        let first_record = obj.values().next()?.clone();
+                        *entry = Value::Array(vec![first_record]);
+                    }
+                    _ => return None,
                 }
-                _ => return None,
-            };
-            *records_map = serde_json::Map::from_iter([(first_key, normalized)]);
+            }
+            records_map.retain(|k, _| k == &first_key);
         }
 
         match serde_json::from_value::<Self>(payload) {
