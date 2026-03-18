@@ -5,6 +5,7 @@ import {Base} from '../lib/stacks/base';
 import {Otlp} from '../lib/stacks/otlp';
 import {Snapstart} from '../lib/stacks/snapstart';
 import {LambdaManagedInstancesStack} from '../lib/stacks/lmi';
+import {DelegatedAuthStack} from '../lib/stacks/delegated-auth';
 import {ACCOUNT, getIdentifier, REGION} from '../config';
 import {CapacityProviderStack} from "../lib/capacity-provider";
 
@@ -32,6 +33,9 @@ const stacks = [
         env,
     }),
     new LambdaManagedInstancesStack(app, `integ-${identifier}-lmi`, {
+        env,
+    }),
+    new DelegatedAuthStack(app, `integ-${identifier}-delegated-auth`, {
         env,
     }),
 ]

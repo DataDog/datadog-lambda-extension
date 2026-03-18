@@ -14,10 +14,28 @@ use sha2::{Digest, Sha256};
 use std::io::Error;
 use std::sync::Arc;
 use tokio::time::Instant;
-use tracing::debug;
-use tracing::error;
+use tracing::{debug, error, info, warn};
+
+use crate::delegated_auth;
 
 pub async fn resolve_secrets(config: Arc<Config>, aws_config: Arc<AwsConfig>) -> Option<String> {
+    // Priority 1: Try delegated auth if DD_ORG_UUID is set
+    // Delegated auth is auto-enabled when org_uuid is present, unless explicitly disabled
+    // via DD_DELEGATED_AUTH_ENABLED=false
+    if !config.org_uuid.is_empty() {
+        match delegated_auth::get_delegated_api_key(&config, &aws_config).await {
+            Ok(api_key) => {
+                info!("Delegated auth API key obtained successfully");
+                return clean_api_key(Some(api_key));
+            }
+            Err(e) => {
+                warn!("Delegated auth failed, falling back to other methods: {e}");
+                // Continue to other methods
+            }
+        }
+    }
+
+    // Priority 2-4: Try AWS secrets (Secrets Manager, KMS, SSM)
     let api_key_candidate = if !config.api_key_secret_arn.is_empty()
         || !config.kms_api_key.is_empty()
         || !config.api_key_ssm_arn.is_empty()
