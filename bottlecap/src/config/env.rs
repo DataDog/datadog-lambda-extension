@@ -481,6 +481,27 @@ pub struct EnvConfig {
     /// The delay between two samples of the API Security schema collection, in seconds.
     #[serde(deserialize_with = "deserialize_optional_duration_from_seconds")]
     pub api_security_sample_delay: Option<Duration>,
+
+    // Delegated Authentication
+    /// @env `DD_DELEGATED_AUTH_ENABLED`
+    ///
+    /// Enable AWS delegated authentication for API key retrieval.
+    /// When enabled, the extension will use the Lambda's execution role credentials
+    /// to obtain a managed API key from Datadog.
+    /// Default is `false`.
+    #[serde(deserialize_with = "deserialize_optional_bool_from_anything")]
+    pub delegated_auth_enabled: Option<bool>,
+    /// @env `DD_ORG_UUID`
+    ///
+    /// The Datadog organization UUID, required when `delegated_auth_enabled` is true.
+    #[serde(deserialize_with = "deserialize_string_or_int")]
+    pub org_uuid: Option<String>,
+    /// @env `DD_DELEGATED_AUTH_REFRESH_INTERVAL`
+    ///
+    /// The interval at which the delegated auth API key is refreshed, in seconds.
+    /// Default is 3600 (1 hour).
+    #[serde(deserialize_with = "deserialize_optional_duration_from_seconds")]
+    pub delegated_auth_refresh_interval: Option<Duration>,
 }
 
 #[allow(clippy::too_many_lines)]
@@ -683,6 +704,11 @@ fn merge_config(config: &mut Config, env_config: &EnvConfig) {
     merge_option_to_value!(config, env_config, appsec_waf_timeout);
     merge_option_to_value!(config, env_config, api_security_enabled);
     merge_option_to_value!(config, env_config, api_security_sample_delay);
+
+    // Delegated Authentication
+    merge_option_to_value!(config, env_config, delegated_auth_enabled);
+    merge_string!(config, env_config, org_uuid);
+    merge_option_to_value!(config, env_config, delegated_auth_refresh_interval);
 }
 
 #[derive(Debug, PartialEq, Clone, Copy)]
@@ -1043,6 +1069,11 @@ mod tests {
                 appsec_waf_timeout: Duration::from_secs(1),
                 api_security_enabled: false,
                 api_security_sample_delay: Duration::from_secs(60),
+
+                // Delegated Authentication (not set in env, should be defaults)
+                delegated_auth_enabled: false,
+                org_uuid: String::default(),
+                delegated_auth_refresh_interval: Duration::from_secs(3600),
             };
 
             assert_eq!(config, expected_config);
