@@ -84,7 +84,7 @@ describe('Durable Execution Status Tag Integration Tests', () => {
       expect(status).toBeDefined();
     });
 
-    it('durable_function_execution_status tag should be one of: SUCCEEDED, FAILED, PENDING', () => {
+    it('durable_function_execution_status tag should be one of: SUCCEEDED, FAILED, STOPPED, TIMED_OUT', () => {
       const result = getResult();
       expect(result).toBeDefined();
       const trace = result.traces![0];
@@ -95,7 +95,7 @@ describe('Durable Execution Status Tag Integration Tests', () => {
 
       const status = awsLambdaSpan?.attributes.custom?.durable_function_execution_status;
       expect(status).toBeDefined();
-      expect(['SUCCEEDED', 'FAILED', 'PENDING']).toContain(status);
+      expect(['SUCCEEDED', 'FAILED', 'STOPPED', 'TIMED_OUT']).toContain(status);
     });
 
     it('durable_function_execution_status tag should be SUCCEEDED for successful execution', () => {
