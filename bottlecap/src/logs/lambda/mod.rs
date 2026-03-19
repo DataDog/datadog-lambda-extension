@@ -3,21 +3,6 @@ use serde::Serialize;
 pub mod processor;
 
 ///
-/// Intake Log for AWS Lambda Telemetry Events.
-///
-#[derive(Clone, Debug, PartialEq, Serialize)]
-pub struct IntakeLog {
-    /// Setting it as a struct, allowing us to override fields.
-    pub message: Message,
-    pub hostname: String,
-    pub service: String,
-    #[serde(rename(serialize = "ddtags"))]
-    pub tags: String,
-    #[serde(rename(serialize = "ddsource"))]
-    pub source: String,
-}
-
-///
 /// Message for AWS Lambda logs.
 ///
 #[derive(Clone, Debug, PartialEq, Serialize)]

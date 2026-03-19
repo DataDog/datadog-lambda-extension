@@ -8,8 +8,9 @@ use dogstatsd::{
     aggregator::AggregatorHandle as MetricsAggregatorHandle, flusher::Flusher as MetricsFlusher,
 };
 
+use datadog_logs_agent::LogFlusher;
+
 use crate::flushing::handles::{FlushHandles, MetricsRetryBatch};
-use crate::logs::flusher::LogsFlusher;
 use crate::traces::{
     proxy_flusher::Flusher as ProxyFlusher, stats_flusher::StatsFlusher,
     trace_flusher::TraceFlusher,
@@ -23,7 +24,7 @@ use crate::traces::{
 /// - Performing blocking flushes (spawn + await)
 pub struct FlushingService {
     // Flushers
-    logs_flusher: LogsFlusher,
+    logs_flusher: LogFlusher,
     trace_flusher: Arc<TraceFlusher>,
     stats_flusher: Arc<StatsFlusher>,
     proxy_flusher: Arc<ProxyFlusher>,
@@ -40,7 +41,7 @@ impl FlushingService {
     /// Creates a new `FlushingService` with the given flushers.
     #[must_use]
     pub fn new(
-        logs_flusher: LogsFlusher,
+        logs_flusher: LogFlusher,
         trace_flusher: Arc<TraceFlusher>,
         stats_flusher: Arc<StatsFlusher>,
         proxy_flusher: Arc<ProxyFlusher>,
@@ -76,7 +77,7 @@ impl FlushingService {
         let lf = self.logs_flusher.clone();
         self.handles
             .log_flush_handles
-            .push(tokio::spawn(async move { lf.flush(None).await }));
+            .push(tokio::spawn(async move { lf.flush(vec![]).await }));
 
         // Spawn traces flush
         let tf = self.trace_flusher.clone();
@@ -206,7 +207,7 @@ impl FlushingService {
                         match item.try_clone() {
                             Some(item_clone) => {
                                 joinset.spawn(async move {
-                                    lf.flush(Some(item_clone)).await;
+                                    lf.flush(vec![item_clone]).await;
                                 });
                             }
                             None => {
@@ -325,7 +326,7 @@ impl FlushingService {
             .collect();
 
         tokio::join!(
-            self.logs_flusher.flush(None),
+            self.logs_flusher.flush(vec![]),
             futures::future::join_all(metrics_futures),
             self.trace_flusher.flush(None),
             self.stats_flusher.flush(force_stats, None),
