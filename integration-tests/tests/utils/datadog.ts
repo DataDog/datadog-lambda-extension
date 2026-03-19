@@ -251,18 +251,22 @@ export async function searchAllSpans(
     }
     console.log(`Unique operation names: ${Array.from(opNames).join(', ')}`);
 
-    // Log details of each span including request_id
+    // Log details of each span including request_id and timestamps
     console.log('\n=== All Spans Detail ===');
     for (const span of spans) {
       const opName = span.attributes?.operation_name || 'unknown';
       const resource = span.attributes?.resource_name || 'unknown';
       const requestId = span.attributes?.custom?.request_id || span.attributes?.request_id || 'NONE';
       const traceId = span.attributes?.trace_id || 'unknown';
-      const start = span.attributes?.start || 0;
       const adjusted = span.attributes?.custom?._dd?.snapstart_adjusted === 'true' ||
                        span.attributes?.custom?.['_dd.snapstart_adjusted'] === 'true';
 
-      console.log(`  ${opName}: resource=${resource}, trace_id=${traceId}, request_id=${requestId}${adjusted ? ' [ADJUSTED]' : ''}`);
+      // Try to find timestamp in various possible locations
+      const startNs = span.attributes?.start || span.attributes?.start_ns || 0;
+      const durationNs = span.attributes?.duration || span.attributes?.duration_ns || 0;
+      const timestamp = span.attributes?.timestamp; // ISO timestamp from API
+
+      console.log(`  ${opName}: trace_id=${traceId}, request_id=${requestId}, timestamp=${timestamp || 'N/A'}${adjusted ? ' [ADJUSTED]' : ''}`);
     }
 
     return spans;

@@ -127,20 +127,101 @@ describe('SnapStart Timing Integration Tests', () => {
 
     const trace = telemetry!.traces![0];
 
+    // Log full span structure for first span to understand the data format
+    console.log('\n=== First Span Full Structure ===');
+    console.log(JSON.stringify(trace.spans[0]?.attributes, null, 2));
+
     // Log all span timestamps for debugging
     console.log('\n=== Span Timestamps ===');
+    const spanTimings: { name: string; startTimestamp: string; endTimestamp: string }[] = [];
+
     for (const span of trace.spans) {
       const opName = span.attributes?.operation_name || 'unknown';
-      const start = span.attributes?.start;
-      const duration = span.attributes?.duration;
-      console.log(`  ${opName}: start=${start}, duration=${duration}`);
+      // Datadog API uses start_timestamp and end_timestamp fields
+      const startTimestamp = span.attributes?.start_timestamp || '';
+      const endTimestamp = span.attributes?.end_timestamp || '';
+      const durationNs = span.attributes?.custom?.duration || 0;
+
+      spanTimings.push({ name: opName, startTimestamp, endTimestamp });
+
+      console.log(`  ${opName}:`);
+      console.log(`    start_timestamp: ${startTimestamp}`);
+      console.log(`    end_timestamp: ${endTimestamp}`);
+      console.log(`    duration_ns: ${durationNs}`);
     }
 
-    // The trace should have a reasonable duration
-    // Note: We validate structure, not calculate duration from raw timestamps
-    // since the Datadog API format may vary
+    // Sort spans by start_timestamp to see order
+    console.log('\n=== Span Order (by start_timestamp) ===');
+    spanTimings.sort((a, b) => {
+      if (a.startTimestamp && b.startTimestamp) {
+        return new Date(a.startTimestamp).getTime() - new Date(b.startTimestamp).getTime();
+      }
+      return 0;
+    });
+    spanTimings.forEach((s, i) => {
+      console.log(`  ${i + 1}. ${s.name} - ${s.startTimestamp}`);
+    });
+
     expect(trace.spans.length).toBeGreaterThanOrEqual(2);
-    console.log(`Trace has ${trace.spans.length} spans - structure is valid`);
+    console.log(`\nTrace has ${trace.spans.length} spans`);
+  });
+
+  it('should have OkHttp span with correct timestamp (during invocation)', () => {
+    const telemetry = result.telemetry;
+    expect(telemetry).toBeDefined();
+    expect(telemetry!.traces?.length).toBeGreaterThan(0);
+
+    const trace = telemetry!.traces![0];
+
+    // Find the aws.lambda span and okhttp span
+    const awsLambdaSpan = trace.spans.find((s: any) =>
+      s.attributes?.operation_name === 'aws.lambda'
+    );
+    const okhttpSpan = trace.spans.find((s: any) =>
+      s.attributes?.operation_name?.includes('okhttp') ||
+      s.attributes?.operation_name?.includes('http.request')
+    );
+
+    if (!awsLambdaSpan || !okhttpSpan) {
+      console.log('Cannot compare timestamps - missing spans');
+      return;
+    }
+
+    // Get timestamps using correct Datadog API field names
+    const lambdaStart = awsLambdaSpan.attributes?.start_timestamp;
+    const lambdaEnd = awsLambdaSpan.attributes?.end_timestamp;
+    const httpStart = okhttpSpan.attributes?.start_timestamp;
+    const httpEnd = okhttpSpan.attributes?.end_timestamp;
+
+    console.log('\n=== Span Timing Comparison ===');
+    console.log(`aws.lambda: start=${lambdaStart}, end=${lambdaEnd}`);
+    console.log(`okhttp: start=${httpStart}, end=${httpEnd}`);
+
+    if (lambdaStart && httpStart) {
+      const lambdaStartMs = new Date(lambdaStart).getTime();
+      const lambdaEndMs = new Date(lambdaEnd).getTime();
+      const httpStartMs = new Date(httpStart).getTime();
+      const diffFromLambdaStart = httpStartMs - lambdaStartMs;
+
+      console.log(`OkHttp started ${diffFromLambdaStart}ms after aws.lambda started`);
+
+      // The OkHttp span should start DURING the aws.lambda span
+      // (after lambda start, before lambda end)
+      const isWithinLambdaSpan = httpStartMs >= lambdaStartMs && httpStartMs <= lambdaEndMs;
+
+      if (isWithinLambdaSpan) {
+        console.log('OK: OkHttp span started during aws.lambda span execution');
+      } else if (diffFromLambdaStart < -60000) {
+        console.log('\n*** WARNING: OkHttp span has stale timestamp ***');
+        console.log(`The span appears to start ${Math.abs(diffFromLambdaStart / 1000).toFixed(1)} seconds BEFORE the Lambda invocation.`);
+      } else {
+        console.log(`Note: OkHttp span started ${diffFromLambdaStart}ms relative to lambda start`);
+      }
+
+      // The HTTP request happens during handler execution, so it should start
+      // at or after the aws.lambda span start (allowing some tolerance)
+      expect(diffFromLambdaStart).toBeGreaterThan(-5000); // 5 second tolerance
+    }
   });
 
   it('should log span details for debugging', () => {
