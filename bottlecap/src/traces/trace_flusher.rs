@@ -6,6 +6,7 @@ use libdd_common::Endpoint;
 use libdd_trace_utils::{
     config_utils::trace_intake_url_prefixed,
     send_data::SendData,
+    send_with_retry::{RetryBackoffType, RetryStrategy},
     trace_utils::{self},
     tracer_payload::TracerPayloadCollection,
 };
@@ -18,6 +19,11 @@ use crate::config::Config;
 use crate::lifecycle::invocation::processor::S_TO_MS;
 use crate::traces::http_client::HttpClient;
 use crate::traces::trace_aggregator_service::AggregatorHandle;
+
+/// Retry strategy for trace flushing: 5 retries with no delay between attempts.
+fn trace_retry_strategy() -> RetryStrategy {
+    RetryStrategy::new(5, 0, RetryBackoffType::Constant, None)
+}
 
 pub struct TraceFlusher {
     pub aggregator_handle: AggregatorHandle,
@@ -113,7 +119,11 @@ impl TraceFlusher {
             let traces_with_tags: Vec<_> = trace_builders
                 .into_iter()
                 .map(|info| {
-                    let trace = info.builder.with_api_key(api_key.as_str()).build();
+                    let trace = info
+                        .builder
+                        .with_api_key(api_key.as_str())
+                        .with_retry_strategy(trace_retry_strategy())
+                        .build();
                     (trace, info.header_tags)
                 })
                 .collect();
@@ -125,12 +135,16 @@ impl TraceFlusher {
                 let additional_traces: Vec<_> = traces_with_tags
                     .iter()
                     .filter_map(|(trace, tags)| match trace.get_payloads() {
-                        TracerPayloadCollection::V07(payloads) => Some(SendData::new(
-                            trace.len(),
-                            TracerPayloadCollection::V07(payloads.clone()),
-                            tags.to_tracer_header_tags(),
-                            &endpoint,
-                        )),
+                        TracerPayloadCollection::V07(payloads) => {
+                            let mut send_data = SendData::new(
+                                trace.len(),
+                                TracerPayloadCollection::V07(payloads.clone()),
+                                tags.to_tracer_header_tags(),
+                                &endpoint,
+                            );
+                            send_data.set_retry_strategy(trace_retry_strategy());
+                            Some(send_data)
+                        }
                         // All payloads in the extension are V07 (produced by
                         // collect_pb_trace_chunks), so this branch is unreachable.
                         _ => None,
