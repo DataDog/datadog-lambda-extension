@@ -20,9 +20,9 @@ use crate::lifecycle::invocation::processor::S_TO_MS;
 use crate::traces::http_client::HttpClient;
 use crate::traces::trace_aggregator_service::AggregatorHandle;
 
-/// Retry strategy for trace flushing: 5 retries with no delay between attempts.
+/// Retry strategy for trace flushing: 3 retries with no delay between attempts.
 fn trace_retry_strategy() -> RetryStrategy {
-    RetryStrategy::new(5, 0, RetryBackoffType::Constant, None)
+    RetryStrategy::new(3, 0, RetryBackoffType::Constant, None)
 }
 
 pub struct TraceFlusher {

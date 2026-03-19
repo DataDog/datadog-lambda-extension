@@ -11,7 +11,7 @@ use crate::lifecycle::invocation::processor::S_TO_MS;
 use crate::traces::http_client::HttpClient;
 use crate::traces::stats_aggregator::StatsAggregator;
 
-const STATS_FLUSH_RETRY_COUNT: usize = 5;
+const STATS_FLUSH_RETRY_COUNT: usize = 3;
 use dogstatsd::api_key::ApiKeyFactory;
 use libdd_common::Endpoint;
 use libdd_trace_protobuf::pb;
