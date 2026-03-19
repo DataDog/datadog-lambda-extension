@@ -27,7 +27,7 @@ use crate::traces::trace_aggregator_service::AggregatorHandle;
 /// each retry can take.
 fn trace_retry_strategy() -> RetryStrategy {
     RetryStrategy::new(
-        u32::try_from(FLUSH_RETRY_COUNT).expect("FLUSH_RETRY_COUNT fits in u32"),
+        u32::try_from(FLUSH_RETRY_COUNT).unwrap_or(3),
         0,
         RetryBackoffType::Constant,
         None,
