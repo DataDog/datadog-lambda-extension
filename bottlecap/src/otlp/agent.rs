@@ -8,7 +8,6 @@ use axum::{
 use libdd_trace_utils::trace_utils::TracerHeaderTags as DatadogTracerHeaderTags;
 use opentelemetry_proto::tonic::collector::trace::v1::ExportTraceServiceResponse;
 use prost::Message;
-use std::mem::size_of_val;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::{net::TcpListener, sync::mpsc::Sender};
@@ -173,8 +172,7 @@ impl Agent {
         };
 
         let tracer_header_tags: DatadogTracerHeaderTags = (&parts.headers).into();
-        let body_size = size_of_val(&traces);
-        if body_size == 0 {
+        if traces.is_empty() {
             error!("OTLP | Not sending traces, processor returned empty data");
             return Self::otlp_error_response(
                 StatusCode::INTERNAL_SERVER_ERROR,
@@ -182,6 +180,7 @@ impl Agent {
                 encoding,
             );
         }
+        let body_size = body.len();
 
         let compute_trace_stats_on_extension = config.compute_trace_stats_on_extension;
         let (send_data_builder, processed_traces) = trace_processor.process_traces(
@@ -309,6 +308,162 @@ impl Agent {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::Config;
+    use crate::tags::provider::Provider;
+    use crate::traces::{
+        span_pointers::SpanPointer,
+        stats_concentrator_service::StatsConcentratorService,
+        stats_generator::StatsGenerator,
+        trace_aggregator::{OwnedTracerHeaderTags, SendDataBuilderInfo},
+        trace_processor::TraceProcessor,
+    };
+    use async_trait::async_trait;
+    use axum::body::Body;
+    use axum::http::Request;
+    use libdd_trace_protobuf::pb;
+    use libdd_trace_utils::tracer_header_tags::TracerHeaderTags;
+    use libdd_trace_utils::tracer_payload::TracerPayloadCollection;
+    use opentelemetry_proto::tonic::collector::trace::v1::ExportTraceServiceRequest;
+    use prost::Message;
+    use std::sync::Arc;
+    use tokio::sync::mpsc;
+    use tower::ServiceExt;
+
+    struct NoopTraceProcessor {
+        captured_body_size: std::sync::Mutex<Option<usize>>,
+    }
+
+    impl NoopTraceProcessor {
+        fn new() -> Self {
+            Self {
+                captured_body_size: std::sync::Mutex::new(None),
+            }
+        }
+
+        fn captured_body_size(&self) -> Option<usize> {
+            *self.captured_body_size.lock().unwrap()
+        }
+    }
+
+    #[async_trait]
+    impl TraceProcessor for NoopTraceProcessor {
+        fn process_traces(
+            &self,
+            _config: Arc<Config>,
+            _tags_provider: Arc<Provider>,
+            _header_tags: TracerHeaderTags<'_>,
+            _traces: Vec<Vec<pb::Span>>,
+            body_size: usize,
+            _span_pointers: Option<Vec<SpanPointer>>,
+        ) -> (Option<SendDataBuilderInfo>, TracerPayloadCollection) {
+            *self.captured_body_size.lock().unwrap() = Some(body_size);
+            (None, TracerPayloadCollection::V07(vec![]))
+        }
+    }
+
+    fn make_state(trace_processor: Arc<dyn TraceProcessor + Send + Sync>) -> AgentState {
+        let config = Arc::new(Config::default());
+        let tags_provider = Arc::new(Provider::new(
+            config.clone(),
+            "lambda".to_string(),
+            &std::collections::HashMap::new(),
+        ));
+        let otlp_processor = OtlpProcessor::new(config.clone());
+        let (tx, _rx) = mpsc::channel(16);
+        let (_, concentrator_handle) = StatsConcentratorService::new(config.clone());
+        let stats_generator = Arc::new(StatsGenerator::new(concentrator_handle));
+        (
+            config,
+            tags_provider,
+            otlp_processor,
+            trace_processor,
+            tx,
+            stats_generator,
+        )
+    }
+
+    fn make_router_with_processor(
+        trace_processor: Arc<dyn TraceProcessor + Send + Sync>,
+    ) -> axum::Router {
+        let state = make_state(trace_processor);
+        axum::Router::new()
+            .route("/v1/traces", axum::routing::post(Agent::v1_traces))
+            .with_state(state)
+    }
+
+    fn encode_otlp_request(request: &ExportTraceServiceRequest) -> Vec<u8> {
+        let mut buf = Vec::new();
+        request.encode(&mut buf).unwrap();
+        buf
+    }
+
+    /// Verifies that an OTLP request with no resource spans returns a 500 error.
+    /// Previously, `size_of_val(&traces)` always returned 24 (Vec stack size),
+    /// so the empty check never fired.
+    #[tokio::test]
+    async fn test_v1_traces_empty_request_returns_error() {
+        let processor = Arc::new(NoopTraceProcessor::new());
+        let router = make_router_with_processor(processor);
+
+        let body = encode_otlp_request(&ExportTraceServiceRequest {
+            resource_spans: vec![],
+        });
+        let request = Request::builder()
+            .method("POST")
+            .uri("/v1/traces")
+            .header("content-type", "application/x-protobuf")
+            .body(Body::from(body))
+            .unwrap();
+
+        let response = router.oneshot(request).await.unwrap();
+        assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+    }
+
+    /// Verifies that `body_size` passed to `process_traces` equals the raw OTLP
+    /// request body length, not `size_of_val(&traces)` (which was always 24 bytes).
+    #[tokio::test]
+    async fn test_v1_traces_body_size_equals_request_body_len() {
+        let processor = Arc::new(NoopTraceProcessor::new());
+        let router = make_router_with_processor(
+            Arc::clone(&processor) as Arc<dyn TraceProcessor + Send + Sync>
+        );
+
+        use opentelemetry_proto::tonic::common::v1::InstrumentationScope;
+        use opentelemetry_proto::tonic::resource::v1::Resource;
+        use opentelemetry_proto::tonic::trace::v1::{ResourceSpans, ScopeSpans, Span};
+        let otlp_request = ExportTraceServiceRequest {
+            resource_spans: vec![ResourceSpans {
+                resource: Some(Resource::default()),
+                scope_spans: vec![ScopeSpans {
+                    scope: Some(InstrumentationScope::default()),
+                    spans: vec![Span {
+                        name: "test-span".to_string(),
+                        trace_id: vec![1u8; 16],
+                        span_id: vec![1u8; 8],
+                        ..Span::default()
+                    }],
+                    ..ScopeSpans::default()
+                }],
+                ..ResourceSpans::default()
+            }],
+        };
+        let body = encode_otlp_request(&otlp_request);
+        let expected_body_size = body.len();
+
+        let request = Request::builder()
+            .method("POST")
+            .uri("/v1/traces")
+            .header("content-type", "application/x-protobuf")
+            .body(Body::from(body))
+            .unwrap();
+
+        router.oneshot(request).await.unwrap();
+        assert_eq!(
+            processor.captured_body_size(),
+            Some(expected_body_size),
+            "body_size must equal the raw OTLP request body length"
+        );
+    }
 
     #[test]
     fn test_parse_port_with_valid_endpoint() {
