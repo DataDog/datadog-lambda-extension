@@ -40,6 +40,28 @@ export class Otlp extends cdk.Stack {
     nodeFunction.addToRolePolicy(defaultDatadogSecretPolicy);
     nodeFunction.addLayers(extensionLayer);
 
+    const nodeGrpcFunctionName = `${id}-node-grpc-lambda`;
+    const nodeGrpcFunction = new lambda.Function(this, nodeGrpcFunctionName, {
+      runtime: defaultNodeRuntime,
+      architecture: lambda.Architecture.ARM_64,
+      handler: 'grpc-handler.handler',
+      code: lambda.Code.fromAsset('./lambda/otlp-node'),
+      functionName: nodeGrpcFunctionName,
+      timeout: cdk.Duration.seconds(30),
+      memorySize: 256,
+      environment: {
+        ...defaultDatadogEnvVariables,
+        DD_SERVICE: nodeGrpcFunctionName,
+        DD_OTLP_CONFIG_RECEIVER_PROTOCOLS_GRPC_ENDPOINT: 'localhost:4317',
+        OTEL_EXPORTER_OTLP_ENDPOINT: 'http://localhost:4317',
+        OTEL_EXPORTER_OTLP_PROTOCOL: 'grpc',
+        OTEL_SERVICE_NAME: nodeGrpcFunctionName,
+      },
+      logGroup: createLogGroup(this, nodeGrpcFunctionName)
+    });
+    nodeGrpcFunction.addToRolePolicy(defaultDatadogSecretPolicy);
+    nodeGrpcFunction.addLayers(extensionLayer);
+
     const validationFunctionName = `${id}-response-validation-lambda`;
     const validationFunction = new lambda.Function(this, validationFunctionName, {
       runtime: defaultNodeRuntime,
