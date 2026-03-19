@@ -602,14 +602,13 @@ impl TraceAgent {
             let restore_time = {
                 let mut found_restore_time = None;
                 for span in chunk.iter() {
-                    if let Some(request_id) = span.meta.get("request_id") {
-                        if let Ok(Some(time)) = invocation_processor_handle
+                    if let Some(request_id) = span.meta.get("request_id")
+                        && let Ok(Some(time)) = invocation_processor_handle
                             .get_snapstart_restore_time(request_id.clone())
                             .await
-                        {
-                            found_restore_time = Some(time);
-                            break;
-                        }
+                    {
+                        found_restore_time = Some(time);
+                        break;
                     }
                 }
                 found_restore_time
