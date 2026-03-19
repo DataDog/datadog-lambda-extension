@@ -114,7 +114,7 @@ impl StatsFlusher {
                     return None;
                 }
                 Err(e) => {
-                    error!(
+                    debug!(
                         "STATS | Failed to send stats to {stats_url} in {} ms (attempt {attempt}/{FLUSH_RETRY_COUNT}): {e:?}",
                         elapsed.as_millis()
                     );
