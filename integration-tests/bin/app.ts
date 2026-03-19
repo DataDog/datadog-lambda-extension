@@ -4,6 +4,7 @@ import * as cdk from 'aws-cdk-lib';
 import {OnDemand} from '../lib/stacks/on-demand';
 import {Otlp} from '../lib/stacks/otlp';
 import {Snapstart} from '../lib/stacks/snapstart';
+import {SnapstartTiming} from '../lib/stacks/snapstart-timing';
 import {LambdaManagedInstancesStack} from '../lib/stacks/lmi';
 import {ACCOUNT, getIdentifier, REGION} from '../config';
 import {CapacityProviderStack} from "../lib/capacity-provider";
@@ -29,6 +30,9 @@ const stacks = [
         env,
     }),
     new Snapstart(app, `integ-${identifier}-snapstart`, {
+        env,
+    }),
+    new SnapstartTiming(app, `integ-${identifier}-snapstart-timing`, {
         env,
     }),
     new LambdaManagedInstancesStack(app, `integ-${identifier}-lmi`, {
