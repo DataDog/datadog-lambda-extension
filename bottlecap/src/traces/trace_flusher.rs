@@ -15,14 +15,23 @@ use std::sync::Arc;
 use tokio::task::JoinSet;
 use tracing::{debug, error};
 
+use crate::FLUSH_RETRY_COUNT;
 use crate::config::Config;
 use crate::lifecycle::invocation::processor::S_TO_MS;
 use crate::traces::http_client::HttpClient;
 use crate::traces::trace_aggregator_service::AggregatorHandle;
 
-/// Retry strategy for trace flushing: 3 retries with no delay between attempts.
+/// Retry strategy for trace flushing using the shared `FLUSH_RETRY_COUNT`
+/// with no delay between attempts. In Lambda, every millisecond of wall-clock
+/// time matters, and the per-attempt request timeout already bounds how long
+/// each retry can take.
 fn trace_retry_strategy() -> RetryStrategy {
-    RetryStrategy::new(3, 0, RetryBackoffType::Constant, None)
+    RetryStrategy::new(
+        u32::try_from(FLUSH_RETRY_COUNT).expect("FLUSH_RETRY_COUNT fits in u32"),
+        0,
+        RetryBackoffType::Constant,
+        None,
+    )
 }
 
 pub struct TraceFlusher {
