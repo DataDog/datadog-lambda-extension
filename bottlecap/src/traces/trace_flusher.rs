@@ -188,12 +188,23 @@ impl TraceFlusher {
         debug!("TRACES | Flushing {} traces", coalesced_traces.len());
 
         for trace in &coalesced_traces {
-            let send_result = trace.send(&http_client).await.last_result;
+            let result = trace.send(&http_client).await;
 
-            if let Err(e) = send_result {
-                error!("TRACES | Request failed: {e:?}");
+            if let Err(e) = &result.last_result {
+                error!(
+                    "TRACES | Request failed after {} attempts ({} timeouts, {} network errors, {} status code errors): {e:?}",
+                    result.requests_count,
+                    result.errors_timeout,
+                    result.errors_network,
+                    result.errors_status_code,
+                );
                 return Some(coalesced_traces);
             }
+
+            debug!(
+                "TRACES | Successfully sent trace ({} attempts, {} bytes)",
+                result.requests_count, result.bytes_sent,
+            );
         }
 
         debug!("TRACES | Flushing took {} ms", start.elapsed().as_millis());
