@@ -1385,6 +1385,7 @@ mod tests {
     /// `_dd.compute_stats` to "0" in the payload tags, overriding the value set by
     /// `get_function_tags_map`, and that `send_processed_traces` does not generate stats.
     #[tokio::test]
+    #[allow(clippy::unwrap_used)]
     async fn test_process_traces_client_computed_stats_overrides_compute_stats_tag() {
         use crate::traces::stats_concentrator_service::StatsConcentratorHandle;
         use crate::traces::stats_generator::StatsGenerator;
@@ -1488,6 +1489,7 @@ mod tests {
     /// Verifies that even when `compute_trace_stats_on_extension` is true, no stats are
     /// generated if `client_computed_stats` is also true (tracer has already computed them).
     #[tokio::test]
+    #[allow(clippy::unwrap_used)]
     async fn test_send_processed_traces_skips_stats_when_client_computed_stats() {
         use crate::traces::stats_concentrator_service::StatsConcentratorHandle;
         use crate::traces::stats_generator::StatsGenerator;
