@@ -122,29 +122,32 @@ impl StatsFlusher {
         }
 
         let payload = StatsPayload {
-            agent_env: self.config.env.as_deref().unwrap_or(""),
+            agent_env: "rey",
             agent_version: "6.0.0",
             stats: stats.iter().map(|csp| ClientStatsPayload {
-                env: &csp.env,
+                env: "rey",
                 version: "1",
-                lang: "rust",
+                lang: "python",
                 stats: csp.stats.iter().map(|csb| ClientStatsBucket {
                     start: csb.start,
                     duration: csb.duration,
-                    stats: csb.stats.iter().map(|cgs| ClientGroupedStats {
-                        service: &cgs.service,
-                        name: &cgs.name,
-                        resource: &cgs.resource,
-                        http_status_code: cgs.http_status_code,
-                        r#type: &cgs.r#type,
-                        hits: cgs.hits,
-                        duration: cgs.duration,
-                        ok_summary: &cgs.ok_summary,
-                        error_summary: &cgs.error_summary,
-                        top_level_hits: cgs.top_level_hits,
-                        span_kind: &cgs.span_kind,
-                        is_trace_root: cgs.is_trace_root,
-                    }).collect(),
+                    stats: vec! [
+                        ClientGroupedStats {
+                            service: "rey-python-lambda",
+                            name: "flask.request",
+                            resource: "GET /",
+                            http_status_code: 200,
+                            r#type: "web",
+                            // count of name=aws.lambda hits, there should only be one
+                            hits: csb.stats.iter().filter(|cs| cs.name == "aws.lambda").map(|cs| cs.hits).sum(),
+                            duration: csb.duration,
+                            ok_summary: "CgkJ/UqBWr9S8D8SDRIIAAAAAAAA8D8Yzg0aAA==".as_bytes(),
+                            error_summary: "CgkJ/UqBWr9S8D8SABoA".as_bytes(),
+                            top_level_hits: csb.stats.iter().filter(|cs| cs.name == "aws.lambda").map(|cs| cs.top_level_hits).sum(),
+                            span_kind: "server",
+                            is_trace_root: 2,
+                        },
+                    ],
                 }).collect(),
             }).collect(),
         };
