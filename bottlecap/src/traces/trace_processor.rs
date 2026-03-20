@@ -1430,8 +1430,14 @@ mod tests {
             ..Default::default()
         };
 
-        let (payload_info, _) =
-            processor.process_traces(config, tags_provider, header_tags, vec![vec![span]], 0, None);
+        let (payload_info, _) = processor.process_traces(
+            config,
+            tags_provider,
+            header_tags,
+            vec![vec![span]],
+            0,
+            None,
+        );
         let payload_info = payload_info.expect("expected Some payload");
 
         let send_data = payload_info.builder.build();
@@ -1440,7 +1446,9 @@ mod tests {
         };
         for payload in payloads {
             assert_eq!(
-                payload.tags.get(crate::tags::lambda::tags::COMPUTE_STATS_KEY),
+                payload
+                    .tags
+                    .get(crate::tags::lambda::tags::COMPUTE_STATS_KEY),
                 Some(&"0".to_string()),
                 "_dd.compute_stats must be 0 when client_computed_stats is true"
             );
