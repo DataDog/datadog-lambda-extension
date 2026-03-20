@@ -39,6 +39,11 @@ pub struct Context {
     ///
     /// This span is only present if the function is using `SnapStart` and being invoked for the first time.
     pub snapstart_restore_span: Option<Span>,
+    /// The timestamp (in nanoseconds since UNIX epoch) when `SnapStart` restore started.
+    ///
+    /// This is used to detect and adjust tracer spans that have stale timestamps
+    /// from the snapshot creation phase.
+    pub snapstart_restore_time: Option<i64>,
     /// The extracted span context from the incoming request, used for distributed
     /// tracing.
     ///
@@ -92,6 +97,7 @@ impl Default for Context {
             runtime_done_received: false,
             cold_start_span: None,
             snapstart_restore_span: None,
+            snapstart_restore_time: None,
             tracer_span: None,
             extracted_span_context: None,
         }

@@ -386,6 +386,8 @@ impl Processor {
             return;
         };
 
+        context.snapstart_restore_time = Some(start_time);
+
         // Create a SnapStart restore span
         let mut snapstart_restore_span = create_empty_span(
             String::from("aws.lambda.snapstart_restore"),
@@ -1341,6 +1343,16 @@ impl Processor {
         if let Some(request_id) = span.meta.get("request_id") {
             self.context_buffer.add_tracer_span(request_id, span);
         }
+    }
+
+    /// Get the `SnapStart` restore time for a given `request_id`.
+    ///
+    /// Returns `None` if the context is not found or if this is not a `SnapStart` restore.
+    #[must_use]
+    pub fn get_snapstart_restore_time(&self, request_id: &String) -> Option<i64> {
+        self.context_buffer
+            .get(request_id)
+            .and_then(|ctx| ctx.snapstart_restore_time)
     }
 }
 

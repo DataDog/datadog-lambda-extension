@@ -593,8 +593,46 @@ impl TraceAgent {
                 }
                 handle_reparenting(&mut reparenting_info, &mut span);
 
-                // Keep the span
                 chunk.push(span);
+            }
+
+            // SnapStart spans may have timestamps from when the snapshot was created,
+            // not when the Lambda was restored. Detect and adjust these stale timestamps.
+            // Find request_id from any span in the chunk to look up restore time.
+            let restore_time = {
+                let mut found_restore_time = None;
+                for span in chunk.iter() {
+                    if let Some(request_id) = span.meta.get("request_id")
+                        && let Ok(Some(time)) = invocation_processor_handle
+                            .get_snapstart_restore_time(request_id.clone())
+                            .await
+                    {
+                        found_restore_time = Some(time);
+                        break;
+                    }
+                }
+                found_restore_time
+            };
+
+            // Apply timestamp adjustment to ALL spans with stale timestamps
+            if let Some(restore_time) = restore_time {
+                const SIXTY_SECONDS_NS: i64 = 60 * 1_000_000_000;
+                let threshold = restore_time - SIXTY_SECONDS_NS;
+                for span in chunk.iter_mut() {
+                    if span.start < threshold {
+                        debug!(
+                            "Adjusting SnapStart span timestamp: original start {} is before restore time {}, shifting forward",
+                            span.start, restore_time
+                        );
+                        span.meta
+                            .insert("_dd.snapstart_adjusted".to_string(), "true".to_string());
+                        span.meta.insert(
+                            "_dd.snapstart_original_start".to_string(),
+                            span.start.to_string(),
+                        );
+                        span.start = restore_time;
+                    }
+                }
             }
         }
 

@@ -207,6 +207,76 @@ export async function getTraces(
 }
 
 /**
+ * Search for ALL spans from a service (without request_id filter)
+ * Used for diagnostic purposes to see what spans exist
+ */
+export async function searchAllSpans(
+  serviceName: string,
+  limit: number = 50,
+): Promise<any[]> {
+  const now = Date.now();
+  const fromTime = now - (1 * 60 * 60 * 1000); // 1 hour ago
+  const toTime = now;
+  const serviceNameLower = serviceName.toLowerCase();
+  const query = `service:${serviceNameLower}`;
+
+  try {
+    console.log(`Searching for all spans: ${query}`);
+
+    const response = await datadogClient.post('/api/v2/spans/events/search', {
+      data: {
+        type: 'search_request',
+        attributes: {
+          filter: {
+            query: query,
+            from: new Date(fromTime).toISOString(),
+            to: new Date(toTime).toISOString(),
+          },
+          page: {
+            limit: limit,
+          },
+          sort: '-timestamp',
+        },
+      },
+    });
+
+    const spans = response.data.data || [];
+    console.log(`Found ${spans.length} total span(s) for service`);
+
+    // Log unique operation names
+    const opNames = new Set<string>();
+    for (const span of spans) {
+      const opName = span.attributes?.operation_name || 'unknown';
+      opNames.add(opName);
+    }
+    console.log(`Unique operation names: ${Array.from(opNames).join(', ')}`);
+
+    // Log details of each span including request_id and timestamps
+    console.log('\n=== All Spans Detail ===');
+    for (const span of spans) {
+      const opName = span.attributes?.operation_name || 'unknown';
+      const resource = span.attributes?.resource_name || 'unknown';
+      const requestId = span.attributes?.custom?.request_id || span.attributes?.request_id || 'NONE';
+      const traceId = span.attributes?.trace_id || 'unknown';
+      const adjusted = span.attributes?.custom?._dd?.snapstart_adjusted === 'true' ||
+                       span.attributes?.custom?.['_dd.snapstart_adjusted'] === 'true';
+
+      // Try to find timestamp in various possible locations
+      const startNs = span.attributes?.start || span.attributes?.start_ns || 0;
+      const durationNs = span.attributes?.duration || span.attributes?.duration_ns || 0;
+      const timestamp = span.attributes?.timestamp; // ISO timestamp from API
+
+      console.log(`  ${opName}: trace_id=${traceId}, request_id=${requestId}, timestamp=${timestamp || 'N/A'}${adjusted ? ' [ADJUSTED]' : ''}`);
+    }
+
+    return spans;
+  } catch (error: unknown) {
+    console.error(`Error searching all spans: ${formatDatadogError(error, query)}`);
+    return [];
+  }
+}
+
+/**
  * Search for logs in Datadog
  * @param serviceName - Datadog service name
  * @param requestId - AWS Lambda request ID to filter by
