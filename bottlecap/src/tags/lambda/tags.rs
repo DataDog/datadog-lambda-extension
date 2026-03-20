@@ -39,7 +39,7 @@ const VERSION_KEY: &str = "version";
 const SERVICE_KEY: &str = "service";
 
 // ComputeStatsKey is the tag key indicating whether trace stats should be computed
-const COMPUTE_STATS_KEY: &str = "_dd.compute_stats";
+pub(crate) const COMPUTE_STATS_KEY: &str = "_dd.compute_stats";
 // FunctionTagsKey is the tag key for a function's tags to be set on the top level tracepayload
 const FUNCTION_TAGS_KEY: &str = "_dd.tags.function";
 // TODO(astuyve) decide what to do with the version
