@@ -110,6 +110,30 @@ impl StatsFlusher {
         }
     }
 
+    fn create_client_grouped_stats<'a>(
+        &self,
+        csb: &'a pb::ClientStatsBucket,
+    ) -> ClientGroupedStats<'a> {
+        let aws_lambda_stat = csb.stats.iter().find(|cs| cs.name == "aws.lambda");
+        if aws_lambda_stat.is_none() {
+            debug!("STATS | No aws.lambda stat found in bucket starting at {}, this is unexpected", csb.start);
+        }
+        ClientGroupedStats {
+            service: aws_lambda_stat.map(|cs| cs.service.as_str()).unwrap_or("unknown"),
+            name: aws_lambda_stat.map(|cs| cs.name.as_str()).unwrap_or("unknown"),
+            resource: aws_lambda_stat.map(|cs| cs.resource.as_str()).unwrap_or("unknown"),
+            http_status_code: aws_lambda_stat.map(|cs| cs.http_status_code).unwrap_or(0),
+            r#type: aws_lambda_stat.map(|cs| cs.r#type.as_str()).unwrap_or("unknown"),
+            hits: aws_lambda_stat.map(|cs| cs.hits).unwrap_or(0),
+            duration: aws_lambda_stat.map(|cs| cs.duration).unwrap_or(0),
+            ok_summary: aws_lambda_stat.map(|cs| cs.ok_summary.as_slice()).unwrap_or(&[]),
+            error_summary: aws_lambda_stat.map(|cs| cs.error_summary.as_slice()).unwrap_or(&[]),
+            top_level_hits: aws_lambda_stat.map(|cs| cs.top_level_hits).unwrap_or(0),
+            span_kind: aws_lambda_stat.map(|cs| cs.span_kind.as_str()).unwrap_or("unknown"),
+            is_trace_root: aws_lambda_stat.map(|cs| cs.is_trace_root).unwrap_or(0),
+        }
+    }
+
     /// Flushes stats to the Datadog trace stats intake.
     ///
     /// Returns `None` on success, or `Some(failed_stats)` if the flush failed and should be retried.
@@ -131,23 +155,7 @@ impl StatsFlusher {
                 stats: csp.stats.iter().map(|csb| ClientStatsBucket {
                     start: csb.start,
                     duration: csb.duration,
-                    stats: vec! [
-                        ClientGroupedStats {
-                            service: "rey-python-lambda",
-                            name: "flask.request",
-                            resource: "GET /",
-                            http_status_code: 200,
-                            r#type: "web",
-                            // count of name=aws.lambda hits, there should only be one
-                            hits: csb.stats.iter().filter(|cs| cs.name == "aws.lambda").map(|cs| cs.hits).sum(),
-                            duration: csb.duration,
-                            ok_summary: "CgkJ/UqBWr9S8D8SDRIIAAAAAAAA8D8Yzg0aAA==".as_bytes(),
-                            error_summary: "CgkJ/UqBWr9S8D8SABoA".as_bytes(),
-                            top_level_hits: csb.stats.iter().filter(|cs| cs.name == "aws.lambda").map(|cs| cs.top_level_hits).sum(),
-                            span_kind: "server",
-                            is_trace_root: 2,
-                        },
-                    ],
+                    stats: vec! [ self.create_client_grouped_stats(csb) ],
                 }).collect(),
             }).collect(),
         };
