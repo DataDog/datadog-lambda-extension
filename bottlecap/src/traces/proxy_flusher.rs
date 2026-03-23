@@ -161,6 +161,7 @@ impl Flusher {
                         );
                         return Ok(());
                     } else if attempts >= FLUSH_RETRY_COUNT {
+                        // Final attempt. Log with error level and return error.
                         let body_string = body.unwrap_or_default();
                         error!(
                             "PROXY_FLUSHER | Request failed with status {status} to {url}: {body_string} after {attempts} attempts"
@@ -170,6 +171,7 @@ impl Flusher {
                             message: format!("Request failed with status {status}: {body_string}"),
                         }));
                     }
+                    // Not the final attempt. Log with info level and retry.
                     info!(
                         "PROXY_FLUSHER | Request failed with status {status} to {url}: {body:?} (attempt {attempts}/{FLUSH_RETRY_COUNT})"
                     );
