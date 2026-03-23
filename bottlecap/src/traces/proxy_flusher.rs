@@ -161,12 +161,13 @@ impl Flusher {
                         );
                         return Ok(());
                     } else if attempts >= FLUSH_RETRY_COUNT {
+                        let body_string = body.unwrap_or_default();
                         error!(
-                            "PROXY_FLUSHER | Request failed with status {status} to {url}: {body:?} after {attempts} attempts"
+                            "PROXY_FLUSHER | Request failed with status {status} to {url}: {body_string} after {attempts} attempts"
                         );
                         return Err(Box::new(FailedProxyRequestError {
                             request,
-                            message: format!("Request failed with status {status}: {body:?}"),
+                            message: format!("Request failed with status {status}: {body_string}"),
                         }));
                     }
                     info!(
