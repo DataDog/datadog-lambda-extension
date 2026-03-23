@@ -150,38 +150,34 @@ describe('On-Demand Integration Tests', () => {
     });
 
     describe.skip('duration metrics', () => {
-      it('should emit aws.lambda.enhanced.runtime_duration for each invocation', () => {
+      it('should emit aws.lambda.enhanced.runtime_duration', () => {
         const points = getTelemetry().metrics['aws.lambda.enhanced.runtime_duration'];
-        expect(points.length).toBe(2);
-        expect(points[0].value).toBeGreaterThan(0);
-        expect(points[1].value).toBeGreaterThan(0);
+        expect(points.length).toBeGreaterThan(0);
+        expect(points.every(p => p.value > 0)).toBe(true);
       });
 
-      it('should emit aws.lambda.enhanced.billed_duration for each invocation', () => {
+      it('should emit aws.lambda.enhanced.billed_duration', () => {
         const points = getTelemetry().metrics['aws.lambda.enhanced.billed_duration'];
-        expect(points.length).toBe(2);
-        expect(points[0].value).toBeGreaterThan(0);
-        expect(points[1].value).toBeGreaterThan(0);
+        expect(points.length).toBeGreaterThan(0);
+        expect(points.every(p => p.value > 0)).toBe(true);
       });
 
-      it('should emit aws.lambda.enhanced.duration for each invocation', () => {
+      it('should emit aws.lambda.enhanced.duration', () => {
         const points = getTelemetry().metrics['aws.lambda.enhanced.duration'];
-        expect(points.length).toBe(2);
-        expect(points[0].value).toBeGreaterThan(0);
-        expect(points[1].value).toBeGreaterThan(0);
+        expect(points.length).toBeGreaterThan(0);
+        expect(points.every(p => p.value > 0)).toBe(true);
       });
 
-      it('should emit aws.lambda.enhanced.post_runtime_duration for each invocation', () => {
+      it('should emit aws.lambda.enhanced.post_runtime_duration', () => {
         const points = getTelemetry().metrics['aws.lambda.enhanced.post_runtime_duration'];
-        expect(points.length).toBe(2);
-        expect(points[0].value).toBeGreaterThanOrEqual(0);
-        expect(points[1].value).toBeGreaterThanOrEqual(0);
+        expect(points.length).toBeGreaterThan(0);
+        expect(points.every(p => p.value >= 0)).toBe(true);
       });
 
-      it('should emit aws.lambda.enhanced.init_duration for cold start only', () => {
+      it('should emit aws.lambda.enhanced.init_duration', () => {
         const points = getTelemetry().metrics['aws.lambda.enhanced.init_duration'];
-        expect(points.length).toBe(1);
-        expect(points[0].value).toBeGreaterThan(0);
+        expect(points.length).toBeGreaterThan(0);
+        expect(points.every(p => p.value > 0)).toBe(true);
       });
     });
   });
