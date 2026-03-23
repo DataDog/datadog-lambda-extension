@@ -5,7 +5,7 @@ use thiserror::Error as ThisError;
 use tokio::sync::OnceCell;
 use tokio::{sync::Mutex, task::JoinSet};
 
-use tracing::{debug, error};
+use tracing::{debug, error, info};
 
 use crate::{
     FLUSH_RETRY_COUNT, config,
@@ -159,13 +159,19 @@ impl Flusher {
                             "PROXY_FLUSHER | Successfully sent request in {} ms to {url}",
                             elapsed.as_millis()
                         );
-                    } else {
+                        return Ok(());
+                    } else if attempts >= FLUSH_RETRY_COUNT {
                         error!(
-                            "PROXY_FLUSHER | Request failed with status {status} to {url}: {body:?}"
+                            "PROXY_FLUSHER | Request failed with status {status} to {url}: {body:?} after {attempts} attempts"
                         );
+                        return Err(Box::new(FailedProxyRequestError {
+                            request,
+                            message: format!("Request failed with status {status}: {body:?}"),
+                        }));
                     }
-
-                    return Ok(());
+                    info!(
+                        "PROXY_FLUSHER | Request failed with status {status} to {url}: {body:?} (attempt {attempts}/{FLUSH_RETRY_COUNT})"
+                    );
                 }
                 Err(e) => {
                     if attempts >= FLUSH_RETRY_COUNT {
