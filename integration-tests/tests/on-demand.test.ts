@@ -1,5 +1,5 @@
 import { invokeAndCollectTelemetry, FunctionConfig } from './utils/default';
-import { DatadogTelemetry } from './utils/datadog';
+import { DatadogTelemetry, DURATION_METRICS } from './utils/datadog';
 import { forceColdStart } from './utils/lambda';
 import { getIdentifier } from '../config';
 
@@ -149,15 +149,7 @@ describe('On-Demand Integration Tests', () => {
       });
     });
 
-    const durationMetrics = [
-      'aws.lambda.enhanced.runtime_duration',
-      'aws.lambda.enhanced.billed_duration',
-      'aws.lambda.enhanced.duration',
-      'aws.lambda.enhanced.post_runtime_duration',
-      'aws.lambda.enhanced.init_duration',
-    ];
-
-    describe.skip.each(durationMetrics)('%s', (metric) => {
+    describe.skip.each(DURATION_METRICS)('%s', (metric) => {
       it('should have points with positive values', () => {
         const points = getTelemetry().metrics[metric];
         expect(points.length).toBeGreaterThan(0);

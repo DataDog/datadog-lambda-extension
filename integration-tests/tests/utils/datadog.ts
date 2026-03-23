@@ -83,7 +83,7 @@ export interface DatadogLog {
   tags: string[];
 }
 
-const DURATION_METRICS = [
+export const DURATION_METRICS = [
   'aws.lambda.enhanced.runtime_duration',
   'aws.lambda.enhanced.billed_duration',
   'aws.lambda.enhanced.duration',
