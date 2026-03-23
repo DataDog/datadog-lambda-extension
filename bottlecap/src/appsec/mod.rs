@@ -1,13 +1,16 @@
-use std::env;
+use std::{env, path::Path};
 
 use crate::config::Config;
 
 pub mod processor;
 
 /// Determines whether the Serverless App & API Protection features are enabled.
+///
+/// AppSec is disabled for Java runtimes: it runs in the tracer.
 #[must_use]
-pub const fn is_enabled(cfg: &Config) -> bool {
+pub fn is_enabled(cfg: &Config) -> bool {
     cfg.serverless_appsec_enabled
+        && !Path::new("/opt/java/lib/dd-java-agent.jar").exists()
 }
 
 /// Determines whether APM is only used as a transport for App & API Protection,

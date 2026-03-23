@@ -5,6 +5,7 @@ use libdd_trace_protobuf::pb::Span;
 use serde_json::Value;
 use tracing::debug;
 
+use crate::appsec;
 use crate::config::Config;
 use crate::lifecycle::invocation::triggers::IdentifiedTrigger;
 use crate::traces::span_pointers::SpanPointer;
@@ -283,7 +284,7 @@ impl SpanInferrer {
                 invocation_span.service.clone(),
             );
             s.meta.insert("span.kind".to_string(), "server".to_string());
-            let appsec_enabled = self.config.serverless_appsec_enabled;
+            let appsec_enabled = appsec::is_enabled(&self.config);
             propagate_appsec(appsec_enabled, invocation_span, s);
 
             if let Some(ws) = &mut self.wrapped_inferred_span {
