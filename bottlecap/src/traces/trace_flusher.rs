@@ -6,6 +6,7 @@ use libdd_common::Endpoint;
 use libdd_trace_utils::{
     config_utils::trace_intake_url_prefixed,
     send_data::SendData,
+    send_with_retry::{RetryBackoffType, RetryStrategy},
     trace_utils::{self},
     tracer_payload::TracerPayloadCollection,
 };
@@ -14,10 +15,24 @@ use std::sync::Arc;
 use tokio::task::JoinSet;
 use tracing::{debug, error};
 
+use crate::FLUSH_RETRY_COUNT;
 use crate::config::Config;
 use crate::lifecycle::invocation::processor::S_TO_MS;
 use crate::traces::http_client::HttpClient;
 use crate::traces::trace_aggregator_service::AggregatorHandle;
+
+/// Retry strategy for trace flushing using the shared `FLUSH_RETRY_COUNT`
+/// with no delay between attempts. In Lambda, every millisecond of wall-clock
+/// time matters, and the per-attempt request timeout already bounds how long
+/// each retry can take.
+fn trace_retry_strategy() -> RetryStrategy {
+    RetryStrategy::new(
+        u32::try_from(FLUSH_RETRY_COUNT).unwrap_or(3),
+        0,
+        RetryBackoffType::Constant,
+        None,
+    )
+}
 
 pub struct TraceFlusher {
     pub aggregator_handle: AggregatorHandle,
@@ -113,7 +128,11 @@ impl TraceFlusher {
             let traces_with_tags: Vec<_> = trace_builders
                 .into_iter()
                 .map(|info| {
-                    let trace = info.builder.with_api_key(api_key.as_str()).build();
+                    let trace = info
+                        .builder
+                        .with_api_key(api_key.as_str())
+                        .with_retry_strategy(trace_retry_strategy())
+                        .build();
                     (trace, info.header_tags)
                 })
                 .collect();
@@ -125,12 +144,16 @@ impl TraceFlusher {
                 let additional_traces: Vec<_> = traces_with_tags
                     .iter()
                     .filter_map(|(trace, tags)| match trace.get_payloads() {
-                        TracerPayloadCollection::V07(payloads) => Some(SendData::new(
-                            trace.len(),
-                            TracerPayloadCollection::V07(payloads.clone()),
-                            tags.to_tracer_header_tags(),
-                            &endpoint,
-                        )),
+                        TracerPayloadCollection::V07(payloads) => {
+                            let mut send_data = SendData::new(
+                                trace.len(),
+                                TracerPayloadCollection::V07(payloads.clone()),
+                                tags.to_tracer_header_tags(),
+                                &endpoint,
+                            );
+                            send_data.set_retry_strategy(trace_retry_strategy());
+                            Some(send_data)
+                        }
                         // All payloads in the extension are V07 (produced by
                         // collect_pb_trace_chunks), so this branch is unreachable.
                         _ => None,
@@ -174,12 +197,23 @@ impl TraceFlusher {
         debug!("TRACES | Flushing {} traces", coalesced_traces.len());
 
         for trace in &coalesced_traces {
-            let send_result = trace.send(&http_client).await.last_result;
+            let result = trace.send(&http_client).await;
 
-            if let Err(e) = send_result {
-                error!("TRACES | Request failed: {e:?}");
+            if let Err(e) = &result.last_result {
+                error!(
+                    "TRACES | Request failed after {} attempts ({} timeouts, {} network errors, {} status code errors): {e:?}",
+                    result.requests_count,
+                    result.errors_timeout,
+                    result.errors_network,
+                    result.errors_status_code,
+                );
                 return Some(coalesced_traces);
             }
+
+            debug!(
+                "TRACES | Successfully sent trace ({} attempts, {} bytes)",
+                result.requests_count, result.bytes_sent,
+            );
         }
 
         debug!("TRACES | Flushing took {} ms", start.elapsed().as_millis());

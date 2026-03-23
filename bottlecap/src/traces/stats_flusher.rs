@@ -6,6 +6,7 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 use tokio::sync::OnceCell;
 
+use crate::FLUSH_RETRY_COUNT;
 use crate::config;
 use crate::lifecycle::invocation::processor::S_TO_MS;
 use crate::traces::http_client::HttpClient;
@@ -93,32 +94,36 @@ impl StatsFlusher {
 
         let stats_url = trace_stats_url(&self.config.site);
 
-        let start = std::time::Instant::now();
+        for attempt in 1..=FLUSH_RETRY_COUNT {
+            let start = std::time::Instant::now();
+            let resp = stats_utils::send_stats_payload_with_client(
+                serialized_stats_payload.clone(),
+                endpoint,
+                api_key.as_str(),
+                Some(&self.http_client),
+            )
+            .await;
+            let elapsed = start.elapsed();
 
-        let resp = stats_utils::send_stats_payload_with_client(
-            serialized_stats_payload,
-            endpoint,
-            api_key.as_str(),
-            Some(&self.http_client),
-        )
-        .await;
-        let elapsed = start.elapsed();
-        debug!(
-            "STATS | Stats request to {} took {} ms",
-            stats_url,
-            elapsed.as_millis()
-        );
-        match resp {
-            Ok(()) => {
-                debug!("STATS | Successfully flushed stats");
-                None
-            }
-            Err(e) => {
-                // Network/server errors are temporary - return stats for retry
-                error!("STATS | Error sending stats: {e:?}");
-                Some(stats)
+            match resp {
+                Ok(()) => {
+                    debug!(
+                        "STATS | Successfully flushed stats to {stats_url} in {} ms (attempt {attempt}/{FLUSH_RETRY_COUNT})",
+                        elapsed.as_millis()
+                    );
+                    return None;
+                }
+                Err(e) => {
+                    debug!(
+                        "STATS | Failed to send stats to {stats_url} in {} ms (attempt {attempt}/{FLUSH_RETRY_COUNT}): {e:?}",
+                        elapsed.as_millis()
+                    );
+                }
             }
         }
+
+        error!("STATS | Exhausted all {FLUSH_RETRY_COUNT} attempts, returning stats for redrive");
+        Some(stats)
     }
 
     /// Flushes stats from the aggregator.

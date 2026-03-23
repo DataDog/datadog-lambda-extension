@@ -55,6 +55,11 @@ function formatDatadogError(error: unknown, query: string): string {
 }
 
 export interface DatadogTelemetry {
+  threads: InvocationTracesLogs[][];  // [thread][invocation]
+  metrics: EnhancedMetrics;
+}
+
+export interface InvocationTracesLogs {
   requestId: string;
   statusCode?: number;
   traces?: DatadogTrace[];
@@ -78,6 +83,21 @@ export interface DatadogLog {
   tags: string[];
 }
 
+export const DURATION_METRICS = [
+  'aws.lambda.enhanced.runtime_duration',
+  'aws.lambda.enhanced.billed_duration',
+  'aws.lambda.enhanced.duration',
+  'aws.lambda.enhanced.post_runtime_duration',
+  'aws.lambda.enhanced.init_duration',
+];
+
+export type EnhancedMetrics = Record<string, MetricPoint[]>;
+
+export interface MetricPoint {
+  timestamp: number;
+  value: number;
+}
+
 /**
  * Extracts the base service name from a function name by stripping any
  * version qualifier (:N) or alias qualifier (:alias)
@@ -90,7 +110,7 @@ function getServiceName(functionName: string): string {
   return functionName.substring(0, colonIndex);
 }
 
-export async function getDatadogTelemetryByRequestId(functionName: string, requestId: string): Promise<DatadogTelemetry> {
+export async function getInvocationTracesLogsByRequestId(functionName: string, requestId: string): Promise<InvocationTracesLogs> {
   const serviceName = getServiceName(functionName);
   const traces = await getTraces(serviceName, requestId);
   const logs = await getLogs(serviceName, requestId);
@@ -107,16 +127,14 @@ export async function getTraces(
   requestId: string,
 ): Promise<DatadogTrace[]> {
   const now = Date.now();
-  const fromTime = now - (1 * 60 * 60 * 1000); // 1 hour ago
+  const fromTime = now - (1 * 60 * 60 * 1000);
   const toTime = now;
-  // Convert service name to lowercase as Datadog stores it that way
   const serviceNameLower = serviceName.toLowerCase();
   const query = `service:${serviceNameLower} @request_id:${requestId}`;
 
   try {
     console.log(`Searching for traces: ${query}`);
 
-    // First, find spans matching the request_id to get trace IDs
     const initialResponse = await datadogClient.post('/api/v2/spans/events/search', {
       data: {
         type: 'search_request',
@@ -137,7 +155,6 @@ export async function getTraces(
     const initialSpans = initialResponse.data.data || [];
     console.log(`Found ${initialSpans.length} initial span(s)`);
 
-    // Extract unique trace IDs
     const traceIds = new Set<string>();
     for (const spanData of initialSpans) {
       const traceId = spanData.attributes?.trace_id;
@@ -148,7 +165,6 @@ export async function getTraces(
 
     console.log(`Found ${traceIds.size} unique trace(s)`);
 
-    // Now fetch all spans for each trace ID
     const allSpans: any[] = [];
     for (const traceId of traceIds) {
       const traceResponse = await datadogClient.post('/api/v2/spans/events/search', {
@@ -171,7 +187,6 @@ export async function getTraces(
       allSpans.push(...traceSpans);
     }
 
-    // Group spans by trace_id to reconstruct traces
     const traceMap = new Map<string, DatadogSpan[]>();
 
     for (const spanData of allSpans) {
@@ -190,7 +205,6 @@ export async function getTraces(
       }
     }
 
-    // Convert map to array of traces
     const traces: DatadogTrace[] = [];
     for (const [traceId, spans] of traceMap.entries()) {
       traces.push({
@@ -216,7 +230,7 @@ export async function getLogs(
   requestId: string,
 ): Promise<DatadogLog[]> {
   const now = Date.now();
-  const fromTime = now - (2 * 60 * 60 * 1000); // 2 hours ago
+  const fromTime = now - (2 * 60 * 60 * 1000);
   const toTime = now;
   const query = `service:${serviceName} @lambda.request_id:${requestId}`;
 
@@ -237,7 +251,6 @@ export async function getLogs(
     const rawLogs = response.data.data || [];
     console.log(`Found ${rawLogs.length} log(s)`);
 
-    // Transform raw logs to DatadogLog format
     const logs: DatadogLog[] = rawLogs.map((logData: any) => {
       const attrs = logData.attributes || {};
       return {
@@ -254,4 +267,56 @@ export async function getLogs(
     console.error(`Error searching logs: ${formatDatadogError(error, query)}`);
     throw error;
   }
+}
+
+export async function getEnhancedMetrics(
+  functionName: string,
+  fromTime: number,
+  toTime: number
+): Promise<EnhancedMetrics> {
+  const promises = DURATION_METRICS.map(async (metricName) => {
+    const points = await getMetrics(metricName, functionName, fromTime, toTime);
+    return { metricName, points };
+  });
+
+  const results = await Promise.all(promises);
+
+  const metrics: EnhancedMetrics = {};
+  for (const { metricName, points } of results) {
+    metrics[metricName] = points;
+  }
+
+  return metrics;
+}
+
+async function getMetrics(
+  metricName: string,
+  functionName: string,
+  fromTime: number,
+  toTime: number
+): Promise<MetricPoint[]> {
+  const baseFunctionName = getServiceName(functionName).toLowerCase();
+  const query = `avg:${metricName}{functionname:${baseFunctionName}}`;
+
+  console.log(`Querying metrics: ${query}`);
+
+  const response = await datadogClient.get('/api/v1/query', {
+    params: {
+      query,
+      from: Math.floor(fromTime / 1000),
+      to: Math.floor(toTime / 1000),
+    },
+  });
+
+  const series = response.data.series || [];
+  console.log(`Found ${series.length} series for ${metricName}`);
+
+  if (series.length === 0) {
+    return [];
+  }
+
+  return (series[0].pointlist || []).map((p: [number, number]) => ({
+    timestamp: p[0],
+    value: p[1],
+  }));
 }
