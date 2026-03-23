@@ -110,43 +110,5 @@ describe('LMI Integration Tests', () => {
         expect(awsLambdaSpan?.attributes.custom.cold_start).toBeUndefined();
       }
     });
-
-    // All duration metrics tests are skipped - metrics indexing is unreliable
-    // TODO: Investigate why Datadog metrics API returns inconsistent results
-    describe.skip('duration metrics', () => {
-      it('should emit aws.lambda.enhanced.runtime_duration', () => {
-        const points = telemetry[runtime].metrics.duration['runtime_duration'];
-        expect(points.length).toBeGreaterThan(0);
-        expect(points[points.length - 1].value).toBeGreaterThan(0);
-      });
-
-      it('should emit aws.lambda.enhanced.billed_duration', () => {
-        const points = telemetry[runtime].metrics.duration['billed_duration'];
-        expect(points.length).toBeGreaterThan(0);
-        expect(points[points.length - 1].value).toBeGreaterThan(0);
-      });
-
-      it('should emit aws.lambda.enhanced.duration', () => {
-        const points = telemetry[runtime].metrics.duration['duration'];
-        expect(points.length).toBeGreaterThan(0);
-        expect(points[points.length - 1].value).toBeGreaterThan(0);
-      });
-
-      it('should emit aws.lambda.enhanced.post_runtime_duration', () => {
-        const points = telemetry[runtime].metrics.duration['post_runtime_duration'];
-        expect(points.length).toBeGreaterThan(0);
-        expect(points[points.length - 1].value).toBeGreaterThanOrEqual(0);
-      });
-
-      it('duration should be >= runtime_duration', () => {
-        const durationPoints = telemetry[runtime].metrics.duration['duration'];
-        const runtimePoints = telemetry[runtime].metrics.duration['runtime_duration'];
-        expect(durationPoints.length).toBeGreaterThan(0);
-        expect(runtimePoints.length).toBeGreaterThan(0);
-        const duration = durationPoints[durationPoints.length - 1].value;
-        const runtimeDuration = runtimePoints[runtimePoints.length - 1].value;
-        expect(duration).toBeGreaterThanOrEqual(runtimeDuration);
-      });
-    });
   });
 });
