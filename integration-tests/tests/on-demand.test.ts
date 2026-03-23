@@ -18,12 +18,8 @@ describe('On-Demand Integration Tests', () => {
       runtime,
     }));
 
-    // Force cold starts
     await Promise.all(functions.map(fn => forceColdStart(fn.functionName)));
 
-    // Add 5s delay between invocations to ensure warm container is reused
-    // Required because there is post-runtime processing with 'end' flush strategy
-    // invokeAndCollectTelemetry now returns DatadogTelemetry with metrics included
     telemetry = await invokeAndCollectTelemetry(functions, 2, 1, 5000);
 
     console.log('All invocations and data fetching completed');
@@ -76,7 +72,6 @@ describe('On-Demand Integration Tests', () => {
         });
       });
 
-      // Python has known issues with cold_start spans - mark as failing
       if (runtime === 'python') {
         it.failing('[failing] should have aws.lambda.cold_start span', () => {
           const result = getFirstInvocation();
@@ -154,8 +149,6 @@ describe('On-Demand Integration Tests', () => {
       });
     });
 
-    // All duration metrics tests are skipped - metrics indexing is unreliable
-    // TODO: Investigate why Datadog metrics API returns inconsistent results
     describe.skip('duration metrics', () => {
       it('should emit aws.lambda.enhanced.runtime_duration', () => {
         const points = getTelemetry().metrics.duration['runtime_duration'];
@@ -181,7 +174,6 @@ describe('On-Demand Integration Tests', () => {
         expect(points[points.length - 1].value).toBeGreaterThanOrEqual(0);
       });
 
-      // First invocation is a forced cold start, so init_duration should be emitted
       it('should emit aws.lambda.enhanced.init_duration for cold start', () => {
         const points = getTelemetry().metrics.duration['init_duration'];
         expect(points.length).toBeGreaterThan(0);
