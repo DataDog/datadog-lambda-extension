@@ -289,10 +289,6 @@ export async function getEnhancedMetrics(
   return metrics;
 }
 
-/**
- * Query Datadog Metrics API v1 for a specific metric.
- * Requires the DD_API_KEY to have 'timeseries_query' scope.
- */
 async function getMetrics(
   metricName: string,
   functionName: string,
