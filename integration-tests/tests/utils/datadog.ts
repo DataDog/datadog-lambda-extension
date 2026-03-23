@@ -276,15 +276,14 @@ export async function getEnhancedMetrics(
 ): Promise<EnhancedMetrics> {
   const promises = DURATION_METRICS.map(async (metricName) => {
     const points = await getMetrics(metricName, functionName, fromTime, toTime);
-    const shortName = metricName.split('.').pop()!;
-    return { shortName, points };
+    return { metricName, points };
   });
 
   const results = await Promise.all(promises);
 
   const metrics: EnhancedMetrics = {};
-  for (const { shortName, points } of results) {
-    metrics[shortName] = points;
+  for (const { metricName, points } of results) {
+    metrics[metricName] = points;
   }
 
   return metrics;
