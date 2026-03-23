@@ -19,7 +19,7 @@ use tokio::sync::{
 };
 use tokio_util::sync::CancellationToken;
 use tower_http::limit::RequestBodyLimitLayer;
-use tracing::{debug, error, warn};
+use tracing::{debug, error, info, warn};
 
 use crate::traces::trace_processor::SendingTraceProcessor;
 use crate::{
@@ -557,7 +557,9 @@ impl TraceAgent {
                         should_keep
                     }
                     Err(e) => {
-                        warn!("Failed to check span in deduper, keeping span: {e}");
+                        // Not using warn or error level to avoid confusion for customers.
+                        // No action is needed on customer side.
+                        info!("Failed to check span in deduper, keeping span: {e}");
                         true
                     }
                 };
