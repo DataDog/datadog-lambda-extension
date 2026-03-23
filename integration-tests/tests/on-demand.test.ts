@@ -1,5 +1,5 @@
 import { invokeAndCollectTelemetry, FunctionConfig } from './utils/default';
-import { DatadogTelemetry } from './utils/datadog';
+import { DatadogTelemetry, DURATION_METRICS } from './utils/datadog';
 import { forceColdStart } from './utils/lambda';
 import { getIdentifier } from '../config';
 
@@ -10,7 +10,7 @@ const identifier = getIdentifier();
 const stackName = `integ-${identifier}-on-demand`;
 
 describe('On-Demand Integration Tests', () => {
-  let results: Record<string, DatadogTelemetry[][]>;
+  let telemetry: Record<string, DatadogTelemetry>;
 
   beforeAll(async () => {
     const functions: FunctionConfig[] = runtimes.map(runtime => ({
@@ -18,19 +18,17 @@ describe('On-Demand Integration Tests', () => {
       runtime,
     }));
 
-    // Force cold starts
     await Promise.all(functions.map(fn => forceColdStart(fn.functionName)));
 
-    // Add 5s delay between invocations to ensure warm container is reused
-    // Required because there is post-runtime processing with 'end' flush strategy
-    results = await invokeAndCollectTelemetry(functions, 2, 1, 5000);
+    telemetry = await invokeAndCollectTelemetry(functions, 2, 1, 5000);
 
     console.log('All invocations and data fetching completed');
   }, 600000);
 
   describe.each(runtimes)('%s runtime', (runtime) => {
-    const getFirstInvocation = () => results[runtime]?.[0]?.[0];
-    const getSecondInvocation = () => results[runtime]?.[0]?.[1];
+    const getTelemetry = () => telemetry[runtime];
+    const getFirstInvocation = () => getTelemetry()?.threads[0]?.[0];
+    const getSecondInvocation = () => getTelemetry()?.threads[0]?.[1];
 
     describe('first invocation (cold start)', () => {
       it('should invoke Lambda successfully', () => {
@@ -74,7 +72,6 @@ describe('On-Demand Integration Tests', () => {
         });
       });
 
-      // Python has known issues with cold_start spans - mark as failing
       if (runtime === 'python') {
         it.failing('[failing] should have aws.lambda.cold_start span', () => {
           const result = getFirstInvocation();
@@ -149,6 +146,14 @@ describe('On-Demand Integration Tests', () => {
           span.attributes.operation_name === 'aws.lambda.cold_start'
         );
         expect(coldStartSpan).toBeUndefined();
+      });
+    });
+
+    describe.skip.each(DURATION_METRICS)('%s', (metric) => {
+      it('should have points with positive values', () => {
+        const points = getTelemetry().metrics[metric];
+        expect(points.length).toBeGreaterThan(0);
+        expect(points.every(p => p.value >= 0)).toBe(true);
       });
     });
   });

@@ -9,7 +9,7 @@ const identifier = getIdentifier();
 const stackName = `integ-${identifier}-otlp`;
 
 describe('OTLP Integration Tests', () => {
-  let results: Record<string, DatadogTelemetry[][]>;
+  let telemetry: Record<string, DatadogTelemetry>;
 
   beforeAll(async () => {
     // Build function configs for all runtimes plus response validation
@@ -27,13 +27,13 @@ describe('OTLP Integration Tests', () => {
     console.log('Invoking all OTLP Lambda functions...');
 
     // Invoke all OTLP functions and collect telemetry
-    results = await invokeAndCollectTelemetry(functions, 1, 1, 0, {}, DATADOG_INDEXING_WAIT_5_MIN_MS);
+    telemetry = await invokeAndCollectTelemetry(functions, 1, 1, 0, {}, DATADOG_INDEXING_WAIT_5_MIN_MS);
 
     console.log('All OTLP Lambda invocations and data fetching completed');
   }, 700000);
 
   describe.each(runtimes)('%s Runtime', (runtime) => {
-    const getResult = () => results[runtime]?.[0]?.[0];
+    const getResult = () => telemetry[runtime]?.threads[0]?.[0];
 
     it('should invoke Lambda successfully', () => {
       const result = getResult();
@@ -56,7 +56,7 @@ describe('OTLP Integration Tests', () => {
   });
 
   describe('OTLP Response Validation', () => {
-    const getResult = () => results['responseValidation']?.[0]?.[0];
+    const getResult = () => telemetry['responseValidation']?.threads[0]?.[0];
 
     it('should invoke response validation Lambda successfully', () => {
       const result = getResult();

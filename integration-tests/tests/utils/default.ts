@@ -1,5 +1,10 @@
 import { invokeLambda, InvocationResult } from './lambda';
-import { getDatadogTelemetryByRequestId, DatadogTelemetry } from './datadog';
+import {
+  getInvocationTracesLogsByRequestId,
+  InvocationTracesLogs,
+  DatadogTelemetry,
+  getEnhancedMetrics,
+} from './datadog';
 import { DEFAULT_DATADOG_INDEXING_WAIT_MS } from '../../config';
 
 export interface FunctionConfig {
@@ -26,7 +31,6 @@ async function invokeThread(
     const result = await invokeLambda(functionName, payload);
     results.push(result);
 
-    // Delay between requests (but not after the last one)
     if (delayBetweenRequestsMs > 0 && i < numInvocations - 1) {
       await sleep(delayBetweenRequestsMs);
     }
@@ -36,16 +40,14 @@ async function invokeThread(
 }
 
 /**
- * Invokes multiple Lambda functions using concurrent threads.
- * Each function gets `concurrency` threads, each doing `invocations` sequential requests.
+ * Invokes multiple Lambda functions and collects all telemetry (traces, logs, metrics).
+ * Returns DatadogTelemetry per runtime, which includes per-invocation data and aggregated metrics.
  *
- * Returns results keyed by runtime, where each value is a list of lists
- * (one per thread, containing telemetry in request order).
- *
- * Example: functions=[{node, fn1}, {python, fn2}], invocations=5, concurrency=2
- *   node:   Thread 0: 5 requests, Thread 1: 5 requests
- *   python: Thread 0: 5 requests, Thread 1: 5 requests
- *   Returns: { node: [[t0], [t1]], python: [[t0], [t1]] }
+ * Example: functions=[{node, fn1}, {python, fn2}], invocations=2
+ *   Returns: {
+ *     node: { invocations: [inv1, inv2], metrics: { duration: {...} } },
+ *     python: { invocations: [inv1, inv2], metrics: { duration: {...} } }
+ *   }
  */
 export async function invokeAndCollectTelemetry(
   functions: FunctionConfig[],
@@ -54,8 +56,9 @@ export async function invokeAndCollectTelemetry(
   delayBetweenRequestsMs: number = 0,
   payload: any = {},
   datadogIndexingWaitMs: number = DEFAULT_DATADOG_INDEXING_WAIT_MS,
-): Promise<Record<string, DatadogTelemetry[][]>> {
-  // Start all threads for all functions in parallel
+): Promise<Record<string, DatadogTelemetry>> {
+  const invocationStartTime = Date.now();
+
   const allPromises: { runtime: string; functionName: string; promise: Promise<InvocationResult[]> }[] = [];
 
   for (const fn of functions) {
@@ -68,7 +71,6 @@ export async function invokeAndCollectTelemetry(
     }
   }
 
-  // Wait for all invocations to complete
   const resolvedResults = await Promise.all(
     allPromises.map(async (p) => ({
       runtime: p.runtime,
@@ -77,22 +79,22 @@ export async function invokeAndCollectTelemetry(
     }))
   );
 
-  // Wait for Datadog indexing
   await sleep(datadogIndexingWaitMs);
 
-  // Fetch telemetry and organize by runtime
-  const telemetry: Record<string, DatadogTelemetry[][]> = {};
+  const metricsEndTime = Date.now();
+
+  const telemetryByRuntime: Record<string, InvocationTracesLogs[][]> = {};
 
   for (const { runtime, functionName, results } of resolvedResults) {
-    if (!telemetry[runtime]) {
-      telemetry[runtime] = [];
+    if (!telemetryByRuntime[runtime]) {
+      telemetryByRuntime[runtime] = [];
     }
 
-    const threadTelemetry: DatadogTelemetry[] = [];
+    const threadTelemetry: InvocationTracesLogs[] = [];
 
     for (const inv of results) {
       try {
-        const data = await getDatadogTelemetryByRequestId(functionName, inv.requestId);
+        const data = await getInvocationTracesLogsByRequestId(functionName, inv.requestId);
         data.statusCode = inv.statusCode;
         threadTelemetry.push(data);
       } catch (err) {
@@ -106,9 +108,32 @@ export async function invokeAndCollectTelemetry(
       }
     }
 
-    telemetry[runtime].push(threadTelemetry);
+    telemetryByRuntime[runtime].push(threadTelemetry);
+  }
+
+  const runtimesWithFunctions = functions.map(fn => ({
+    runtime: fn.runtime,
+    functionName: fn.functionName,
+  }));
+
+  const metricsPromises = runtimesWithFunctions.map(async ({ runtime, functionName }) => {
+    const metrics = await getEnhancedMetrics(functionName, invocationStartTime, metricsEndTime);
+    return { runtime, metrics };
+  });
+
+  const metricsResults = await Promise.all(metricsPromises);
+
+  const result: Record<string, DatadogTelemetry> = {};
+
+  for (const fn of functions) {
+    const threads = telemetryByRuntime[fn.runtime] || [];
+    const metricsResult = metricsResults.find(m => m.runtime === fn.runtime)!;
+    result[fn.runtime] = {
+      threads,
+      metrics: metricsResult.metrics,
+    };
   }
 
   console.log(`Collected telemetry for ${functions.length} functions`);
-  return telemetry;
+  return result;
 }
