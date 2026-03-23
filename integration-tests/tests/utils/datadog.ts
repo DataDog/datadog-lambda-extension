@@ -83,21 +83,15 @@ export interface DatadogLog {
   tags: string[];
 }
 
-export const ENHANCED_METRICS_CONFIG = {
-  duration: [
-    'aws.lambda.enhanced.runtime_duration',
-    'aws.lambda.enhanced.billed_duration',
-    'aws.lambda.enhanced.duration',
-    'aws.lambda.enhanced.post_runtime_duration',
-    'aws.lambda.enhanced.init_duration',
-  ],
-} as const;
+const DURATION_METRICS = [
+  'aws.lambda.enhanced.runtime_duration',
+  'aws.lambda.enhanced.billed_duration',
+  'aws.lambda.enhanced.duration',
+  'aws.lambda.enhanced.post_runtime_duration',
+  'aws.lambda.enhanced.init_duration',
+];
 
-export type MetricCategory = keyof typeof ENHANCED_METRICS_CONFIG;
-
-export type EnhancedMetrics = {
-  [K in MetricCategory]: Record<string, MetricPoint[]>;
-};
+export type EnhancedMetrics = Record<string, MetricPoint[]>;
 
 export interface MetricPoint {
   timestamp: number;
@@ -275,47 +269,12 @@ export async function getLogs(
   }
 }
 
-/**
- * Fetch all enhanced metrics for a function based on config
- */
 export async function getEnhancedMetrics(
   functionName: string,
   fromTime: number,
   toTime: number
 ): Promise<EnhancedMetrics> {
-  const result: Partial<EnhancedMetrics> = {};
-
-  const categoryPromises = Object.entries(ENHANCED_METRICS_CONFIG).map(
-    async ([category, metricNames]) => {
-      const categoryMetrics = await fetchMetricCategory(
-        metricNames as readonly string[],
-        functionName,
-        fromTime,
-        toTime
-      );
-      return { category, metrics: categoryMetrics };
-    }
-  );
-
-  const categoryResults = await Promise.all(categoryPromises);
-
-  for (const { category, metrics } of categoryResults) {
-    result[category as MetricCategory] = metrics;
-  }
-
-  return result as EnhancedMetrics;
-}
-
-/**
- * Fetch all metrics in a category in parallel
- */
-async function fetchMetricCategory(
-  metricNames: readonly string[],
-  functionName: string,
-  fromTime: number,
-  toTime: number
-): Promise<Record<string, MetricPoint[]>> {
-  const promises = metricNames.map(async (metricName) => {
+  const promises = DURATION_METRICS.map(async (metricName) => {
     const points = await getMetrics(metricName, functionName, fromTime, toTime);
     const shortName = metricName.split('.').pop()!;
     return { shortName, points };
@@ -323,7 +282,7 @@ async function fetchMetricCategory(
 
   const results = await Promise.all(promises);
 
-  const metrics: Record<string, MetricPoint[]> = {};
+  const metrics: EnhancedMetrics = {};
   for (const { shortName, points } of results) {
     metrics[shortName] = points;
   }

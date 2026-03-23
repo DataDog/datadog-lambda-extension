@@ -151,38 +151,38 @@ describe('On-Demand Integration Tests', () => {
 
     describe.skip('duration metrics', () => {
       it('should emit aws.lambda.enhanced.runtime_duration', () => {
-        const points = getTelemetry().metrics.duration['runtime_duration'];
+        const points = getTelemetry().metrics['runtime_duration'];
         expect(points.length).toBeGreaterThan(0);
         expect(points[points.length - 1].value).toBeGreaterThan(0);
       });
 
       it('should emit aws.lambda.enhanced.billed_duration', () => {
-        const points = getTelemetry().metrics.duration['billed_duration'];
+        const points = getTelemetry().metrics['billed_duration'];
         expect(points.length).toBeGreaterThan(0);
         expect(points[points.length - 1].value).toBeGreaterThan(0);
       });
 
       it('should emit aws.lambda.enhanced.duration', () => {
-        const points = getTelemetry().metrics.duration['duration'];
+        const points = getTelemetry().metrics['duration'];
         expect(points.length).toBeGreaterThan(0);
         expect(points[points.length - 1].value).toBeGreaterThan(0);
       });
 
       it('should emit aws.lambda.enhanced.post_runtime_duration', () => {
-        const points = getTelemetry().metrics.duration['post_runtime_duration'];
+        const points = getTelemetry().metrics['post_runtime_duration'];
         expect(points.length).toBeGreaterThan(0);
         expect(points[points.length - 1].value).toBeGreaterThanOrEqual(0);
       });
 
       it('should emit aws.lambda.enhanced.init_duration for cold start', () => {
-        const points = getTelemetry().metrics.duration['init_duration'];
+        const points = getTelemetry().metrics['init_duration'];
         expect(points.length).toBeGreaterThan(0);
         expect(points[points.length - 1].value).toBeGreaterThan(0);
       });
 
       it('duration should be >= runtime_duration', () => {
-        const durationPoints = getTelemetry().metrics.duration['duration'];
-        const runtimePoints = getTelemetry().metrics.duration['runtime_duration'];
+        const durationPoints = getTelemetry().metrics['duration'];
+        const runtimePoints = getTelemetry().metrics['runtime_duration'];
         expect(durationPoints.length).toBeGreaterThan(0);
         expect(runtimePoints.length).toBeGreaterThan(0);
         const duration = durationPoints[durationPoints.length - 1].value;
