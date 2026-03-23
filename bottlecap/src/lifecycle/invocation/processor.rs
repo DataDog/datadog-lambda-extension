@@ -610,9 +610,16 @@ impl Processor {
         trace_sender: &Arc<SendingTraceProcessor>,
         context: Context,
     ) {
+        let client_computed_stats = context.client_computed_stats;
         let (traces, body_size) = self.get_ctx_spans(context);
-        self.send_spans(traces, body_size, tags_provider, trace_sender)
-            .await;
+        self.send_spans(
+            traces,
+            body_size,
+            client_computed_stats,
+            tags_provider,
+            trace_sender,
+        )
+        .await;
     }
 
     fn get_ctx_spans(&mut self, context: Context) -> (Vec<Span>, usize) {
@@ -677,7 +684,7 @@ impl Processor {
             let traces = vec![cold_start_span.clone()];
             let body_size = size_of_val(cold_start_span);
 
-            self.send_spans(traces, body_size, tags_provider, trace_sender)
+            self.send_spans(traces, body_size, false, tags_provider, trace_sender)
                 .await;
         }
     }
@@ -689,6 +696,7 @@ impl Processor {
         &mut self,
         traces: Vec<Span>,
         body_size: usize,
+        client_computed_stats: bool,
         tags_provider: &Arc<provider::Provider>,
         trace_sender: &Arc<SendingTraceProcessor>,
     ) {
@@ -701,7 +709,7 @@ impl Processor {
             tracer_version: "",
             container_id: "",
             client_computed_top_level: false,
-            client_computed_stats: false,
+            client_computed_stats,
             dropped_p0_traces: 0,
             dropped_p0_spans: 0,
         };
@@ -1337,9 +1345,10 @@ impl Processor {
     ///
     /// This is used to enrich the invocation span with additional metadata from the tracers
     /// top level span, since we discard the tracer span when we create the invocation span.
-    pub fn add_tracer_span(&mut self, span: &Span) {
+    pub fn add_tracer_span(&mut self, span: &Span, client_computed_stats: bool) {
         if let Some(request_id) = span.meta.get("request_id") {
-            self.context_buffer.add_tracer_span(request_id, span);
+            self.context_buffer
+                .add_tracer_span(request_id, span, client_computed_stats);
         }
     }
 }

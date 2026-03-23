@@ -43,6 +43,11 @@ pub struct Context {
     /// tracing.
     ///
     pub extracted_span_context: Option<SpanContext>,
+    /// Whether the tracer has already computed stats for this invocation.
+    ///
+    /// Set from the `Datadog-Client-Computed-Stats` header when the tracer's
+    /// placeholder span (`dd-tracer-serverless-span`) is received.
+    pub client_computed_stats: bool,
 }
 
 /// Struct containing the information needed to reparent a span.
@@ -94,6 +99,7 @@ impl Default for Context {
             snapstart_restore_span: None,
             tracer_span: None,
             extracted_span_context: None,
+            client_computed_stats: false,
         }
     }
 }
@@ -508,7 +514,12 @@ impl ContextBuffer {
 
     /// Adds the tracer span to a `Context` in the buffer.
     ///
-    pub fn add_tracer_span(&mut self, request_id: &String, tracer_span: &Span) {
+    pub fn add_tracer_span(
+        &mut self,
+        request_id: &String,
+        tracer_span: &Span,
+        client_computed_stats: bool,
+    ) {
         if let Some(context) = self
             .buffer
             .iter_mut()
@@ -528,6 +539,7 @@ impl ContextBuffer {
                 .extend(tracer_span.metrics.clone());
 
             context.tracer_span = Some(tracer_span.clone());
+            context.client_computed_stats = client_computed_stats;
         } else {
             debug!("Could not add tracer span - context not found");
         }
