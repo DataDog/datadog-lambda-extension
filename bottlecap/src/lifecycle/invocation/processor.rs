@@ -2119,4 +2119,75 @@ mod tests {
             "Should return None when no trace context found"
         );
     }
+
+    /// Verifies that `client_computed_stats` set on a context via `add_tracer_span` is
+    /// propagated all the way through `send_ctx_spans` to the `aws.lambda` payload sent
+    /// to the backend, so the extension does not generate duplicate stats.
+    #[tokio::test]
+    #[allow(clippy::unwrap_used)]
+    async fn test_client_computed_stats_propagated_to_aws_lambda_span() {
+        use crate::traces::stats_concentrator_service::StatsConcentratorService;
+        use crate::traces::stats_generator::StatsGenerator;
+        use libdd_trace_obfuscation::obfuscation_config::ObfuscationConfig;
+        use tokio::sync::mpsc;
+
+        let config = Arc::new(config::Config {
+            apm_dd_url: "https://trace.agent.datadoghq.com".to_string(),
+            ..config::Config::default()
+        });
+        let tags_provider = Arc::new(provider::Provider::new(
+            Arc::clone(&config),
+            LAMBDA_RUNTIME_SLUG.to_string(),
+            &HashMap::from([("function_arn".to_string(), "test-arn".to_string())]),
+        ));
+        let aws_config = Arc::new(AwsConfig {
+            region: "us-east-1".into(),
+            aws_lwa_proxy_lambda_runtime_api: None,
+            function_name: "test-function".into(),
+            sandbox_init_time: Instant::now(),
+            runtime_api: "***".into(),
+            exec_wrapper: None,
+            initialization_type: "on-demand".into(),
+        });
+        let (aggregator_service, aggregator_handle) =
+            AggregatorService::new(EMPTY_TAGS, 1024).expect("failed to create aggregator service");
+        tokio::spawn(aggregator_service.run());
+        let propagator = Arc::new(DatadogCompositePropagator::new(Arc::clone(&config)));
+        let mut p = Processor::new(
+            Arc::clone(&tags_provider),
+            Arc::clone(&config),
+            aws_config,
+            aggregator_handle,
+            propagator,
+        );
+
+        let (trace_tx, mut trace_rx) = mpsc::channel(10);
+        let (stats_concentrator_service, stats_concentrator_handle) =
+            StatsConcentratorService::new(Arc::clone(&config));
+        tokio::spawn(stats_concentrator_service.run());
+        let trace_sender = Arc::new(SendingTraceProcessor {
+            appsec: None,
+            processor: Arc::new(trace_processor::ServerlessTraceProcessor {
+                obfuscation_config: Arc::new(
+                    ObfuscationConfig::new().expect("Failed to create ObfuscationConfig"),
+                ),
+            }),
+            trace_tx,
+            stats_generator: Arc::new(StatsGenerator::new(stats_concentrator_handle)),
+        });
+
+        let mut context = Context::from_request_id("req-1");
+        context.invocation_span.trace_id = 1;
+        context.invocation_span.span_id = 2;
+        context.client_computed_stats = true;
+
+        p.send_ctx_spans(&tags_provider, &trace_sender, context)
+            .await;
+
+        let payload = trace_rx.recv().await.expect("expected payload from trace_tx");
+        assert!(
+            payload.header_tags.client_computed_stats,
+            "client_computed_stats must be propagated to the aws.lambda span payload"
+        );
+    }
 }
