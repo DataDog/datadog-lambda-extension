@@ -527,8 +527,8 @@ impl LambdaProcessor {
     }
 
     /// Inserts the durable execution context for a `request_id`, received from the `aws.lambda`
-    /// span. Evicts the oldest entry when the map is at capacity. If `is_durable_function` is
-    /// already `Some(true)`, drains any held logs for that `request_id`.
+    /// span. Evicts the oldest entry when the map is at capacity. Drains any held logs for that
+    /// `request_id`.
     pub fn insert_to_durable_context_map(
         &mut self,
         request_id: &str,     // key
