@@ -620,7 +620,7 @@ impl InvocationProcessorService {
                         &request_id,
                         &execution_id,
                         &execution_name,
-                    );
+                    ).await;
                 }
                 ProcessorCommand::OnOutOfMemoryError { timestamp } => {
                     self.processor.on_out_of_memory_error(timestamp);

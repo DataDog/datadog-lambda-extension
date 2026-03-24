@@ -1354,17 +1354,17 @@ impl Processor {
 
     /// Forwards durable execution context extracted from an `aws.lambda` span to the logs
     /// pipeline so it can release held logs and tag them with durable execution metadata.
-    pub fn forward_durable_context(
+    pub async fn forward_durable_context(
         &mut self,
         request_id: &str,
         execution_id: &str,
         execution_name: &str,
     ) {
-        if let Err(e) = self.durable_context_tx.try_send(DurableContextUpdate {
+        if let Err(e) = self.durable_context_tx.send(DurableContextUpdate {
             request_id: request_id.to_owned(),
             execution_id: execution_id.to_owned(),
             execution_name: execution_name.to_owned(),
-        }) {
+        }).await {
             error!("Invocation Processor | Failed to forward durable context to logs agent: {e}");
         }
     }
