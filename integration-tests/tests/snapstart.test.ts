@@ -1,136 +1,179 @@
-import { invokeLambdaAndGetDatadogData, LambdaInvocationDatadogData } from './utils/util';
-import { getIdentifier } from '../config';
+import { invokeAndCollectTelemetry, FunctionConfig } from './utils/default';
+import { DatadogTelemetry } from './utils/datadog';
 import { publishVersion, waitForSnapStartReady } from './utils/lambda';
+import { getIdentifier } from '../config';
+
+const runtimes = ['java', 'dotnet'] as const;
+type Runtime = typeof runtimes[number];
+
+const identifier = getIdentifier();
+const stackName = `integ-${identifier}-snapstart`;
 
 describe('Snapstart Integration Tests', () => {
-  const identifier = getIdentifier();
-
-  const results = {
-    javaInvocation1: null as LambdaInvocationDatadogData | null,
-    javaInvocation2: null as LambdaInvocationDatadogData | null,
-    dotnetInvocation1: null as LambdaInvocationDatadogData | null,
-    dotnetInvocation2: null as LambdaInvocationDatadogData | null,
-    pythonInvocation1: null as LambdaInvocationDatadogData | null,
-    pythonInvocation2: null as LambdaInvocationDatadogData | null,
-  };
+  let telemetry: Record<string, DatadogTelemetry>;
 
   beforeAll(async () => {
-    const javaBaseFunctionName = `integ-${identifier}-snapstart-java-lambda`;
-    const dotnetBaseFunctionName = `integ-${identifier}-snapstart-dotnet-lambda`;
-    const pythonBaseFunctionName = `integ-${identifier}-snapstart-python-lambda`;
+    // Publish new versions and wait for SnapStart optimization
+    console.log('Publishing new versions for Snapstart Lambda functions...');
+    const versions: Record<Runtime, string> = {} as Record<Runtime, string>;
 
-    console.log('Publishing new versions for all Snapstart Lambda functions...');
-    const javaVersion = await publishVersion(javaBaseFunctionName);
-    const dotnetVersion  = await publishVersion(dotnetBaseFunctionName);
-    const pythonVersion = await publishVersion(pythonBaseFunctionName);
-    console.log(`All Lambda versions published successfully - Java: ${javaVersion}, .NET: ${dotnetVersion}, Python: ${pythonVersion}`);
+    for (const runtime of runtimes) {
+      const baseFunctionName = `${stackName}-${runtime}-lambda`;
+      versions[runtime] = await publishVersion(baseFunctionName);
+      console.log(`${runtime} version published: ${versions[runtime]}`);
+    }
 
-    console.log('Waiting for SnapStart optimization to complete on all versions...');
-    await waitForSnapStartReady(javaBaseFunctionName, javaVersion);
-    await waitForSnapStartReady(dotnetBaseFunctionName, dotnetVersion);
-    await waitForSnapStartReady(pythonBaseFunctionName, pythonVersion);
+    console.log('Waiting for SnapStart optimization to complete...');
+    for (const runtime of runtimes) {
+      const baseFunctionName = `${stackName}-${runtime}-lambda`;
+      await waitForSnapStartReady(baseFunctionName, versions[runtime]);
+    }
     console.log('All SnapStart versions are ready');
 
-    console.log('Invoking all Snapstart Lambda functions concurrently...');
-    const javaFunctionName = `${javaBaseFunctionName}:${javaVersion}`;
-    const dotnetFunctionName = `${dotnetBaseFunctionName}:${dotnetVersion}`;
-    const pythonFunctionName = `${pythonBaseFunctionName}:${pythonVersion}`;
-    const invocationResults = await Promise.all([
-      invokeLambdaAndGetDatadogData(javaFunctionName, {}, false),
-      invokeLambdaAndGetDatadogData(javaFunctionName, {}, false),
-      invokeLambdaAndGetDatadogData(dotnetFunctionName, {}, false),
-      invokeLambdaAndGetDatadogData(dotnetFunctionName, {}, false),
-      invokeLambdaAndGetDatadogData(pythonFunctionName, {}, false),
-      invokeLambdaAndGetDatadogData(pythonFunctionName, {}, false),
-    ]);
+    // Build function configs with version qualifier
+    const functions: FunctionConfig[] = runtimes.map(runtime => ({
+      functionName: `${stackName}-${runtime}-lambda:${versions[runtime]}`,
+      runtime,
+    }));
 
-    results.javaInvocation1 = invocationResults[0];
-    results.javaInvocation2 = invocationResults[1];
-    results.dotnetInvocation1 = invocationResults[2];
-    results.dotnetInvocation2 = invocationResults[3];
-    results.pythonInvocation1 = invocationResults[4];
-    results.pythonInvocation2 = invocationResults[5];
+    console.log('Invoking Snapstart Lambda functions...');
+
+    // Invoke with 2 concurrent threads, 2 invocations each
+    // - First invocation: restore from snapshot (has snapstart_restore span)
+    // - Second invocation: warm (no snapstart_restore span)
+    // - 5s delay ensures warm container reuse
+    // - 2 threads for trace isolation testing
+    telemetry = await invokeAndCollectTelemetry(functions, 2, 2, 5000);
 
     console.log('All Snapstart Lambda invocations and data fetching completed');
   }, 900000);
 
-  describe('Java Runtime with SnapStart', () => {
-    testSnapStartInvocation(() => results.javaInvocation1!);
-    testSnapStartInvocation(() => results.javaInvocation2!);
-    testTraceIsolation(() => results.javaInvocation1!, () => results.javaInvocation2!);
+  describe.each(runtimes)('%s Runtime with SnapStart', (runtime) => {
+    // With concurrency=2, invocations=2:
+    // - telemetry[runtime].threads[0][0] = thread 0, first invocation (restore)
+    // - telemetry[runtime].threads[0][1] = thread 0, second invocation (warm)
+    // - telemetry[runtime].threads[1][0] = thread 1, first invocation (restore)
+    // - telemetry[runtime].threads[1][1] = thread 1, second invocation (warm)
+    const getRestoreInvocation = () => telemetry[runtime]?.threads[0]?.[0];
+    const getWarmInvocation = () => telemetry[runtime]?.threads[0]?.[1];
+    const getOtherThreadInvocation = () => telemetry[runtime]?.threads[1]?.[0];
+
+    describe('first invocation (restore from snapshot)', () => {
+      it('should invoke successfully', () => {
+        const result = getRestoreInvocation();
+        expect(result).toBeDefined();
+        expect(result.statusCode).toBe(200);
+      });
+
+      it('should send one trace to Datadog', () => {
+        const result = getRestoreInvocation();
+        expect(result).toBeDefined();
+        expect(result.traces?.length).toEqual(1);
+      });
+
+      it('should have aws.lambda span with init_type=snap-start', () => {
+        const result = getRestoreInvocation();
+        expect(result).toBeDefined();
+        const trace = result.traces![0];
+        const awsLambdaSpan = trace.spans.find((span: any) =>
+          span.attributes.operation_name === 'aws.lambda'
+        );
+        expect(awsLambdaSpan).toBeDefined();
+        expect(awsLambdaSpan?.attributes.custom.init_type).toBe('snap-start');
+      });
+
+      it('should have aws.lambda.snapstart_restore span', () => {
+        const result = getRestoreInvocation();
+        expect(result).toBeDefined();
+        const trace = result.traces![0];
+        const restoreSpan = trace.spans.find((span: any) =>
+          span.attributes.operation_name === 'aws.lambda.snapstart_restore'
+        );
+        expect(restoreSpan).toBeDefined();
+      });
+
+      it('should NOT have aws.lambda.cold_start span', () => {
+        const result = getRestoreInvocation();
+        expect(result).toBeDefined();
+        const trace = result.traces![0];
+        const coldStartSpan = trace.spans.find((span: any) =>
+          span.attributes.operation_name === 'aws.lambda.cold_start'
+        );
+        expect(coldStartSpan).toBeUndefined();
+      });
+    });
+
+    describe('second invocation (warm)', () => {
+      it('should invoke successfully', () => {
+        const result = getWarmInvocation();
+        expect(result).toBeDefined();
+        expect(result.statusCode).toBe(200);
+      });
+
+      it('should send one trace to Datadog', () => {
+        const result = getWarmInvocation();
+        expect(result).toBeDefined();
+        expect(result.traces?.length).toEqual(1);
+      });
+
+      it('should have aws.lambda span with init_type=snap-start', () => {
+        const result = getWarmInvocation();
+        expect(result).toBeDefined();
+        const trace = result.traces![0];
+        const awsLambdaSpan = trace.spans.find((span: any) =>
+          span.attributes.operation_name === 'aws.lambda'
+        );
+        expect(awsLambdaSpan).toBeDefined();
+        expect(awsLambdaSpan?.attributes.custom.init_type).toBe('snap-start');
+      });
+
+      it('should NOT have aws.lambda.snapstart_restore span', () => {
+        const result = getWarmInvocation();
+        expect(result).toBeDefined();
+        const trace = result.traces![0];
+        const restoreSpan = trace.spans.find((span: any) =>
+          span.attributes.operation_name === 'aws.lambda.snapstart_restore'
+        );
+        expect(restoreSpan).toBeUndefined();
+      });
+
+      it('should NOT have aws.lambda.cold_start span', () => {
+        const result = getWarmInvocation();
+        expect(result).toBeDefined();
+        const trace = result.traces![0];
+        const coldStartSpan = trace.spans.find((span: any) =>
+          span.attributes.operation_name === 'aws.lambda.cold_start'
+        );
+        expect(coldStartSpan).toBeUndefined();
+      });
+    });
+
+    describe('trace isolation', () => {
+      it('should have different trace IDs for all 4 invocations', () => {
+        const thread0Restore = telemetry[runtime]?.threads[0]?.[0];
+        const thread0Warm = telemetry[runtime]?.threads[0]?.[1];
+        const thread1Restore = telemetry[runtime]?.threads[1]?.[0];
+        const thread1Warm = telemetry[runtime]?.threads[1]?.[1];
+
+        expect(thread0Restore).toBeDefined();
+        expect(thread0Warm).toBeDefined();
+        expect(thread1Restore).toBeDefined();
+        expect(thread1Warm).toBeDefined();
+
+        const traceIds = [
+          thread0Restore.traces![0].trace_id,
+          thread0Warm.traces![0].trace_id,
+          thread1Restore.traces![0].trace_id,
+          thread1Warm.traces![0].trace_id,
+        ];
+
+        // All trace IDs should be unique
+        const uniqueTraceIds = new Set(traceIds);
+        expect(uniqueTraceIds.size).toBe(4);
+      });
+    });
   });
 
-  describe('.NET Runtime with SnapStart', () => {
-    testSnapStartInvocation(() => results.dotnetInvocation1!);
-    testSnapStartInvocation(() => results.dotnetInvocation2!);
-    testTraceIsolation(() => results.dotnetInvocation1!, () => results.dotnetInvocation2!);
-  });
-
-  // SVLS-5988 - Doesn't completely work as expected.
-  // describe('Python Runtime with SnapStart', () => {
-  //   testSnapStartInvocation(() => results.pythonInvocation1!);
-  //   testSnapStartInvocation(() => results.pythonInvocation2!);
-  //   testTraceIsolation(() => results.pythonInvocation1!, () => results.pythonInvocation2!);
-  // });
-
+  // SVLS-5988 - Python SnapStart doesn't completely work as expected.
+  // describe('Python Runtime with SnapStart', () => { ... });
 });
-
-function testSnapStartInvocation(getInvocation: () => LambdaInvocationDatadogData) {
-  it('should invoke successfully', () => {
-    const invocation = getInvocation();
-    expect(invocation.statusCode).toBe(200);
-  });
-
-  it('should send one trace to Datadog', () => {
-    const invocation = getInvocation();
-    expect(invocation.traces?.length).toEqual(1);
-  });
-
-  it('should have aws.lambda span with Snapstart properties', () => {
-    const invocation = getInvocation();
-    const trace = invocation.traces![0];
-    const awsLambdaSpan = trace.spans.find((span: any) =>
-        span.attributes.operation_name === 'aws.lambda'
-    );
-    expect(awsLambdaSpan).toBeDefined();
-    expect(awsLambdaSpan?.attributes.custom.init_type).toBe('snap-start');
-  });
-
-  it('should have aws.lambda.snapstart_restore span', () => {
-    const invocation = getInvocation();
-    const trace = invocation.traces![0];
-    const restoreSpan = trace.spans.find((span: any) =>
-        span.attributes.operation_name === 'aws.lambda.snapstart_restore'
-    );
-    expect(restoreSpan).toBeDefined();
-    expect(restoreSpan).toMatchObject({
-      attributes: {
-        operation_name: 'aws.lambda.snapstart_restore',
-      }
-    });
-
-  });
-
-  it('should NOT have aws.lambda.cold_start span (replaced by restore span)', () => {
-    const invocation = getInvocation();
-    const trace = invocation.traces![0];
-    const coldStartSpan = trace.spans.find((span: any) =>
-        span.attributes.operation_name === 'aws.lambda.cold_start'
-    );
-    expect(coldStartSpan).toBeUndefined();
-  });
-}
-
-function testTraceIsolation(getInvocation1: () => LambdaInvocationDatadogData, getInvocation2: () => LambdaInvocationDatadogData) {
-  describe('Trace Isolation Between Concurrent Invocations', () => {
-    it('should have different trace IDs for each invocation', () => {
-      const invocation1 = getInvocation1();
-      const invocation2 = getInvocation2();
-      const trace1 = invocation1.traces![0];
-      const trace2 = invocation2.traces![0];
-
-      expect(trace1.trace_id).not.toEqual(trace2.trace_id);
-    });
-  });
-}
-

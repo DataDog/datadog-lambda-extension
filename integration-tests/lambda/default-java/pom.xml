@@ -5,12 +5,12 @@
     <modelVersion>4.0.0</modelVersion>
 
     <groupId>example</groupId>
-    <artifactId>base-java-lambda</artifactId>
+    <artifactId>java-lambda</artifactId>
     <version>1.0.0</version>
     <packaging>jar</packaging>
 
-    <name>Base Java Lambda</name>
-    <description>Base Java Lambda function for Datadog Extension integration testing</description>
+    <name>Java Lambda</name>
+    <description>Shared Java Lambda function for Datadog Extension integration testing</description>
 
     <properties>
         <maven.compiler.source>21</maven.compiler.source>
@@ -23,6 +23,11 @@
             <groupId>com.amazonaws</groupId>
             <artifactId>aws-lambda-java-core</artifactId>
             <version>1.4.0</version>
+        </dependency>
+        <dependency>
+            <groupId>com.fasterxml.jackson.core</groupId>
+            <artifactId>jackson-databind</artifactId>
+            <version>2.15.2</version>
         </dependency>
     </dependencies>
 

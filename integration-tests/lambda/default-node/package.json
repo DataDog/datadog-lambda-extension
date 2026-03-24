@@ -1,0 +1,9 @@
+{
+  "name": "integration-test-lambda",
+  "version": "1.0.0",
+  "description": "Shared Lambda function for Datadog extension integration testing",
+  "main": "index.js",
+  "scripts": {
+    "clean": "rm -rf node_modules package-lock.json"
+  }
+}

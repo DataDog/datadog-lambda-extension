@@ -1,107 +1,73 @@
-import { invokeLambdaAndGetDatadogData, LambdaInvocationDatadogData, DATADOG_INDEXING_WAIT_5_MIN_MS } from './utils/util';
-import { getIdentifier } from '../config';
+import { invokeAndCollectTelemetry, FunctionConfig } from './utils/default';
+import { DatadogTelemetry } from './utils/datadog';
+import { getIdentifier, DATADOG_INDEXING_WAIT_5_MIN_MS } from '../config';
+
+const runtimes = ['node', 'python', 'java', 'dotnet'] as const;
+type Runtime = typeof runtimes[number];
+
+const identifier = getIdentifier();
+const stackName = `integ-${identifier}-otlp`;
 
 describe('OTLP Integration Tests', () => {
-  const results: Record<string, LambdaInvocationDatadogData> = {};
+  let telemetry: Record<string, DatadogTelemetry>;
 
   beforeAll(async () => {
-    const identifier = getIdentifier();
-    const functions = {
-      node: `integ-${identifier}-otlp-node-lambda`,
-      python: `integ-${identifier}-otlp-python-lambda`,
-      java: `integ-${identifier}-otlp-java-lambda`,
-      dotnet: `integ-${identifier}-otlp-dotnet-lambda`,
-      responseValidation: `integ-${identifier}-otlp-response-validation-lambda`,
-    };
+    // Build function configs for all runtimes plus response validation
+    const functions: FunctionConfig[] = [
+      ...runtimes.map(runtime => ({
+        functionName: `${stackName}-${runtime}-lambda`,
+        runtime,
+      })),
+      {
+        functionName: `${stackName}-response-validation-lambda`,
+        runtime: 'responseValidation',
+      },
+    ];
 
-    console.log('Invoking all OTLP Lambda functions in parallel...');
+    console.log('Invoking all OTLP Lambda functions...');
 
-    // Invoke all Lambdas in parallel (using 5 minute wait for OTLP indexing)
-    const invocationResults = await Promise.all([
-      invokeLambdaAndGetDatadogData(functions.node, {}, true, true, DATADOG_INDEXING_WAIT_5_MIN_MS),
-      invokeLambdaAndGetDatadogData(functions.python, {}, true, true, DATADOG_INDEXING_WAIT_5_MIN_MS),
-      invokeLambdaAndGetDatadogData(functions.java, {}, true, true, DATADOG_INDEXING_WAIT_5_MIN_MS),
-      invokeLambdaAndGetDatadogData(functions.dotnet, {}, true, true, DATADOG_INDEXING_WAIT_5_MIN_MS),
-      invokeLambdaAndGetDatadogData(functions.responseValidation, {}, true, true, DATADOG_INDEXING_WAIT_5_MIN_MS),
-    ]);
-
-    // Store results
-    results.node = invocationResults[0];
-    results.python = invocationResults[1];
-    results.java = invocationResults[2];
-    results.dotnet = invocationResults[3];
-    results.responseValidation = invocationResults[4];
+    // Invoke all OTLP functions and collect telemetry
+    telemetry = await invokeAndCollectTelemetry(functions, 1, 1, 0, {}, DATADOG_INDEXING_WAIT_5_MIN_MS);
 
     console.log('All OTLP Lambda invocations and data fetching completed');
-  }, 700000); // 11.6 minute timeout
+  }, 700000);
 
-  describe('Node.js Runtime', () => {
-    it('should invoke Node.js Lambda successfully', () => {
-      expect(results.node.statusCode).toBe(200);
+  describe.each(runtimes)('%s Runtime', (runtime) => {
+    const getResult = () => telemetry[runtime]?.threads[0]?.[0];
+
+    it('should invoke Lambda successfully', () => {
+      const result = getResult();
+      expect(result).toBeDefined();
+      expect(result.statusCode).toBe(200);
     });
 
     it('should send at least one trace to Datadog', () => {
-      expect(results.node.traces?.length).toBeGreaterThan(0);
+      const result = getResult();
+      expect(result).toBeDefined();
+      expect(result.traces?.length).toBeGreaterThan(0);
     });
 
     it('should have spans in the trace', () => {
-      const trace = results.node.traces![0];
-      expect(trace.spans.length).toBeGreaterThan(0);
-    });
-  });
-
-  describe('Python Runtime', () => {
-    it('should invoke Python Lambda successfully', () => {
-      expect(results.python.statusCode).toBe(200);
-    });
-
-    it('should send at least one trace to Datadog', () => {
-      expect(results.python.traces?.length).toBeGreaterThan(0);
-    });
-
-    it('should have spans in the trace', () => {
-      const trace = results.python.traces![0];
-      expect(trace.spans.length).toBeGreaterThan(0);
-    });
-  });
-
-  describe('Java Runtime', () => {
-    it('should invoke Java Lambda successfully', () => {
-      expect(results.java.statusCode).toBe(200);
-    });
-
-    it('should send at least one trace to Datadog', () => {
-      expect(results.java.traces?.length).toBeGreaterThan(0);
-    });
-
-    it('should have spans in the trace', () => {
-      const trace = results.java.traces![0];
-      expect(trace.spans.length).toBeGreaterThan(0);
-    });
-  });
-
-  describe('.NET Runtime', () => {
-    it('should invoke .NET Lambda successfully', () => {
-      expect(results.dotnet.statusCode).toBe(200);
-    });
-
-    it('should send at least one trace to Datadog', () => {
-      expect(results.dotnet.traces?.length).toBeGreaterThan(0);
-    });
-
-    it('should have spans in the trace', () => {
-      const trace = results.dotnet.traces![0];
+      const result = getResult();
+      expect(result).toBeDefined();
+      const trace = result.traces![0];
       expect(trace.spans.length).toBeGreaterThan(0);
     });
   });
 
   describe('OTLP Response Validation', () => {
+    const getResult = () => telemetry['responseValidation']?.threads[0]?.[0];
+
     it('should invoke response validation Lambda successfully', () => {
-      expect(results.responseValidation.statusCode).toBe(200);
+      const result = getResult();
+      expect(result).toBeDefined();
+      expect(result.statusCode).toBe(200);
     });
 
     it('should have JSON encoded span in Datadog', () => {
-      const allSpans = results.responseValidation.traces?.flatMap(t => t.spans) || [];
+      const result = getResult();
+      expect(result).toBeDefined();
+      const allSpans = result.traces?.flatMap(t => t.spans) || [];
       const hasJsonSpan = allSpans.some(s =>
         s.attributes?.resource_name === 'test-span-json' && s.attributes?.custom?.encoding === 'json'
       );
@@ -109,7 +75,9 @@ describe('OTLP Integration Tests', () => {
     });
 
     it('should have Protobuf encoded span in Datadog', () => {
-      const allSpans = results.responseValidation.traces?.flatMap(t => t.spans) || [];
+      const result = getResult();
+      expect(result).toBeDefined();
+      const allSpans = result.traces?.flatMap(t => t.spans) || [];
       const hasProtobufSpan = allSpans.some(s =>
         s.attributes?.resource_name === 'test-span-protobuf' && s.attributes?.custom?.encoding === 'protobuf'
       );
