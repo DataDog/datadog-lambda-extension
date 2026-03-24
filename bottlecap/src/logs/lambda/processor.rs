@@ -656,8 +656,12 @@ impl LambdaProcessor {
                         self.held_logs.entry(rid).or_default().push(log);
                     }
                 } else {
-                    error!("LOGS | queue_log_after_rules: log without request_id: {log:?}");
-                    drop(log);
+                    // Some logs may not have a request_id. Mark these logs as ready 
+                    // to be aggregated since they cannot carry durable context.
+                    if let Ok(serialized_log) = serde_json::to_string(&log) {
+                        drop(log);
+                        self.ready_logs.push(serialized_log);
+                    }
                 }
             }
             // Not a durable function. Serialize and push the log.
@@ -698,8 +702,12 @@ impl LambdaProcessor {
                                 self.held_logs.entry(rid).or_default().push(log);
                             }
                         } else {
-                            error!("LOGS | queue_log_after_rules: log without request_id: {log:?}");
-                            drop(log);
+                            // Some logs may not have a request_id. Mark these logs as ready 
+                            // to be aggregated since they cannot carry durable context.
+                            if let Ok(serialized_log) = serde_json::to_string(&log) {
+                                drop(log);
+                                self.ready_logs.push(serialized_log);
+                            }
                         }
                     }
                 }
