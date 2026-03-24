@@ -1396,6 +1396,13 @@ mod tests {
     /// Asserts:
     /// - `_dd.compute_stats` tag value in the trace payload
     /// - whether the extension generates stats via `send_processed_traces`
+    ///
+    /// | Input: `compute_trace_stats_on_extension` | Input: `client_computed_stats` | Expected: `_dd.compute_stats` | Expected: Extension generates stats? |
+    /// |-------------------------------------------|--------------------------------|-------------------------------|--------------------------------------|
+    /// | `false`                                   | `false`                        | `"1"`                         | No                                   |
+    /// | `false`                                   | `true`                         | `"0"`                         | No                                   |
+    /// | `true`                                    | `false`                        | `"0"`                         | Yes                                  |
+    /// | `true`                                    | `true`                         | `"0"`                         | No                                   |
     #[allow(clippy::unwrap_used)]
     #[allow(clippy::too_many_lines)]
     async fn check_compute_stats_behavior(
