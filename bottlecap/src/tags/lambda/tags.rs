@@ -127,12 +127,6 @@ fn tags_from_env(
         tags_map.extend(config.tags.clone());
     }
 
-    // The value of _dd.compute_stats is the opposite of config.compute_trace_stats_on_extension.
-    // "config.compute_trace_stats_on_extension == true" means computing stats on the extension side,
-    // so we set _dd.compute_stats to 0 so stats won't be computed on the backend side.
-    let compute_stats = i32::from(!config.compute_trace_stats_on_extension);
-    tags_map.insert(COMPUTE_STATS_KEY.to_string(), compute_stats.to_string());
-
     tags_map
 }
 
@@ -292,8 +286,7 @@ mod tests {
     fn test_new_from_config() {
         let metadata = HashMap::new();
         let tags = Lambda::new_from_config(Arc::new(Config::default()), &metadata);
-        assert_eq!(tags.tags_map.len(), 3);
-        assert_eq!(tags.tags_map.get(COMPUTE_STATS_KEY).unwrap(), "1");
+        assert_eq!(tags.tags_map.len(), 2);
         let arch = arch_to_platform();
         assert_eq!(
             tags.tags_map.get(ARCHITECTURE_KEY).unwrap(),
@@ -428,7 +421,7 @@ mod tests {
                 (parts[0].to_string(), parts[1].to_string())
             })
             .collect();
-        assert_eq!(fn_tags_map.len(), 14);
+        assert_eq!(fn_tags_map.len(), 13);
         assert_eq!(fn_tags_map.get("key1").unwrap(), "value1");
         assert_eq!(fn_tags_map.get("key2").unwrap(), "value2");
         assert_eq!(fn_tags_map.get(ACCOUNT_ID_KEY).unwrap(), "123456789012");
@@ -470,7 +463,7 @@ mod tests {
                 (parts[0].to_string(), parts[1].to_string())
             })
             .collect();
-        assert_eq!(fn_tags_map.len(), 14);
+        assert_eq!(fn_tags_map.len(), 13);
         assert_eq!(fn_tags_map.get("key1").unwrap(), "value1");
         assert_eq!(fn_tags_map.get("key2").unwrap(), "value2");
         assert_eq!(fn_tags_map.get(ACCOUNT_ID_KEY).unwrap(), "123456789012");

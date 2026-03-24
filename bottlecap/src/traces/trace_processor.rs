@@ -350,13 +350,19 @@ impl TraceProcessor for ServerlessTraceProcessor {
             let tags = tags_provider.get_function_tags_map();
             for tracer_payload in collection.iter_mut() {
                 tracer_payload.tags.extend(tags.clone());
-                // If the tracer has already computed stats (Datadog-Client-Computed-Stats header
-                // is set), tell the backend not to compute them again.
-                if header_tags.client_computed_stats {
-                    tracer_payload
-                        .tags
-                        .insert(COMPUTE_STATS_KEY.to_string(), "0".to_string());
-                }
+                // Tell the backend whether to compute stats:
+                // - "1" (compute on backend) if neither the extension nor the tracer is computing them
+                // - "0" (skip on backend) if the extension or the tracer has already computed them
+                let compute_stats = if !config.compute_trace_stats_on_extension
+                    && !header_tags.client_computed_stats
+                {
+                    "1"
+                } else {
+                    "0"
+                };
+                tracer_payload
+                    .tags
+                    .insert(COMPUTE_STATS_KEY.to_string(), compute_stats.to_string());
             }
         }
         let endpoint = Endpoint {
@@ -668,6 +674,10 @@ mod tests {
         );
         let tracer_payload = tracer_payload.expect("expected Some payload");
 
+        let mut expected_tags = tags_provider.get_function_tags_map();
+        // process_traces always sets _dd.compute_stats:
+        // "1" since compute_trace_stats_on_extension is false and client_computed_stats is false.
+        expected_tags.insert(COMPUTE_STATS_KEY.to_string(), "1".to_string());
         let expected_tracer_payload = pb::TracerPayload {
             container_id: "33".to_string(),
             language_name: "nodejs".to_string(),
@@ -681,7 +691,7 @@ mod tests {
                 tags: HashMap::new(),
                 dropped_trace: false,
             }],
-            tags: tags_provider.get_function_tags_map(),
+            tags: expected_tags,
             env: "test-env".to_string(),
             hostname: String::new(),
             app_version: String::new(),
@@ -1382,8 +1392,8 @@ mod tests {
     }
 
     /// Verifies that when `client_computed_stats` is true, `process_traces` sets
-    /// `_dd.compute_stats` to "0" in the payload tags, overriding the value set by
-    /// `get_function_tags_map`, and that `send_processed_traces` does not generate stats.
+    /// `_dd.compute_stats` to "0" in the payload tags, and that `send_processed_traces`
+    /// does not generate stats.
     #[tokio::test]
     #[allow(clippy::unwrap_used)]
     async fn test_process_traces_client_computed_stats_overrides_compute_stats_tag() {
@@ -1394,8 +1404,8 @@ mod tests {
 
         let config = Arc::new(Config {
             apm_dd_url: "https://trace.agent.datadoghq.com".to_string(),
-            // compute_trace_stats_on_extension is false, so get_function_tags_map would set
-            // _dd.compute_stats to "1". client_computed_stats should override it to "0".
+            // compute_trace_stats_on_extension is false but client_computed_stats is true,
+            // so process_traces should set _dd.compute_stats to "0".
             compute_trace_stats_on_extension: false,
             ..Config::default()
         });
@@ -1434,7 +1444,7 @@ mod tests {
             ..Default::default()
         };
 
-        // Verify _dd.compute_stats is overridden to "0" in the payload tags.
+        // Verify _dd.compute_stats is "0" in the payload tags.
         let (payload_info, _) = processor.process_traces(
             config.clone(),
             tags_provider.clone(),
