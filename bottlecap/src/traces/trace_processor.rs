@@ -351,7 +351,7 @@ impl TraceProcessor for ServerlessTraceProcessor {
             for tracer_payload in collection.iter_mut() {
                 tracer_payload.tags.extend(tags.clone());
                 // Tell the backend whether to compute stats:
-                // - "1" (compute on backend) if neither the extension nor the tracer is computing them
+                // - "1" (compute on backend) if neither the tracer nor the extension is computing them
                 // - "0" (skip on backend) if the extension or the tracer has already computed them
                 let compute_stats = if !config.compute_trace_stats_on_extension
                     && !header_tags.client_computed_stats
@@ -675,8 +675,8 @@ mod tests {
         let tracer_payload = tracer_payload.expect("expected Some payload");
 
         let mut expected_tags = tags_provider.get_function_tags_map();
-        // process_traces always sets _dd.compute_stats:
-        // "1" since compute_trace_stats_on_extension is false and client_computed_stats is false.
+        // process_traces always sets _dd.compute_stats:"1"
+        // because compute_trace_stats_on_extension is false and client_computed_stats is false.
         expected_tags.insert(COMPUTE_STATS_KEY.to_string(), "1".to_string());
         let expected_tracer_payload = pb::TracerPayload {
             container_id: "33".to_string(),
