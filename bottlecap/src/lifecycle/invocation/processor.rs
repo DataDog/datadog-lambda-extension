@@ -1360,11 +1360,15 @@ impl Processor {
         execution_id: &str,
         execution_name: &str,
     ) {
-        if let Err(e) = self.durable_context_tx.send(DurableContextUpdate {
-            request_id: request_id.to_owned(),
-            execution_id: execution_id.to_owned(),
-            execution_name: execution_name.to_owned(),
-        }).await {
+        if let Err(e) = self
+            .durable_context_tx
+            .send(DurableContextUpdate {
+                request_id: request_id.to_owned(),
+                execution_id: execution_id.to_owned(),
+                execution_name: execution_name.to_owned(),
+            })
+            .await
+        {
             error!("Invocation Processor | Failed to forward durable context to logs agent: {e}");
         }
     }

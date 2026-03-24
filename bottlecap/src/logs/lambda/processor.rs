@@ -63,7 +63,6 @@ pub struct LambdaProcessor {
 const DURABLE_CONTEXT_MAP_CAPACITY: usize = 500;
 const HELD_LOGS_MAX_KEYS: usize = 500;
 
-
 const OOM_ERRORS: [&str; 7] = [
     "fatal error: runtime: out of memory",       // Go
     "java.lang.OutOfMemoryError",                // Java
@@ -652,11 +651,13 @@ impl LambdaProcessor {
             None => {
                 if let Some(rid) = log.message.lambda.request_id.clone() {
                     // Do not log here — the warning would re-enter the logs pipeline and loop.
-                    if self.held_logs.contains_key(&rid) || self.held_logs.len() < HELD_LOGS_MAX_KEYS {
+                    if self.held_logs.contains_key(&rid)
+                        || self.held_logs.len() < HELD_LOGS_MAX_KEYS
+                    {
                         self.held_logs.entry(rid).or_default().push(log);
                     }
                 } else {
-                    // Some logs may not have a request_id. Mark these logs as ready 
+                    // Some logs may not have a request_id. Mark these logs as ready
                     // to be aggregated since they cannot carry durable context.
                     if let Ok(serialized_log) = serde_json::to_string(&log) {
                         drop(log);
@@ -698,11 +699,13 @@ impl LambdaProcessor {
                         if let Some(rid) = log.message.lambda.request_id.clone() {
                             // Drop the log if held_logs is at capacity. This is to avoid memory leaks if durable
                             // context doesn't arrive for some reason.
-                            if self.held_logs.contains_key(&rid) || self.held_logs.len() < HELD_LOGS_MAX_KEYS {
+                            if self.held_logs.contains_key(&rid)
+                                || self.held_logs.len() < HELD_LOGS_MAX_KEYS
+                            {
                                 self.held_logs.entry(rid).or_default().push(log);
                             }
                         } else {
-                            // Some logs may not have a request_id. Mark these logs as ready 
+                            // Some logs may not have a request_id. Mark these logs as ready
                             // to be aggregated since they cannot carry durable context.
                             if let Ok(serialized_log) = serde_json::to_string(&log) {
                                 drop(log);

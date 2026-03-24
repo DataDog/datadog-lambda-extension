@@ -616,11 +616,9 @@ impl InvocationProcessorService {
                     execution_id,
                     execution_name,
                 } => {
-                    self.processor.forward_durable_context(
-                        &request_id,
-                        &execution_id,
-                        &execution_name,
-                    ).await;
+                    self.processor
+                        .forward_durable_context(&request_id, &execution_id, &execution_name)
+                        .await;
                 }
                 ProcessorCommand::OnOutOfMemoryError { timestamp } => {
                     self.processor.on_out_of_memory_error(timestamp);
