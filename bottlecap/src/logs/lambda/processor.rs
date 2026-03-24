@@ -61,6 +61,8 @@ pub struct LambdaProcessor {
 // Matches `lifecycle::invocation::ContextBuffer` default capacity: sized to absorb async
 // event backlog where invocation contexts may arrive out of order.
 const DURABLE_CONTEXT_MAP_CAPACITY: usize = 500;
+const HELD_LOGS_MAX_KEYS: usize = 500;
+
 
 const OOM_ERRORS: [&str; 7] = [
     "fatal error: runtime: out of memory",       // Go
@@ -649,7 +651,10 @@ impl LambdaProcessor {
             // We don't yet know if this is a durable function. Hold the log until we know.
             None => {
                 if let Some(rid) = log.message.lambda.request_id.clone() {
-                    self.held_logs.entry(rid).or_default().push(log);
+                    // Do not log here — the warning would re-enter the logs pipeline and loop.
+                    if self.held_logs.contains_key(&rid) || self.held_logs.len() < HELD_LOGS_MAX_KEYS {
+                        self.held_logs.entry(rid).or_default().push(log);
+                    }
                 } else {
                     error!("LOGS | queue_log_after_rules: log without request_id: {log:?}");
                     drop(log);
@@ -687,7 +692,11 @@ impl LambdaProcessor {
                     }
                     None => {
                         if let Some(rid) = log.message.lambda.request_id.clone() {
-                            self.held_logs.entry(rid).or_default().push(log);
+                            // Drop the log if held_logs is at capacity. This is to avoid memory leaks if durable
+                            // context doesn't arrive for some reason.
+                            if self.held_logs.contains_key(&rid) || self.held_logs.len() < HELD_LOGS_MAX_KEYS {
+                                self.held_logs.entry(rid).or_default().push(log);
+                            }
                         } else {
                             error!("LOGS | queue_log_after_rules: log without request_id: {log:?}");
                             drop(log);
