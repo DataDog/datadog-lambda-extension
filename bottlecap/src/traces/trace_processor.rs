@@ -1396,6 +1396,7 @@ mod tests {
     /// does not generate stats.
     #[tokio::test]
     #[allow(clippy::unwrap_used)]
+    #[allow(clippy::too_many_lines)]
     async fn test_process_traces_client_computed_stats_overrides_compute_stats_tag() {
         use crate::traces::stats_concentrator_service::StatsConcentratorHandle;
         use crate::traces::stats_generator::StatsGenerator;
@@ -1444,7 +1445,7 @@ mod tests {
             ..Default::default()
         };
 
-        // Verify _dd.compute_stats is "0" in the payload tags.
+        // Verify _dd.compute_stats is "0" when client_computed_stats is true.
         let (payload_info, _) = processor.process_traces(
             config.clone(),
             tags_provider.clone(),
@@ -1465,6 +1466,34 @@ mod tests {
                     .get(crate::tags::lambda::tags::COMPUTE_STATS_KEY),
                 Some(&"0".to_string()),
                 "_dd.compute_stats must be 0 when client_computed_stats is true"
+            );
+        }
+
+        // Verify _dd.compute_stats is "1" when both flags are false (backend computes stats).
+        let no_client_stats_header_tags = tracer_header_tags::TracerHeaderTags {
+            client_computed_stats: false,
+            ..make_header_tags()
+        };
+        let (payload_info, _) = processor.process_traces(
+            config.clone(),
+            tags_provider.clone(),
+            no_client_stats_header_tags,
+            vec![vec![make_span()]],
+            0,
+            None,
+        );
+        let payload_info = payload_info.expect("expected Some payload");
+        let send_data = payload_info.builder.build();
+        let TracerPayloadCollection::V07(payloads) = send_data.get_payloads() else {
+            panic!("expected V07");
+        };
+        for payload in payloads {
+            assert_eq!(
+                payload
+                    .tags
+                    .get(crate::tags::lambda::tags::COMPUTE_STATS_KEY),
+                Some(&"1".to_string()),
+                "_dd.compute_stats must be 1 when neither the extension nor the tracer computes stats"
             );
         }
 
@@ -1549,7 +1578,7 @@ mod tests {
         let (stats_tx, mut stats_rx) = mpsc::unbounded_channel();
         let stats_handle = StatsConcentratorHandle::new(stats_tx);
         let stats_generator = Arc::new(StatsGenerator::new(stats_handle));
-        let (trace_tx, _trace_rx) = mpsc::channel(10);
+        let (trace_tx, mut trace_rx) = mpsc::channel(10);
         let sending_processor = SendingTraceProcessor {
             appsec: None,
             processor,
@@ -1574,5 +1603,24 @@ mod tests {
             "no stats should be generated when client_computed_stats is true, \
              even if compute_trace_stats_on_extension is also true"
         );
+
+        // Verify _dd.compute_stats is "0": compute_trace_stats_on_extension=true means
+        // the extension handles stats, so the backend must not compute them.
+        let payload_info = trace_rx
+            .try_recv()
+            .expect("expected payload in trace_tx channel");
+        let send_data = payload_info.builder.build();
+        let TracerPayloadCollection::V07(payloads) = send_data.get_payloads() else {
+            panic!("expected V07");
+        };
+        for payload in payloads {
+            assert_eq!(
+                payload
+                    .tags
+                    .get(crate::tags::lambda::tags::COMPUTE_STATS_KEY),
+                Some(&"0".to_string()),
+                "_dd.compute_stats must be 0 when compute_trace_stats_on_extension is true"
+            );
+        }
     }
 }
