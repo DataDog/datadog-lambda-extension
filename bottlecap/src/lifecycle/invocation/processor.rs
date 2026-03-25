@@ -2184,7 +2184,10 @@ mod tests {
         p.send_ctx_spans(&tags_provider, &trace_sender, context)
             .await;
 
-        let payload = trace_rx.recv().await.expect("expected payload from trace_tx");
+        let payload = trace_rx
+            .recv()
+            .await
+            .expect("expected payload from trace_tx");
         assert!(
             payload.header_tags.client_computed_stats,
             "client_computed_stats must be propagated to the aws.lambda span payload"
@@ -2200,8 +2203,7 @@ mod tests {
         };
         for p in payloads {
             assert_eq!(
-                p.tags
-                    .get(crate::tags::lambda::tags::COMPUTE_STATS_KEY),
+                p.tags.get(crate::tags::lambda::tags::COMPUTE_STATS_KEY),
                 Some(&"0".to_string()),
                 "_dd.compute_stats must be 0 when client_computed_stats is true"
             );
