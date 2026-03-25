@@ -2,12 +2,13 @@ use bottlecap::LAMBDA_RUNTIME_SLUG;
 use bottlecap::config::Config;
 use bottlecap::event_bus::EventBus;
 use bottlecap::extension::telemetry::events::TelemetryEvent;
-use bottlecap::logs::{agent::LogsAgent, flusher::LogsFlusher};
+use bottlecap::logs::agent::LogsAgent;
 use bottlecap::tags::provider::Provider;
-use dogstatsd::api_key::ApiKeyFactory;
+use datadog_logs_agent::{AggregatorService, Destination, LogFlusher, LogFlusherConfig};
 use httpmock::prelude::*;
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::time::Duration;
 
 mod common;
 
@@ -19,9 +20,11 @@ async fn test_logs() {
     };
     let dd_api_key = "my_test_key";
 
-    // protobuf is using hashmap, can't set a btreemap to have sorted keys. Using multiple regexp since
-    // Can't do look around since -> error: look-around, including look-ahead and look-behind, is not supported
-    let regexp_message = r#"[{"message":{"message":"START RequestId: 459921b5-681c-4a96-beb0-81e0aa586026 Version: $LATEST","lambda":{"arn":"test-arn","request_id":"459921b5-681c-4a96-beb0-81e0aa586026"},"timestamp":1666361103165,"status":"info"},"hostname":"test-arn","service":"","#;
+    // New flat LogEntry format: top-level message, hostname, lambda attrs flattened
+    let regexp_message =
+        r#""message":"START RequestId: 459921b5-681c-4a96-beb0-81e0aa586026 Version: $LATEST""#;
+    let regexp_request_id = r#""request_id":"459921b5-681c-4a96-beb0-81e0aa586026""#;
+    let regexp_hostname = r#""hostname":"test-arn""#;
     let regexp_compute_state = r#"_dd.compute_stats:1"#;
     let regexp_arch = format!(r#"architecture:{}"#, arch);
     let regexp_function_arn = r#"function_arn:test-arn"#;
@@ -34,6 +37,8 @@ async fn test_logs() {
             .header("DD-API-KEY", dd_api_key)
             .header("Content-Type", "application/json")
             .body_contains(regexp_message)
+            .body_contains(regexp_request_id)
+            .body_contains(regexp_hostname)
             .body_contains(regexp_compute_state)
             .body_contains(regexp_arch)
             .body_contains(regexp_function_arn)
@@ -56,8 +61,7 @@ async fn test_logs() {
 
     let (_, bus_tx) = EventBus::run();
 
-    let (logs_aggr_service, logs_aggr_handle) =
-        bottlecap::logs::aggregator_service::AggregatorService::default();
+    let (logs_aggr_service, logs_aggr_handle) = AggregatorService::new();
     tokio::spawn(async move {
         logs_aggr_service.run().await;
     });
@@ -69,10 +73,20 @@ async fn test_logs() {
         logs_aggr_handle.clone(),
         false,
     );
-    let api_key_factory = Arc::new(ApiKeyFactory::new(dd_api_key));
+
     let client = bottlecap::http::get_client(&Arc::clone(&arc_conf));
-    let logs_flusher =
-        LogsFlusher::new(api_key_factory, logs_aggr_handle, arc_conf.clone(), client);
+    let flusher_config = LogFlusherConfig {
+        api_key: dd_api_key.to_string(),
+        site: "datadoghq.com".to_string(),
+        mode: Destination::ObservabilityPipelinesWorker {
+            url: format!("{}/api/v2/logs", server.url("")),
+        },
+        additional_endpoints: Vec::new(),
+        use_compression: false,
+        compression_level: 3,
+        flush_timeout: Duration::from_secs(5),
+    };
+    let logs_flusher = LogFlusher::new(flusher_config, client, logs_aggr_handle);
 
     let telemetry_events: Vec<TelemetryEvent> = serde_json::from_str(
         r#"[{"time":"2022-10-21T14:05:03.165Z","type":"platform.start","record":{"requestId":"459921b5-681c-4a96-beb0-81e0aa586026","version":"$LATEST","tracing":{"spanId":"24cd7d670fa455f0","type":"X-Amzn-Trace-Id","value":"Root=1-6352a70e-1e2c502e358361800241fd45;Parent=35465b3a9e2f7c6a;Sampled=1"}}}]"#)
@@ -89,7 +103,7 @@ async fn test_logs() {
 
     logs_agent.sync_consume().await;
 
-    let _ = logs_flusher.flush(None).await;
+    let _ = logs_flusher.flush(vec![]).await;
 
     hello_mock.assert();
 }
