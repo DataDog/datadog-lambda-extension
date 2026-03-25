@@ -80,9 +80,12 @@ impl TraceService for OtlpGrpcService {
             debug!("OTLP gRPC | Successfully buffered traces to be aggregated.");
         }
 
+        // Compute stats after process_traces() which performs obfuscation.
         if compute_trace_stats_on_extension
             && let Err(err) = self.stats_generator.send(&processed_traces)
         {
+            // Just log the error. We don't think trace stats are critical, so we don't want to
+            // return an error if only stats fail to send.
             error!("OTLP gRPC | Error sending traces to the stats concentrator: {err}");
         }
 
