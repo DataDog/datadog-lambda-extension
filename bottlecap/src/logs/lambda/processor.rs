@@ -51,7 +51,11 @@ pub struct LambdaProcessor {
     // While is_durable_function is Some(true), logs whose request_id has no
     // durable execution context yet are also stashed here; they are drained
     // the moment that context arrives.
+    // When held_logs reaches capacity, the oldest key is evicted to ready_logs (without durable
+    // context tags) to ensure logs are always sent even if the tracer is not installed.
     held_logs: HashMap<String, Vec<IntakeLog>>,
+    // Insertion order for FIFO eviction when held_logs reaches capacity
+    held_logs_order: VecDeque<String>,
     // Maps request_id -> (durable execution id, durable execution name)
     durable_context_map: HashMap<String, DurableExecutionContext>,
     // Insertion order for FIFO eviction when map reaches capacity
@@ -142,6 +146,7 @@ impl LambdaProcessor {
             is_managed_instance_mode,
             is_durable_function: None,
             held_logs: HashMap::new(),
+            held_logs_order: VecDeque::new(),
             durable_context_map: HashMap::with_capacity(DURABLE_CONTEXT_MAP_CAPACITY),
             durable_context_order: VecDeque::with_capacity(DURABLE_CONTEXT_MAP_CAPACITY),
         }
@@ -564,6 +569,7 @@ impl LambdaProcessor {
         let Some(held) = self.held_logs.remove(request_id) else {
             return;
         };
+        self.held_logs_order.retain(|r| r != request_id);
         let durable_ctx = self.durable_context_map.get(request_id).cloned();
         if let Some(ctx) = durable_ctx {
             for mut log in held {
@@ -583,6 +589,7 @@ impl LambdaProcessor {
     ///   the rest stay in `held_logs` until their context arrives via an `aws.lambda` span.
     fn resolve_held_logs_on_durable_function_set(&mut self, is_durable: bool) {
         let held = std::mem::take(&mut self.held_logs);
+        self.held_logs_order.clear();
         if is_durable {
             // Drain logs whose request_id is already in the map.
             for (request_id, logs) in held {
@@ -624,6 +631,31 @@ impl LambdaProcessor {
         }
     }
 
+    /// Stashes a log in `held_logs` under `request_id`, waiting for durable context.
+    ///
+    /// If `held_logs` is at capacity and `request_id` is a new key, the oldest key is evicted:
+    /// its logs are drained to `ready_logs` without durable context tags. This ensures logs are
+    /// always eventually sent to Datadog even if the tracer is not installed and context never
+    /// arrives.
+    fn hold_log(&mut self, request_id: String, log: IntakeLog) {
+        if !self.held_logs.contains_key(&request_id) {
+            while self.held_logs.len() >= HELD_LOGS_MAX_KEYS {
+                // Evict the oldest key to ready_logs (without durable context tags).
+                if let Some(oldest) = self.held_logs_order.pop_front() {
+                    if let Some(evicted) = self.held_logs.remove(&oldest) {
+                        for evicted_log in evicted {
+                            if let Ok(s) = serde_json::to_string(&evicted_log) {
+                                self.ready_logs.push(s);
+                            }
+                        }
+                    }
+                }
+            }
+            self.held_logs_order.push_back(request_id.clone());
+        }
+        self.held_logs.entry(request_id).or_default().push(log);
+    }
+
     /// Queues a log that has already had processing rules applied.
     ///
     /// Logs from the durable execution SDK include an `executionArn` field from which
@@ -650,12 +682,7 @@ impl LambdaProcessor {
             // We don't yet know if this is a durable function. Hold the log until we know.
             None => {
                 if let Some(rid) = log.message.lambda.request_id.clone() {
-                    // Do not log here — the warning would re-enter the logs pipeline and loop.
-                    if self.held_logs.contains_key(&rid)
-                        || self.held_logs.len() < HELD_LOGS_MAX_KEYS
-                    {
-                        self.held_logs.entry(rid).or_default().push(log);
-                    }
+                    self.hold_log(rid, log);
                 } else {
                     // Some logs may not have a request_id. Mark these logs as ready
                     // to be aggregated since they cannot carry durable context.
@@ -697,13 +724,7 @@ impl LambdaProcessor {
                     }
                     None => {
                         if let Some(rid) = log.message.lambda.request_id.clone() {
-                            // Drop the log if held_logs is at capacity. This is to avoid memory leaks if durable
-                            // context doesn't arrive for some reason.
-                            if self.held_logs.contains_key(&rid)
-                                || self.held_logs.len() < HELD_LOGS_MAX_KEYS
-                            {
-                                self.held_logs.entry(rid).or_default().push(log);
-                            }
+                            self.hold_log(rid, log);
                         } else {
                             // Some logs may not have a request_id. Mark these logs as ready
                             // to be aggregated since they cannot carry durable context.
