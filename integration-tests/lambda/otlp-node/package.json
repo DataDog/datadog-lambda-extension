@@ -5,6 +5,7 @@
   "main": "index.js",
   "dependencies": {
     "@opentelemetry/api": "^1.9.0",
+    "@opentelemetry/exporter-trace-otlp-grpc": "^0.54.2",
     "@opentelemetry/exporter-trace-otlp-http": "^0.54.2",
     "@opentelemetry/exporter-trace-otlp-proto": "^0.54.2",
     "@opentelemetry/otlp-transformer": "^0.54.2",

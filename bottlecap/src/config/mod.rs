@@ -29,9 +29,9 @@ use crate::config::{
     log_level::LogLevel,
     logs_additional_endpoints::LogsAdditionalEndpoint,
     processing_rule::{ProcessingRule, deserialize_processing_rules},
-    trace_propagation_style::TracePropagationStyle,
     yaml::YamlConfigSource,
 };
+use datadog_opentelemetry::propagation::TracePropagationStyle;
 
 /// Helper macro to merge Option<String> fields to String fields
 ///
@@ -488,6 +488,38 @@ impl Default for Config {
     }
 }
 
+impl datadog_opentelemetry::propagation::PropagationConfig for Config {
+    fn trace_propagation_style(&self) -> Option<&[TracePropagationStyle]> {
+        if self.trace_propagation_style.is_empty() {
+            None
+        } else {
+            Some(&self.trace_propagation_style)
+        }
+    }
+
+    fn trace_propagation_style_extract(&self) -> Option<&[TracePropagationStyle]> {
+        if self.trace_propagation_style_extract.is_empty() {
+            None
+        } else {
+            Some(&self.trace_propagation_style_extract)
+        }
+    }
+
+    fn trace_propagation_style_inject(&self) -> Option<&[TracePropagationStyle]> {
+        // Bottlecap does not configure injection styles separately
+        None
+    }
+
+    fn trace_propagation_extract_first(&self) -> bool {
+        self.trace_propagation_extract_first
+    }
+
+    fn datadog_tags_max_length(&self) -> usize {
+        // Default max length matching dd-trace-rs
+        512
+    }
+}
+
 #[allow(clippy::module_name_repetitions)]
 #[inline]
 #[must_use]
@@ -819,8 +851,8 @@ pub mod tests {
         flush_strategy::{FlushStrategy, PeriodicStrategy},
         log_level::LogLevel,
         processing_rule::ProcessingRule,
-        trace_propagation_style::TracePropagationStyle,
     };
+    use datadog_opentelemetry::propagation::TracePropagationStyle;
 
     #[test]
     fn test_default_logs_intake_url() {
@@ -1299,17 +1331,12 @@ pub mod tests {
     fn test_parse_trace_propagation_style() {
         figment::Jail::expect_with(|jail| {
             jail.clear_env();
-            jail.set_env(
-                "DD_TRACE_PROPAGATION_STYLE",
-                "datadog,tracecontext,b3,b3multi",
-            );
+            jail.set_env("DD_TRACE_PROPAGATION_STYLE", "datadog,tracecontext");
             let config = get_config(Path::new(""));
 
             let expected_styles = vec![
                 TracePropagationStyle::Datadog,
                 TracePropagationStyle::TraceContext,
-                TracePropagationStyle::B3,
-                TracePropagationStyle::B3Multi,
             ];
             assert_eq!(config.trace_propagation_style, expected_styles);
             assert_eq!(config.trace_propagation_style_extract, expected_styles);

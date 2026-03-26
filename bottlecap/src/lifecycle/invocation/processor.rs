@@ -5,6 +5,13 @@ use std::{
 };
 
 use chrono::{DateTime, Utc};
+use datadog_opentelemetry::propagation::{
+    context::SpanContext,
+    datadog::{
+        DATADOG_PARENT_ID_KEY, DATADOG_SAMPLING_PRIORITY_KEY, DATADOG_TAGS_KEY,
+        DATADOG_TRACE_ID_KEY,
+    },
+};
 use libdd_trace_protobuf::pb::Span;
 use libdd_trace_utils::tracer_header_tags;
 use serde_json::Value;
@@ -34,14 +41,7 @@ use crate::{
     },
     tags::{lambda::tags::resolve_runtime_from_proc, provider},
     traces::{
-        context::SpanContext,
-        propagation::{
-            DatadogCompositePropagator, Propagator,
-            text_map_propagator::{
-                DATADOG_PARENT_ID_KEY, DATADOG_SAMPLING_PRIORITY_KEY, DATADOG_SPAN_ID_KEY,
-                DATADOG_TRACE_ID_KEY, DatadogHeaderPropagator,
-            },
-        },
+        propagation::{DatadogCompositePropagator, carrier::JsonCarrier},
         trace_processor::SendingTraceProcessor,
     },
 };
@@ -55,6 +55,7 @@ pub const DATADOG_INVOCATION_ERROR_MESSAGE_KEY: &str = "x-datadog-invocation-err
 pub const DATADOG_INVOCATION_ERROR_TYPE_KEY: &str = "x-datadog-invocation-error-type";
 pub const DATADOG_INVOCATION_ERROR_STACK_KEY: &str = "x-datadog-invocation-error-stack";
 pub const DATADOG_INVOCATION_ERROR_KEY: &str = "x-datadog-invocation-error";
+const DATADOG_SPAN_ID_KEY: &str = "x-datadog-span-id";
 const TAG_SAMPLING_PRIORITY: &str = "_sampling_priority_v1";
 
 pub struct Processor {
@@ -619,9 +620,16 @@ impl Processor {
         trace_sender: &Arc<SendingTraceProcessor>,
         context: Context,
     ) {
+        let client_computed_stats = context.client_computed_stats;
         let (traces, body_size) = self.get_ctx_spans(context);
-        self.send_spans(traces, body_size, tags_provider, trace_sender)
-            .await;
+        self.send_spans(
+            traces,
+            body_size,
+            client_computed_stats,
+            tags_provider,
+            trace_sender,
+        )
+        .await;
     }
 
     fn get_ctx_spans(&mut self, context: Context) -> (Vec<Span>, usize) {
@@ -686,7 +694,7 @@ impl Processor {
             let traces = vec![cold_start_span.clone()];
             let body_size = size_of_val(cold_start_span);
 
-            self.send_spans(traces, body_size, tags_provider, trace_sender)
+            self.send_spans(traces, body_size, false, tags_provider, trace_sender)
                 .await;
         }
     }
@@ -698,6 +706,7 @@ impl Processor {
         &mut self,
         traces: Vec<Span>,
         body_size: usize,
+        client_computed_stats: bool,
         tags_provider: &Arc<provider::Provider>,
         trace_sender: &Arc<SendingTraceProcessor>,
     ) {
@@ -710,7 +719,7 @@ impl Processor {
             tracer_version: "",
             container_id: "",
             client_computed_top_level: false,
-            client_computed_stats: false,
+            client_computed_stats,
             dropped_p0_traces: 0,
             dropped_p0_spans: 0,
         };
@@ -988,7 +997,10 @@ impl Processor {
 
         // Set the extracted trace context to the spans
         if let Some(sc) = &context.extracted_span_context {
-            context.invocation_span.trace_id = sc.trace_id;
+            #[allow(clippy::cast_possible_truncation)] // Datadog protocol uses lower 64 bits
+            {
+                context.invocation_span.trace_id = sc.trace_id as u64;
+            }
             context.invocation_span.parent_id = sc.span_id;
 
             // Set the right data to the correct root level span,
@@ -1091,7 +1103,7 @@ impl Processor {
     pub fn extract_span_context(
         headers: &HashMap<String, String>,
         payload_value: &Value,
-        propagator: Arc<impl Propagator>,
+        propagator: Arc<DatadogCompositePropagator>,
     ) -> Option<SpanContext> {
         if let Some(sc) =
             span_inferrer::extract_span_context(payload_value, Arc::clone(&propagator))
@@ -1102,14 +1114,14 @@ impl Processor {
         if let Some(sc) = payload_value
             .get("request")
             .and_then(|req| req.get("headers"))
-            .and_then(|headers| propagator.extract(headers))
+            .and_then(|headers| propagator.extract(&JsonCarrier(headers)))
         {
             debug!("Extracted trace context from event.request.headers");
             return Some(sc);
         }
 
         if let Some(payload_headers) = payload_value.get("headers")
-            && let Some(sc) = propagator.extract(payload_headers)
+            && let Some(sc) = propagator.extract(&JsonCarrier(payload_headers))
         {
             debug!("Extracted trace context from event headers");
             return Some(sc);
@@ -1211,14 +1223,17 @@ impl Processor {
             self.inferrer.set_status_code(status_code_as_string);
         }
 
-        let mut trace_id = 0;
-        let mut parent_id = 0;
+        let mut trace_id: u64 = 0;
+        let mut parent_id: u64 = 0;
         let mut tags: HashMap<String, String> = HashMap::new();
 
         // If we have a trace context, this means we got it from
         // distributed tracing
         if let Some(sc) = &context.extracted_span_context {
-            trace_id = sc.trace_id;
+            #[allow(clippy::cast_possible_truncation)] // Datadog protocol uses lower 64 bits
+            {
+                trace_id = sc.trace_id as u64;
+            }
             parent_id = sc.span_id;
             tags.extend(sc.tags.clone());
         }
@@ -1244,9 +1259,9 @@ impl Processor {
                     .insert(TAG_SAMPLING_PRIORITY.to_string(), priority);
             }
 
-            // Extract tags from headers
-            // Used for 128 bit trace ids
-            tags = DatadogHeaderPropagator::extract_tags(&headers);
+            // Extract _dd.p.* propagation tags from x-datadog-tags header
+            let carrier_tags = headers.get(DATADOG_TAGS_KEY).map_or("", String::as_str);
+            tags = crate::traces::propagation::extract_propagation_tags(carrier_tags);
         }
 
         // We should always use the generated span id from the tracer
@@ -1346,9 +1361,10 @@ impl Processor {
     ///
     /// This is used to enrich the invocation span with additional metadata from the tracers
     /// top level span, since we discard the tracer span when we create the invocation span.
-    pub fn add_tracer_span(&mut self, span: &Span) {
+    pub fn add_tracer_span(&mut self, span: &Span, client_computed_stats: bool) {
         if let Some(request_id) = span.meta.get("request_id") {
-            self.context_buffer.add_tracer_span(request_id, span);
+            self.context_buffer
+                .add_tracer_span(request_id, span, client_computed_stats);
         }
     }
 
@@ -2094,8 +2110,8 @@ mod tests {
     fn test_extract_span_context_priority_order() {
         let config = Arc::new(config::Config {
             trace_propagation_style_extract: vec![
-                config::trace_propagation_style::TracePropagationStyle::Datadog,
-                config::trace_propagation_style::TracePropagationStyle::TraceContext,
+                datadog_opentelemetry::propagation::TracePropagationStyle::Datadog,
+                datadog_opentelemetry::propagation::TracePropagationStyle::TraceContext,
             ],
             ..config::Config::default()
         });
@@ -2132,8 +2148,8 @@ mod tests {
     fn test_extract_span_context_no_request_headers() {
         let config = Arc::new(config::Config {
             trace_propagation_style_extract: vec![
-                config::trace_propagation_style::TracePropagationStyle::Datadog,
-                config::trace_propagation_style::TracePropagationStyle::TraceContext,
+                datadog_opentelemetry::propagation::TracePropagationStyle::Datadog,
+                datadog_opentelemetry::propagation::TracePropagationStyle::TraceContext,
             ],
             ..config::Config::default()
         });
@@ -2155,5 +2171,95 @@ mod tests {
             result.is_none(),
             "Should return None when no trace context found"
         );
+    }
+
+    /// Verifies that `client_computed_stats` set on a context via `add_tracer_span` is
+    /// propagated all the way through `send_ctx_spans` to the `aws.lambda` payload sent
+    /// to the backend, so the extension does not generate duplicate stats.
+    #[tokio::test]
+    #[allow(clippy::unwrap_used)]
+    async fn test_client_computed_stats_propagated_to_aws_lambda_span() {
+        use crate::traces::stats_concentrator_service::StatsConcentratorService;
+        use crate::traces::stats_generator::StatsGenerator;
+        use libdd_trace_obfuscation::obfuscation_config::ObfuscationConfig;
+        use tokio::sync::mpsc;
+
+        let config = Arc::new(config::Config {
+            apm_dd_url: "https://trace.agent.datadoghq.com".to_string(),
+            ..config::Config::default()
+        });
+        let tags_provider = Arc::new(provider::Provider::new(
+            Arc::clone(&config),
+            LAMBDA_RUNTIME_SLUG.to_string(),
+            &HashMap::from([("function_arn".to_string(), "test-arn".to_string())]),
+        ));
+        let aws_config = Arc::new(AwsConfig {
+            region: "us-east-1".into(),
+            aws_lwa_proxy_lambda_runtime_api: None,
+            function_name: "test-function".into(),
+            sandbox_init_time: Instant::now(),
+            runtime_api: "***".into(),
+            exec_wrapper: None,
+            initialization_type: "on-demand".into(),
+        });
+        let (aggregator_service, aggregator_handle) =
+            AggregatorService::new(EMPTY_TAGS, 1024).expect("failed to create aggregator service");
+        tokio::spawn(aggregator_service.run());
+        let propagator = Arc::new(DatadogCompositePropagator::new(Arc::clone(&config)));
+        let mut p = Processor::new(
+            Arc::clone(&tags_provider),
+            Arc::clone(&config),
+            aws_config,
+            aggregator_handle,
+            propagator,
+        );
+
+        let (trace_tx, mut trace_rx) = mpsc::channel(10);
+        let (stats_concentrator_service, stats_concentrator_handle) =
+            StatsConcentratorService::new(Arc::clone(&config));
+        tokio::spawn(stats_concentrator_service.run());
+        let trace_sender = Arc::new(SendingTraceProcessor {
+            appsec: None,
+            processor: Arc::new(trace_processor::ServerlessTraceProcessor {
+                obfuscation_config: Arc::new(
+                    ObfuscationConfig::new().expect("Failed to create ObfuscationConfig"),
+                ),
+            }),
+            trace_tx,
+            stats_generator: Arc::new(StatsGenerator::new(stats_concentrator_handle)),
+        });
+
+        let mut context = Context::from_request_id("req-1");
+        context.invocation_span.trace_id = 1;
+        context.invocation_span.span_id = 2;
+        context.client_computed_stats = true;
+
+        p.send_ctx_spans(&tags_provider, &trace_sender, context)
+            .await;
+
+        let payload = trace_rx
+            .recv()
+            .await
+            .expect("expected payload from trace_tx");
+        assert!(
+            payload.header_tags.client_computed_stats,
+            "client_computed_stats must be propagated to the aws.lambda span payload"
+        );
+
+        // Verify _dd.compute_stats is "0" in the built payload tags: client_computed_stats=true
+        // means the tracer has already computed stats, so neither extension nor backend should.
+        let send_data = payload.builder.build();
+        let libdd_trace_utils::tracer_payload::TracerPayloadCollection::V07(payloads) =
+            send_data.get_payloads()
+        else {
+            panic!("expected V07 payload");
+        };
+        for p in payloads {
+            assert_eq!(
+                p.tags.get(crate::tags::lambda::tags::COMPUTE_STATS_KEY),
+                Some(&"0".to_string()),
+                "_dd.compute_stats must be 0 when client_computed_stats is true"
+            );
+        }
     }
 }
