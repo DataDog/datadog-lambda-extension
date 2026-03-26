@@ -658,12 +658,12 @@ impl LambdaProcessor {
         if !self.held_logs.contains_key(&request_id) {
             while self.held_logs.len() >= HELD_LOGS_MAX_KEYS {
                 // Evict the oldest key to ready_logs (without durable context tags).
-                if let Some(oldest) = self.held_logs_order.pop_front() {
-                    if let Some(evicted) = self.held_logs.remove(&oldest) {
-                        for evicted_log in evicted {
-                            if let Ok(s) = serde_json::to_string(&evicted_log) {
-                                self.ready_logs.push(s);
-                            }
+                if let Some(oldest) = self.held_logs_order.pop_front()
+                    && let Some(evicted) = self.held_logs.remove(&oldest)
+                {
+                    for evicted_log in evicted {
+                        if let Ok(s) = serde_json::to_string(&evicted_log) {
+                            self.ready_logs.push(s);
                         }
                     }
                 }
