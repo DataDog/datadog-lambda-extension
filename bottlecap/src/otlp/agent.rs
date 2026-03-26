@@ -56,12 +56,12 @@ impl Agent {
         trace_processor: Arc<dyn TraceProcessor + Send + Sync>,
         trace_tx: Sender<SendDataBuilderInfo>,
         stats_generator: Arc<StatsGenerator>,
+        cancel_token: CancellationToken,
     ) -> Self {
         let port = Self::parse_port(
             config.otlp_config_receiver_protocols_http_endpoint.as_ref(),
             OTLP_AGENT_HTTP_PORT,
         );
-        let cancel_token = CancellationToken::new();
 
         Self {
             config: Arc::clone(&config),
@@ -73,11 +73,6 @@ impl Agent {
             port,
             cancel_token,
         }
-    }
-
-    #[must_use]
-    pub fn cancel_token(&self) -> CancellationToken {
-        self.cancel_token.clone()
     }
 
     fn parse_port(endpoint: Option<&String>, default_port: u16) -> u16 {
@@ -312,7 +307,6 @@ mod tests {
 
     #[test]
     fn test_parse_port_with_valid_endpoint() {
-        // Test with a valid endpoint containing a port
         let endpoint = Some("localhost:8080".to_string());
         assert_eq!(
             Agent::parse_port(endpoint.as_ref(), OTLP_AGENT_HTTP_PORT),
@@ -322,7 +316,6 @@ mod tests {
 
     #[test]
     fn test_parse_port_with_invalid_port_format() {
-        // Test with an endpoint containing an invalid port format
         let endpoint = Some("localhost:invalid".to_string());
         assert_eq!(
             Agent::parse_port(endpoint.as_ref(), OTLP_AGENT_HTTP_PORT),
@@ -332,7 +325,6 @@ mod tests {
 
     #[test]
     fn test_parse_port_with_missing_port() {
-        // Test with an endpoint missing a port
         let endpoint = Some("localhost".to_string());
         assert_eq!(
             Agent::parse_port(endpoint.as_ref(), OTLP_AGENT_HTTP_PORT),
@@ -342,7 +334,6 @@ mod tests {
 
     #[test]
     fn test_parse_port_with_none_endpoint() {
-        // Test with None endpoint
         let endpoint: Option<String> = None;
         assert_eq!(
             Agent::parse_port(endpoint.as_ref(), OTLP_AGENT_HTTP_PORT),
@@ -352,7 +343,6 @@ mod tests {
 
     #[test]
     fn test_parse_port_with_empty_endpoint() {
-        // Test with an empty endpoint
         let endpoint = Some(String::new());
         assert_eq!(
             Agent::parse_port(endpoint.as_ref(), OTLP_AGENT_HTTP_PORT),
