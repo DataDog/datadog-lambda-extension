@@ -2206,12 +2206,14 @@ mod tests {
             AggregatorService::new(EMPTY_TAGS, 1024).expect("failed to create aggregator service");
         tokio::spawn(aggregator_service.run());
         let propagator = Arc::new(DatadogCompositePropagator::new(Arc::clone(&config)));
+        let (durable_context_tx, _) = tokio::sync::mpsc::channel(1);
         let mut p = Processor::new(
             Arc::clone(&tags_provider),
             Arc::clone(&config),
             aws_config,
             aggregator_handle,
             propagator,
+            durable_context_tx,
         );
 
         let (trace_tx, mut trace_rx) = mpsc::channel(10);
