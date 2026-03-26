@@ -7,8 +7,8 @@ use tracing::debug;
 
 use crate::config::Config;
 use crate::lifecycle::invocation::triggers::IdentifiedTrigger;
+use crate::traces::propagation::DatadogCompositePropagator;
 use crate::traces::span_pointers::SpanPointer;
-use crate::traces::{context::SpanContext, propagation::Propagator};
 use crate::{
     config::aws::AwsConfig,
     lifecycle::invocation::{
@@ -21,6 +21,7 @@ use crate::{
         },
     },
 };
+use datadog_opentelemetry::propagation::context::SpanContext;
 
 #[derive(Default)]
 pub struct SpanInferrer {
@@ -363,7 +364,7 @@ fn propagate_appsec(
 
 pub fn extract_span_context(
     payload_value: &Value,
-    propagator: Arc<impl Propagator>,
+    propagator: Arc<DatadogCompositePropagator>,
 ) -> Option<SpanContext> {
     let identified_trigger = IdentifiedTrigger::from_value(payload_value);
     let generated_span_context = extract_generated_span_context(&identified_trigger);
@@ -405,13 +406,18 @@ pub fn extract_generated_span_context(
 mod tests {
     use super::*;
     use crate::lifecycle::invocation::triggers::test_utils::read_json_file;
-    use crate::traces::propagation::text_map_propagator::DatadogHeaderPropagator;
+    use crate::traces::propagation::DatadogCompositePropagator;
+    use datadog_opentelemetry::propagation::TracePropagationStyle;
     use serde_json::json;
     use std::sync::Arc;
     use tokio::time::Instant;
 
     fn test_context_source(payload: &Value, expected_source: &str) {
-        let propagator = Arc::new(DatadogHeaderPropagator);
+        let config = Arc::new(Config {
+            trace_propagation_style_extract: vec![TracePropagationStyle::Datadog],
+            ..Config::default()
+        });
+        let propagator = Arc::new(DatadogCompositePropagator::new(config));
         let context = extract_span_context(payload, propagator);
 
         let context = context.expect("Should return a span context");
