@@ -65,7 +65,10 @@ pub struct LambdaProcessor {
 // Matches `lifecycle::invocation::ContextBuffer` default capacity: sized to absorb async
 // event backlog where invocation contexts may arrive out of order.
 const DURABLE_CONTEXT_MAP_CAPACITY: usize = 500;
-const HELD_LOGS_MAX_KEYS: usize = 500;
+// Kept intentionally small: at shutdown, all held logs are flushed without durable context.
+// A large cap would mean a large batch sent in one shot, increasing the risk of the final
+// flush timing out when the tracer is not installed.
+const HELD_LOGS_MAX_KEYS: usize = 50;
 
 const OOM_ERRORS: [&str; 7] = [
     "fatal error: runtime: out of memory",       // Go
