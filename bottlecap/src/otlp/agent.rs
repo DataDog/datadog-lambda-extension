@@ -12,7 +12,6 @@ use opentelemetry_proto::tonic::collector::trace::v1::{
     trace_service_server::{TraceService, TraceServiceServer},
 };
 use prost::Message;
-use std::mem::size_of_val;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::{net::TcpListener, sync::mpsc::Sender};
@@ -243,17 +242,14 @@ impl Agent {
             .fallback(handler_not_found)
             .with_state(pipeline);
 
-        let listener = TcpListener::bind(&socket)
-            .await
-            .expect("Failed to bind HTTP socket");
+        let listener = TcpListener::bind(&socket).await?;
         debug!("OTLP HTTP | Starting collector on {}", socket);
         axum::serve(listener, router)
             .with_graceful_shutdown(async move {
                 cancel_token.cancelled().await;
                 debug!("OTLP HTTP | Shutdown signal received, shutting down");
             })
-            .await
-            .expect("Failed to start OTLP HTTP agent");
+            .await?;
 
         Ok(())
     }
@@ -346,7 +342,7 @@ impl Agent {
         };
 
         let tracer_header_tags: DatadogTracerHeaderTags = (&parts.headers).into();
-        let body_size = size_of_val(&traces);
+        let body_size = body.len();
 
         match pipeline
             .process_and_send_traces(tracer_header_tags, traces, body_size)
