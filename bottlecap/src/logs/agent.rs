@@ -67,7 +67,7 @@ impl LogsAgent {
                 () = self.cancel_token.cancelled() => {
                     debug!("LOGS_AGENT | Received shutdown signal, draining remaining events");
 
-                    // Drain remaining events
+                    // Drain remaining telemetry events
                     let mut last_drain_log_time = Instant::now().checked_sub(DRAIN_LOG_INTERVAL).expect("Failed to subtract interval from now");
                     'drain_logs_loop: loop {
                         match self.rx.try_recv() {
@@ -89,6 +89,15 @@ impl LogsAgent {
                             },
                         }
                     }
+
+                    // Drain any pending durable context updates before flushing held logs,
+                    // to maximise the chance of decorating logs with execution context.
+                    while let Ok(update) = self.durable_context_rx.try_recv() {
+                        self.processor.process_durable_context_update(update, &self.aggregator_handle);
+                    }
+
+                    // Drain remaining held logs without durable context tags so no logs are lost.
+                    self.processor.drain_held_logs(&self.aggregator_handle);
 
                     break;
                 }

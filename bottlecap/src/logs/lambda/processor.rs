@@ -563,6 +563,20 @@ impl LambdaProcessor {
         std::mem::take(&mut self.ready_logs)
     }
 
+    /// Drains all remaining `held_logs` to `ready_logs` without durable context tags.
+    /// Called at shutdown to ensure no logs are lost even if durable context never arrived.
+    pub fn drain_held_logs(&mut self) {
+        let held = std::mem::take(&mut self.held_logs);
+        self.held_logs_order.clear();
+        for (_, logs) in held {
+            for log in logs {
+                if let Ok(s) = serde_json::to_string(&log) {
+                    self.ready_logs.push(s);
+                }
+            }
+        }
+    }
+
     /// Moves all logs held for `request_id` into `ready_logs`, tagging each with the
     /// durable execution context that is now known for that `request_id`.
     fn drain_held_logs_for_request_id(&mut self, request_id: &str) {

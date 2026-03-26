@@ -79,6 +79,20 @@ impl LogsProcessor {
             LogsProcessor::Lambda(p) => p.take_ready_logs(),
         }
     }
+
+    /// Drains all remaining held logs to the aggregator without durable context tags.
+    /// Called at shutdown to ensure no logs are lost.
+    pub fn drain_held_logs(&mut self, aggregator_handle: &AggregatorHandle) {
+        match self {
+            LogsProcessor::Lambda(p) => p.drain_held_logs(),
+        }
+        let ready_logs = self.take_ready_logs();
+        if !ready_logs.is_empty()
+            && let Err(e) = aggregator_handle.insert_batch(ready_logs)
+        {
+            error!("LOGS_PROCESSOR | Failed to insert batch at shutdown: {}", e);
+        }
+    }
 }
 
 #[allow(clippy::module_name_repetitions)]
