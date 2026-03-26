@@ -1,0 +1,42 @@
+title = "datadog-lambda-extension gitleaks config"
+
+# This file configures gitleaks to suppress known false positives.
+# Only add entries here after confirming a finding is NOT a real secret.
+# If a real secret is found: rotate it immediately, then add the commit to [allowlist.commits].
+#
+# Maintenance workflow:
+#   1. gitleaks flags something on a PR
+#   2. Review the finding — is it a real secret or a false positive?
+#   3. Real secret    → rotate immediately, fix the code, optionally add the commit hash below
+#   4. False positive → add the appropriate entry below with a comment explaining why
+
+[allowlist]
+description = "Known false positives"
+
+# paths: skip entire directories or files from scanning.
+# Use when a directory contains third-party code or test fixtures with fake data.
+# Examples:
+#   "integration-tests/node_modules"  — npm dependencies, not our code
+#   "bottlecap/tests/fixtures"        — test payloads with placeholder values
+#   "docs/examples"                   — documentation examples with fake keys
+paths = [
+  # npm dependencies bundled under integration-tests — not our code, would be noisy
+  "integration-tests/node_modules",
+]
+
+# regexes: suppress findings whose matched secret value matches one of these patterns.
+# Use for placeholder/example values that appear in source or docs but are not real secrets.
+# Examples:
+#   '''your-api-key'''          — generic placeholder in docs or scripts
+#   '''my_test_key'''           — unit test placeholder (bottlecap/tests/)
+#   '''AKIAIOSFODNN7EXAMPLE'''  — AWS example key from official AWS documentation
+#   '''DD_API_KEY_EXAMPLE'''    — Datadog placeholder used in README examples
+regexes = []
+
+# commits: suppress all findings from a specific historical commit.
+# Use when a commit contained a now-rotated credential that cannot be rewritten
+# (e.g., it is already on the default branch or in a public tag).
+# Always document why the commit is suppressed and confirm the credential was rotated.
+# Examples:
+#   "abc123def456"  — rotated DD_API_KEY accidentally committed on 2024-01-15, key invalidated
+commits = []
