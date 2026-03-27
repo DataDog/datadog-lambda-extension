@@ -24,11 +24,11 @@ pub type HttpClient =
     GenericHttpClient<hyper_http_proxy::ProxyConnector<libdd_common::connector::Connector>>;
 
 /// Initialize the crypto provider needed for setting custom root certificates.
+/// Uses ring for non-FIPS builds; FIPS builds install the aws-lc-rs FIPS provider
+/// in `fips::prepare_client_provider()` before this is called.
 fn ensure_crypto_provider_initialized() {
     static INIT_CRYPTO_PROVIDER: LazyLock<()> = LazyLock::new(|| {
-        #[cfg(unix)]
-        if let Err(_already_installed) =
-            rustls::crypto::aws_lc_rs::default_provider().install_default()
+        if let Err(_already_installed) = rustls::crypto::ring::default_provider().install_default()
         {
             debug!(
                 "HTTP_CLIENT | Default CryptoProvider already installed, using existing provider"
