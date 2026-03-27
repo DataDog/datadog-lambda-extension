@@ -21,6 +21,7 @@
 
 pub mod appsec;
 pub mod config;
+pub mod delegated_auth;
 pub mod event_bus;
 pub mod extension;
 pub mod fips;
