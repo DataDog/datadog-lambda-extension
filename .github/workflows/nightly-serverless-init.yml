@@ -22,9 +22,9 @@ jobs:
           - { dockerFile: "Dockerfile.serverless-init.alpine.build", isAlpine: "true", tagSuffix: "-alpine" }
     name: "Nightly Build (isAlpine: ${{ matrix.arrays.isAlpine }})"
     steps:
-      - uses: actions/checkout@v6.0.2
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
-      - uses: actions/checkout@v6.0.2
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           repository: DataDog/datadog-agent
           ref: main
@@ -47,7 +47,7 @@ jobs:
           image: tonistiigi/binfmt:qemu-v10.1.3
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v4
+        uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd # v4.0.0
 
       - name: Build binaries
         working-directory: ./scripts
@@ -65,14 +65,14 @@ jobs:
         run: cp ./scripts/serverless_init_dotnet.sh ./scripts/bin/
 
       - name: Login to GHCR
-        uses: docker/login-action@v4
+        uses: docker/login-action@b45d80f862d83dbcd57f89517bcf500b2ab88fb2 # v4.0.0
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build and push
-        uses: docker/build-push-action@v7
+        uses: docker/build-push-action@d08e5c354a6adb9ed34480a06d141179aa583294 # v7.0.0
         with:
           context: ./scripts
           file: ./scripts/${{ matrix.arrays.dockerFile }}
@@ -106,15 +106,11 @@ jobs:
           SLACK_CHANNEL: "#serverless-agent"
           SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK }}
         run: |
-          set -x
-
           OPS_MESSAGE=":gh-check-failed: Nightly serverless-init build failed!
 
           The nightly build from datadog-agent main did not succeed after retry.
 
           See ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID} for details."
 
-          curl -H "Content-type: application/json" -X POST "$SLACK_WEBHOOK" -d '{
-            "channel": "'"$SLACK_CHANNEL"'",
-            "text": "'"$OPS_MESSAGE"'"
-          }'
+          curl -H "Content-type: application/json" -X POST "$SLACK_WEBHOOK" \
+            -d "$(jq -n --arg channel "$SLACK_CHANNEL" --arg text "$OPS_MESSAGE" '{channel: $channel, text: $text}')"
