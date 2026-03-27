@@ -2,7 +2,7 @@ title = "datadog-lambda-extension gitleaks config"
 
 # This file configures gitleaks to suppress known false positives.
 # Only add entries here after confirming a finding is NOT a real secret.
-# If a real secret is found: rotate it immediately, then add the commit to [allowlist.commits].
+# If a real secret is found: rotate it immediately, then add the commit hash to the `commits` list under [allowlist] below.
 #
 # Maintenance workflow:
 #   1. gitleaks flags something on a PR
