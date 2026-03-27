@@ -1148,11 +1148,19 @@ fn start_trace_agent(
 
     let obfuscation_config = obfuscation_config::ObfuscationConfig {
         tag_replace_rules: config.apm_replace_tags.clone(),
-        http_remove_path_digits: config.apm_config_obfuscation_http_remove_paths_with_digits,
-        http_remove_query_string: config.apm_config_obfuscation_http_remove_query_string,
-        obfuscate_memcached: false,
-        obfuscation_redis_enabled: false,
-        obfuscation_redis_remove_all_args: false,
+        http: obfuscation_config::HttpConfig {
+            remove_paths_with_digits: config.apm_config_obfuscation_http_remove_paths_with_digits,
+            remove_query_string: config.apm_config_obfuscation_http_remove_query_string,
+        },
+        memcached: obfuscation_config::MemcachedConfig {
+            enabled: false,
+            ..Default::default()
+        },
+        redis: obfuscation_config::RedisConfig {
+            enabled: false,
+            remove_all_args: false,
+        },
+        ..Default::default()
     };
 
     let trace_processor = Arc::new(trace_processor::ServerlessTraceProcessor {
