@@ -2,7 +2,7 @@ name: Nightly serverless-init build
 
 on:
   schedule:
-    # 2 AM UTC (~9 PM ET), daily
+    # 2 AM UTC (~9-10 PM ET), daily
     - cron: "0 2 * * *"
   workflow_dispatch:
 
@@ -14,6 +14,7 @@ jobs:
   build-nightly:
     runs-on: ubuntu-22.04
     permissions:
+      contents: read
       packages: write
     strategy:
       matrix:
