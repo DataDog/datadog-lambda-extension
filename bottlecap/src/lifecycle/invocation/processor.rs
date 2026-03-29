@@ -1671,9 +1671,11 @@ mod tests {
                     // Create trace sender
                     let trace_sender = Arc::new(SendingTraceProcessor {
                         appsec: None,
-                        processor: Arc::new(trace_processor::ServerlessTraceProcessor {
-                            obfuscation_config: Arc::new(ObfuscationConfig::new().expect("Failed to create ObfuscationConfig")),
-                        }),
+                        processor: Arc::new(trace_processor::ServerlessTraceProcessor::new(
+                            config.as_ref(),
+                            ObfuscationConfig::new()
+                                .expect("Failed to create ObfuscationConfig"),
+                        )),
                         trace_tx: tokio::sync::mpsc::channel(1).0,
                         stats_generator: Arc::new(StatsGenerator::new(stats_concentrator_handle)),
                     });
@@ -1779,11 +1781,10 @@ mod tests {
         tokio::spawn(stats_concentrator_service.run());
         let trace_sender = Arc::new(SendingTraceProcessor {
             appsec: None,
-            processor: Arc::new(trace_processor::ServerlessTraceProcessor {
-                obfuscation_config: Arc::new(
-                    ObfuscationConfig::new().expect("Failed to create ObfuscationConfig"),
-                ),
-            }),
+            processor: Arc::new(trace_processor::ServerlessTraceProcessor::new(
+                config.as_ref(),
+                ObfuscationConfig::new().expect("Failed to create ObfuscationConfig"),
+            )),
             trace_tx: tokio::sync::mpsc::channel(1).0,
             stats_generator: Arc::new(StatsGenerator::new(stats_concentrator_handle)),
         });
@@ -2174,11 +2175,10 @@ mod tests {
         tokio::spawn(stats_concentrator_service.run());
         let trace_sender = Arc::new(SendingTraceProcessor {
             appsec: None,
-            processor: Arc::new(trace_processor::ServerlessTraceProcessor {
-                obfuscation_config: Arc::new(
-                    ObfuscationConfig::new().expect("Failed to create ObfuscationConfig"),
-                ),
-            }),
+            processor: Arc::new(trace_processor::ServerlessTraceProcessor::new(
+                config.as_ref(),
+                ObfuscationConfig::new().expect("Failed to create ObfuscationConfig"),
+            )),
             trace_tx,
             stats_generator: Arc::new(StatsGenerator::new(stats_concentrator_handle)),
         });

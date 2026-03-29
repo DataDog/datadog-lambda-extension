@@ -226,7 +226,7 @@ pub struct EnvConfig {
     /// @env `DD_APM_FILTER_TAGS_REQUIRE`
     ///
     /// Space-separated list of key:value tag pairs that spans must match to be kept.
-    /// Only spans matching at least one of these tags will be sent to Datadog.
+    /// Only spans matching all of these tags will be sent to Datadog.
     /// Example: "env:production service:api-gateway"
     #[serde(deserialize_with = "deserialize_apm_filter_tags")]
     pub apm_filter_tags_require: Option<Vec<String>>,
@@ -240,7 +240,7 @@ pub struct EnvConfig {
     /// @env `DD_APM_FILTER_TAGS_REGEX_REQUIRE`
     ///
     /// Space-separated list of key:value tag pairs with regex values that spans must match to be kept.
-    /// Only spans matching at least one of these regex patterns will be sent to Datadog.
+    /// Only spans matching all of these regex patterns will be sent to Datadog.
     /// Example: "env:^prod.*$ service:^api-.*$"
     #[serde(deserialize_with = "deserialize_apm_filter_tags")]
     pub apm_filter_tags_regex_require: Option<Vec<String>>,
