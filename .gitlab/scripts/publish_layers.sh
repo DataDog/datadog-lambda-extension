@@ -50,13 +50,21 @@ publish_layer() {
         | jq -r '.Version'
     )
 
-    # Add permissions only for prod
+    # Add permissions: public for prod, grant testing account access to sandbox layers
     if [ "$ADD_LAYER_VERSION_PERMISSIONS" = "1" ]; then
         permission=$(aws lambda add-layer-version-permission --layer-name $layer \
             --version-number $version_nbr \
             --statement-id "release-$version_nbr" \
             --action lambda:GetLayerVersion \
             --principal "*" \
+            --region $region
+        )
+    else
+        permission=$(aws lambda add-layer-version-permission --layer-name $layer \
+            --version-number $version_nbr \
+            --statement-id "release-$version_nbr" \
+            --action lambda:GetLayerVersion \
+            --principal "093468662994" \
             --region $region
         )
     fi
