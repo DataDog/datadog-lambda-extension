@@ -63,7 +63,7 @@ pub fn generate_auth_proof(
     } else {
         format!("sts.{region}.amazonaws.com")
     };
-    let sts_url = format!("https://{sts_host}/");
+    let sts_url = format!("https://{sts_host}");
 
     // Get current time for signing
     let now = Utc::now();
@@ -136,17 +136,17 @@ pub fn generate_auth_proof(
 
     // Build headers map for the proof
     // Using BTreeMap for consistent ordering (important for signature verification)
-    let mut headers_map: BTreeMap<String, String> = BTreeMap::new();
-    headers_map.insert("Authorization".to_string(), authorization);
-    headers_map.insert("Content-Type".to_string(), CONTENT_TYPE.to_string());
-    headers_map.insert("Host".to_string(), sts_host);
-    headers_map.insert("x-amz-date".to_string(), amz_date);
-    headers_map.insert(ORG_ID_HEADER.to_string(), org_uuid.to_string());
+    let mut headers_map: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    headers_map.insert("Authorization".to_string(), vec![authorization]);
+    headers_map.insert("Content-Type".to_string(), vec![CONTENT_TYPE.to_string()]);
+    headers_map.insert("Host".to_string(), vec![sts_host]);
+    headers_map.insert("X-Amz-Date".to_string(), vec![amz_date]);
+    headers_map.insert("X-Ddog-Org-Id".to_string(), vec![org_uuid.to_string()]);
 
     if !aws_credentials.aws_session_token.is_empty() {
         headers_map.insert(
-            "x-amz-security-token".to_string(),
-            aws_credentials.aws_session_token.clone(),
+            "X-Amz-Security-Token".to_string(),
+            vec![aws_credentials.aws_session_token.clone()],
         );
     }
 
@@ -248,8 +248,11 @@ mod tests {
 
         // Verify body is base64-encoded GET_CALLER_IDENTITY_BODY
         let body = String::from_utf8(
-            BASE64_STANDARD.decode(parts[0]).expect("Failed to decode base64 body")
-        ).expect("Failed to convert body to UTF-8");
+            BASE64_STANDARD
+                .decode(parts[0])
+                .expect("Failed to decode base64 body"),
+        )
+        .expect("Failed to convert body to UTF-8");
         assert_eq!(body, GET_CALLER_IDENTITY_BODY);
 
         // Verify method
@@ -257,8 +260,11 @@ mod tests {
 
         // Verify URL is base64-encoded STS URL
         let url = String::from_utf8(
-            BASE64_STANDARD.decode(parts[3]).expect("Failed to decode base64 URL")
-        ).expect("Failed to convert URL to UTF-8");
+            BASE64_STANDARD
+                .decode(parts[3])
+                .expect("Failed to decode base64 URL"),
+        )
+        .expect("Failed to convert URL to UTF-8");
         assert!(url.contains("sts.us-east-1.amazonaws.com"));
     }
 
@@ -280,23 +286,28 @@ mod tests {
 
         // Decode and parse headers
         let headers_json = String::from_utf8(
-            BASE64_STANDARD.decode(parts[1]).expect("Failed to decode base64 headers")
-        ).expect("Failed to convert headers to UTF-8");
-        let headers: BTreeMap<String, String> = serde_json::from_str(&headers_json)
-            .expect("Failed to parse headers JSON");
+            BASE64_STANDARD
+                .decode(parts[1])
+                .expect("Failed to decode base64 headers"),
+        )
+        .expect("Failed to convert headers to UTF-8");
+        let headers: BTreeMap<String, Vec<String>> =
+            serde_json::from_str(&headers_json).expect("Failed to parse headers JSON");
 
-        // Verify required headers
+        // Verify required headers (canonical casing)
         assert!(headers.contains_key("Authorization"));
         assert!(headers.contains_key("Content-Type"));
         assert!(headers.contains_key("Host"));
-        assert!(headers.contains_key("x-amz-date"));
-        assert!(headers.contains_key("x-amz-security-token"));
-        assert!(headers.contains_key("x-ddog-org-id"));
+        assert!(headers.contains_key("X-Amz-Date"));
+        assert!(headers.contains_key("X-Amz-Security-Token"));
+        assert!(headers.contains_key("X-Ddog-Org-Id"));
 
-        // Verify org-id header value
+        // Verify org-id header value (array format)
         assert_eq!(
-            headers.get("x-ddog-org-id").expect("Missing x-ddog-org-id header"),
-            "my-org-uuid"
+            headers
+                .get("X-Ddog-Org-Id")
+                .expect("Missing X-Ddog-Org-Id header"),
+            &vec!["my-org-uuid".to_string()]
         );
     }
 
@@ -317,8 +328,11 @@ mod tests {
         let proof = result.expect("Failed to generate auth proof");
         let parts: Vec<&str> = proof.split('|').collect();
         let url = String::from_utf8(
-            BASE64_STANDARD.decode(parts[3]).expect("Failed to decode base64 URL")
-        ).expect("Failed to convert URL to UTF-8");
+            BASE64_STANDARD
+                .decode(parts[3])
+                .expect("Failed to decode base64 URL"),
+        )
+        .expect("Failed to convert URL to UTF-8");
         assert!(url.contains("sts.amazonaws.com"));
     }
 }
