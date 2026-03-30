@@ -11,10 +11,11 @@
 # See: PR #1134 test plan — "Optional smoke test" step
 
 # Fake AWS access key that matches the AKIA[A-Z0-9]{16} pattern.
-# This key is from official AWS documentation and is not a real credential.
-# Source: https://docs.aws.amazon.com/IAM/latest/UserGuide/reference_iam-quotas.html
-FAKE_AWS_KEY="AKIAIOSFODNN7EXAMPLE"
-FAKE_AWS_SECRET="wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
+# NOT a real credential — generated for smoke-test purposes only.
+# Deliberately avoids the canonical AWS doc examples (AKIAIOSFODNN7EXAMPLE)
+# which are in gitleaks' internal global allowlist and would not be flagged.
+FAKE_AWS_KEY="AKIAVQD12YX3RSMOKETEST"
+FAKE_AWS_SECRET="sM0keT3st+FaKeK3y/ABCDEFGHIJ1234567890ab"
 
 echo "This file is intentionally flagged by gitleaks for smoke-test purposes."
 echo "Key: $FAKE_AWS_KEY"
