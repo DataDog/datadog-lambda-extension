@@ -250,6 +250,9 @@ fn create_api_key_factory(config: &Arc<Config>, aws_config: &Arc<AwsConfig>) -> 
     let aws_config = Arc::clone(aws_config);
     let api_key_secret_reload_interval = config.api_key_secret_reload_interval;
 
+    let api_key = &config.api_key;
+    debug!("Resolved api_key={api_key} for factory initialization");
+
     Arc::new(ApiKeyFactory::new_from_resolver(
         Arc::new(move || {
             let config = Arc::clone(&config);
@@ -291,6 +294,7 @@ async fn extension_loop_active(
     let (mut event_bus, event_bus_tx) = EventBus::run();
 
     let account_id = r.account_id.as_ref().unwrap_or(&"none".to_string()).clone();
+    debug!("Extension registered successfully: {:?}", r);
     let tags_provider = setup_tag_provider(&Arc::clone(&aws_config), config, &account_id);
 
     // Build one shared reqwest::Client for metrics, logs, and trace proxy flushing.
@@ -1125,6 +1129,8 @@ fn start_trace_agent(
         trace_http_client,
     ));
 
+    debug!("Trace agent starting with config: {:?}", config);
+
     let obfuscation_config = obfuscation_config::ObfuscationConfig {
         tag_replace_rules: config.apm_replace_tags.clone(),
         http_remove_path_digits: config.apm_config_obfuscation_http_remove_paths_with_digits,
@@ -1296,6 +1302,9 @@ fn start_metrics_flushers(
 
         // Create a flusher for each endpoint URL and API key pair
         for api_key in api_keys {
+            debug!(
+                "Configuring additional endpoint flusher: endpoint={endpoint_url} api_key={api_key}"
+            );
             let additional_api_key_factory = Arc::new(ApiKeyFactory::new(api_key));
             let additional_flusher_config = MetricsFlusherConfig {
                 api_key_factory: additional_api_key_factory,

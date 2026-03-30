@@ -95,6 +95,7 @@ impl TraceFlusher {
             return None;
         };
 
+        debug!("TRACES | Flushing traces with api_key={api_key}");
         let http_client = &self.http_client;
 
         let mut failed_batch: Vec<SendData> = Vec::new();
@@ -133,6 +134,8 @@ impl TraceFlusher {
                         .with_api_key(api_key.as_str())
                         .with_retry_strategy(trace_retry_strategy())
                         .build();
+
+                    debug!("TRACES | Built trace: {:?}", trace.get_payloads());
                     (trace, info.header_tags)
                 })
                 .collect();

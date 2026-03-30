@@ -98,6 +98,7 @@ impl Flusher {
             format!("{}/api/v2/logs", self.endpoint)
         };
         let headers = self.get_headers(api_key).await;
+        debug!("LOGS | Flushing request headers: {:?}", headers);
         self.client
             .post(&url)
             .timeout(std::time::Duration::from_secs(self.config.flush_timeout))

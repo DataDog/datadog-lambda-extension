@@ -183,7 +183,10 @@ impl Listener {
         payload_value: Value,
         invocation_processor_handle: InvocationProcessorHandle,
     ) {
-        debug!("Received start invocation request from headers:{headers:?}");
+        // to test https://github.com/DataDog/datadog-lambda-extension/pull/1037/changes
+        debug!(
+            "Received start invocation request from headers:{headers:?}, payload_value:{payload_value:?}"
+        );
 
         let request_id = extract_request_id_from_headers(&headers);
 
@@ -246,7 +249,10 @@ impl Listener {
         let headers = headers_to_map(headers);
         let payload_value = serde_json::from_slice::<Value>(&body).unwrap_or_else(|_| json!({}));
 
-        debug!("Received end invocation request from headers:{headers:?}");
+        // to test https://github.com/DataDog/datadog-lambda-extension/pull/1037/changes
+        debug!(
+            "Received end invocation request from headers:{headers:?}, payload_value:{payload_value:?}"
+        );
         let request_id = extract_request_id_from_headers(&headers);
 
         if let Err(e) = invocation_processor_handle

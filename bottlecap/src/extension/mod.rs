@@ -1,6 +1,6 @@
 use reqwest::Client;
 use serde::Deserialize;
-use tracing::error;
+use tracing::{debug, error};
 
 pub mod telemetry;
 
@@ -48,7 +48,7 @@ pub enum ExtensionError {
     HttpStatusError { status: u16 },
 }
 
-#[derive(Clone, Deserialize)]
+#[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 /// Response from the register endpoint
 /// <https://docs.aws.amazon.com/lambda/latest/dg/runtimes-extensions-api.html#runtimes-extensions-registration-api>
@@ -117,6 +117,8 @@ pub async fn register(
         let status = response.status().as_u16();
         return Err(ExtensionError::HttpStatusError { status });
     }
+
+    debug!("Register response headers: {:?}", response.headers());
 
     let extension_id = response
         .headers()
