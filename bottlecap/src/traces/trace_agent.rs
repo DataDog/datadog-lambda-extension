@@ -63,6 +63,9 @@ const LLM_OBS_EVAL_METRIC_ENDPOINT_PATH_V2: &str =
 const LLM_OBS_SPANS_ENDPOINT_PATH: &str = "/evp_proxy/v2/api/v2/llmobs";
 const INFO_ENDPOINT_PATH: &str = "/info";
 const V1_DEBUGGER_ENDPOINT_PATH: &str = "/debugger/v1/input";
+const SPAN_TAG_KEY_REQUEST_ID: &str = "request_id";
+const SPAN_TAG_KEY_DURABLE_EXECUTION_ID: &str = "durable_function_execution_id";
+const SPAN_TAG_KEY_DURABLE_EXECUTION_NAME: &str = "durable_function_execution_name";
 const V2_DEBUGGER_ENDPOINT_PATH: &str = "/debugger/v2/input";
 const DEBUGGER_DIAGNOSTICS_ENDPOINT_PATH: &str = "/debugger/v1/diagnostics";
 const INSTRUMENTATION_ENDPOINT_PATH: &str = "/telemetry/proxy/api/v2/apmtelemetry";
@@ -594,9 +597,9 @@ impl TraceAgent {
 
                 if span.name == "aws.lambda"
                     && let (Some(request_id), Some(execution_id), Some(execution_name)) = (
-                        span.meta.get("request_id"),
-                        span.meta.get("durable_function_execution_id"),
-                        span.meta.get("durable_function_execution_name"),
+                        span.meta.get(SPAN_TAG_KEY_REQUEST_ID),
+                        span.meta.get(SPAN_TAG_KEY_DURABLE_EXECUTION_ID),
+                        span.meta.get(SPAN_TAG_KEY_DURABLE_EXECUTION_NAME),
                     )
                     && let Err(e) = invocation_processor_handle
                         .forward_durable_context(
