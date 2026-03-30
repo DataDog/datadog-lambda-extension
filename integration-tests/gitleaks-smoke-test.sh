@@ -14,7 +14,7 @@
 # NOT a real credential — generated for smoke-test purposes only.
 # Deliberately avoids the canonical AWS doc examples (AKIAIOSFODNN7EXAMPLE)
 # which are in gitleaks' internal global allowlist and would not be flagged.
-FAKE_AWS_KEY="AKIAVQD12YX3RSMOKETEST"
+FAKE_AWS_KEY="AKIAT3STFAKEKEY12345"
 FAKE_AWS_SECRET="sM0keT3st+FaKeK3y/ABCDEFGHIJ1234567890ab"
 
 echo "This file is intentionally flagged by gitleaks for smoke-test purposes."
