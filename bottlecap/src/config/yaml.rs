@@ -1,21 +1,20 @@
 use std::time::Duration;
 use std::{collections::HashMap, path::PathBuf};
 
+use datadog_opentelemetry::propagation::TracePropagationStyle;
+
 use crate::{
     config::{
         Config, ConfigError, ConfigSource, ProcessingRule,
-        additional_endpoints::deserialize_additional_endpoints,
-        deserialize_apm_replace_rules, deserialize_key_value_pair_array_to_hashmap,
-        deserialize_option_lossless, deserialize_optional_bool_from_anything,
-        deserialize_optional_duration_from_microseconds,
+        additional_endpoints::deserialize_additional_endpoints, deserialize_apm_replace_rules,
+        deserialize_key_value_pair_array_to_hashmap, deserialize_option_lossless,
+        deserialize_optional_bool_from_anything, deserialize_optional_duration_from_microseconds,
         deserialize_optional_duration_from_seconds,
         deserialize_optional_duration_from_seconds_ignore_zero, deserialize_optional_string,
-        deserialize_processing_rules, deserialize_string_or_int,
-        flush_strategy::FlushStrategy,
-        log_level::LogLevel,
-        logs_additional_endpoints::LogsAdditionalEndpoint,
+        deserialize_processing_rules, deserialize_string_or_int, flush_strategy::FlushStrategy,
+        log_level::LogLevel, logs_additional_endpoints::LogsAdditionalEndpoint,
         service_mapping::deserialize_service_mapping,
-        trace_propagation_style::{TracePropagationStyle, deserialize_trace_propagation_style},
+        trace_propagation_style::deserialize_trace_propagation_style,
     },
     merge_hashmap, merge_option, merge_option_to_value, merge_string, merge_vec,
 };
@@ -826,7 +825,7 @@ service_mapping: old-service:new-service
 
 # Trace Propagation
 trace_propagation_style: "datadog"
-trace_propagation_style_extract: "b3"
+trace_propagation_style_extract: "tracecontext"
 trace_propagation_extract_first: true
 trace_propagation_http_baggage_enabled: true
 trace_aws_service_representation_enabled: true
@@ -972,7 +971,7 @@ api_security_sample_delay: 60 # Seconds
                     ),
                 ]),
                 trace_propagation_style: vec![TracePropagationStyle::Datadog],
-                trace_propagation_style_extract: vec![TracePropagationStyle::B3],
+                trace_propagation_style_extract: vec![TracePropagationStyle::TraceContext],
                 trace_propagation_extract_first: true,
                 trace_propagation_http_baggage_enabled: true,
                 trace_aws_service_representation_enabled: true,

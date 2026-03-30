@@ -1357,15 +1357,18 @@ fn start_otlp_agent(
     if !should_enable_otlp_agent(config) {
         return None;
     }
+
     let stats_generator = Arc::new(StatsGenerator::new(stats_concentrator));
+    let cancel_token = CancellationToken::new();
+
     let agent = OtlpAgent::new(
         config.clone(),
         tags_provider,
         trace_processor,
         trace_tx,
         stats_generator,
+        cancel_token.clone(),
     );
-    let cancel_token = agent.cancel_token();
 
     tokio::spawn(async move {
         if let Err(e) = agent.start().await {
