@@ -36,7 +36,7 @@ export class DelegatedAuthStack extends cdk.Stack {
       runtime: defaultNodeRuntime,
       architecture: lambda.Architecture.ARM_64,
       handler: 'index.handler',
-      code: lambda.Code.fromAsset('./lambda/delegated-auth'),
+      code: lambda.Code.fromAsset('./lambda/default-node'),
       functionName,
       timeout: cdk.Duration.seconds(30),
       memorySize: 256,
