@@ -52,8 +52,8 @@ const ACCOUNT_ID_KEY: &str = "account_id";
 
 // Span tag keys for durable function execution context
 pub const REQUEST_ID_KEY: &str = "request_id";
-pub const DURABLE_EXECUTION_ID_KEY: &str = "durable_function_execution_id";
-pub const DURABLE_EXECUTION_NAME_KEY: &str = "durable_function_execution_name";
+pub const DURABLE_EXECUTION_ID_KEY: &str = "aws_lambda.durable_function.execution_id";
+pub const DURABLE_EXECUTION_NAME_KEY: &str = "aws_lambda.durable_function.execution_name";
 
 const AWS_ACCOUNT_KEY: &str = "aws_account";
 const RESOURCE_KEY: &str = "resource";
