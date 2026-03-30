@@ -3,7 +3,7 @@
 
 use tokio::sync::{mpsc, oneshot};
 use tokio::time::Duration;
-use tracing::info;
+use tracing::debug;
 
 use crate::traces::span_dedup::{DedupKey, Deduper};
 
@@ -97,7 +97,7 @@ impl DedupService {
                     if let Err(e) = response_tx.send(was_added) {
                         // Not using warn or error level to avoid confusion for customers.
                         // No action is needed on customer side.
-                        info!("Failed to send check_and_add response: {e:?}");
+                        debug!("Failed to send check_and_add response: {e:?}");
                     }
                 }
             }
