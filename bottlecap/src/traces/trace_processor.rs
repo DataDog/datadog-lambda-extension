@@ -868,7 +868,6 @@ mod tests {
             "service",
             &Regex::new(r"api-.*").expect("regex pattern should be valid")
         ));
-
     }
 
     #[test]
