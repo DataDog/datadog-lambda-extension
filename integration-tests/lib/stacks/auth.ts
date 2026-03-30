@@ -15,7 +15,7 @@ import {
  *
  * PREREQUISITE: The IAM role ARN must be configured in Datadog's intake mapping.
  */
-export class DelegatedAuthStack extends cdk.Stack {
+export class AuthStack extends cdk.Stack {
   constructor(scope: Construct, id: string, props: cdk.StackProps) {
     super(scope, id, props);
 

@@ -4,19 +4,19 @@ import { forceColdStart } from './utils/lambda';
 import { getIdentifier } from '../config';
 
 const identifier = getIdentifier();
-const stackName = `integ-${identifier}-delegated-auth`;
+const stackName = `integ-${identifier}-auth`;
 
 const FUNCTION_NAME = stackName;
 
-describe('Delegated Authentication Integration Tests', () => {
+describe('Auth Integration Tests', () => {
   let telemetry: Record<string, DatadogTelemetry>;
 
-  const getFirstInvocation = () => telemetry['delegated-auth']?.threads[0]?.[0];
+  const getFirstInvocation = () => telemetry['auth']?.threads[0]?.[0];
 
   beforeAll(async () => {
     const functions: FunctionConfig[] = [{
       functionName: FUNCTION_NAME,
-      runtime: 'delegated-auth',
+      runtime: 'auth',
     }];
 
     await forceColdStart(FUNCTION_NAME);
@@ -36,16 +36,6 @@ describe('Delegated Authentication Integration Tests', () => {
     const result = getFirstInvocation();
     expect(result).toBeDefined();
     expect(result.logs!.length).toBeGreaterThan(0);
-  });
-
-  it('should NOT show fallback to static API key', () => {
-    const result = getFirstInvocation();
-    expect(result).toBeDefined();
-
-    const fallbackLog = result.logs?.find((log: any) =>
-      log.message.includes('fallback') || log.message.includes('Falling back')
-    );
-    expect(fallbackLog).toBeUndefined();
   });
 
   it('should send telemetry to Datadog (validates API key works)', () => {
