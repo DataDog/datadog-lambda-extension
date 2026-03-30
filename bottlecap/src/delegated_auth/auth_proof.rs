@@ -189,7 +189,7 @@ mod tests {
         assert!(result.is_err());
         assert!(
             result
-                .unwrap_err()
+                .expect_err("expected error for missing credentials")
                 .to_string()
                 .contains("Missing AWS credentials")
         );
@@ -207,7 +207,7 @@ mod tests {
 
         let result = generate_auth_proof(&creds, "us-east-1", "");
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("Missing org UUID"));
+        assert!(result.expect_err("expected error for missing org UUID").to_string().contains("Missing org UUID"));
     }
 
     #[test]
@@ -223,7 +223,7 @@ mod tests {
         let result = generate_auth_proof(&creds, "us-east-1", "test-org-uuid");
         assert!(result.is_ok());
 
-        let proof = result.unwrap();
+        let proof = result.expect("failed to generate auth proof");
         let parts: Vec<&str> = proof.split('|').collect();
         assert_eq!(parts.len(), 4);
 
