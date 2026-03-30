@@ -1,0 +1,5 @@
+{
+  "name": "durable-node",
+  "version": "1.0.0",
+  "description": "Durable function integration test handler for Node.js"
+}
