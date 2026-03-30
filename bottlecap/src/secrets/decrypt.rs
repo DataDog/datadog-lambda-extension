@@ -20,8 +20,7 @@ use crate::delegated_auth;
 
 pub async fn resolve_secrets(config: Arc<Config>, aws_config: Arc<AwsConfig>) -> Option<String> {
     // Priority 1: Try delegated auth if DD_ORG_UUID is set
-    // Delegated auth is auto-enabled when org_uuid is present, unless explicitly disabled
-    // via DD_DELEGATED_AUTH_ENABLED=false
+    // Delegated auth is auto-enabled when org_uuid is present
     if !config.org_uuid.is_empty() {
         match delegated_auth::get_delegated_api_key(&config, &aws_config).await {
             Ok(api_key) => {
@@ -30,7 +29,6 @@ pub async fn resolve_secrets(config: Arc<Config>, aws_config: Arc<AwsConfig>) ->
             }
             Err(e) => {
                 warn!("Delegated auth failed, falling back to other methods: {e}");
-                // Continue to other methods
             }
         }
     }

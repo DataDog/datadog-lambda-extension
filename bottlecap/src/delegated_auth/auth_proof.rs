@@ -13,16 +13,9 @@ use tracing::debug;
 
 use crate::config::aws::AwsCredentials;
 
-/// The body content for STS `GetCallerIdentity` request
 const GET_CALLER_IDENTITY_BODY: &str = "Action=GetCallerIdentity&Version=2011-06-15";
-
-/// Content type for the STS request
 const CONTENT_TYPE: &str = "application/x-www-form-urlencoded; charset=utf-8";
-
-/// Custom header for organization UUID
 const ORG_ID_HEADER: &str = "x-ddog-org-id";
-
-/// STS service name for signing
 const STS_SERVICE: &str = "sts";
 
 /// Generates an authentication proof from AWS credentials.
@@ -46,7 +39,6 @@ pub fn generate_auth_proof(
 ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
     debug!("Generating delegated auth proof for region: {}", region);
 
-    // Validate inputs
     if aws_credentials.aws_access_key_id.is_empty()
         || aws_credentials.aws_secret_access_key.is_empty()
     {
@@ -57,7 +49,6 @@ pub fn generate_auth_proof(
         return Err("Missing org UUID for delegated auth".into());
     }
 
-    // Build STS URL based on region
     let sts_host = if region.is_empty() {
         "sts.amazonaws.com".to_string()
     } else {
@@ -65,20 +56,17 @@ pub fn generate_auth_proof(
     };
     let sts_url = format!("https://{sts_host}");
 
-    // Get current time for signing
     let now = Utc::now();
     let amz_date = now.format("%Y%m%dT%H%M%SZ").to_string();
     let date_stamp = now.format("%Y%m%d").to_string();
 
-    // Calculate payload hash
     let payload_hash = hex::encode(Sha256::digest(GET_CALLER_IDENTITY_BODY.as_bytes()));
 
-    // Build canonical headers (must be sorted alphabetically)
+    // Canonical headers must be sorted alphabetically per SigV4 spec
     let canonical_headers = format!(
         "content-type:{CONTENT_TYPE}\nhost:{sts_host}\nx-amz-date:{amz_date}\n{ORG_ID_HEADER}:{org_uuid}"
     );
 
-    // Add security token to signed headers if present
     let (signed_headers, canonical_headers) = if aws_credentials.aws_session_token.is_empty() {
         (
             "content-type;host;x-amz-date;x-ddog-org-id",
@@ -95,7 +83,6 @@ pub fn generate_auth_proof(
         )
     };
 
-    // Build canonical request
     let canonical_request =
         format!("POST\n/\n\n{canonical_headers}\n\n{signed_headers}\n{payload_hash}");
 
@@ -104,7 +91,6 @@ pub fn generate_auth_proof(
         hex::encode(Sha256::digest(canonical_request.as_bytes()))
     );
 
-    // Build string to sign
     let algorithm = "AWS4-HMAC-SHA256";
     let effective_region = if region.is_empty() {
         "us-east-1"
@@ -117,7 +103,6 @@ pub fn generate_auth_proof(
         hex::encode(Sha256::digest(canonical_request.as_bytes()))
     );
 
-    // Calculate signing key
     let signing_key = get_aws4_signature_key(
         &aws_credentials.aws_secret_access_key,
         &date_stamp,
@@ -125,17 +110,14 @@ pub fn generate_auth_proof(
         STS_SERVICE,
     )?;
 
-    // Calculate signature
     let signature = hex::encode(sign(&signing_key, &string_to_sign)?);
 
-    // Build Authorization header
     let authorization = format!(
         "{algorithm} Credential={}/{credential_scope}, SignedHeaders={signed_headers}, Signature={signature}",
         aws_credentials.aws_access_key_id
     );
 
-    // Build headers map for the proof
-    // Using BTreeMap for consistent ordering (important for signature verification)
+    // BTreeMap ensures consistent ordering for signature verification
     let mut headers_map: BTreeMap<String, Vec<String>> = BTreeMap::new();
     headers_map.insert("Authorization".to_string(), vec![authorization]);
     headers_map.insert("Content-Type".to_string(), vec![CONTENT_TYPE.to_string()]);
@@ -150,10 +132,9 @@ pub fn generate_auth_proof(
         );
     }
 
-    // Serialize headers to JSON
     let headers_json = serde_json::to_string(&headers_map)?;
 
-    // Build the proof: base64(body)|base64(headers)|POST|base64(url)
+    // Proof format: base64(body)|base64(headers)|POST|base64(url)
     let proof = format!(
         "{}|{}|POST|{}",
         BASE64_STANDARD.encode(GET_CALLER_IDENTITY_BODY),

@@ -365,9 +365,7 @@ pub struct Config {
     pub api_key_secret_reload_interval: Option<Duration>,
 
     // Delegated Authentication
-    pub delegated_auth_enabled: bool,
     pub org_uuid: String,
-    pub delegated_auth_refresh_interval: Duration,
 
     pub serverless_appsec_enabled: bool,
     pub appsec_rules: Option<String>,
@@ -485,9 +483,7 @@ impl Default for Config {
             api_key_secret_reload_interval: None,
 
             // Delegated Authentication
-            delegated_auth_enabled: false,
             org_uuid: String::default(),
-            delegated_auth_refresh_interval: Duration::from_secs(3600),
 
             serverless_appsec_enabled: false,
             appsec_rules: None,

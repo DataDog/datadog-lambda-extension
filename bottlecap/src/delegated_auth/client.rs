@@ -12,10 +12,8 @@ use crate::config::Config;
 use crate::config::aws::{AwsConfig, AwsCredentials};
 use crate::delegated_auth::auth_proof::generate_auth_proof;
 
-/// The intake-key API endpoint path
 const INTAKE_KEY_ENDPOINT: &str = "/api/v2/intake-key";
 
-/// Response from the intake-key API
 #[derive(Debug, Deserialize)]
 struct IntakeKeyResponse {
     data: IntakeKeyData,
@@ -50,10 +48,9 @@ pub async fn get_delegated_api_key(
 ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
     debug!("Attempting to get API key via delegated auth");
 
-    // Get AWS credentials (handles both standard env vars and SnapStart container credentials)
     let mut aws_credentials = AwsCredentials::from_env();
 
-    // Handle SnapStart scenario where credentials come from container endpoint
+    // SnapStart: credentials come from the container endpoint instead of env vars
     if aws_credentials.aws_secret_access_key.is_empty()
         && aws_credentials.aws_access_key_id.is_empty()
         && !aws_credentials
@@ -65,14 +62,11 @@ pub async fn get_delegated_api_key(
         aws_credentials = get_snapstart_credentials(&aws_credentials).await?;
     }
 
-    // Generate the auth proof
     let proof = generate_auth_proof(&aws_credentials, &aws_config.region, &config.org_uuid)?;
 
-    // Build the API endpoint URL
     let url = get_api_endpoint(&config.site);
     info!("Requesting delegated API key from: {}", url);
 
-    // Create HTTP client
     let builder = match create_reqwest_client_builder() {
         Ok(b) => b,
         Err(err) => {
@@ -89,7 +83,6 @@ pub async fn get_delegated_api_key(
         }
     };
 
-    // Build request headers
     let mut headers = HeaderMap::new();
     headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
     headers.insert(
@@ -97,7 +90,6 @@ pub async fn get_delegated_api_key(
         HeaderValue::from_str(&format!("Delegated {proof}"))?,
     );
 
-    // Send request
     let response = client
         .post(&url)
         .headers(headers)
@@ -112,12 +104,14 @@ pub async fn get_delegated_api_key(
     let status = response.status();
     if !status.is_success() {
         let body = response.text().await.unwrap_or_default();
-        let err_msg = format!("Delegated auth request failed with status {status}: {body}");
+        let err_msg = format!(
+            "Delegated auth request failed with status {status} (response body length: {} bytes)",
+            body.len()
+        );
         error!("{err_msg}");
         return Err(err_msg.into());
     }
 
-    // Parse response
     let response_body = response.text().await?;
     let parsed: IntakeKeyResponse = serde_json::from_str(&response_body).map_err(|err| {
         error!(
@@ -150,7 +144,6 @@ fn get_api_endpoint(site: &str) -> String {
         return format!("https://api.datadoghq.com{INTAKE_KEY_ENDPOINT}");
     }
 
-    // If the site already has a protocol, extract just the domain
     let domain = if site.starts_with("https://") || site.starts_with("http://") {
         site.split("://")
             .nth(1)

@@ -50,7 +50,6 @@ export class AuthStack extends cdk.Stack {
         DD_LOG_LEVEL: 'debug',
         // Delegated auth config
         DD_ORG_UUID: process.env.SERVERLESS_UUID || '',
-        DD_DELEGATED_AUTH_ENABLED: 'true',
         TS: Date.now().toString(),
       },
       logGroup: createLogGroup(this, functionName),
