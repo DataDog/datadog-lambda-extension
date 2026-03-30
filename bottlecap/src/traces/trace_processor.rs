@@ -30,7 +30,7 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 use tokio::sync::mpsc::Sender;
 use tokio::sync::mpsc::error::SendError;
-use tracing::{debug, error, warn};
+use tracing::{debug, error};
 
 use crate::traces::stats_generator::StatsGenerator;
 use crate::traces::trace_aggregator::{OwnedTracerHeaderTags, SendDataBuilderInfo};
@@ -122,7 +122,7 @@ fn compile_regex_filters(filters: Option<&[String]>) -> Vec<RegexFilter> {
                     regex: Some(regex),
                 })
             } else {
-                warn!(
+                debug!(
                     "TRACE_PROCESSOR | Invalid regex pattern '{}' for key '{}', skipping filter",
                     pattern.trim(),
                     key.trim()
@@ -868,6 +868,7 @@ mod tests {
             "service",
             &Regex::new(r"api-.*").expect("regex pattern should be valid")
         ));
+
     }
 
     #[test]
