@@ -8,9 +8,9 @@ use serde::Deserialize;
 use std::sync::Arc;
 use tracing::{debug, error, info};
 
+use super::auth_proof::generate_auth_proof;
 use crate::config::Config;
 use crate::config::aws::{AwsConfig, AwsCredentials};
-use super::auth_proof::generate_auth_proof;
 
 const INTAKE_KEY_ENDPOINT: &str = "/api/v2/intake-key";
 
