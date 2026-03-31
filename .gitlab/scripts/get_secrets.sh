@@ -21,7 +21,7 @@ fi
 
 printf "Getting AWS External ID...\n"
 
-EXTERNAL_ID=$(vault kv get -field=$EXTERNAL_ID_NAME kv/k8s/gitlab-runner/datadog-lambda-extension/secrets)
+EXTERNAL_ID=$(vault kv get -field="$EXTERNAL_ID_NAME" kv/k8s/gitlab-runner/datadog-lambda-extension/secrets)
 
 printf "Getting DD API KEY...\n"
 
