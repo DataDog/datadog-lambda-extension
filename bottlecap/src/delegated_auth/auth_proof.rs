@@ -207,7 +207,12 @@ mod tests {
 
         let result = generate_auth_proof(&creds, "us-east-1", "");
         assert!(result.is_err());
-        assert!(result.expect_err("expected error for missing org UUID").to_string().contains("Missing org UUID"));
+        assert!(
+            result
+                .expect_err("expected error for missing org UUID")
+                .to_string()
+                .contains("Missing org UUID")
+        );
     }
 
     #[test]
