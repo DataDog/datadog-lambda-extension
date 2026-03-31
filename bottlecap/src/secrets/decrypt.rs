@@ -16,7 +16,7 @@ use std::sync::Arc;
 use tokio::time::Instant;
 use tracing::{debug, error, info, warn};
 
-use crate::delegated_auth;
+use crate::secrets::delegated_auth;
 
 pub async fn resolve_secrets(config: Arc<Config>, aws_config: Arc<AwsConfig>) -> Option<String> {
     if !config.dd_org_uuid.is_empty() {

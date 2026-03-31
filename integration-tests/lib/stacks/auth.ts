@@ -9,6 +9,7 @@ import {
   defaultNodeRuntime,
   defaultJavaRuntime,
 } from '../util';
+import { AUTH_ROLE_NAME } from '../auth-role';
 
 /**
  * CDK Stack for Authentication Integration Tests
@@ -16,7 +17,7 @@ import {
  * Tests delegated authentication - Lambda uses IAM role to obtain API key.
  * Includes on-demand (Node) and SnapStart (Java) functions.
  *
- * PREREQUISITE: The IAM role ARNs must be configured in Datadog's intake mapping.
+ * Uses a shared IAM role (from AuthRoleStack) so the intake mapping is stable.
  */
 export class AuthStack extends cdk.Stack {
   constructor(scope: Construct, id: string, props: cdk.StackProps) {
@@ -24,6 +25,8 @@ export class AuthStack extends cdk.Stack {
 
     const extensionLayer = getExtensionLayer(this);
     const javaLayer = getDefaultJavaLayer(this);
+
+    const role = iam.Role.fromRoleName(this, 'AuthRole', AUTH_ROLE_NAME);
 
     const orgUuid = process.env.SERVERLESS_UUID || '';
 
@@ -37,15 +40,6 @@ export class AuthStack extends cdk.Stack {
       DD_ORG_UUID: orgUuid,
       TS: Date.now().toString(),
     };
-
-    const roleName = `${id}-role`;
-    const role = new iam.Role(this, 'ExecutionRole', {
-      roleName,
-      assumedBy: new iam.ServicePrincipal('lambda.amazonaws.com'),
-      managedPolicies: [
-        iam.ManagedPolicy.fromAwsManagedPolicyName('service-role/AWSLambdaBasicExecutionRole'),
-      ],
-    });
 
     const nodeFunctionName = `${id}-node`;
     const nodeFn = new lambda.Function(this, nodeFunctionName, {
@@ -90,11 +84,6 @@ export class AuthStack extends cdk.Stack {
     new lambda.Alias(this, `${javaFunctionName}-snapstart-alias`, {
       aliasName: 'snapstart',
       version: javaVersion,
-    });
-
-    new cdk.CfnOutput(this, 'RoleArn', {
-      value: role.roleArn,
-      description: 'IAM Role ARN - configure in intake mapping',
     });
   }
 }

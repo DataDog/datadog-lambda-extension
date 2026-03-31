@@ -10,7 +10,7 @@ use tracing::{debug, error, info};
 
 use crate::config::Config;
 use crate::config::aws::{AwsConfig, AwsCredentials};
-use crate::delegated_auth::auth_proof::generate_auth_proof;
+use super::auth_proof::generate_auth_proof;
 
 const INTAKE_KEY_ENDPOINT: &str = "/api/v2/intake-key";
 

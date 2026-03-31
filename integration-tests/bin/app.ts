@@ -6,6 +6,7 @@ import {Otlp} from '../lib/stacks/otlp';
 import {Snapstart} from '../lib/stacks/snapstart';
 import {LambdaManagedInstancesStack} from '../lib/stacks/lmi';
 import {AuthStack} from '../lib/stacks/auth';
+import {AuthRoleStack} from '../lib/auth-role';
 import {ACCOUNT, getIdentifier, REGION} from '../config';
 import {CapacityProviderStack} from "../lib/capacity-provider";
 
@@ -21,6 +22,7 @@ const identifier = getIdentifier();
 // Use the same Lambda Managed Instance Capacity Provider for all LMI functions.
 // It is slow to create/destroy the related resources.
 new CapacityProviderStack(app, `integ-default-capacity-provider`, {env});
+new AuthRoleStack(app, `integ-auth-role`, {env});
 
 const stacks = [
     new OnDemand(app, `integ-${identifier}-on-demand`, {
