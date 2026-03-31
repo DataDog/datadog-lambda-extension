@@ -58,7 +58,7 @@ jobs:
         run: |
           AGENT_VERSION="${{ github.event.inputs.agentVersion }}"
           if [ -z "$AGENT_VERSION" ]; then
-            AGENT_VERSION=$(git -C datadog-agent tag --sort=-version:refname | grep -E '^[0-9]+\.[0-9]+\.[0-9]+$' | head -1)
+            AGENT_VERSION=$(grep -m 1 -E '^[0-9]+\.[0-9]+\.[0-9]+$' datadog-agent/CHANGELOG.rst)
           fi
           echo "agent_version=${AGENT_VERSION}" >> "$GITHUB_OUTPUT"
 
