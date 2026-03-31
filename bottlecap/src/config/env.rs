@@ -483,7 +483,6 @@ pub struct EnvConfig {
     #[serde(deserialize_with = "deserialize_optional_duration_from_seconds")]
     pub api_security_sample_delay: Option<Duration>,
 
-    // Delegated Authentication
     /// @env `DD_ORG_UUID`
     ///
     /// The Datadog organization UUID. When set, delegated auth is auto-enabled.
@@ -692,8 +691,7 @@ fn merge_config(config: &mut Config, env_config: &EnvConfig) {
     merge_option_to_value!(config, env_config, api_security_enabled);
     merge_option_to_value!(config, env_config, api_security_sample_delay);
 
-    // Delegated Authentication
-    merge_string!(config, env_config, org_uuid);
+    merge_string!(config, dd_org_uuid, env_config, org_uuid);
 }
 
 #[derive(Debug, PartialEq, Clone, Copy)]
@@ -1055,8 +1053,7 @@ mod tests {
                 api_security_enabled: false,
                 api_security_sample_delay: Duration::from_secs(60),
 
-                // Delegated Authentication (not set in env, should be defaults)
-                org_uuid: String::default(),
+                dd_org_uuid: String::default(),
             };
 
             assert_eq!(config, expected_config);

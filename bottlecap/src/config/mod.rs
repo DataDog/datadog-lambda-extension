@@ -364,8 +364,7 @@ pub struct Config {
     pub span_dedup_timeout: Option<Duration>,
     pub api_key_secret_reload_interval: Option<Duration>,
 
-    // Delegated Authentication
-    pub org_uuid: String,
+    pub dd_org_uuid: String,
 
     pub serverless_appsec_enabled: bool,
     pub appsec_rules: Option<String>,
@@ -482,8 +481,7 @@ impl Default for Config {
             span_dedup_timeout: None,
             api_key_secret_reload_interval: None,
 
-            // Delegated Authentication
-            org_uuid: String::default(),
+            dd_org_uuid: String::default(),
 
             serverless_appsec_enabled: false,
             appsec_rules: None,

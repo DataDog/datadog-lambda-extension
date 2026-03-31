@@ -62,7 +62,7 @@ pub async fn get_delegated_api_key(
         aws_credentials = get_snapstart_credentials(&aws_credentials).await?;
     }
 
-    let proof = generate_auth_proof(&aws_credentials, &aws_config.region, &config.org_uuid)?;
+    let proof = generate_auth_proof(&aws_credentials, &aws_config.region, &config.dd_org_uuid)?;
 
     let url = get_api_endpoint(&config.site);
     info!("Requesting delegated API key from: {}", url);

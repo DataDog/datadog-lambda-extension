@@ -1037,8 +1037,7 @@ api_security_sample_delay: 60 # Seconds
                 dogstatsd_buffer_size: Some(65507),
                 dogstatsd_queue_size: Some(2048),
 
-                // Delegated Authentication (not set in yaml, should be defaults)
-                org_uuid: String::default(),
+                dd_org_uuid: String::default(),
             };
 
             // Assert that

@@ -38,7 +38,6 @@ export class AuthStack extends cdk.Stack {
       TS: Date.now().toString(),
     };
 
-    // Shared IAM role for all auth test functions
     const roleName = `${id}-role`;
     const role = new iam.Role(this, 'ExecutionRole', {
       roleName,
@@ -48,7 +47,6 @@ export class AuthStack extends cdk.Stack {
       ],
     });
 
-    // On-demand Node.js function
     const nodeFunctionName = `${id}-node`;
     const nodeFn = new lambda.Function(this, nodeFunctionName, {
       role,
@@ -67,7 +65,6 @@ export class AuthStack extends cdk.Stack {
     });
     nodeFn.addLayers(extensionLayer);
 
-    // SnapStart Java function
     const javaFunctionName = `${id}-java`;
     const javaFn = new lambda.Function(this, javaFunctionName, {
       role,
