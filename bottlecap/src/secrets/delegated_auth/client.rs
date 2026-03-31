@@ -1,7 +1,3 @@
-//! Datadog intake-key API client for delegated authentication
-//!
-//! Exchanges the signed STS `GetCallerIdentity` proof for a managed API key.
-
 use datadog_fips::reqwest_adapter::create_reqwest_client_builder;
 use reqwest::header::{AUTHORIZATION, CONTENT_TYPE, HeaderMap, HeaderValue};
 use serde::Deserialize;

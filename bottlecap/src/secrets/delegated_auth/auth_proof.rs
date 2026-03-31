@@ -1,8 +1,3 @@
-//! STS `GetCallerIdentity` signing for AWS delegated authentication
-//!
-//! Generates a signed STS `GetCallerIdentity` request that proves access to AWS credentials.
-//! The proof is sent to Datadog's intake-key API to obtain a managed API key.
-
 use base64::prelude::*;
 use chrono::Utc;
 use hmac::{Hmac, Mac};

@@ -1,8 +1,3 @@
-//! AWS Delegated Authentication module
-//!
-//! This module provides the ability to obtain a managed Datadog API key using
-//! AWS Lambda execution role credentials via SigV4-signed STS requests.
-
 pub mod auth_proof;
 pub mod client;
 
