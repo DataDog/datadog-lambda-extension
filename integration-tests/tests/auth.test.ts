@@ -6,41 +6,49 @@ import { getIdentifier } from '../config';
 const identifier = getIdentifier();
 const stackName = `integ-${identifier}-auth`;
 
-const FUNCTION_NAME = stackName;
-
 describe('Auth Integration Tests', () => {
   let telemetry: Record<string, DatadogTelemetry>;
 
-  const getFirstInvocation = () => telemetry['auth']?.threads[0]?.[0];
+  const getFirstInvocation = (runtime: string) => telemetry[runtime]?.threads[0]?.[0];
 
   beforeAll(async () => {
-    const functions: FunctionConfig[] = [{
-      functionName: FUNCTION_NAME,
-      runtime: 'auth',
-    }];
+    const functions: FunctionConfig[] = [
+      { functionName: `${stackName}-node`, runtime: 'node' },
+      { functionName: `${stackName}-java:snapstart`, runtime: 'java' },
+    ];
 
-    await forceColdStart(FUNCTION_NAME);
+    await Promise.all(functions.map(fn => forceColdStart(fn.functionName)));
 
     telemetry = await invokeAndCollectTelemetry(functions, 1);
 
     console.log('All invocations and data fetching completed');
   }, 600000);
 
-  it('should invoke Lambda successfully', () => {
-    const result = getFirstInvocation();
-    expect(result).toBeDefined();
-    expect(result.statusCode).toBe(200);
+  describe('on-demand (node)', () => {
+    it('should invoke Lambda successfully', () => {
+      const result = getFirstInvocation('node');
+      expect(result).toBeDefined();
+      expect(result.statusCode).toBe(200);
+    });
+
+    it('should send logs to Datadog via delegated auth', () => {
+      const result = getFirstInvocation('node');
+      expect(result).toBeDefined();
+      expect(result.logs!.length).toBeGreaterThan(0);
+    });
   });
 
-  it('should have function log output', () => {
-    const result = getFirstInvocation();
-    expect(result).toBeDefined();
-    expect(result.logs!.length).toBeGreaterThan(0);
-  });
+  describe('snapstart (java)', () => {
+    it('should invoke Lambda successfully', () => {
+      const result = getFirstInvocation('java');
+      expect(result).toBeDefined();
+      expect(result.statusCode).toBe(200);
+    });
 
-  it('should send telemetry to Datadog (validates API key works)', () => {
-    const result = getFirstInvocation();
-    expect(result).toBeDefined();
-    expect(result.logs!.length).toBeGreaterThan(0);
+    it('should send logs to Datadog via delegated auth', () => {
+      const result = getFirstInvocation('java');
+      expect(result).toBeDefined();
+      expect(result.logs!.length).toBeGreaterThan(0);
+    });
   });
 });
