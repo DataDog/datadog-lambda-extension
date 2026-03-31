@@ -21,39 +21,15 @@ fi
 
 printf "Getting AWS External ID...\n"
 
-EXTERNAL_ID=$(aws ssm get-parameter \
-    --region us-east-1 \
-    --name "ci.datadog-lambda-extension.$EXTERNAL_ID_NAME" \
-    --with-decryption \
-    --query "Parameter.Value" \
-    --out text)
+EXTERNAL_ID=$(vault kv get -field=$EXTERNAL_ID_NAME kv/k8s/gitlab-runner/datadog-lambda-extension/secrets)
 
 printf "Getting DD API KEY...\n"
 
-export DD_API_KEY=$(aws ssm get-parameter \
-    --region us-east-1 \
-    --name ci.datadog-lambda-extension.dd-api-key \
-    --with-decryption \
-    --query "Parameter.Value" \
-    --out text)
-
-printf "Getting DD API KEY Secret ARN...\n"
-
-export DATADOG_API_SECRET_ARN=$(aws ssm get-parameter \
-    --region us-east-1 \
-    --name ci.datadog-lambda-extension.dd-api-key-secret-arn \
-    --with-decryption \
-    --query "Parameter.Value" \
-    --out text)
+export DD_API_KEY=$(vault kv get -field=dd-api-key kv/k8s/gitlab-runner/datadog-lambda-extension/secrets)
 
 printf "Getting DD APP KEY...\n"
 
-export DD_APP_KEY=$(aws ssm get-parameter \
-    --region us-east-1 \
-    --name ci.datadog-lambda-extension.dd-app-key \
-    --with-decryption \
-    --query "Parameter.Value" \
-    --out text)
+export DD_APP_KEY=$(vault kv get -field=dd-app-key kv/k8s/gitlab-runner/datadog-lambda-extension/secrets)
 
 printf "Assuming role...\n"
 
