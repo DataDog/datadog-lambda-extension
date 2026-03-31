@@ -22,7 +22,7 @@ on:
           - "no"
       agentVersion:
         type: string
-        description: Datadog agent version (default: latest release tag from Datadog agent branch)
+        description: Datadog agent version (default latest release tag from Datadog agent branch)
       agentBranch:
         type: string
         description: Datadog agent branch or tag name (default main)
