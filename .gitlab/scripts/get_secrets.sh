@@ -33,12 +33,7 @@ export DD_APP_KEY=$(vault kv get -field=dd-app-key kv/k8s/gitlab-runner/datadog-
 
 printf "Getting Serverless UUID...\n"
 
-export SERVERLESS_UUID=$(aws ssm get-parameter \
-    --region us-east-1 \
-    --name ci.datadog-lambda-extension.serverless-uuid \
-    --with-decryption \
-    --query "Parameter.Value" \
-    --out text)
+export SERVERLESS_UUID=$(vault kv get -field=serverless-uuid kv/k8s/gitlab-runner/datadog-lambda-extension/secrets)
 
 printf "Assuming role...\n"
 
