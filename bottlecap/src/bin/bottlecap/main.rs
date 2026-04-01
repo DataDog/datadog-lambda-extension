@@ -150,7 +150,8 @@ async fn main() -> anyhow::Result<()> {
     let config = Arc::new(config::get_config(Path::new(&lambda_directory)));
 
     let aws_config = Arc::new(aws_config);
-    let api_key_factory = create_api_key_factory(&config, &aws_config);
+    let shared_client = bottlecap::http::get_client(&config);
+    let api_key_factory = create_api_key_factory(&config, &aws_config, &shared_client);
 
     let r = response
         .await
@@ -161,6 +162,7 @@ async fn main() -> anyhow::Result<()> {
         Arc::clone(&aws_config),
         &config,
         &client,
+        shared_client,
         &r,
         Arc::clone(&api_key_factory),
         start_time,
@@ -246,17 +248,23 @@ fn get_flush_strategy_for_mode(
     }
 }
 
-fn create_api_key_factory(config: &Arc<Config>, aws_config: &Arc<AwsConfig>) -> Arc<ApiKeyFactory> {
+fn create_api_key_factory(
+    config: &Arc<Config>,
+    aws_config: &Arc<AwsConfig>,
+    client: &reqwest::Client,
+) -> Arc<ApiKeyFactory> {
     let config = Arc::clone(config);
     let aws_config = Arc::clone(aws_config);
+    let client = client.clone();
     let api_key_secret_reload_interval = config.api_key_secret_reload_interval;
 
     Arc::new(ApiKeyFactory::new_from_resolver(
         Arc::new(move || {
             let config = Arc::clone(&config);
             let aws_config = Arc::clone(&aws_config);
+            let client = client.clone();
 
-            Box::pin(async move { resolve_secrets(config, aws_config).await })
+            Box::pin(async move { resolve_secrets(config, aws_config, client).await })
         }),
         api_key_secret_reload_interval,
     ))
@@ -285,6 +293,7 @@ async fn extension_loop_active(
     aws_config: Arc<AwsConfig>,
     config: &Arc<Config>,
     client: &Client,
+    shared_client: reqwest::Client,
     r: &RegisterResponse,
     api_key_factory: Arc<ApiKeyFactory>,
     start_time: Instant,
@@ -293,11 +302,6 @@ async fn extension_loop_active(
 
     let account_id = r.account_id.as_ref().unwrap_or(&"none".to_string()).clone();
     let tags_provider = setup_tag_provider(&Arc::clone(&aws_config), config, &account_id);
-
-    // Build one shared reqwest::Client for metrics, logs, and trace proxy flushing.
-    // reqwest::Client is Arc-based internally, so cloning just increments a refcount
-    // and shares the connection pool.
-    let shared_client = bottlecap::http::get_client(config);
 
     let (
         logs_agent_channel,

@@ -1,29 +1,12 @@
-use datadog_fips::reqwest_adapter::create_reqwest_client_builder;
 use reqwest::header::{AUTHORIZATION, CONTENT_TYPE, HeaderMap, HeaderValue};
-use serde::Deserialize;
 use std::sync::Arc;
-use tracing::{debug, error, info};
+use tracing::{debug, error};
 
 use super::auth_proof::generate_auth_proof;
 use crate::config::Config;
 use crate::config::aws::{AwsConfig, AwsCredentials};
 
 const INTAKE_KEY_ENDPOINT: &str = "/api/v2/intake-key";
-
-#[derive(Debug, Deserialize)]
-struct IntakeKeyResponse {
-    data: IntakeKeyData,
-}
-
-#[derive(Debug, Deserialize)]
-struct IntakeKeyData {
-    attributes: IntakeKeyAttributes,
-}
-
-#[derive(Debug, Deserialize)]
-struct IntakeKeyAttributes {
-    api_key: String,
-}
 
 /// Gets a delegated API key from Datadog using AWS credentials.
 ///
@@ -35,49 +18,27 @@ struct IntakeKeyAttributes {
 /// # Arguments
 /// * `config` - The extension configuration containing site and `org_uuid`
 /// * `aws_config` - The AWS configuration containing region
+/// * `client` - A pre-built `reqwest::Client` to use for the request. The client is built
+///   with `create_reqwest_client_builder()` which respects proxy configuration via
+///   `HTTPS_PROXY` environment variables, so hardcoded `https://` in the URL does not
+///   bypass proxy settings.
+/// * `aws_credentials` - Pre-resolved AWS credentials (`SnapStart` credentials must be
+///   fetched by the caller before invoking this function)
 ///
 /// # Returns
 /// The API key string, or an error if the request fails
 pub async fn get_delegated_api_key(
     config: &Arc<Config>,
     aws_config: &Arc<AwsConfig>,
+    client: &reqwest::Client,
+    aws_credentials: &AwsCredentials,
 ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
     debug!("Attempting to get API key via delegated auth");
 
-    let mut aws_credentials = AwsCredentials::from_env();
-
-    // SnapStart: credentials come from the container endpoint instead of env vars
-    if aws_credentials.aws_secret_access_key.is_empty()
-        && aws_credentials.aws_access_key_id.is_empty()
-        && !aws_credentials
-            .aws_container_credentials_full_uri
-            .is_empty()
-        && !aws_credentials.aws_container_authorization_token.is_empty()
-    {
-        debug!("Fetching credentials from container credentials endpoint (SnapStart)");
-        aws_credentials = get_snapstart_credentials(&aws_credentials).await?;
-    }
-
-    let proof = generate_auth_proof(&aws_credentials, &aws_config.region, &config.dd_org_uuid)?;
+    let proof = generate_auth_proof(aws_credentials, &aws_config.region, &config.dd_org_uuid)?;
 
     let url = get_api_endpoint(&config.site);
-    info!("Requesting delegated API key from: {}", url);
-
-    let builder = match create_reqwest_client_builder() {
-        Ok(b) => b,
-        Err(err) => {
-            error!("Error creating reqwest client builder: {}", err);
-            return Err(err.to_string().into());
-        }
-    };
-
-    let client = match builder.build() {
-        Ok(c) => c,
-        Err(err) => {
-            error!("Error creating reqwest client: {}", err);
-            return Err(err.into());
-        }
-    };
+    debug!("Requesting delegated API key from: {}", url);
 
     let mut headers = HeaderMap::new();
     headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
@@ -98,31 +59,34 @@ pub async fn get_delegated_api_key(
         })?;
 
     let status = response.status();
+    let response_body = response.text().await.unwrap_or_default();
     if !status.is_success() {
-        let body = response.text().await.unwrap_or_default();
         let err_msg = format!(
             "Delegated auth request failed with status {status} (response body length: {} bytes)",
-            body.len()
+            response_body.len()
         );
         error!("{err_msg}");
         return Err(err_msg.into());
     }
 
-    let response_body = response.text().await?;
-    let parsed: IntakeKeyResponse = serde_json::from_str(&response_body).map_err(|err| {
+    let parsed: serde_json::Value = serde_json::from_str(&response_body).map_err(|err| {
         error!(
-            "Failed to parse delegated auth response: {} - body: {}",
-            err, response_body
+            "Failed to parse delegated auth response: {} (body length: {} bytes)",
+            err,
+            response_body.len()
         );
         err
     })?;
 
-    let api_key = parsed.data.attributes.api_key;
+    let api_key = parsed["data"]["attributes"]["api_key"]
+        .as_str()
+        .unwrap_or_default()
+        .to_string();
+
     if api_key.is_empty() {
         return Err("Received empty API key from delegated auth".into());
     }
 
-    info!("Delegated auth API key obtained successfully");
     Ok(api_key)
 }
 
@@ -152,43 +116,6 @@ fn get_api_endpoint(site: &str) -> String {
     };
 
     format!("https://api.{domain}{INTAKE_KEY_ENDPOINT}")
-}
-
-/// Fetches credentials from the container credentials endpoint (for `SnapStart`).
-async fn get_snapstart_credentials(
-    aws_credentials: &AwsCredentials,
-) -> Result<AwsCredentials, Box<dyn std::error::Error + Send + Sync>> {
-    let builder = create_reqwest_client_builder().map_err(|e| e.to_string())?;
-    let client = builder.build()?;
-
-    let mut headers = HeaderMap::new();
-    headers.insert(
-        AUTHORIZATION,
-        HeaderValue::from_str(&aws_credentials.aws_container_authorization_token)?,
-    );
-
-    let response = client
-        .get(&aws_credentials.aws_container_credentials_full_uri)
-        .headers(headers)
-        .send()
-        .await?;
-
-    let body = response.text().await?;
-    let creds: serde_json::Value = serde_json::from_str(&body)?;
-
-    Ok(AwsCredentials {
-        aws_access_key_id: creds["AccessKeyId"]
-            .as_str()
-            .unwrap_or_default()
-            .to_string(),
-        aws_secret_access_key: creds["SecretAccessKey"]
-            .as_str()
-            .unwrap_or_default()
-            .to_string(),
-        aws_session_token: creds["Token"].as_str().unwrap_or_default().to_string(),
-        aws_container_credentials_full_uri: String::new(),
-        aws_container_authorization_token: String::new(),
-    })
 }
 
 #[cfg(test)]

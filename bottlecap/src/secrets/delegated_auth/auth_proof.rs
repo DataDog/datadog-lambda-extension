@@ -8,9 +8,13 @@ use tracing::debug;
 
 use crate::config::aws::AwsCredentials;
 
+/// The STS `GetCallerIdentity` request body (form-encoded)
 const GET_CALLER_IDENTITY_BODY: &str = "Action=GetCallerIdentity&Version=2011-06-15";
+/// Content-Type for the STS request (required by `SigV4`)
 const CONTENT_TYPE: &str = "application/x-www-form-urlencoded; charset=utf-8";
+/// Datadog organization ID header included in the signed headers for backend verification
 const ORG_ID_HEADER: &str = "x-ddog-org-id";
+/// AWS service name used in `SigV4` credential scope
 const STS_SERVICE: &str = "sts";
 
 /// Generates an authentication proof from AWS credentials.
@@ -34,6 +38,8 @@ pub fn generate_auth_proof(
 ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
     debug!("Generating delegated auth proof for region: {}", region);
 
+    // By the time this function is called, the caller has already resolved SnapStart
+    // credentials from the container credentials endpoint if needed.
     if aws_credentials.aws_access_key_id.is_empty()
         || aws_credentials.aws_secret_access_key.is_empty()
     {
@@ -44,11 +50,7 @@ pub fn generate_auth_proof(
         return Err("Missing org UUID for delegated auth".into());
     }
 
-    let sts_host = if region.is_empty() {
-        "sts.amazonaws.com".to_string()
-    } else {
-        format!("sts.{region}.amazonaws.com")
-    };
+    let sts_host = format!("sts.{region}.amazonaws.com");
     let sts_url = format!("https://{sts_host}");
 
     let now = Utc::now();
@@ -87,12 +89,7 @@ pub fn generate_auth_proof(
     );
 
     let algorithm = "AWS4-HMAC-SHA256";
-    let effective_region = if region.is_empty() {
-        "us-east-1"
-    } else {
-        region
-    };
-    let credential_scope = format!("{date_stamp}/{effective_region}/{STS_SERVICE}/aws4_request");
+    let credential_scope = format!("{date_stamp}/{region}/{STS_SERVICE}/aws4_request");
     let string_to_sign = format!(
         "{algorithm}\n{amz_date}\n{credential_scope}\n{}",
         hex::encode(Sha256::digest(canonical_request.as_bytes()))
@@ -101,7 +98,7 @@ pub fn generate_auth_proof(
     let signing_key = get_aws4_signature_key(
         &aws_credentials.aws_secret_access_key,
         &date_stamp,
-        effective_region,
+        region,
         STS_SERVICE,
     )?;
 
@@ -292,28 +289,4 @@ mod tests {
         );
     }
 
-    #[test]
-    fn test_generate_auth_proof_default_region() {
-        let creds = AwsCredentials {
-            aws_access_key_id: "AKIDEXAMPLE".to_string(),
-            aws_secret_access_key: "wJalrXUtnFEMI/K7MDENG+bPxRfiCYEXAMPLEKEY".to_string(),
-            aws_session_token: String::new(),
-            aws_container_credentials_full_uri: String::new(),
-            aws_container_authorization_token: String::new(),
-        };
-
-        // Empty region should use global STS endpoint
-        let result = generate_auth_proof(&creds, "", "test-org-uuid");
-        assert!(result.is_ok());
-
-        let proof = result.expect("Failed to generate auth proof");
-        let parts: Vec<&str> = proof.split('|').collect();
-        let url = String::from_utf8(
-            BASE64_STANDARD
-                .decode(parts[3])
-                .expect("Failed to decode base64 URL"),
-        )
-        .expect("Failed to convert URL to UTF-8");
-        assert!(url.contains("sts.amazonaws.com"));
-    }
 }
