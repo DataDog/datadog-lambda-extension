@@ -36,9 +36,11 @@ jobs:
         run: |
           STAMP=$(date -u +%Y%m%d)
           SHORT_SHA=$(git -C datadog-agent rev-parse --short=8 HEAD)
+          AGENT_VERSION=$(grep -m 1 -E '^[0-9]+\.[0-9]+\.[0-9]+$' datadog-agent/CHANGELOG.rst) || { echo "ERROR: could not detect agent version from datadog-agent's CHANGELOG.rst"; exit 1; }
           echo "stamp=${STAMP}" >> "$GITHUB_OUTPUT"
           echo "short_sha=${SHORT_SHA}" >> "$GITHUB_OUTPUT"
           echo "version=nightly-${STAMP}-${SHORT_SHA}" >> "$GITHUB_OUTPUT"
+          echo "agent_version=${AGENT_VERSION}" >> "$GITHUB_OUTPUT"
 
       # Pin QEMU to a known-good version. See release-serverless-init.yml
       # and test-qemu-versions.yml for context on QEMU breakage history.
@@ -56,6 +58,7 @@ jobs:
         env:
           AGENT_PATH: datadog-agent
           VERSION: ${{ steps.meta.outputs.version }}
+          AGENT_VERSION: ${{ steps.meta.outputs.agent_version }}
           SERVERLESS_INIT: "true"
           ALPINE: ${{ matrix.arrays.isAlpine }}
 
