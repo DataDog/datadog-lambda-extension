@@ -1,6 +1,6 @@
 import { invokeAndCollectTelemetry, FunctionConfig } from './utils/default';
 import { DatadogTelemetry } from './utils/datadog';
-import { forceColdStart } from './utils/lambda';
+import { forceColdStart, publishVersion, waitForSnapStartReady } from './utils/lambda';
 import { getIdentifier } from '../config';
 
 const identifier = getIdentifier();
@@ -12,12 +12,18 @@ describe('Auth Integration Tests', () => {
   const getFirstInvocation = (runtime: string) => telemetry[runtime]?.threads[0]?.[0];
 
   beforeAll(async () => {
-    const functions: FunctionConfig[] = [
-      { functionName: `${stackName}-node`, runtime: 'node' },
-      { functionName: `${stackName}-java:snapstart`, runtime: 'java' },
-    ];
+    const nodeFunctionName = `${stackName}-node`;
+    const javaFunctionName = `${stackName}-java`;
 
-    await Promise.all(functions.map(fn => forceColdStart(fn.functionName)));
+    await forceColdStart(nodeFunctionName);
+
+    const javaVersion = await publishVersion(javaFunctionName);
+    await waitForSnapStartReady(javaFunctionName, javaVersion);
+
+    const functions: FunctionConfig[] = [
+      { functionName: nodeFunctionName, runtime: 'node' },
+      { functionName: `${javaFunctionName}:${javaVersion}`, runtime: 'java' },
+    ];
 
     telemetry = await invokeAndCollectTelemetry(functions, 1);
 
