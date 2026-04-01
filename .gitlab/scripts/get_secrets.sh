@@ -31,10 +31,6 @@ printf "Getting DD APP KEY...\n"
 
 export DD_APP_KEY=$(vault kv get -field=dd-app-key kv/k8s/gitlab-runner/datadog-lambda-extension/secrets)
 
-printf "Getting Serverless UUID...\n"
-
-export SERVERLESS_UUID=$(vault kv get -field=serverless-uuid kv/k8s/gitlab-runner/datadog-lambda-extension/secrets)
-
 printf "Assuming role...\n"
 
 export $(printf "AWS_ACCESS_KEY_ID=%s AWS_SECRET_ACCESS_KEY=%s AWS_SESSION_TOKEN=%s" \

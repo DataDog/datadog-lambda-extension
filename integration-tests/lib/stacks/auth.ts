@@ -28,7 +28,7 @@ export class AuthStack extends cdk.Stack {
 
     const role = iam.Role.fromRoleName(this, 'AuthRole', AUTH_ROLE_NAME);
 
-    const orgUuid = process.env.SERVERLESS_UUID || '';
+    const orgUuid = '80372b20-c861-11ea-9d80-67f811a2b630';
 
     const delegatedAuthEnv = {
       DD_SITE: 'datadoghq.com',
