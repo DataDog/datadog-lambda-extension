@@ -2534,11 +2534,11 @@ mod tests {
         assert_eq!(batches.len(), 1);
         let logs: Vec<serde_json::Value> = serde_json::from_slice(&batches[0]).unwrap();
         assert_eq!(
-            logs[0]["message"]["lambda"]["durable_execution_id"],
+            logs[0]["message"]["lambda"]["durable_function.execution_id"],
             "my-id"
         );
         assert_eq!(
-            logs[0]["message"]["lambda"]["durable_execution_name"],
+            logs[0]["message"]["lambda"]["durable_function.execution_name"],
             "my-name"
         );
     }

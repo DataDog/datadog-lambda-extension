@@ -51,11 +51,11 @@ pub struct Message {
 pub struct Lambda {
     pub arn: String,
     pub request_id: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(rename = "durable_function.execution_id", skip_serializing_if = "Option::is_none")]
     pub durable_execution_id: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(rename = "durable_function.execution_name", skip_serializing_if = "Option::is_none")]
     pub durable_execution_name: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(rename = "durable_function.first_invocation", skip_serializing_if = "Option::is_none")]
     pub first_invocation: Option<bool>,
 }
 
