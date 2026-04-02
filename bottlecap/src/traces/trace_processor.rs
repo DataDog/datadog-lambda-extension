@@ -1567,10 +1567,7 @@ mod tests {
 
     fn create_inferred_span() -> pb::Span {
         let mut meta = HashMap::new();
-        meta.insert(
-            "_inferred_span.tag_source".to_string(),
-            "self".to_string(),
-        );
+        meta.insert("_inferred_span.tag_source".to_string(), "self".to_string());
         pb::Span {
             name: "aws.sqs".to_string(),
             service: "sqs".to_string(),

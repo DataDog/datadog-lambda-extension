@@ -112,10 +112,9 @@ impl SpanInferrer {
 
                     wrapped_inferred_span.duration =
                         inferred_span.start - wrapped_inferred_span.start;
-                    wrapped_inferred_span.meta.insert(
-                        "_inferred_span.tag_source".to_string(),
-                        "self".to_string(),
-                    );
+                    wrapped_inferred_span
+                        .meta
+                        .insert("_inferred_span.tag_source".to_string(), "self".to_string());
                     wrapped_inferred_span.meta.insert(
                         "_inferred_span.synchronicity".to_string(),
                         "async".to_string(),
@@ -139,10 +138,9 @@ impl SpanInferrer {
 
                     wrapped_inferred_span.duration =
                         inferred_span.start - wrapped_inferred_span.start;
-                    wrapped_inferred_span.meta.insert(
-                        "_inferred_span.tag_source".to_string(),
-                        "self".to_string(),
-                    );
+                    wrapped_inferred_span
+                        .meta
+                        .insert("_inferred_span.tag_source".to_string(), "self".to_string());
                     wrapped_inferred_span.meta.insert(
                         "_inferred_span.synchronicity".to_string(),
                         "async".to_string(),
@@ -174,10 +172,9 @@ impl SpanInferrer {
 
                     wrapped_inferred_span.duration =
                         inferred_span.start - wrapped_inferred_span.start;
-                    wrapped_inferred_span.meta.insert(
-                        "_inferred_span.tag_source".to_string(),
-                        "self".to_string(),
-                    );
+                    wrapped_inferred_span
+                        .meta
+                        .insert("_inferred_span.tag_source".to_string(), "self".to_string());
                     wrapped_inferred_span.meta.insert(
                         "_inferred_span.synchronicity".to_string(),
                         "async".to_string(),
@@ -273,10 +270,9 @@ impl SpanInferrer {
                 self.inferred_span = None;
             } else {
                 let synchronicity = if t.is_async() { "async" } else { "sync" };
-                inferred_span.meta.insert(
-                    "_inferred_span.tag_source".to_string(),
-                    "self".to_string(),
-                );
+                inferred_span
+                    .meta
+                    .insert("_inferred_span.tag_source".to_string(), "self".to_string());
                 inferred_span.meta.insert(
                     "_inferred_span.synchronicity".to_string(),
                     synchronicity.to_string(),
