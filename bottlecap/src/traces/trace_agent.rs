@@ -458,7 +458,7 @@ impl TraceAgent {
                     V2_DEBUGGER_ENDPOINT_PATH,
                     DEBUGGER_DIAGNOSTICS_ENDPOINT_PATH,
                 ],
-                "client_drop_p0s": true,
+                "client_drop_p0s": false,
             }
         );
         (StatusCode::OK, response_json.to_string()).into_response()
