@@ -546,9 +546,9 @@ impl LambdaProcessor {
     /// `request_id`.
     pub fn insert_to_durable_context_map(
         &mut self,
-        request_id: &str,              // key
-        execution_id: &str,            // value
-        execution_name: &str,          // value
+        request_id: &str,               // key
+        execution_id: &str,             // value
+        execution_name: &str,           // value
         first_invocation: Option<bool>, // value
     ) {
         if self.durable_context_map.contains_key(request_id) {
