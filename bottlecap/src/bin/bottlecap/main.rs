@@ -53,10 +53,7 @@ use bottlecap::{
         flusher::LogsFlusher,
         lambda::DurableContextUpdate,
     },
-    otlp::{
-        agent::Agent as OtlpAgent, grpc_agent::GrpcAgent as OtlpGrpcAgent, should_enable_otlp_grpc,
-        should_enable_otlp_http,
-    },
+    otlp::{agent::Agent as OtlpAgent, should_enable_otlp_agent},
     proxy::{interceptor, should_start_proxy},
     secrets::decrypt,
     tags::{
@@ -1371,49 +1368,27 @@ fn start_otlp_agent(
     trace_tx: Sender<SendDataBuilderInfo>,
     stats_concentrator: StatsConcentratorHandle,
 ) -> Option<CancellationToken> {
-    let http_enabled = should_enable_otlp_http(config);
-    let grpc_enabled = should_enable_otlp_grpc(config);
-
-    if !http_enabled && !grpc_enabled {
+    if !should_enable_otlp_agent(config) {
         return None;
     }
 
     let stats_generator = Arc::new(StatsGenerator::new(stats_concentrator));
     let cancel_token = CancellationToken::new();
 
-    if http_enabled {
-        let agent = OtlpAgent::new(
-            config.clone(),
-            tags_provider.clone(),
-            trace_processor.clone(),
-            trace_tx.clone(),
-            stats_generator.clone(),
-            cancel_token.clone(),
-        );
+    let agent = OtlpAgent::new(
+        config.clone(),
+        tags_provider,
+        trace_processor,
+        trace_tx,
+        stats_generator,
+        cancel_token.clone(),
+    );
 
-        tokio::spawn(async move {
-            if let Err(e) = agent.start().await {
-                error!("Error starting OTLP HTTP agent: {e:?}");
-            }
-        });
-    }
-
-    if grpc_enabled {
-        let grpc_agent = OtlpGrpcAgent::new(
-            config.clone(),
-            tags_provider,
-            trace_processor,
-            trace_tx,
-            stats_generator,
-            cancel_token.clone(),
-        );
-
-        tokio::spawn(async move {
-            if let Err(e) = grpc_agent.start().await {
-                error!("Error starting OTLP gRPC agent: {e:?}");
-            }
-        });
-    }
+    tokio::spawn(async move {
+        if let Err(e) = agent.start().await {
+            error!("Error starting OTLP agent: {e:?}");
+        }
+    });
 
     Some(cancel_token)
 }

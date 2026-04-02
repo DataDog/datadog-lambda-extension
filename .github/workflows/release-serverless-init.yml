@@ -22,7 +22,7 @@ on:
           - "no"
       agentVersion:
         type: string
-        description: Datadog agent version
+        description: Datadog agent version (default latest release tag from Datadog agent branch)
       agentBranch:
         type: string
         description: Datadog agent branch or tag name (default main)
@@ -53,6 +53,15 @@ jobs:
           ref: ${{ github.event.inputs.agentBranch }}
           path: datadog-agent
 
+      - name: Compute agent version
+        id: meta
+        run: |
+          AGENT_VERSION="${{ github.event.inputs.agentVersion }}"
+          if [ -z "$AGENT_VERSION" ]; then
+            AGENT_VERSION=$(grep -m 1 -E '^[0-9]+\.[0-9]+\.[0-9]+$' datadog-agent/CHANGELOG.rst) || { echo "ERROR: could not detect agent version from datadog-agent's CHANGELOG.rst; set the Datadog agent version manually"; exit 1; }
+          fi
+          echo "agent_version=${AGENT_VERSION}" >> "$GITHUB_OUTPUT"
+
       # Pin QEMU to a known-good version. The default (binfmt:latest) has broken
       # arm64 emulation multiple times due to QEMU segfaults in libc-bin triggers:
       #   - Feb 2025: qemu-v9.2.0 — PR #571 pinned, PR #581 reverted to :latest
@@ -76,7 +85,7 @@ jobs:
           VERSION: ${{ github.event.inputs.tag }}
           SERVERLESS_INIT: true
           ALPINE: ${{ matrix.arrays.isAlpine }}
-          AGENT_VERSION: ${{ github.event.inputs.agentVersion }}
+          AGENT_VERSION: ${{ steps.meta.outputs.agent_version }}
 
       - name: Set up build directory and copy binaries
         run: |

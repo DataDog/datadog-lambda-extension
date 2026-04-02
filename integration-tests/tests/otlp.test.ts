@@ -90,7 +90,7 @@ describe('OTLP Integration Tests', () => {
   });
 
   describe('OTLP gRPC Protocol', () => {
-    const getResult = () => results['nodeGrpc']?.[0]?.[0];
+    const getResult = () => telemetry['nodeGrpc']?.threads[0]?.[0];
 
     it('should invoke gRPC Lambda successfully', () => {
       const result = getResult();
