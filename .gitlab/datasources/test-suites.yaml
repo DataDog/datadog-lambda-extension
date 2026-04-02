@@ -3,4 +3,3 @@ test_suites:
   - name: otlp
   - name: snapstart
   - name: lmi
-  - name: durable

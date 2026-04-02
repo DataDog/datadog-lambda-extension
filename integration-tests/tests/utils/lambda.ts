@@ -36,10 +36,7 @@ function formatLambdaError(error: unknown): string {
 export interface InvocationResult {
   functionName: string;
   requestId: string;
-  // Lambda execution request ID extracted from tail logs (START RequestId: ...).
-  // Undefined for durable functions because they do not support LogType=Tail.
-  executionRequestId?: string;
-  statusCode: number;
+  statusCode?: number;
 }
 
 export async function invokeLambda(
@@ -49,13 +46,11 @@ export async function invokeLambda(
   const command = new InvokeCommand({
     FunctionName: functionName,
     Payload: JSON.stringify(payload),
-    LogType: 'Tail',
   });
 
   let response;
   try {
     response = await lambdaClient.send(command);
-    console.log(`Lambda invocation completed. StatusCode: ${response.StatusCode}, FunctionError: ${response.FunctionError || 'none'}`);
   } catch (error: unknown) {
     console.error(`Lambda invocation failed for '${functionName}': ${formatLambdaError(error)}`);
     throw error;
@@ -63,25 +58,9 @@ export async function invokeLambda(
 
   const requestId: string = response.$metadata.requestId || '';
 
-  // For durable functions, $metadata.requestId is the HTTP orchestration request ID which
-  // does NOT match the Lambda execution request ID stored as @lambda.request_id in Datadog.
-  // Durable functions also do not support LogType=Tail, so LogResult is absent.
-  // When LogResult is available, extract the real execution request ID from the START line.
-  let executionRequestId: string | undefined;
-  if (response.LogResult) {
-    const decodedLogs = Buffer.from(response.LogResult, 'base64').toString('utf-8');
-    console.log(`Tail logs: ${decodedLogs}`);
-    const startMatch = decodedLogs.match(/START RequestId: ([a-f0-9-]+)/);
-    if (startMatch?.[1]) {
-      executionRequestId = startMatch[1];
-      console.log(`Extracted execution requestId from tail logs: ${executionRequestId}`);
-    }
-  }
-
   return {
     functionName,
     requestId,
-    executionRequestId,
     statusCode: response.StatusCode || 200,
   };
 }

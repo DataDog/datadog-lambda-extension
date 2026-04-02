@@ -1,7 +1,6 @@
 #!/usr/bin/env node
 import 'source-map-support/register';
 import * as cdk from 'aws-cdk-lib';
-import {Durable} from '../lib/stacks/durable';
 import {OnDemand} from '../lib/stacks/on-demand';
 import {Otlp} from '../lib/stacks/otlp';
 import {Snapstart} from '../lib/stacks/snapstart';
@@ -24,9 +23,6 @@ new CapacityProviderStack(app, `integ-default-capacity-provider`, {env});
 
 const stacks = [
     new OnDemand(app, `integ-${identifier}-on-demand`, {
-        env,
-    }),
-    new Durable(app, `integ-${identifier}-durable`, {
         env,
     }),
     new Otlp(app, `integ-${identifier}-otlp`, {

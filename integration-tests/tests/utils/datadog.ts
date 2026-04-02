@@ -227,14 +227,12 @@ export async function getTraces(
  */
 export async function getLogs(
   serviceName: string,
-  requestId?: string,
+  requestId: string,
 ): Promise<DatadogLog[]> {
   const now = Date.now();
   const fromTime = now - (2 * 60 * 60 * 1000);
   const toTime = now;
-  const query = requestId
-    ? `service:${serviceName} @lambda.request_id:${requestId}`
-    : `service:${serviceName}`;
+  const query = `service:${serviceName} @lambda.request_id:${requestId}`;
 
   try {
     console.log(`Searching for logs: ${query}`);
