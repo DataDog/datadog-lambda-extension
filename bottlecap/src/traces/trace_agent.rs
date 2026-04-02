@@ -599,15 +599,22 @@ impl TraceAgent {
                         span.meta
                             .get(tags::lambda::tags::DURABLE_EXECUTION_NAME_KEY),
                     )
-                    && let Err(e) = invocation_processor_handle
+                {
+                    let first_invocation = span
+                        .meta
+                        .get(tags::lambda::tags::DURABLE_FUNCTION_FIRST_INVOCATION_KEY)
+                        .map(|v| v == "true");
+                    if let Err(e) = invocation_processor_handle
                         .forward_durable_context(
                             request_id.clone(),
                             execution_id.clone(),
                             execution_name.clone(),
+                            first_invocation,
                         )
                         .await
-                {
-                    error!("Failed to forward durable context to processor: {e}");
+                    {
+                        error!("Failed to forward durable context to processor: {e}");
+                    }
                 }
 
                 handle_reparenting(&mut reparenting_info, &mut span);

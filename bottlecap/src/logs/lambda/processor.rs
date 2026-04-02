@@ -86,6 +86,14 @@ fn is_oom_error(error_msg: &str) -> bool {
         .any(|&oom_str| error_msg.contains(oom_str))
 }
 
+/// Returns `true` for START, END, and REPORT platform logs.
+/// These are the only logs that carry the `first_invocation` attribute.
+fn is_platform_log(message: &str) -> bool {
+    message.starts_with("START RequestId:")
+        || message.starts_with("END RequestId:")
+        || message.starts_with("REPORT RequestId:")
+}
+
 /// Parses a Lambda durable execution ARN and returns `(execution_id, execution_name)`.
 ///
 /// Expected format:
@@ -538,9 +546,10 @@ impl LambdaProcessor {
     /// `request_id`.
     pub fn insert_to_durable_context_map(
         &mut self,
-        request_id: &str,     // key
-        execution_id: &str,   // value
-        execution_name: &str, // value
+        request_id: &str,              // key
+        execution_id: &str,            // value
+        execution_name: &str,          // value
+        first_invocation: Option<bool>, // value
     ) {
         if self.durable_context_map.contains_key(request_id) {
             error!("LOGS | insert_to_durable_context_map: request_id={request_id} already in map");
@@ -557,6 +566,7 @@ impl LambdaProcessor {
             DurableExecutionContext {
                 execution_id: execution_id.to_string(),
                 execution_name: execution_name.to_string(),
+                first_invocation,
             },
         );
         self.drain_held_logs_for_request_id(request_id);
@@ -592,6 +602,9 @@ impl LambdaProcessor {
             for mut log in held {
                 log.message.lambda.durable_execution_id = Some(ctx.execution_id.clone());
                 log.message.lambda.durable_execution_name = Some(ctx.execution_name.clone());
+                if is_platform_log(&log.message.message) {
+                    log.message.lambda.first_invocation = ctx.first_invocation;
+                }
                 if let Ok(s) = serde_json::to_string(&log) {
                     drop(log);
                     self.ready_logs.push(s);
@@ -618,6 +631,9 @@ impl LambdaProcessor {
                         log.message.lambda.durable_execution_id = Some(ctx.execution_id.clone());
                         log.message.lambda.durable_execution_name =
                             Some(ctx.execution_name.clone());
+                        if is_platform_log(&log.message.message) {
+                            log.message.lambda.first_invocation = ctx.first_invocation;
+                        }
                         if let Ok(s) = serde_json::to_string(&log) {
                             self.ready_logs.push(s);
                         }
@@ -732,6 +748,9 @@ impl LambdaProcessor {
                     Some(ctx) => {
                         log.message.lambda.durable_execution_id = Some(ctx.execution_id);
                         log.message.lambda.durable_execution_name = Some(ctx.execution_name);
+                        if is_platform_log(&log.message.message) {
+                            log.message.lambda.first_invocation = ctx.first_invocation;
+                        }
                         if let Ok(serialized_log) = serde_json::to_string(&log) {
                             // explicitly drop log so we don't accidentally re-use it and push
                             // duplicate logs to the aggregator
