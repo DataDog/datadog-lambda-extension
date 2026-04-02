@@ -29,7 +29,7 @@ use crate::{
     lifecycle::invocation::{
         context::ReparentingInfo, processor_service::InvocationProcessorHandle,
     },
-    tags::provider,
+    tags::{self, provider},
     traces::{
         INVOCATION_SPAN_RESOURCE,
         proxy_aggregator::{self, ProxyRequest},
@@ -591,6 +591,25 @@ impl TraceAgent {
                 {
                     error!("Failed to add tracer span to processor: {}", e);
                 }
+
+                if span.name == "aws.lambda"
+                    && let (Some(request_id), Some(execution_id), Some(execution_name)) = (
+                        span.meta.get(tags::lambda::tags::REQUEST_ID_KEY),
+                        span.meta.get(tags::lambda::tags::DURABLE_EXECUTION_ID_KEY),
+                        span.meta
+                            .get(tags::lambda::tags::DURABLE_EXECUTION_NAME_KEY),
+                    )
+                    && let Err(e) = invocation_processor_handle
+                        .forward_durable_context(
+                            request_id.clone(),
+                            execution_id.clone(),
+                            execution_name.clone(),
+                        )
+                        .await
+                {
+                    error!("Failed to forward durable context to processor: {e}");
+                }
+
                 handle_reparenting(&mut reparenting_info, &mut span);
 
                 // Keep the span

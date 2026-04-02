@@ -1,14 +1,14 @@
 use std::sync::Arc;
 use tokio::sync::mpsc::Sender;
 
-use tracing::debug;
+use tracing::{debug, error};
 
 use crate::LAMBDA_RUNTIME_SLUG;
 use crate::config::{self, processing_rule};
 use crate::event_bus::Event;
 use crate::extension::telemetry::events::TelemetryEvent;
 use crate::logs::aggregator_service::AggregatorHandle;
-use crate::logs::lambda::processor::LambdaProcessor;
+use crate::logs::lambda::{DurableContextUpdate, processor::LambdaProcessor};
 use crate::tags;
 
 impl LogsProcessor {
@@ -34,11 +34,63 @@ impl LogsProcessor {
         }
     }
 
+    // TODO: rename this method to process_telemetry_event()
     pub async fn process(&mut self, event: TelemetryEvent, aggregator_handle: &AggregatorHandle) {
         match self {
             LogsProcessor::Lambda(lambda_processor) => {
                 lambda_processor.process(event, aggregator_handle).await;
             }
+        }
+    }
+
+    pub fn process_durable_context_update(
+        &mut self,
+        update: DurableContextUpdate,
+        aggregator_handle: &AggregatorHandle,
+    ) {
+        self.insert_to_durable_map(
+            &update.request_id,
+            &update.execution_id,
+            &update.execution_name,
+        );
+        let ready_logs = self.take_ready_logs();
+        if !ready_logs.is_empty()
+            && let Err(e) = aggregator_handle.insert_batch(ready_logs)
+        {
+            error!("LOGS_PROCESSOR | Failed to insert batch: {}", e);
+        }
+    }
+
+    pub fn insert_to_durable_map(
+        &mut self,
+        request_id: &str,
+        execution_id: &str,
+        execution_name: &str,
+    ) {
+        match self {
+            LogsProcessor::Lambda(p) => {
+                p.insert_to_durable_context_map(request_id, execution_id, execution_name);
+            }
+        }
+    }
+
+    pub fn take_ready_logs(&mut self) -> Vec<String> {
+        match self {
+            LogsProcessor::Lambda(p) => p.take_ready_logs(),
+        }
+    }
+
+    /// Drains all remaining held logs to the aggregator without durable context tags.
+    /// Called at shutdown to ensure no logs are lost.
+    pub fn drain_held_logs(&mut self, aggregator_handle: &AggregatorHandle) {
+        match self {
+            LogsProcessor::Lambda(p) => p.drain_held_logs(),
+        }
+        let ready_logs = self.take_ready_logs();
+        if !ready_logs.is_empty()
+            && let Err(e) = aggregator_handle.insert_batch(ready_logs)
+        {
+            error!("LOGS_PROCESSOR | Failed to insert batch at shutdown: {}", e);
         }
     }
 }
