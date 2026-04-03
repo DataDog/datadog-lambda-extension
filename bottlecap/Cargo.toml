@@ -76,6 +76,7 @@ saluki-components = { version = "0.1.0", default-features = false, git = "https:
 saluki-config = { version = "0.1.0", default-features = false, git = "https://github.com/DataDog/saluki/", rev = "e8ff26721ccac37d370188f13fc06f3a9a97d181" }
 saluki-context = { version = "0.1.0", default-features = false, git = "https://github.com/DataDog/saluki/", rev = "e8ff26721ccac37d370188f13fc06f3a9a97d181" }
 saluki-error = { version = "0.1.0", default-features = false, git = "https://github.com/DataDog/saluki/", rev = "e8ff26721ccac37d370188f13fc06f3a9a97d181" }
+saluki-tls = { version = "0.1.0", default-features = false, git = "https://github.com/DataDog/saluki/", rev = "e8ff26721ccac37d370188f13fc06f3a9a97d181" }
 saluki-health = { version = "0.1.0", default-features = false, git = "https://github.com/DataDog/saluki/", rev = "e8ff26721ccac37d370188f13fc06f3a9a97d181" }
 memory-accounting = { version = "0.1.0", default-features = false, git = "https://github.com/DataDog/saluki/", rev = "e8ff26721ccac37d370188f13fc06f3a9a97d181" }
 stringtheory = { version = "0.1.0", default-features = false, git = "https://github.com/DataDog/saluki/", rev = "e8ff26721ccac37d370188f13fc06f3a9a97d181" }

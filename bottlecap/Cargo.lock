@@ -616,6 +616,7 @@ dependencies = [
  "saluki-core",
  "saluki-error",
  "saluki-health",
+ "saluki-tls",
  "serde",
  "serde-aux",
  "serde_html_form",

@@ -69,6 +69,14 @@ fn build_saluki_config(config: &Config) -> serde_json::Value {
 pub async fn start_metrics_topology(
     config: &Arc<Config>,
 ) -> Result<MetricsTopology, GenericError> {
+    // Initialize Saluki's default root certificate store from the platform's
+    // native certificates. Uses rustls-native-certs 0.8.2 + openssl-probe 0.1.6
+    // (the fast path that loads a single CA bundle file on Lambda).
+    // This is idempotent — safe to call even if already initialized.
+    if let Err(e) = saluki_tls::load_platform_root_certificates() {
+        tracing::warn!("Failed to load platform root certificates for Saluki TLS: {e}");
+    }
+
     // Build a GenericConfiguration from our already-loaded config values.
     // This avoids re-reading DD_* env vars — we pass what we already have.
     let saluki_values = build_saluki_config(config);
