@@ -1,12 +1,13 @@
 //! Saluki metrics topology setup.
 //!
-//! Builds and spawns the Saluki DogStatsD pipeline.
-//! Pipeline: DogStatsD Source + Enhanced Metrics Source → Aggregate → Encoder → Forwarder
+//! Builds and spawns the Saluki DogStatsD pipeline using bottlecap's
+//! already-loaded Config — no re-reading of environment variables.
 //!
-//! Saluki components are configured from DD_* environment variables — the same
-//! env vars that bottlecap reads. Since they're already in the process
-//! environment, Saluki's ConfigurationLoader reads them directly.
+//! Pipeline: DogStatsD Source + Enhanced Metrics Source → Aggregate → Encoder → Forwarder
 
+use std::sync::Arc;
+
+use figment::providers::Serialized;
 use memory_accounting::{ComponentRegistry, MemoryLimiter};
 use saluki_components::{
     encoders::DatadogMetricsConfiguration,
@@ -20,6 +21,7 @@ use saluki_error::{ErrorContext as _, GenericError};
 use saluki_health::HealthRegistry;
 use tracing::debug;
 
+use crate::config::Config;
 use crate::metrics::enhanced_source::{EnhancedMetricsHandle, EnhancedMetricsSourceBuilder};
 
 /// Result of starting the Saluki metrics topology.
@@ -32,18 +34,49 @@ pub struct MetricsTopology {
     pub running: RunningTopology,
 }
 
-/// Build and spawn the Saluki metrics pipeline.
-///
-/// Configuration is loaded from DD_* environment variables (the same env vars
-/// bottlecap uses). Saluki components read `DD_API_KEY`, `DD_SITE`, `DD_URL`,
-/// `DD_DOGSTATSD_PORT`, etc. directly from the process environment.
-pub async fn start_metrics_topology() -> Result<MetricsTopology, GenericError> {
-    let config = ConfigurationLoader::default()
-        .from_environment("DD")
-        .error_context("Failed to load DD_* environment variables")?
+/// Build a `GenericConfiguration` from bottlecap's already-loaded Config,
+/// mapping our config fields to the keys Saluki components expect.
+fn build_saluki_config(config: &Config) -> serde_json::Value {
+    let mut map = serde_json::Map::new();
+
+    // DogStatsD source config
+    map.insert(
+        "dogstatsd_port".into(),
+        serde_json::json!(crate::DOGSTATSD_PORT),
+    );
+    if let Some(buf_size) = config.dogstatsd_buffer_size {
+        map.insert("dogstatsd_buffer_size".into(), serde_json::json!(buf_size));
+    }
+    if let Some(so_rcvbuf) = config.dogstatsd_so_rcvbuf {
+        map.insert("dogstatsd_so_rcvbuf".into(), serde_json::json!(so_rcvbuf));
+    }
+
+    // Forwarder / endpoint config
+    map.insert("api_key".into(), serde_json::json!(config.api_key));
+    if !config.site.is_empty() {
+        map.insert("site".into(), serde_json::json!(config.site));
+    }
+    if !config.dd_url.is_empty() {
+        map.insert("dd_url".into(), serde_json::json!(config.dd_url));
+    } else if !config.url.is_empty() {
+        map.insert("dd_url".into(), serde_json::json!(config.url));
+    }
+
+    serde_json::Value::Object(map)
+}
+
+/// Build and spawn the Saluki metrics pipeline from bottlecap's Config.
+pub async fn start_metrics_topology(
+    config: &Arc<Config>,
+) -> Result<MetricsTopology, GenericError> {
+    // Build a GenericConfiguration from our already-loaded config values.
+    // This avoids re-reading DD_* env vars — we pass what we already have.
+    let saluki_values = build_saluki_config(config);
+    let generic_config = ConfigurationLoader::default()
+        .add_providers([Serialized::defaults(saluki_values)])
         .into_generic()
         .await
-        .error_context("Failed to build Saluki configuration from environment")?;
+        .error_context("Failed to build Saluki configuration from bottlecap Config")?;
 
     let health_registry = HealthRegistry::new();
     let component_registry = ComponentRegistry::default();
@@ -52,34 +85,29 @@ pub async fn start_metrics_topology() -> Result<MetricsTopology, GenericError> {
 
     // --- Sources ---
 
-    // DogStatsD UDP source (reads DD_DOGSTATSD_PORT, defaults to 8125)
-    let dsd_config = DogStatsDConfiguration::from_configuration(&config)
+    let dsd_config = DogStatsDConfiguration::from_configuration(&generic_config)
         .error_context("Failed to create DogStatsD source configuration")?;
     blueprint.add_source("dogstatsd", dsd_config)?;
 
-    // Enhanced metrics source (channel-based, for programmatic Lambda metric injection)
     let (enhanced_source_builder, enhanced_metrics_handle) = EnhancedMetricsSourceBuilder::new();
     blueprint.add_source("enhanced_metrics", enhanced_source_builder)?;
 
     // --- Transform ---
 
-    // Aggregation with on-demand flush handle for Lambda invocation boundaries
-    let mut agg_config = AggregateConfiguration::from_configuration(&config)
+    let mut agg_config = AggregateConfiguration::from_configuration(&generic_config)
         .unwrap_or_else(|_| AggregateConfiguration::with_defaults());
     let aggregator_handle = agg_config.create_handle();
     blueprint.add_transform("aggregate", agg_config)?;
 
     // --- Encoder ---
 
-    // Protobuf encoder for both /api/v2/series and /api/beta/sketches
-    let encoder_config = DatadogMetricsConfiguration::from_configuration(&config)
+    let encoder_config = DatadogMetricsConfiguration::from_configuration(&generic_config)
         .error_context("Failed to create metrics encoder configuration")?;
     blueprint.add_encoder("metrics_encoder", encoder_config)?;
 
     // --- Forwarder ---
 
-    // HTTP forwarder with retries and circuit breaker (reads DD_API_KEY, DD_SITE, DD_URL)
-    let forwarder_config = DatadogConfiguration::from_configuration(&config)
+    let forwarder_config = DatadogConfiguration::from_configuration(&generic_config)
         .error_context("Failed to create Datadog forwarder configuration")?;
     blueprint.add_forwarder("datadog_forwarder", forwarder_config)?;
 
@@ -96,9 +124,7 @@ pub async fn start_metrics_topology() -> Result<MetricsTopology, GenericError> {
 
     debug!("Metrics topology built, spawning on current runtime...");
 
-    // Use noop memory limiter — Lambda has its own memory management
     let memory_limiter = MemoryLimiter::noop();
-
     let running = built
         .spawn_with_handle(
             &health_registry,
