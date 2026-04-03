@@ -65,6 +65,7 @@ const INFO_ENDPOINT_PATH: &str = "/info";
 const V1_DEBUGGER_ENDPOINT_PATH: &str = "/debugger/v1/input";
 const V2_DEBUGGER_ENDPOINT_PATH: &str = "/debugger/v2/input";
 const DEBUGGER_DIAGNOSTICS_ENDPOINT_PATH: &str = "/debugger/v1/diagnostics";
+const SYMDB_ENDPOINT_PATH: &str = "/symdb/v1/input";
 const INSTRUMENTATION_ENDPOINT_PATH: &str = "/telemetry/proxy/api/v2/apmtelemetry";
 
 // Intake endpoints
@@ -272,6 +273,7 @@ impl TraceAgent {
                 DEBUGGER_DIAGNOSTICS_ENDPOINT_PATH,
                 post(Self::debugger_intake_proxy),
             )
+            .route(SYMDB_ENDPOINT_PATH, post(Self::symdb_proxy))
             .route(
                 INSTRUMENTATION_ENDPOINT_PATH,
                 post(Self::instrumentation_proxy),
@@ -428,6 +430,19 @@ impl TraceAgent {
         .await
     }
 
+    // Used for `/symdb/v1/input` in Symbol Database uploads
+    async fn symdb_proxy(State(state): State<ProxyState>, request: Request) -> Response {
+        Self::handle_proxy(
+            state.config,
+            state.proxy_aggregator,
+            request,
+            "debugger-intake",
+            V2_DEBUGGER_INTAKE_PATH,
+            "symdb",
+        )
+        .await
+    }
+
     async fn instrumentation_proxy(State(state): State<ProxyState>, request: Request) -> Response {
         Self::handle_proxy(
             state.config,
@@ -457,6 +472,7 @@ impl TraceAgent {
                     V1_DEBUGGER_ENDPOINT_PATH,
                     V2_DEBUGGER_ENDPOINT_PATH,
                     DEBUGGER_DIAGNOSTICS_ENDPOINT_PATH,
+                    SYMDB_ENDPOINT_PATH,
                 ],
                 "client_drop_p0s": true,
             }
@@ -667,6 +683,30 @@ impl TraceAgent {
         };
 
         let target_url = format!("https://{}.{}{}", backend_domain, config.site, backend_path);
+
+        // Log detailed info for debugger endpoints
+        if context == "debugger" || context == "debugger_logs" {
+            let body_len = body.len();
+            debug!(
+                "TRACE_AGENT | Debugger proxy request: context={}, target_url={}, payload_size={} bytes",
+                context, target_url, body_len
+            );
+            // Log payload preview (first 1000 chars) for debugging
+            if let Ok(body_str) = std::str::from_utf8(&body) {
+                let preview = if body_str.len() > 1000 {
+                    format!("{}... (truncated)", &body_str[..1000])
+                } else {
+                    body_str.to_string()
+                };
+                debug!("TRACE_AGENT | Debugger payload preview: {}", preview);
+            } else {
+                debug!(
+                    "TRACE_AGENT | Debugger payload is binary data, {} bytes",
+                    body_len
+                );
+            }
+        }
+
         let proxy_request = ProxyRequest {
             headers: parts.headers,
             body,
