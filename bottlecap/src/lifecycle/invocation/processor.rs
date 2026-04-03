@@ -793,6 +793,11 @@ impl Processor {
         // Release the context now that all processing for this invocation is complete.
         // This prevents unbounded memory growth across warm invocations.
         self.context_buffer.remove(request_id);
+        // Prune the corresponding reparenting entry so that update_reparenting does not
+        // warn about a missing context for already-completed invocations.
+        self.context_buffer
+            .sorted_reparenting_info
+            .retain(|info| info.request_id != *request_id);
         trace!(
             "Context released (buffer size after remove: {})",
             self.context_buffer.size()
@@ -2263,5 +2268,134 @@ mod tests {
                 "_dd.compute_stats must be 0 when client_computed_stats is true"
             );
         }
+    }
+
+    fn make_trace_sender(config: Arc<config::Config>) -> Arc<SendingTraceProcessor> {
+        use libdd_trace_obfuscation::obfuscation_config::ObfuscationConfig;
+        let (stats_concentrator_service, stats_concentrator_handle) =
+            StatsConcentratorService::new(Arc::clone(&config));
+        tokio::spawn(stats_concentrator_service.run());
+        Arc::new(SendingTraceProcessor {
+            appsec: None,
+            processor: Arc::new(trace_processor::ServerlessTraceProcessor {
+                obfuscation_config: Arc::new(
+                    ObfuscationConfig::new().expect("Failed to create ObfuscationConfig"),
+                ),
+            }),
+            trace_tx: tokio::sync::mpsc::channel(1).0,
+            stats_generator: Arc::new(StatsGenerator::new(stats_concentrator_handle)),
+        })
+    }
+
+    // Regression test for SLES-2810: sorted_reparenting_info must be pruned when the
+    // context is released in on_platform_report, so that update_reparenting does not
+    // emit spurious warnings for already-completed invocations.
+    #[tokio::test]
+    async fn test_reparenting_info_pruned_after_on_platform_report() {
+        let mut p = setup();
+        let request_id = String::from("test-request-id");
+
+        p.on_invoke_event(request_id.clone());
+        p.add_reparenting(request_id.clone(), 42, 0);
+        assert_eq!(
+            p.context_buffer.sorted_reparenting_info.len(),
+            1,
+            "reparenting entry must exist before report"
+        );
+
+        let config = Arc::new(config::Config::default());
+        let tags_provider = Arc::new(provider::Provider::new(
+            Arc::clone(&config),
+            LAMBDA_RUNTIME_SLUG.to_string(),
+            &HashMap::from([("function_arn".to_string(), "test-arn".to_string())]),
+        ));
+        let trace_sender = make_trace_sender(config);
+
+        p.on_platform_report(
+            &request_id,
+            ReportMetrics::OnDemand(OnDemandReportMetrics {
+                duration_ms: 10.0,
+                billed_duration_ms: 11,
+                memory_size_mb: 128,
+                max_memory_used_mb: 64,
+                init_duration_ms: None,
+                restore_duration_ms: None,
+            }),
+            chrono::Utc::now().timestamp(),
+            Status::Success,
+            None,
+            None,
+            tags_provider,
+            trace_sender,
+        )
+        .await;
+
+        assert!(
+            p.context_buffer.sorted_reparenting_info.is_empty(),
+            "reparenting entry must be pruned after on_platform_report"
+        );
+    }
+
+    // Regression test for SLES-2810: update_reparenting must not visit stale entries
+    // whose context has already been released, preventing the warning flood.
+    #[tokio::test]
+    async fn test_update_reparenting_ignores_completed_invocations() {
+        let mut p = setup();
+
+        // Invocation A completes fully.
+        let request_id_a = String::from("request-a");
+        p.on_invoke_event(request_id_a.clone());
+        p.add_reparenting(request_id_a.clone(), 11, 0);
+
+        let config = Arc::new(config::Config::default());
+        let tags_provider = Arc::new(provider::Provider::new(
+            Arc::clone(&config),
+            LAMBDA_RUNTIME_SLUG.to_string(),
+            &HashMap::from([("function_arn".to_string(), "test-arn".to_string())]),
+        ));
+        let trace_sender = make_trace_sender(Arc::clone(&config));
+
+        p.on_platform_report(
+            &request_id_a,
+            ReportMetrics::OnDemand(OnDemandReportMetrics {
+                duration_ms: 10.0,
+                billed_duration_ms: 11,
+                memory_size_mb: 128,
+                max_memory_used_mb: 64,
+                init_duration_ms: None,
+                restore_duration_ms: None,
+            }),
+            chrono::Utc::now().timestamp(),
+            Status::Success,
+            None,
+            None,
+            tags_provider,
+            trace_sender,
+        )
+        .await;
+
+        // Invocation B is in-flight (context still live).
+        let request_id_b = String::from("request-b");
+        p.on_invoke_event(request_id_b.clone());
+        p.add_reparenting(request_id_b.clone(), 22, 0);
+
+        // Simulate the trace agent path: clone reparenting_info, then call update_reparenting.
+        // Before the fix this clone contained the stale entry for request-a, causing a warning.
+        let reparenting_info = p.get_reparenting_info();
+
+        // Only the live invocation B should be present.
+        assert_eq!(
+            reparenting_info.len(),
+            1,
+            "only the in-flight invocation must remain in reparenting_info"
+        );
+        assert_eq!(reparenting_info[0].request_id, request_id_b);
+
+        // update_reparenting must return no contexts to send (span IDs still unset).
+        let ctx_to_send = p.update_reparenting(reparenting_info);
+        assert!(
+            ctx_to_send.is_empty(),
+            "no contexts should be ready to send yet"
+        );
     }
 }
