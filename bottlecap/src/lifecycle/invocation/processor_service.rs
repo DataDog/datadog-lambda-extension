@@ -2,7 +2,7 @@ use std::{collections::HashMap, sync::Arc};
 
 use chrono::{DateTime, Utc};
 use datadog_opentelemetry::propagation::context::SpanContext;
-use dogstatsd::aggregator::AggregatorHandle;
+use crate::metrics::enhanced_source::EnhancedMetricsHandle;
 use libdd_trace_protobuf::pb::Span;
 use serde_json::Value;
 use thiserror::Error;
@@ -429,7 +429,7 @@ impl InvocationProcessorService {
         tags_provider: Arc<provider::Provider>,
         config: Arc<config::Config>,
         aws_config: Arc<AwsConfig>,
-        metrics_aggregator_handle: AggregatorHandle,
+        metrics_aggregator_handle: EnhancedMetricsHandle,
         propagator: Arc<DatadogCompositePropagator>,
     ) -> (InvocationProcessorHandle, Self) {
         let (sender, receiver) = mpsc::channel(1000);

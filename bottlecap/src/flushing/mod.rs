@@ -10,5 +10,5 @@
 mod handles;
 mod service;
 
-pub use handles::{FlushHandles, MetricsRetryBatch};
+pub use handles::FlushHandles;
 pub use service::FlushingService;

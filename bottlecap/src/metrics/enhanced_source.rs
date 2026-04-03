@@ -26,6 +26,12 @@ pub struct EnhancedMetricsHandle {
 }
 
 impl EnhancedMetricsHandle {
+    /// Create a handle from a raw sender. Useful for tests that need to
+    /// inspect the metrics flowing through the channel.
+    pub fn from_sender(tx: mpsc::UnboundedSender<Metric>) -> Self {
+        Self { tx }
+    }
+
     /// Send a single metric into the pipeline.
     pub fn send(&self, metric: Metric) {
         let _ = self.tx.send(metric);

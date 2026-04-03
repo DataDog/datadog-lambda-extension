@@ -97,7 +97,7 @@ impl Processor {
         tags_provider: Arc<provider::Provider>,
         config: Arc<config::Config>,
         aws_config: Arc<AwsConfig>,
-        metrics_aggregator: dogstatsd::aggregator::AggregatorHandle,
+        metrics_aggregator: crate::metrics::enhanced_source::EnhancedMetricsHandle,
         propagator: Arc<DatadogCompositePropagator>,
     ) -> Self {
         let resource = tags_provider

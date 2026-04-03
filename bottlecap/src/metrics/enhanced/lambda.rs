@@ -1,36 +1,66 @@
 use crate::extension::telemetry::events::{InitType, ReportMetrics, RuntimeDoneMetrics};
 use crate::metrics::enhanced::constants::{self, BASE_LAMBDA_INVOCATION_PRICE};
 use crate::metrics::enhanced::statfs;
-use crate::metrics::enhanced::usage_metrics::{EnhancedMetricsHandle, EnhancedMetricsService};
+use crate::metrics::enhanced::usage_metrics::{
+    EnhancedMetricsHandle as UsageMetricsHandle, EnhancedMetricsService,
+};
+use crate::metrics::enhanced_source::EnhancedMetricsHandle;
 use crate::proc::{self, CPUData, NetworkData};
-use dogstatsd::metric::SortedTags;
-use dogstatsd::metric::{Metric, MetricValue};
-use dogstatsd::{aggregator::AggregatorHandle, metric};
+use saluki_context::Context;
+use saluki_core::data_model::event::metric::Metric;
 use std::collections::HashMap;
 use std::env::consts::ARCH;
 use std::sync::Arc;
+use stringtheory::MetaString;
 use tracing::debug;
 use tracing::error;
 
 pub struct Lambda {
-    pub aggr_handle: AggregatorHandle,
+    pub enhanced_handle: EnhancedMetricsHandle,
     pub config: Arc<crate::config::Config>,
     // Dynamic value tags are the ones we cannot obtain statically from the sandbox
     dynamic_value_tags: HashMap<String, String>,
     invoked_received: bool,
-    pub enhanced_metrics_handle: EnhancedMetricsHandle,
+    pub enhanced_metrics_handle: UsageMetricsHandle,
+}
+
+fn build_tags(dynamic_tags: &HashMap<String, String>) -> Vec<String> {
+    dynamic_tags
+        .iter()
+        .map(|(k, v)| format!("{k}:{v}"))
+        .collect()
+}
+
+fn create_context(name: &str, tags: &Option<Vec<String>>) -> Context {
+    let tag_set: saluki_context::tags::TagSet = tags
+        .as_ref()
+        .map(|t| {
+            t.iter()
+                .map(|s| saluki_context::tags::Tag::from(MetaString::from(s.clone())))
+                .collect()
+        })
+        .unwrap_or_default();
+    Context::from_parts(MetaString::from(name.to_owned()), tag_set)
+}
+
+fn create_distribution(name: &str, value: f64, tags: &Option<Vec<String>>, timestamp: i64) -> Metric {
+    let context = create_context(name, tags);
+    Metric::distribution(context, (timestamp as u64, value))
 }
 
 impl Lambda {
     #[must_use]
-    pub fn new(aggregator: AggregatorHandle, config: Arc<crate::config::Config>) -> Lambda {
+    pub fn new(
+        enhanced_handle: EnhancedMetricsHandle,
+        config: Arc<crate::config::Config>,
+    ) -> Lambda {
         let (enhanced_metrics_service, enhanced_metrics_handle) = EnhancedMetricsService::new();
         tokio::spawn(async move {
             enhanced_metrics_service.run().await; // starts the enhanced metrics service for usage metrics
         });
 
         Lambda {
-            aggr_handle: aggregator,
+            enhanced_handle,
             config,
             dynamic_value_tags: HashMap::new(),
             invoked_received: false,
@@ -67,16 +97,12 @@ impl Lambda {
             .insert(String::from("durable_function"), String::from("true"));
     }
 
-    fn get_dynamic_value_tags(&self) -> Option<SortedTags> {
-        let vec_tags: Vec<String> = self
-            .dynamic_value_tags
-            .iter()
-            .map(|(k, v)| format!("{k}:{v}"))
-            .collect();
-
-        let string_tags = vec_tags.join(",");
-
-        SortedTags::parse(&string_tags).ok()
+    fn get_dynamic_value_tags(&self) -> Option<Vec<String>> {
+        if self.dynamic_value_tags.is_empty() {
+            None
+        } else {
+            Some(build_tags(&self.dynamic_value_tags))
+        }
     }
 
     pub fn increment_invocation_metric(&self, timestamp: i64) {
@@ -112,16 +138,14 @@ impl Lambda {
         }
         self.dynamic_value_tags
             .insert(String::from("init_type"), init_type.to_string());
-        let metric = Metric::new(
-            constants::INIT_DURATION_METRIC.into(),
-            MetricValue::distribution(init_duration_ms * constants::MS_TO_SEC),
-            self.get_dynamic_value_tags(),
-            Some(timestamp),
+        let tags = self.get_dynamic_value_tags();
+        let metric = create_distribution(
+            constants::INIT_DURATION_METRIC,
+            init_duration_ms * constants::MS_TO_SEC,
+            &tags,
+            timestamp,
         );
-
-        if let Err(e) = self.aggr_handle.insert_batch(vec![metric]) {
-            error!("failed to insert metric: {}", e);
-        }
+        self.enhanced_handle.send(metric);
     }
 
     pub fn set_snapstart_restore_duration_metric(
@@ -132,16 +156,14 @@ impl Lambda {
         if !self.config.enhanced_metrics {
             return;
         }
-        let metric = Metric::new(
-            constants::SNAPSTART_RESTORE_DURATION_METRIC.into(),
-            MetricValue::distribution(restore_duration_ms * constants::MS_TO_SEC),
-            self.get_dynamic_value_tags(),
-            Some(timestamp),
+        let tags = self.get_dynamic_value_tags();
+        let metric = create_distribution(
+            constants::SNAPSTART_RESTORE_DURATION_METRIC,
+            restore_duration_ms * constants::MS_TO_SEC,
+            &tags,
+            timestamp,
         );
-
-        if let Err(e) = self.aggr_handle.insert_batch(vec![metric]) {
-            error!("failed to insert metric: {}", e);
-        }
+        self.enhanced_handle.send(metric);
     }
 
     pub fn set_invoked_received(&mut self) {
@@ -153,43 +175,33 @@ impl Lambda {
             return;
         }
         let tags = self.get_dynamic_value_tags();
-        let metric = Metric::new(
-            metric_name.into(),
-            MetricValue::distribution(1f64),
-            tags,
-            Some(timestamp),
-        );
-        if let Err(e) = self.aggr_handle.insert_batch(vec![metric]) {
-            error!("failed to insert metric: {}", e);
-        }
+        let metric = create_distribution(metric_name, 1f64, &tags, timestamp);
+        self.enhanced_handle.send(metric);
     }
 
     pub fn set_runtime_done_metrics(&self, metrics: &RuntimeDoneMetrics, timestamp: i64) {
         if !self.config.enhanced_metrics {
             return;
         }
-        let metric = Metric::new(
-            constants::RUNTIME_DURATION_METRIC.into(),
-            MetricValue::distribution(metrics.duration_ms),
+        let tags = self.get_dynamic_value_tags();
+        let metric = create_distribution(
+            constants::RUNTIME_DURATION_METRIC,
+            metrics.duration_ms,
             // Datadog expects this value as milliseconds, not seconds
-            self.get_dynamic_value_tags(),
-            Some(timestamp),
+            &tags,
+            timestamp,
         );
-        if let Err(e) = self.aggr_handle.insert_batch(vec![metric]) {
-            error!("failed to insert runtime duration metric: {}", e);
-        }
+        self.enhanced_handle.send(metric);
 
         if let Some(produced_bytes) = metrics.produced_bytes {
-            let metric = Metric::new(
-                constants::PRODUCED_BYTES_METRIC.into(),
-                MetricValue::distribution(produced_bytes as f64),
+            let metric = create_distribution(
+                constants::PRODUCED_BYTES_METRIC,
+                produced_bytes as f64,
                 // Datadog expects this value as milliseconds, not seconds
-                self.get_dynamic_value_tags(),
-                Some(timestamp),
+                &tags,
+                timestamp,
             );
-            if let Err(e) = self.aggr_handle.insert_batch(vec![metric]) {
-                error!("failed to insert produced bytes metric: {}", e);
-            }
+            self.enhanced_handle.send(metric);
         }
     }
 
@@ -210,25 +222,24 @@ impl Lambda {
         if !self.config.enhanced_metrics {
             return;
         }
-        let metric = metric::Metric::new(
-            constants::POST_RUNTIME_DURATION_METRIC.into(),
-            MetricValue::distribution(duration_ms),
+        let tags = self.get_dynamic_value_tags();
+        let metric = create_distribution(
+            constants::POST_RUNTIME_DURATION_METRIC,
+            duration_ms,
             // Datadog expects this value as milliseconds, not seconds
-            self.get_dynamic_value_tags(),
-            Some(timestamp),
+            &tags,
+            timestamp,
         );
-        if let Err(e) = self.aggr_handle.insert_batch(vec![metric]) {
-            error!("failed to insert post runtime duration metric: {}", e);
-        }
+        self.enhanced_handle.send(metric);
     }
 
     pub fn generate_network_enhanced_metrics(
         network_data_offset: NetworkData,
         network_data_end: NetworkData,
-        aggr: &AggregatorHandle,
-        tags: Option<SortedTags>,
+        enhanced: &EnhancedMetricsHandle,
+        tags: Option<Vec<String>>,
     ) {
-        let now = std::time::UNIX_EPOCH
+        let now: i64 = std::time::UNIX_EPOCH
             .elapsed()
             .expect("unable to poll clock, unrecoverable")
             .as_secs()
@@ -238,35 +249,14 @@ impl Lambda {
         let tx_bytes = network_data_end.tx_bytes - network_data_offset.tx_bytes;
         let total_network = rx_bytes + tx_bytes;
 
-        let metric = Metric::new(
-            constants::RX_BYTES_METRIC.into(),
-            MetricValue::distribution(rx_bytes),
-            tags.clone(),
-            Some(now),
-        );
-        if let Err(e) = aggr.insert_batch(vec![metric]) {
-            error!("Failed to insert rx_bytes metric: {}", e);
-        }
+        let metric = create_distribution(constants::RX_BYTES_METRIC, rx_bytes, &tags, now);
+        enhanced.send(metric);
 
-        let metric = Metric::new(
-            constants::TX_BYTES_METRIC.into(),
-            MetricValue::distribution(tx_bytes),
-            tags.clone(),
-            Some(now),
-        );
-        if let Err(e) = aggr.insert_batch(vec![metric]) {
-            error!("Failed to insert tx_bytes metric: {}", e);
-        }
+        let metric = create_distribution(constants::TX_BYTES_METRIC, tx_bytes, &tags, now);
+        enhanced.send(metric);
 
-        let metric = Metric::new(
-            constants::TOTAL_NETWORK_METRIC.into(),
-            MetricValue::distribution(total_network),
-            tags.clone(),
-            Some(now),
-        );
-        if let Err(e) = aggr.insert_batch(vec![metric]) {
-            error!("Failed to insert total_network metric: {}", e);
-        }
+        let metric = create_distribution(constants::TOTAL_NETWORK_METRIC, total_network, &tags, now);
+        enhanced.send(metric);
     }
 
     pub fn set_network_enhanced_metrics(&self, network_offset: Option<NetworkData>) {
@@ -275,14 +265,14 @@ impl Lambda {
         }
 
         if let Some(offset) = network_offset {
-            let aggr_handle = self.aggr_handle.clone();
+            let enhanced_handle = self.enhanced_handle.clone();
 
             match proc::get_network_data() {
                 Ok(data) => {
                     Self::generate_network_enhanced_metrics(
                         offset,
                         data,
-                        &aggr_handle,
+                        &enhanced_handle,
                         self.get_dynamic_value_tags(),
                     );
                 }
@@ -298,48 +288,28 @@ impl Lambda {
     pub(crate) fn generate_cpu_time_enhanced_metrics(
         cpu_data_offset: &CPUData,
         cpu_data_end: &CPUData,
-        aggr: &AggregatorHandle,
-        tags: Option<SortedTags>,
+        enhanced: &EnhancedMetricsHandle,
+        tags: Option<Vec<String>>,
     ) {
         let cpu_user_time = cpu_data_end.total_user_time_ms - cpu_data_offset.total_user_time_ms;
         let cpu_system_time =
             cpu_data_end.total_system_time_ms - cpu_data_offset.total_system_time_ms;
         let cpu_total_time = cpu_user_time + cpu_system_time;
-        let now = std::time::UNIX_EPOCH
+        let now: i64 = std::time::UNIX_EPOCH
             .elapsed()
             .expect("unable to poll clock, unrecoverable")
             .as_secs()
             .try_into()
             .unwrap_or_default();
-        let metric = Metric::new(
-            constants::CPU_USER_TIME_METRIC.into(),
-            MetricValue::distribution(cpu_user_time),
-            tags.clone(),
-            Some(now),
-        );
-        if let Err(e) = aggr.insert_batch(vec![metric]) {
-            error!("Failed to insert cpu_user_time metric: {}", e);
-        }
 
-        let metric = Metric::new(
-            constants::CPU_SYSTEM_TIME_METRIC.into(),
-            MetricValue::distribution(cpu_system_time),
-            tags.clone(),
-            Some(now),
-        );
-        if let Err(e) = aggr.insert_batch(vec![metric]) {
-            error!("Failed to insert cpu_system_time metric: {}", e);
-        }
+        let metric = create_distribution(constants::CPU_USER_TIME_METRIC, cpu_user_time, &tags, now);
+        enhanced.send(metric);
 
-        let metric = Metric::new(
-            constants::CPU_TOTAL_TIME_METRIC.into(),
-            MetricValue::distribution(cpu_total_time),
-            tags.clone(),
-            Some(now),
-        );
-        if let Err(e) = aggr.insert_batch(vec![metric]) {
-            error!("Failed to insert cpu_total_time metric: {}", e);
-        }
+        let metric = create_distribution(constants::CPU_SYSTEM_TIME_METRIC, cpu_system_time, &tags, now);
+        enhanced.send(metric);
+
+        let metric = create_distribution(constants::CPU_TOTAL_TIME_METRIC, cpu_total_time, &tags, now);
+        enhanced.send(metric);
     }
 
     pub fn set_cpu_time_enhanced_metrics(&self, cpu_offset: Option<CPUData>) {
@@ -347,7 +317,7 @@ impl Lambda {
             return;
         }
 
-        let aggr_handle = self.aggr_handle.clone();
+        let enhanced_handle = self.enhanced_handle.clone();
 
         let cpu_data = proc::get_cpu_data();
         match (cpu_offset, cpu_data) {
@@ -355,7 +325,7 @@ impl Lambda {
                 Self::generate_cpu_time_enhanced_metrics(
                     &cpu_offset,
                     &cpu_data,
-                    &aggr_handle,
+                    &enhanced_handle,
                     self.get_dynamic_value_tags(),
                 );
             }
@@ -370,8 +340,8 @@ impl Lambda {
         cpu_data_end: &CPUData,
         uptime_data_offset: f64,
         uptime_data_end: f64,
-        aggr: &AggregatorHandle,
-        tags: Option<SortedTags>,
+        enhanced: &EnhancedMetricsHandle,
+        tags: Option<Vec<String>>,
     ) {
         let num_cores = cpu_data_end.individual_cpu_idle_times.len() as f64;
         let uptime = uptime_data_end - uptime_data_offset;
@@ -388,7 +358,7 @@ impl Lambda {
 
         let mut max_idle_time = 0.0;
         let mut min_idle_time = f64::MAX;
-        let now = std::time::UNIX_EPOCH
+        let now: i64 = std::time::UNIX_EPOCH
             .elapsed()
             .expect("unable to poll clock, unrecoverable")
             .as_secs()
@@ -431,41 +401,34 @@ impl Lambda {
         let cpu_total_utilization = cpu_total_utilization_decimal * num_cores;
 
         let metrics = vec![
-            Metric::new(
-                constants::CPU_TOTAL_UTILIZATION_PCT_METRIC.into(),
-                MetricValue::distribution(cpu_total_utilization_pct),
-                tags.clone(),
-                Some(now),
+            create_distribution(
+                constants::CPU_TOTAL_UTILIZATION_PCT_METRIC,
+                cpu_total_utilization_pct,
+                &tags,
+                now,
             ),
-            Metric::new(
-                constants::CPU_TOTAL_UTILIZATION_METRIC.into(),
-                MetricValue::distribution(cpu_total_utilization),
-                tags.clone(),
-                Some(now),
+            create_distribution(
+                constants::CPU_TOTAL_UTILIZATION_METRIC,
+                cpu_total_utilization,
+                &tags,
+                now,
             ),
-            Metric::new(
-                constants::NUM_CORES_METRIC.into(),
-                MetricValue::distribution(num_cores),
-                tags.clone(),
-                Some(now),
+            create_distribution(constants::NUM_CORES_METRIC, num_cores, &tags, now),
+            create_distribution(
+                constants::CPU_MAX_UTILIZATION_METRIC,
+                cpu_max_utilization,
+                &tags,
+                now,
             ),
-            Metric::new(
-                constants::CPU_MAX_UTILIZATION_METRIC.into(),
-                MetricValue::distribution(cpu_max_utilization),
-                tags.clone(),
-                Some(now),
-            ),
-            Metric::new(
-                constants::CPU_MIN_UTILIZATION_METRIC.into(),
-                MetricValue::distribution(cpu_min_utilization),
-                tags,
-                Some(now),
+            create_distribution(
+                constants::CPU_MIN_UTILIZATION_METRIC,
+                cpu_min_utilization,
+                &tags,
+                now,
             ),
         ];
 
-        if let Err(e) = aggr.insert_batch(metrics) {
-            error!("Failed to insert cpu utilization metrics: {}", e);
-        }
+        enhanced.send_batch(metrics);
     }
 
     pub fn set_cpu_utilization_enhanced_metrics(
@@ -477,7 +440,7 @@ impl Lambda {
             return;
         }
 
-        let aggr_handle = self.aggr_handle.clone();
+        let enhanced_handle = self.enhanced_handle.clone();
 
         let cpu_data = proc::get_cpu_data();
         let uptime_data = proc::get_uptime();
@@ -488,7 +451,7 @@ impl Lambda {
                     &cpu_data,
                     uptime_offset,
                     uptime_data,
-                    &aggr_handle,
+                    &enhanced_handle,
                     self.get_dynamic_value_tags(),
                 );
             }
@@ -518,15 +481,14 @@ impl Lambda {
         if !self.config.enhanced_metrics {
             return;
         }
-        let metric = metric::Metric::new(
-            constants::DURATION_METRIC.into(),
-            MetricValue::distribution(metrics.duration_ms() * constants::MS_TO_SEC),
-            self.get_dynamic_value_tags(),
-            Some(timestamp),
+        let tags = self.get_dynamic_value_tags();
+        let metric = create_distribution(
+            constants::DURATION_METRIC,
+            metrics.duration_ms() * constants::MS_TO_SEC,
+            &tags,
+            timestamp,
         );
-        if let Err(e) = self.aggr_handle.insert_batch(vec![metric]) {
-            error!("failed to insert duration metric: {}", e);
-        }
+        self.enhanced_handle.send(metric);
 
         match metrics {
             ReportMetrics::ManagedInstance(_) => {
@@ -537,49 +499,41 @@ impl Lambda {
                 // - estimated cost
             }
             ReportMetrics::OnDemand(metrics) => {
-                let metric = metric::Metric::new(
-                    constants::BILLED_DURATION_METRIC.into(),
-                    MetricValue::distribution(
-                        metrics.billed_duration_ms as f64 * constants::MS_TO_SEC,
-                    ),
-                    self.get_dynamic_value_tags(),
-                    Some(timestamp),
+                let metric = create_distribution(
+                    constants::BILLED_DURATION_METRIC,
+                    metrics.billed_duration_ms as f64 * constants::MS_TO_SEC,
+                    &tags,
+                    timestamp,
                 );
-                if let Err(e) = self.aggr_handle.insert_batch(vec![metric]) {
-                    error!("failed to insert billed duration metric: {}", e);
-                }
-                let metric = metric::Metric::new(
-                    constants::MAX_MEMORY_USED_METRIC.into(),
-                    MetricValue::distribution(metrics.max_memory_used_mb as f64),
-                    self.get_dynamic_value_tags(),
-                    Some(timestamp),
+                self.enhanced_handle.send(metric);
+
+                let metric = create_distribution(
+                    constants::MAX_MEMORY_USED_METRIC,
+                    metrics.max_memory_used_mb as f64,
+                    &tags,
+                    timestamp,
                 );
-                if let Err(e) = self.aggr_handle.insert_batch(vec![metric]) {
-                    error!("failed to insert max memory used metric: {}", e);
-                }
-                let metric = metric::Metric::new(
-                    constants::MEMORY_SIZE_METRIC.into(),
-                    MetricValue::distribution(metrics.memory_size_mb as f64),
-                    self.get_dynamic_value_tags(),
-                    Some(timestamp),
+                self.enhanced_handle.send(metric);
+
+                let metric = create_distribution(
+                    constants::MEMORY_SIZE_METRIC,
+                    metrics.memory_size_mb as f64,
+                    &tags,
+                    timestamp,
                 );
-                if let Err(e) = self.aggr_handle.insert_batch(vec![metric]) {
-                    error!("failed to insert memory size metric: {}", e);
-                }
+                self.enhanced_handle.send(metric);
 
                 let cost_usd = Self::calculate_estimated_cost_usd(
                     metrics.billed_duration_ms,
                     metrics.memory_size_mb,
                 );
-                let metric = metric::Metric::new(
-                    constants::ESTIMATED_COST_METRIC.into(),
-                    MetricValue::distribution(cost_usd),
-                    self.get_dynamic_value_tags(),
-                    Some(timestamp),
+                let metric = create_distribution(
+                    constants::ESTIMATED_COST_METRIC,
+                    cost_usd,
+                    &tags,
+                    timestamp,
                 );
-                if let Err(e) = self.aggr_handle.insert_batch(vec![metric]) {
-                    error!("failed to insert estimated cost metric: {}", e);
-                }
+                self.enhanced_handle.send(metric);
             }
         }
     }
@@ -664,13 +618,13 @@ impl Lambda {
         self.enhanced_metrics_handle.pause_monitoring();
 
         let enhanced_metrics_handle = self.enhanced_metrics_handle.clone();
-        let aggr_handle = self.aggr_handle.clone();
+        let enhanced_handle = self.enhanced_handle.clone();
         let tags = self.get_dynamic_value_tags();
 
         tokio::spawn(async move {
             match enhanced_metrics_handle.get_metrics().await {
                 Ok(metrics) => {
-                    let now = std::time::UNIX_EPOCH
+                    let now: i64 = std::time::UNIX_EPOCH
                         .elapsed()
                         .expect("unable to poll clock, unrecoverable")
                         .as_secs()
@@ -679,64 +633,54 @@ impl Lambda {
 
                     // Set all tmp metrics - need tmp_max and tmp_used to calculate tmp_free
                     if metrics.tmp_used > 0.0 {
-                        let metric = Metric::new(
-                            constants::TMP_USED_METRIC.into(),
-                            MetricValue::distribution(metrics.tmp_used),
-                            tags.clone(),
-                            Some(now),
+                        let metric = create_distribution(
+                            constants::TMP_USED_METRIC,
+                            metrics.tmp_used,
+                            &tags,
+                            now,
                         );
-                        if let Err(e) = aggr_handle.insert_batch(vec![metric]) {
-                            error!("Failed to insert tmp_used metric: {}", e);
-                        }
+                        enhanced_handle.send(metric);
 
                         if let Ok(tmp_max) = statfs::get_tmp_max() {
-                            let metric = Metric::new(
-                                constants::TMP_MAX_METRIC.into(),
-                                MetricValue::distribution(tmp_max),
-                                tags.clone(),
-                                Some(now),
+                            let metric = create_distribution(
+                                constants::TMP_MAX_METRIC,
+                                tmp_max,
+                                &tags,
+                                now,
                             );
-                            if let Err(e) = aggr_handle.insert_batch(vec![metric]) {
-                                error!("Failed to insert tmp_max metric: {}", e);
-                            }
+                            enhanced_handle.send(metric);
 
                             let tmp_free = tmp_max - metrics.tmp_used;
-                            let metric = Metric::new(
-                                constants::TMP_FREE_METRIC.into(),
-                                MetricValue::distribution(tmp_free),
-                                tags.clone(),
-                                Some(now),
+                            let metric = create_distribution(
+                                constants::TMP_FREE_METRIC,
+                                tmp_free,
+                                &tags,
+                                now,
                             );
-                            if let Err(e) = aggr_handle.insert_batch(vec![metric]) {
-                                error!("Failed to insert tmp_free metric: {}", e);
-                            }
+                            enhanced_handle.send(metric);
                         }
                     }
 
                     // Set file descriptor use
                     if metrics.fd_use > 0.0 {
-                        let metric = Metric::new(
-                            constants::FD_USE_METRIC.into(),
-                            MetricValue::distribution(metrics.fd_use),
-                            tags.clone(),
-                            Some(now),
+                        let metric = create_distribution(
+                            constants::FD_USE_METRIC,
+                            metrics.fd_use,
+                            &tags,
+                            now,
                         );
-                        if let Err(e) = aggr_handle.insert_batch(vec![metric]) {
-                            error!("Failed to insert fd_use metric: {}", e);
-                        }
+                        enhanced_handle.send(metric);
                     }
 
                     // Set threads use
                     if metrics.threads_use > 0.0 {
-                        let metric = Metric::new(
-                            constants::THREADS_USE_METRIC.into(),
-                            MetricValue::distribution(metrics.threads_use),
-                            tags.clone(),
-                            Some(now),
+                        let metric = create_distribution(
+                            constants::THREADS_USE_METRIC,
+                            metrics.threads_use,
+                            &tags,
+                            now,
                         );
-                        if let Err(e) = aggr_handle.insert_batch(vec![metric]) {
-                            error!("Failed to insert threads_use metric: {}", e);
-                        }
+                        enhanced_handle.send(metric);
                     }
                 }
                 Err(e) => {
@@ -755,7 +699,7 @@ impl Lambda {
         let fd_max = proc::get_fd_max_data(&pids);
         let threads_max = proc::get_threads_max_data(&pids);
 
-        let now = std::time::UNIX_EPOCH
+        let now: i64 = std::time::UNIX_EPOCH
             .elapsed()
             .expect("unable to poll clock, unrecoverable")
             .as_secs()
@@ -764,25 +708,11 @@ impl Lambda {
 
         let tags = self.get_dynamic_value_tags();
 
-        let metric = Metric::new(
-            constants::FD_MAX_METRIC.into(),
-            MetricValue::distribution(fd_max),
-            tags.clone(),
-            Some(now),
-        );
-        if let Err(e) = self.aggr_handle.insert_batch(vec![metric]) {
-            error!("Failed to insert fd_max metric: {}", e);
-        }
+        let metric = create_distribution(constants::FD_MAX_METRIC, fd_max, &tags, now);
+        self.enhanced_handle.send(metric);
 
-        let metric = Metric::new(
-            constants::THREADS_MAX_METRIC.into(),
-            MetricValue::distribution(threads_max),
-            tags,
-            Some(now),
-        );
-        if let Err(e) = self.aggr_handle.insert_batch(vec![metric]) {
-            error!("Failed to insert threads_max metric: {}", e);
-        }
+        let metric = create_distribution(constants::THREADS_MAX_METRIC, threads_max, &tags, now);
+        self.enhanced_handle.send(metric);
     }
 }
 
@@ -809,46 +739,82 @@ mod tests {
     use super::*;
     use crate::config;
     use crate::extension::telemetry::events::{OnDemandReportMetrics, ReportMetrics};
-    use dogstatsd::aggregator::AggregatorService;
-    use dogstatsd::metric::EMPTY_TAGS;
+    use crate::metrics::enhanced_source::EnhancedMetricsSourceBuilder;
+    use tokio::sync::mpsc;
+
     const PRECISION: f64 = 0.000_000_01;
 
-    fn setup() -> (AggregatorHandle, Arc<config::Config>) {
+    fn setup() -> (EnhancedMetricsHandle, mpsc::UnboundedReceiver<Metric>, Arc<config::Config>) {
         let config = Arc::new(config::Config {
             service: Some("test-service".to_string()),
             tags: HashMap::from([("test".to_string(), "tags".to_string())]),
             ..config::Config::default()
         });
 
-        let (service, handle) =
-            AggregatorService::new(EMPTY_TAGS, 1024).expect("failed to create aggregator service");
+        let (_, enhanced_handle) = EnhancedMetricsSourceBuilder::new();
 
-        tokio::spawn(service.run());
+        // Also create a raw channel so tests can receive the metrics
+        let (tx, rx) = mpsc::unbounded_channel();
+        let test_handle = EnhancedMetricsHandle::from_sender(tx);
 
-        (handle, config)
+        (test_handle, rx, config)
     }
 
-    async fn assert_sketch(handle: &AggregatorHandle, metric_id: &str, value: f64, timestamp: i64) {
-        let ts = (timestamp / 10) * 10;
-        if let Some(e) = handle
-            .get_entry_by_id(metric_id.into(), None, ts)
-            .await
-            .unwrap()
-        {
-            let metric = e.value.get_sketch().unwrap();
-            assert!((metric.max().unwrap() - value).abs() < PRECISION);
-            assert!((metric.min().unwrap() - value).abs() < PRECISION);
-            assert!((metric.sum().unwrap() - value).abs() < PRECISION);
-            assert!((metric.avg().unwrap() - value).abs() < PRECISION);
-        } else {
-            panic!("{}", format!("{metric_id} not found"));
+    fn assert_distribution_value(metric: &Metric, expected_value: f64) {
+        match metric.values() {
+            saluki_core::data_model::event::metric::MetricValues::Distribution(points) => {
+                for (_ts, sketch) in points {
+                    assert!(
+                        (sketch.max().unwrap() - expected_value).abs() < PRECISION,
+                        "expected max={expected_value}, got {:?}",
+                        sketch.max()
+                    );
+                    assert!(
+                        (sketch.min().unwrap() - expected_value).abs() < PRECISION,
+                        "expected min={expected_value}, got {:?}",
+                        sketch.min()
+                    );
+                    assert!(
+                        (sketch.sum().unwrap() - expected_value).abs() < PRECISION,
+                        "expected sum={expected_value}, got {:?}",
+                        sketch.sum()
+                    );
+                    assert!(
+                        (sketch.avg().unwrap() - expected_value).abs() < PRECISION,
+                        "expected avg={expected_value}, got {:?}",
+                        sketch.avg()
+                    );
+                }
+            }
+            other => panic!("expected Distribution, got {:?}", other.as_str()),
         }
+    }
+
+    fn assert_metric_name(metric: &Metric, expected_name: &str) {
+        assert_eq!(
+            metric.context().name().as_ref(),
+            expected_name,
+            "expected metric name {expected_name}, got {}",
+            metric.context().name()
+        );
+    }
+
+    fn recv_metric_by_name(
+        rx: &mut mpsc::UnboundedReceiver<Metric>,
+        name: &str,
+    ) -> Option<Metric> {
+        let mut collected = Vec::new();
+        while let Ok(m) = rx.try_recv() {
+            collected.push(m);
+        }
+        collected.into_iter().find(|m| m.context().name().as_ref() == name)
     }
 
     #[tokio::test]
     async fn test_set_durable_function_tag() {
-        let (metrics_aggr, my_config) = setup();
-        let mut lambda = Lambda::new(metrics_aggr.clone(), my_config);
+        let (enhanced_handle, mut rx, my_config) = setup();
+        let mut lambda = Lambda::new(enhanced_handle, my_config);
+
         let now: i64 = std::time::UNIX_EPOCH
             .elapsed()
             .expect("unable to poll clock, unrecoverable")
@@ -860,23 +826,22 @@ mod tests {
         lambda.increment_invocation_metric(now);
 
         // Verify the metric was emitted with the durable_function:true tag
-        let ts = (now / 10) * 10;
-        let durable_tags = SortedTags::parse("durable_function:true").ok();
-        let entry = metrics_aggr
-            .get_entry_by_id(constants::INVOCATIONS_METRIC.into(), durable_tags, ts)
-            .await
-            .unwrap();
-        assert!(
-            entry.is_some(),
-            "Expected metric with durable_function:true tag"
-        );
+        let metric = recv_metric_by_name(&mut rx, constants::INVOCATIONS_METRIC);
+        assert!(metric.is_some(), "Expected metric with durable_function:true tag");
+        let metric = metric.unwrap();
+        let has_durable_tag = metric
+            .context()
+            .tags()
+            .into_iter()
+            .any(|t| t.as_str() == "durable_function:true");
+        assert!(has_durable_tag, "Expected durable_function:true tag");
     }
 
     #[tokio::test]
     #[allow(clippy::float_cmp)]
     async fn test_increment_invocation_metric() {
-        let (metrics_aggr, my_config) = setup();
-        let lambda = Lambda::new(metrics_aggr.clone(), my_config);
+        let (enhanced_handle, mut rx, my_config) = setup();
+        let lambda = Lambda::new(enhanced_handle, my_config);
         let now: i64 = std::time::UNIX_EPOCH
             .elapsed()
             .expect("unable to poll clock, unrecoverable")
@@ -884,20 +849,17 @@ mod tests {
             .try_into()
             .unwrap_or_default();
         lambda.increment_invocation_metric(now);
-        let now: i64 = std::time::UNIX_EPOCH
-            .elapsed()
-            .expect("unable to poll clock, unrecoverable")
-            .as_secs()
-            .try_into()
-            .unwrap_or_default();
-        assert_sketch(&metrics_aggr, constants::INVOCATIONS_METRIC, 1f64, now).await;
+
+        let metric = recv_metric_by_name(&mut rx, constants::INVOCATIONS_METRIC);
+        assert!(metric.is_some(), "invocations metric not found");
+        assert_distribution_value(&metric.unwrap(), 1f64);
     }
 
     #[tokio::test]
     #[allow(clippy::float_cmp)]
     async fn test_increment_errors_metric() {
-        let (metrics_aggr, my_config) = setup();
-        let lambda = Lambda::new(metrics_aggr.clone(), my_config);
+        let (enhanced_handle, mut rx, my_config) = setup();
+        let lambda = Lambda::new(enhanced_handle, my_config);
         let now: i64 = std::time::UNIX_EPOCH
             .elapsed()
             .expect("unable to poll clock, unrecoverable")
@@ -905,24 +867,21 @@ mod tests {
             .try_into()
             .unwrap_or_default();
         lambda.increment_errors_metric(now);
-        let now: i64 = std::time::UNIX_EPOCH
-            .elapsed()
-            .expect("unable to poll clock, unrecoverable")
-            .as_secs()
-            .try_into()
-            .unwrap_or_default();
-        assert_sketch(&metrics_aggr, constants::ERRORS_METRIC, 1f64, now).await;
+
+        let metric = recv_metric_by_name(&mut rx, constants::ERRORS_METRIC);
+        assert!(metric.is_some(), "errors metric not found");
+        assert_distribution_value(&metric.unwrap(), 1f64);
     }
 
     #[tokio::test]
     #[allow(clippy::too_many_lines)]
     async fn test_disabled() {
-        let (metrics_aggr, no_config) = setup();
+        let (enhanced_handle, mut rx, no_config) = setup();
         let my_config = Arc::new(config::Config {
             enhanced_metrics: false,
             ..no_config.as_ref().clone()
         });
-        let mut lambda = Lambda::new(metrics_aggr.clone(), my_config);
+        let mut lambda = Lambda::new(enhanced_handle, my_config);
         let now: i64 = std::time::UNIX_EPOCH
             .elapsed()
             .expect("unable to poll clock, unrecoverable")
@@ -952,226 +911,17 @@ mod tests {
             }),
             now,
         );
+        // No metrics should have been sent since enhanced_metrics is disabled
         assert!(
-            metrics_aggr
-                .get_entry_by_id(constants::INVOCATIONS_METRIC.into(), None, now)
-                .await
-                .unwrap()
-                .is_none()
-        );
-        assert!(
-            metrics_aggr
-                .get_entry_by_id(constants::ERRORS_METRIC.into(), None, now)
-                .await
-                .unwrap()
-                .is_none()
-        );
-        assert!(
-            metrics_aggr
-                .get_entry_by_id(constants::TIMEOUTS_METRIC.into(), None, now)
-                .await
-                .unwrap()
-                .is_none()
-        );
-        assert!(
-            metrics_aggr
-                .get_entry_by_id(constants::INIT_DURATION_METRIC.into(), None, now)
-                .await
-                .unwrap()
-                .is_none()
-        );
-        assert!(
-            metrics_aggr
-                .get_entry_by_id(constants::RUNTIME_DURATION_METRIC.into(), None, now)
-                .await
-                .unwrap()
-                .is_none()
-        );
-        assert!(
-            metrics_aggr
-                .get_entry_by_id(constants::PRODUCED_BYTES_METRIC.into(), None, now)
-                .await
-                .unwrap()
-                .is_none()
-        );
-        assert!(
-            metrics_aggr
-                .get_entry_by_id(constants::POST_RUNTIME_DURATION_METRIC.into(), None, now)
-                .await
-                .unwrap()
-                .is_none()
-        );
-        assert!(
-            metrics_aggr
-                .get_entry_by_id(constants::DURATION_METRIC.into(), None, now)
-                .await
-                .unwrap()
-                .is_none()
-        );
-        assert!(
-            metrics_aggr
-                .get_entry_by_id(constants::BILLED_DURATION_METRIC.into(), None, now)
-                .await
-                .unwrap()
-                .is_none()
-        );
-        assert!(
-            metrics_aggr
-                .get_entry_by_id(constants::MAX_MEMORY_USED_METRIC.into(), None, now)
-                .await
-                .unwrap()
-                .is_none()
-        );
-        assert!(
-            metrics_aggr
-                .get_entry_by_id(constants::MEMORY_SIZE_METRIC.into(), None, now)
-                .await
-                .unwrap()
-                .is_none()
-        );
-        assert!(
-            metrics_aggr
-                .get_entry_by_id(constants::ESTIMATED_COST_METRIC.into(), None, now)
-                .await
-                .unwrap()
-                .is_none()
-        );
-        assert!(
-            metrics_aggr
-                .get_entry_by_id(constants::RX_BYTES_METRIC.into(), None, now)
-                .await
-                .unwrap()
-                .is_none()
-        );
-        assert!(
-            metrics_aggr
-                .get_entry_by_id(constants::TX_BYTES_METRIC.into(), None, now)
-                .await
-                .unwrap()
-                .is_none()
-        );
-        assert!(
-            metrics_aggr
-                .get_entry_by_id(constants::TOTAL_NETWORK_METRIC.into(), None, now)
-                .await
-                .unwrap()
-                .is_none()
-        );
-        assert!(
-            metrics_aggr
-                .get_entry_by_id(constants::CPU_USER_TIME_METRIC.into(), None, now)
-                .await
-                .unwrap()
-                .is_none()
-        );
-        assert!(
-            metrics_aggr
-                .get_entry_by_id(constants::CPU_SYSTEM_TIME_METRIC.into(), None, now)
-                .await
-                .unwrap()
-                .is_none()
-        );
-        assert!(
-            metrics_aggr
-                .get_entry_by_id(constants::CPU_TOTAL_TIME_METRIC.into(), None, now)
-                .await
-                .unwrap()
-                .is_none()
-        );
-        assert!(
-            metrics_aggr
-                .get_entry_by_id(
-                    constants::CPU_TOTAL_UTILIZATION_PCT_METRIC.into(),
-                    None,
-                    now
-                )
-                .await
-                .unwrap()
-                .is_none()
-        );
-        assert!(
-            metrics_aggr
-                .get_entry_by_id(constants::CPU_TOTAL_UTILIZATION_METRIC.into(), None, now)
-                .await
-                .unwrap()
-                .is_none()
-        );
-        assert!(
-            metrics_aggr
-                .get_entry_by_id(constants::NUM_CORES_METRIC.into(), None, now)
-                .await
-                .unwrap()
-                .is_none()
-        );
-        assert!(
-            metrics_aggr
-                .get_entry_by_id(constants::CPU_MIN_UTILIZATION_METRIC.into(), None, now)
-                .await
-                .unwrap()
-                .is_none()
-        );
-        assert!(
-            metrics_aggr
-                .get_entry_by_id(constants::CPU_MAX_UTILIZATION_METRIC.into(), None, now)
-                .await
-                .unwrap()
-                .is_none()
-        );
-        assert!(
-            metrics_aggr
-                .get_entry_by_id(constants::TMP_MAX_METRIC.into(), None, now)
-                .await
-                .unwrap()
-                .is_none()
-        );
-        assert!(
-            metrics_aggr
-                .get_entry_by_id(constants::TMP_USED_METRIC.into(), None, now)
-                .await
-                .unwrap()
-                .is_none()
-        );
-        assert!(
-            metrics_aggr
-                .get_entry_by_id(constants::TMP_FREE_METRIC.into(), None, now)
-                .await
-                .unwrap()
-                .is_none()
-        );
-        assert!(
-            metrics_aggr
-                .get_entry_by_id(constants::FD_MAX_METRIC.into(), None, now)
-                .await
-                .unwrap()
-                .is_none()
-        );
-        assert!(
-            metrics_aggr
-                .get_entry_by_id(constants::FD_USE_METRIC.into(), None, now)
-                .await
-                .unwrap()
-                .is_none()
-        );
-        assert!(
-            metrics_aggr
-                .get_entry_by_id(constants::THREADS_MAX_METRIC.into(), None, now)
-                .await
-                .unwrap()
-                .is_none()
-        );
-        assert!(
-            metrics_aggr
-                .get_entry_by_id(constants::THREADS_USE_METRIC.into(), None, now)
-                .await
-                .unwrap()
-                .is_none()
+            rx.try_recv().is_err(),
+            "No metrics should be emitted when enhanced_metrics is disabled"
         );
     }
 
     #[tokio::test]
     async fn test_set_runtime_done_metrics() {
-        let (metrics_aggr, my_config) = setup();
-        let lambda = Lambda::new(metrics_aggr.clone(), my_config);
+        let (enhanced_handle, mut rx, my_config) = setup();
+        let lambda = Lambda::new(enhanced_handle, my_config);
         let runtime_done_metrics = RuntimeDoneMetrics {
             duration_ms: 100.0,
             produced_bytes: Some(42_u64),
@@ -1184,20 +934,24 @@ mod tests {
             .unwrap_or_default();
         lambda.set_runtime_done_metrics(&runtime_done_metrics, now);
 
-        assert_sketch(
-            &metrics_aggr,
-            constants::RUNTIME_DURATION_METRIC,
-            100.0,
-            now,
-        )
-        .await;
-        assert_sketch(&metrics_aggr, constants::PRODUCED_BYTES_METRIC, 42.0, now).await;
+        let mut all_metrics = Vec::new();
+        while let Ok(m) = rx.try_recv() {
+            all_metrics.push(m);
+        }
+
+        let runtime_dur = all_metrics.iter().find(|m| m.context().name().as_ref() == constants::RUNTIME_DURATION_METRIC);
+        assert!(runtime_dur.is_some(), "runtime duration metric not found");
+        assert_distribution_value(runtime_dur.unwrap(), 100.0);
+
+        let produced = all_metrics.iter().find(|m| m.context().name().as_ref() == constants::PRODUCED_BYTES_METRIC);
+        assert!(produced.is_some(), "produced bytes metric not found");
+        assert_distribution_value(produced.unwrap(), 42.0);
     }
 
     #[tokio::test]
     async fn test_set_report_log_metrics() {
-        let (metrics_aggr, my_config) = setup();
-        let lambda = Lambda::new(metrics_aggr.clone(), my_config);
+        let (enhanced_handle, mut rx, my_config) = setup();
+        let lambda = Lambda::new(enhanced_handle, my_config);
         let report_metrics = ReportMetrics::OnDemand(OnDemandReportMetrics {
             duration_ms: 100.0,
             billed_duration_ms: 100,
@@ -1214,23 +968,34 @@ mod tests {
             .unwrap_or_default();
         lambda.set_report_log_metrics(&report_metrics, now);
 
-        assert_sketch(&metrics_aggr, constants::DURATION_METRIC, 0.1, now).await;
-        assert_sketch(&metrics_aggr, constants::BILLED_DURATION_METRIC, 0.1, now).await;
+        // Collect all metrics
+        let mut all_metrics = Vec::new();
+        while let Ok(m) = rx.try_recv() {
+            all_metrics.push(m);
+        }
 
-        assert_sketch(&metrics_aggr, constants::MAX_MEMORY_USED_METRIC, 128.0, now).await;
-        assert_sketch(&metrics_aggr, constants::MEMORY_SIZE_METRIC, 256.0, now).await;
+        let duration = all_metrics.iter().find(|m| m.context().name().as_ref() == constants::DURATION_METRIC);
+        assert!(duration.is_some(), "duration metric not found");
+        assert_distribution_value(duration.unwrap(), 0.1);
+
+        let billed = all_metrics.iter().find(|m| m.context().name().as_ref() == constants::BILLED_DURATION_METRIC);
+        assert!(billed.is_some(), "billed duration metric not found");
+        assert_distribution_value(billed.unwrap(), 0.1);
+
+        let max_mem = all_metrics.iter().find(|m| m.context().name().as_ref() == constants::MAX_MEMORY_USED_METRIC);
+        assert!(max_mem.is_some(), "max memory used metric not found");
+        assert_distribution_value(max_mem.unwrap(), 128.0);
+
+        let mem_size = all_metrics.iter().find(|m| m.context().name().as_ref() == constants::MEMORY_SIZE_METRIC);
+        assert!(mem_size.is_some(), "memory size metric not found");
+        assert_distribution_value(mem_size.unwrap(), 256.0);
     }
 
     #[tokio::test]
     async fn test_set_network_enhanced_metrics() {
-        let (metrics_aggr, my_config) = setup();
-        let _lambda = Lambda::new(metrics_aggr.clone(), my_config);
-        let now: i64 = std::time::UNIX_EPOCH
-            .elapsed()
-            .expect("unable to poll clock, unrecoverable")
-            .as_secs()
-            .try_into()
-            .unwrap_or_default();
+        let (enhanced_handle, mut rx, my_config) = setup();
+        let _lambda = Lambda::new(enhanced_handle.clone(), my_config);
+
         let network_offset = NetworkData {
             rx_bytes: 180.0,
             tx_bytes: 254.0,
@@ -1243,25 +1008,33 @@ mod tests {
         Lambda::generate_network_enhanced_metrics(
             network_offset,
             network_data,
-            &metrics_aggr,
+            &enhanced_handle,
             None,
         );
 
-        assert_sketch(&metrics_aggr, constants::RX_BYTES_METRIC, 20000.0, now).await;
-        assert_sketch(&metrics_aggr, constants::TX_BYTES_METRIC, 74746.0, now).await;
-        assert_sketch(&metrics_aggr, constants::TOTAL_NETWORK_METRIC, 94746.0, now).await;
+        let mut all_metrics = Vec::new();
+        while let Ok(m) = rx.try_recv() {
+            all_metrics.push(m);
+        }
+
+        let rx_metric = all_metrics.iter().find(|m| m.context().name().as_ref() == constants::RX_BYTES_METRIC);
+        assert!(rx_metric.is_some(), "rx_bytes metric not found");
+        assert_distribution_value(rx_metric.unwrap(), 20000.0);
+
+        let tx_metric = all_metrics.iter().find(|m| m.context().name().as_ref() == constants::TX_BYTES_METRIC);
+        assert!(tx_metric.is_some(), "tx_bytes metric not found");
+        assert_distribution_value(tx_metric.unwrap(), 74746.0);
+
+        let total_metric = all_metrics.iter().find(|m| m.context().name().as_ref() == constants::TOTAL_NETWORK_METRIC);
+        assert!(total_metric.is_some(), "total_network metric not found");
+        assert_distribution_value(total_metric.unwrap(), 94746.0);
     }
 
     #[tokio::test]
     async fn test_set_cpu_time_enhanced_metrics() {
-        let (metrics_aggr, my_config) = setup();
-        let _lambda = Lambda::new(metrics_aggr.clone(), my_config);
-        let now: i64 = std::time::UNIX_EPOCH
-            .elapsed()
-            .expect("unable to poll clock, unrecoverable")
-            .as_secs()
-            .try_into()
-            .unwrap_or_default();
+        let (enhanced_handle, mut rx, my_config) = setup();
+        let _lambda = Lambda::new(enhanced_handle.clone(), my_config);
+
         let mut individual_cpu_idle_time_offsets = HashMap::new();
         individual_cpu_idle_time_offsets.insert("cpu0".to_string(), 10.0);
         individual_cpu_idle_time_offsets.insert("cpu1".to_string(), 20.0);
@@ -1282,23 +1055,31 @@ mod tests {
             individual_cpu_idle_times: individual_cpu_idle_times_end,
         };
 
-        Lambda::generate_cpu_time_enhanced_metrics(&cpu_offset, &cpu_data, &metrics_aggr, None);
+        Lambda::generate_cpu_time_enhanced_metrics(&cpu_offset, &cpu_data, &enhanced_handle, None);
 
-        assert_sketch(&metrics_aggr, constants::CPU_USER_TIME_METRIC, 100.0, now).await;
-        assert_sketch(&metrics_aggr, constants::CPU_SYSTEM_TIME_METRIC, 53.0, now).await;
-        assert_sketch(&metrics_aggr, constants::CPU_TOTAL_TIME_METRIC, 153.0, now).await;
+        let mut all_metrics = Vec::new();
+        while let Ok(m) = rx.try_recv() {
+            all_metrics.push(m);
+        }
+
+        let cpu_user = all_metrics.iter().find(|m| m.context().name().as_ref() == constants::CPU_USER_TIME_METRIC);
+        assert!(cpu_user.is_some(), "cpu_user_time metric not found");
+        assert_distribution_value(cpu_user.unwrap(), 100.0);
+
+        let cpu_system = all_metrics.iter().find(|m| m.context().name().as_ref() == constants::CPU_SYSTEM_TIME_METRIC);
+        assert!(cpu_system.is_some(), "cpu_system_time metric not found");
+        assert_distribution_value(cpu_system.unwrap(), 53.0);
+
+        let cpu_total = all_metrics.iter().find(|m| m.context().name().as_ref() == constants::CPU_TOTAL_TIME_METRIC);
+        assert!(cpu_total.is_some(), "cpu_total_time metric not found");
+        assert_distribution_value(cpu_total.unwrap(), 153.0);
     }
 
     #[tokio::test]
     async fn test_set_cpu_utilization_enhanced_metrics() {
-        let (metrics_aggr, my_config) = setup();
-        let _lambda = Lambda::new(metrics_aggr.clone(), my_config);
-        let now: i64 = std::time::UNIX_EPOCH
-            .elapsed()
-            .expect("unable to poll clock, unrecoverable")
-            .as_secs()
-            .try_into()
-            .unwrap_or_default();
+        let (enhanced_handle, mut rx, my_config) = setup();
+        let _lambda = Lambda::new(enhanced_handle.clone(), my_config);
+
         let mut individual_cpu_idle_time_offsets = HashMap::new();
         individual_cpu_idle_time_offsets.insert("cpu0".to_string(), 10.0);
         individual_cpu_idle_time_offsets.insert("cpu1".to_string(), 30.0);
@@ -1326,46 +1107,41 @@ mod tests {
             &cpu_data,
             uptime_offset,
             uptime_data,
-            &metrics_aggr,
+            &enhanced_handle,
             None,
         );
 
+        let mut all_metrics = Vec::new();
+        while let Ok(m) = rx.try_recv() {
+            all_metrics.push(m);
+        }
+
         // the differences above and metric values below are from an invocation using the go agent to verify the calculations
-        assert_sketch(
-            &metrics_aggr,
-            constants::CPU_TOTAL_UTILIZATION_PCT_METRIC,
-            30.0,
-            now,
-        )
-        .await;
-        assert_sketch(
-            &metrics_aggr,
-            constants::CPU_TOTAL_UTILIZATION_METRIC,
-            0.6,
-            now,
-        )
-        .await;
-        assert_sketch(&metrics_aggr, constants::NUM_CORES_METRIC, 2.0, now).await;
-        assert_sketch(
-            &metrics_aggr,
-            constants::CPU_MAX_UTILIZATION_METRIC,
-            30.0,
-            now,
-        )
-        .await;
-        assert_sketch(
-            &metrics_aggr,
-            constants::CPU_MIN_UTILIZATION_METRIC,
-            28.75,
-            now,
-        )
-        .await;
+        let total_pct = all_metrics.iter().find(|m| m.context().name().as_ref() == constants::CPU_TOTAL_UTILIZATION_PCT_METRIC);
+        assert!(total_pct.is_some(), "cpu_total_utilization_pct metric not found");
+        assert_distribution_value(total_pct.unwrap(), 30.0);
+
+        let total_util = all_metrics.iter().find(|m| m.context().name().as_ref() == constants::CPU_TOTAL_UTILIZATION_METRIC);
+        assert!(total_util.is_some(), "cpu_total_utilization metric not found");
+        assert_distribution_value(total_util.unwrap(), 0.6);
+
+        let num_cores = all_metrics.iter().find(|m| m.context().name().as_ref() == constants::NUM_CORES_METRIC);
+        assert!(num_cores.is_some(), "num_cores metric not found");
+        assert_distribution_value(num_cores.unwrap(), 2.0);
+
+        let max_util = all_metrics.iter().find(|m| m.context().name().as_ref() == constants::CPU_MAX_UTILIZATION_METRIC);
+        assert!(max_util.is_some(), "cpu_max_utilization metric not found");
+        assert_distribution_value(max_util.unwrap(), 30.0);
+
+        let min_util = all_metrics.iter().find(|m| m.context().name().as_ref() == constants::CPU_MIN_UTILIZATION_METRIC);
+        assert!(min_util.is_some(), "cpu_min_utilization metric not found");
+        assert_distribution_value(min_util.unwrap(), 28.75);
     }
 
     #[tokio::test]
     async fn test_set_snapstart_restore_duration_metric() {
-        let (metrics_aggr, my_config) = setup();
-        let mut lambda = Lambda::new(metrics_aggr.clone(), my_config);
+        let (enhanced_handle, mut rx, my_config) = setup();
+        let mut lambda = Lambda::new(enhanced_handle, my_config);
         let now: i64 = std::time::UNIX_EPOCH
             .elapsed()
             .expect("unable to poll clock, unrecoverable")
@@ -1377,23 +1153,22 @@ mod tests {
         lambda.set_snapstart_restore_duration_metric(restore_duration_ms, now);
 
         // Duration should be converted to seconds (ms * 0.001)
-        assert_sketch(
-            &metrics_aggr,
-            constants::SNAPSTART_RESTORE_DURATION_METRIC,
+        let metric = recv_metric_by_name(&mut rx, constants::SNAPSTART_RESTORE_DURATION_METRIC);
+        assert!(metric.is_some(), "snapstart restore duration metric not found");
+        assert_distribution_value(
+            &metric.unwrap(),
             restore_duration_ms * constants::MS_TO_SEC,
-            now,
-        )
-        .await;
+        );
     }
 
     #[tokio::test]
     async fn test_snapstart_restore_duration_metric_disabled() {
-        let (metrics_aggr, no_config) = setup();
+        let (enhanced_handle, mut rx, no_config) = setup();
         let my_config = Arc::new(config::Config {
             enhanced_metrics: false,
             ..no_config.as_ref().clone()
         });
-        let mut lambda = Lambda::new(metrics_aggr.clone(), my_config);
+        let mut lambda = Lambda::new(enhanced_handle, my_config);
         let now: i64 = std::time::UNIX_EPOCH
             .elapsed()
             .expect("unable to poll clock, unrecoverable")
@@ -1405,28 +1180,15 @@ mod tests {
 
         // Metric should not be created when enhanced_metrics is disabled
         assert!(
-            metrics_aggr
-                .get_entry_by_id(
-                    constants::SNAPSTART_RESTORE_DURATION_METRIC.into(),
-                    None,
-                    now
-                )
-                .await
-                .unwrap()
-                .is_none()
+            rx.try_recv().is_err(),
+            "No metrics should be emitted when enhanced_metrics is disabled"
         );
     }
 
     #[tokio::test]
     async fn test_cpu_utilization_with_negative_uptime() {
-        let (metrics_aggr, my_config) = setup();
-        let _lambda = Lambda::new(metrics_aggr.clone(), my_config);
-        let now: i64 = std::time::UNIX_EPOCH
-            .elapsed()
-            .expect("unable to poll clock, unrecoverable")
-            .as_secs()
-            .try_into()
-            .unwrap_or_default();
+        let (enhanced_handle, mut rx, my_config) = setup();
+        let _lambda = Lambda::new(enhanced_handle.clone(), my_config);
 
         let mut individual_cpu_idle_times = HashMap::new();
         individual_cpu_idle_times.insert("cpu0".to_string(), 10.0);
@@ -1452,30 +1214,21 @@ mod tests {
             &cpu_data,
             uptime_offset,
             uptime_data,
-            &metrics_aggr,
+            &enhanced_handle,
             None,
         );
 
         // No metrics should be created
         assert!(
-            metrics_aggr
-                .get_entry_by_id(constants::CPU_MAX_UTILIZATION_METRIC.into(), None, now)
-                .await
-                .unwrap()
-                .is_none()
+            rx.try_recv().is_err(),
+            "No metrics should be emitted with negative uptime"
         );
     }
 
     #[tokio::test]
     async fn test_cpu_utilization_with_zero_uptime() {
-        let (metrics_aggr, my_config) = setup();
-        let _lambda = Lambda::new(metrics_aggr.clone(), my_config);
-        let now: i64 = std::time::UNIX_EPOCH
-            .elapsed()
-            .expect("unable to poll clock, unrecoverable")
-            .as_secs()
-            .try_into()
-            .unwrap_or_default();
+        let (enhanced_handle, mut rx, my_config) = setup();
+        let _lambda = Lambda::new(enhanced_handle.clone(), my_config);
 
         let mut individual_cpu_idle_times = HashMap::new();
         individual_cpu_idle_times.insert("cpu0".to_string(), 10.0);
@@ -1501,30 +1254,21 @@ mod tests {
             &cpu_data,
             uptime_offset,
             uptime_data,
-            &metrics_aggr,
+            &enhanced_handle,
             None,
         );
 
         // No metrics should be created
         assert!(
-            metrics_aggr
-                .get_entry_by_id(constants::CPU_MAX_UTILIZATION_METRIC.into(), None, now)
-                .await
-                .unwrap()
-                .is_none()
+            rx.try_recv().is_err(),
+            "No metrics should be emitted with zero uptime"
         );
     }
 
     #[tokio::test]
     async fn test_cpu_utilization_with_excessive_idle_time() {
-        let (metrics_aggr, my_config) = setup();
-        let _lambda = Lambda::new(metrics_aggr.clone(), my_config);
-        let now: i64 = std::time::UNIX_EPOCH
-            .elapsed()
-            .expect("unable to poll clock, unrecoverable")
-            .as_secs()
-            .try_into()
-            .unwrap_or_default();
+        let (enhanced_handle, mut rx, my_config) = setup();
+        let _lambda = Lambda::new(enhanced_handle.clone(), my_config);
 
         let mut individual_cpu_idle_time_offsets = HashMap::new();
         individual_cpu_idle_time_offsets.insert("cpu0".to_string(), 10.0);
@@ -1557,40 +1301,29 @@ mod tests {
             &cpu_data,
             uptime_offset,
             uptime_data,
-            &metrics_aggr,
+            &enhanced_handle,
             None,
         );
 
+        let mut all_metrics = Vec::new();
+        while let Ok(m) = rx.try_recv() {
+            all_metrics.push(m);
+        }
+
         // Metrics should be created with clamped idle times
-        // Both CPUs have idle time clamped to 800 (the uptime)
-        // cpu_max_utilization = ((800 - 800) / 800) * 100 = 0%
-        // cpu_min_utilization = ((800 - 800) / 800) * 100 = 0%
-        assert_sketch(
-            &metrics_aggr,
-            constants::CPU_MAX_UTILIZATION_METRIC,
-            0.0,
-            now,
-        )
-        .await;
-        assert_sketch(
-            &metrics_aggr,
-            constants::CPU_MIN_UTILIZATION_METRIC,
-            0.0,
-            now,
-        )
-        .await;
+        let max_util = all_metrics.iter().find(|m| m.context().name().as_ref() == constants::CPU_MAX_UTILIZATION_METRIC);
+        assert!(max_util.is_some(), "cpu_max_utilization metric not found");
+        assert_distribution_value(max_util.unwrap(), 0.0);
+
+        let min_util = all_metrics.iter().find(|m| m.context().name().as_ref() == constants::CPU_MIN_UTILIZATION_METRIC);
+        assert!(min_util.is_some(), "cpu_min_utilization metric not found");
+        assert_distribution_value(min_util.unwrap(), 0.0);
     }
 
     #[tokio::test]
     async fn test_cpu_utilization_with_idle_time_exceeding_uptime() {
-        let (metrics_aggr, my_config) = setup();
-        let _lambda = Lambda::new(metrics_aggr.clone(), my_config);
-        let now: i64 = std::time::UNIX_EPOCH
-            .elapsed()
-            .expect("unable to poll clock, unrecoverable")
-            .as_secs()
-            .try_into()
-            .unwrap_or_default();
+        let (enhanced_handle, mut rx, my_config) = setup();
+        let _lambda = Lambda::new(enhanced_handle.clone(), my_config);
 
         // This test simulates the bug scenario where per-CPU idle time > uptime
         // The fix should clamp idle_time to [0, uptime] and produce valid metrics
@@ -1625,53 +1358,33 @@ mod tests {
             &cpu_data,
             uptime_offset,
             uptime_data,
-            &metrics_aggr,
+            &enhanced_handle,
             None,
         );
 
+        let mut all_metrics = Vec::new();
+        while let Ok(m) = rx.try_recv() {
+            all_metrics.push(m);
+        }
+
         // Metrics should be created with clamped values
-        // cpu1 idle time is clamped to 1000, so:
-        // min_idle_time = 1000 (cpu0)
-        // max_idle_time = 1000 (cpu1, clamped from 1030)
-        // cpu_max_utilization = ((1000 - 1000) / 1000) * 100 = 0%
-        // cpu_min_utilization = ((1000 - 1000) / 1000) * 100 = 0%
-        assert_sketch(
-            &metrics_aggr,
-            constants::CPU_MAX_UTILIZATION_METRIC,
-            0.0,
-            now,
-        )
-        .await;
-        assert_sketch(
-            &metrics_aggr,
-            constants::CPU_MIN_UTILIZATION_METRIC,
-            0.0,
-            now,
-        )
-        .await;
+        let max_util = all_metrics.iter().find(|m| m.context().name().as_ref() == constants::CPU_MAX_UTILIZATION_METRIC);
+        assert!(max_util.is_some(), "cpu_max_utilization metric not found");
+        assert_distribution_value(max_util.unwrap(), 0.0);
+
+        let min_util = all_metrics.iter().find(|m| m.context().name().as_ref() == constants::CPU_MIN_UTILIZATION_METRIC);
+        assert!(min_util.is_some(), "cpu_min_utilization metric not found");
+        assert_distribution_value(min_util.unwrap(), 0.0);
 
         // Total utilization should also be valid (clamped to [0, 100])
-        let total_util_entry = metrics_aggr
-            .get_entry_by_id(
-                constants::CPU_TOTAL_UTILIZATION_PCT_METRIC.into(),
-                None,
-                (now / 10) * 10,
-            )
-            .await
-            .unwrap();
-        assert!(total_util_entry.is_some());
+        let total_pct = all_metrics.iter().find(|m| m.context().name().as_ref() == constants::CPU_TOTAL_UTILIZATION_PCT_METRIC);
+        assert!(total_pct.is_some(), "cpu_total_utilization_pct metric not found");
     }
 
     #[tokio::test]
     async fn test_cpu_utilization_with_negative_idle_time() {
-        let (metrics_aggr, my_config) = setup();
-        let _lambda = Lambda::new(metrics_aggr.clone(), my_config);
-        let now: i64 = std::time::UNIX_EPOCH
-            .elapsed()
-            .expect("unable to poll clock, unrecoverable")
-            .as_secs()
-            .try_into()
-            .unwrap_or_default();
+        let (enhanced_handle, mut rx, my_config) = setup();
+        let _lambda = Lambda::new(enhanced_handle.clone(), my_config);
 
         // Test case where idle time decreases (negative delta)
         // This can happen due to measurement timing issues
@@ -1702,38 +1415,30 @@ mod tests {
             &cpu_data,
             uptime_offset,
             uptime_data,
-            &metrics_aggr,
+            &enhanced_handle,
             None,
         );
 
+        let mut all_metrics = Vec::new();
+        while let Ok(m) = rx.try_recv() {
+            all_metrics.push(m);
+        }
+
         // Metrics should be created with idle_time clamped to 0
         // This results in 100% utilization
-        assert_sketch(
-            &metrics_aggr,
-            constants::CPU_MAX_UTILIZATION_METRIC,
-            100.0,
-            now,
-        )
-        .await;
-        assert_sketch(
-            &metrics_aggr,
-            constants::CPU_MIN_UTILIZATION_METRIC,
-            100.0,
-            now,
-        )
-        .await;
+        let max_util = all_metrics.iter().find(|m| m.context().name().as_ref() == constants::CPU_MAX_UTILIZATION_METRIC);
+        assert!(max_util.is_some(), "cpu_max_utilization metric not found");
+        assert_distribution_value(max_util.unwrap(), 100.0);
+
+        let min_util = all_metrics.iter().find(|m| m.context().name().as_ref() == constants::CPU_MIN_UTILIZATION_METRIC);
+        assert!(min_util.is_some(), "cpu_min_utilization metric not found");
+        assert_distribution_value(min_util.unwrap(), 100.0);
     }
 
     #[tokio::test]
     async fn test_cpu_utilization_boundary_values() {
-        let (metrics_aggr, my_config) = setup();
-        let _lambda = Lambda::new(metrics_aggr.clone(), my_config);
-        let now: i64 = std::time::UNIX_EPOCH
-            .elapsed()
-            .expect("unable to poll clock, unrecoverable")
-            .as_secs()
-            .try_into()
-            .unwrap_or_default();
+        let (enhanced_handle, mut rx, my_config) = setup();
+        let _lambda = Lambda::new(enhanced_handle.clone(), my_config);
 
         // Test with very small uptime delta (edge case for fast invocations)
         let mut individual_cpu_idle_time_offsets = HashMap::new();
@@ -1765,27 +1470,25 @@ mod tests {
             &cpu_data,
             uptime_offset,
             uptime_data,
-            &metrics_aggr,
+            &enhanced_handle,
             None,
         );
+
+        let mut all_metrics = Vec::new();
+        while let Ok(m) = rx.try_recv() {
+            all_metrics.push(m);
+        }
 
         // Should produce valid metrics
         // min_idle = 0.5, max_idle = 0.8
         // max_util = (1.0 - 0.5) / 1.0 * 100 = 50%
         // min_util = (1.0 - 0.8) / 1.0 * 100 = 20%
-        assert_sketch(
-            &metrics_aggr,
-            constants::CPU_MAX_UTILIZATION_METRIC,
-            50.0,
-            now,
-        )
-        .await;
-        assert_sketch(
-            &metrics_aggr,
-            constants::CPU_MIN_UTILIZATION_METRIC,
-            20.0,
-            now,
-        )
-        .await;
+        let max_util = all_metrics.iter().find(|m| m.context().name().as_ref() == constants::CPU_MAX_UTILIZATION_METRIC);
+        assert!(max_util.is_some(), "cpu_max_utilization metric not found");
+        assert_distribution_value(max_util.unwrap(), 50.0);
+
+        let min_util = all_metrics.iter().find(|m| m.context().name().as_ref() == constants::CPU_MIN_UTILIZATION_METRIC);
+        assert!(min_util.is_some(), "cpu_min_utilization metric not found");
+        assert_distribution_value(min_util.unwrap(), 20.0);
     }
 }

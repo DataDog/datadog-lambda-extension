@@ -80,20 +80,8 @@ use bottlecap::{
 };
 use datadog_fips::reqwest_adapter::create_reqwest_client_builder;
 use decrypt::resolve_secrets;
-use dogstatsd::{
-    aggregator::{
-        AggregatorHandle as MetricsAggregatorHandle, AggregatorService as MetricsAggregatorService,
-    },
-    api_key::ApiKeyFactory,
-    constants::CONTEXTS,
-    datadog::{
-        DdDdUrl, DdUrl, MetricsIntakeUrlPrefix, MetricsIntakeUrlPrefixOverride,
-        RetryStrategy as DsdRetryStrategy, Site as MetricsSite,
-    },
-    dogstatsd::{DogStatsD, DogStatsDConfig},
-    flusher::{Flusher as MetricsFlusher, FlusherConfig as MetricsFlusherConfig},
-    metric::{EMPTY_TAGS, SortedTags},
-};
+use dogstatsd::api_key::ApiKeyFactory;
+use bottlecap::metrics::topology::{self, MetricsTopology};
 use libdd_trace_obfuscation::obfuscation_config;
 use reqwest::Client;
 use std::{collections::hash_map, env, path::Path, str::FromStr, sync::Arc};
@@ -308,13 +296,13 @@ async fn extension_loop_active(
             &shared_client,
         );
 
-    let (metrics_flushers, metrics_aggregator_handle, dogstatsd_cancel_token) = start_dogstatsd(
-        tags_provider.clone(),
-        Arc::clone(&api_key_factory),
-        config,
-        &shared_client,
-    )
-    .await;
+    let MetricsTopology {
+        enhanced_metrics_handle,
+        aggregator_handle: saluki_aggr_handle,
+        running: metrics_topology,
+    } = topology::start_metrics_topology()
+        .await
+        .expect("Failed to start Saluki metrics topology");
 
     let propagator = Arc::new(DatadogCompositePropagator::new(Arc::clone(config)));
     // Lifecycle Invocation Processor
@@ -323,7 +311,7 @@ async fn extension_loop_active(
             Arc::clone(&tags_provider),
             Arc::clone(config),
             Arc::clone(&aws_config),
-            metrics_aggregator_handle.clone(),
+            enhanced_metrics_handle.clone(),
             Arc::clone(&propagator),
         );
     tokio::spawn(async move {
@@ -410,11 +398,10 @@ async fn extension_loop_active(
     if aws_config.is_managed_instance_mode() {
         // Clone Arc references for the background flusher task
         let logs_flusher_clone = logs_flusher.clone();
-        let metrics_flushers_clone = Arc::clone(&metrics_flushers);
         let trace_flusher_clone = Arc::clone(&trace_flusher);
         let stats_flusher_clone = Arc::clone(&stats_flusher);
         let proxy_flusher_clone = proxy_flusher.clone();
-        let metrics_aggr_handle_clone = metrics_aggregator_handle.clone();
+        let saluki_aggr_handle_clone = saluki_aggr_handle.clone();
 
         // In Managed Instance mode, create a separate interval for the background flusher task.
         // We don't reuse race_flush_interval because we need to configure the missed tick
@@ -443,8 +430,7 @@ async fn extension_loop_active(
                 trace_flusher_clone,
                 stats_flusher_clone,
                 proxy_flusher_clone,
-                metrics_flushers_clone,
-                metrics_aggr_handle_clone,
+                saluki_aggr_handle_clone,
             );
 
             loop {
@@ -591,7 +577,6 @@ async fn extension_loop_active(
             api_runtime_proxy_shutdown_signal.as_ref(),
             otlp_cancel_token.as_ref(),
             &trace_agent_shutdown_token,
-            &dogstatsd_cancel_token,
             &telemetry_listener_cancel_token,
             &lifecycle_listener_shutdown_token,
         );
@@ -617,8 +602,7 @@ async fn extension_loop_active(
         Arc::clone(&trace_flusher),
         Arc::clone(&stats_flusher),
         proxy_flusher.clone(),
-        Arc::clone(&metrics_flushers),
-        metrics_aggregator_handle.clone(),
+        saluki_aggr_handle.clone(),
     );
     handle_next_invocation(next_lambda_response, &invocation_processor_handle).await;
     loop {
@@ -733,7 +717,6 @@ async fn extension_loop_active(
                 api_runtime_proxy_shutdown_signal.as_ref(),
                 otlp_cancel_token.as_ref(),
                 &trace_agent_shutdown_token,
-                &dogstatsd_cancel_token,
                 &telemetry_listener_cancel_token,
                 &lifecycle_listener_shutdown_token,
             );
@@ -800,7 +783,6 @@ fn cancel_background_services(
     api_runtime_proxy_shutdown_signal: Option<&CancellationToken>,
     otlp_cancel_token: Option<&CancellationToken>,
     trace_agent_shutdown_token: &CancellationToken,
-    dogstatsd_cancel_token: &CancellationToken,
     telemetry_listener_cancel_token: &CancellationToken,
     lifecycle_listener_shutdown_token: &CancellationToken,
 ) {
@@ -811,7 +793,8 @@ fn cancel_background_services(
         token.cancel();
     }
     trace_agent_shutdown_token.cancel();
-    dogstatsd_cancel_token.cancel();
+    // Note: DogStatsD/metrics topology is shut down separately via
+    // RunningTopology::shutdown_with_timeout() since it requires async.
     telemetry_listener_cancel_token.cancel();
     lifecycle_listener_shutdown_token.cancel();
 }
@@ -1183,132 +1166,6 @@ fn start_trace_agent(
         stats_concentrator_handle,
         trace_aggregator_handle,
     )
-}
-
-async fn start_dogstatsd(
-    tags_provider: Arc<TagProvider>,
-    api_key_factory: Arc<ApiKeyFactory>,
-    config: &Arc<Config>,
-    client: &Client,
-) -> (
-    Arc<Vec<MetricsFlusher>>,
-    MetricsAggregatorHandle,
-    CancellationToken,
-) {
-    // Start aggregator service and handle
-    let start_time = Instant::now();
-    let (aggregator_service, aggregator_handle) = MetricsAggregatorService::new(
-        SortedTags::parse(&tags_provider.get_tags_string()).unwrap_or(EMPTY_TAGS),
-        CONTEXTS,
-    )
-    .expect("can't create metrics service");
-    debug!(
-        "Metrics aggregator created in {:} microseconds",
-        start_time.elapsed().as_micros().to_string()
-    );
-
-    // Start service in background
-    tokio::spawn(async move {
-        aggregator_service.run().await;
-    });
-
-    // Get flushers with aggregator handle
-    let flushers = Arc::new(start_metrics_flushers(
-        Arc::clone(&api_key_factory),
-        &aggregator_handle,
-        config,
-        client,
-    ));
-
-    // Create Dogstatsd server
-    let dogstatsd_config = DogStatsDConfig {
-        host: EXTENSION_HOST.to_string(),
-        port: DOGSTATSD_PORT,
-        metric_namespace: config.statsd_metric_namespace.clone(),
-        so_rcvbuf: config.dogstatsd_so_rcvbuf,
-        buffer_size: config.dogstatsd_buffer_size,
-        queue_size: config.dogstatsd_queue_size,
-    };
-    let cancel_token = tokio_util::sync::CancellationToken::new();
-    let dogstatsd_agent = DogStatsD::new(
-        &dogstatsd_config,
-        aggregator_handle.clone(),
-        cancel_token.clone(),
-    )
-    .await;
-
-    // Start server in background
-    tokio::spawn(async move {
-        dogstatsd_agent.spin().await;
-    });
-
-    (flushers, aggregator_handle, cancel_token)
-}
-
-fn start_metrics_flushers(
-    api_key_factory: Arc<ApiKeyFactory>,
-    metrics_aggr_handle: &MetricsAggregatorHandle,
-    config: &Arc<Config>,
-    client: &Client,
-) -> Vec<MetricsFlusher> {
-    let mut flushers = Vec::new();
-
-    let metrics_intake_url = if !config.dd_url.is_empty() {
-        let dd_dd_url = DdDdUrl::new(config.dd_url.clone()).expect("can't parse DD_DD_URL");
-
-        let prefix_override = MetricsIntakeUrlPrefixOverride::maybe_new(None, Some(dd_dd_url));
-        MetricsIntakeUrlPrefix::new(None, prefix_override)
-    } else if !config.url.is_empty() {
-        let dd_url = DdUrl::new(config.url.clone()).expect("can't parse DD_URL");
-
-        let prefix_override = MetricsIntakeUrlPrefixOverride::maybe_new(Some(dd_url), None);
-        MetricsIntakeUrlPrefix::new(None, prefix_override)
-    } else {
-        // use site
-        let metrics_site = MetricsSite::new(config.site.clone()).expect("can't parse site");
-        MetricsIntakeUrlPrefix::new(Some(metrics_site), None)
-    };
-
-    let flusher_config = MetricsFlusherConfig {
-        api_key_factory,
-        aggregator_handle: metrics_aggr_handle.clone(),
-        metrics_intake_url_prefix: metrics_intake_url.expect("can't parse site or override"),
-        client: client.clone(),
-        retry_strategy: DsdRetryStrategy::Immediate(3),
-        compression_level: config.metrics_config_compression_level,
-    };
-    flushers.push(MetricsFlusher::new(flusher_config));
-
-    for (endpoint_url, api_keys) in &config.additional_endpoints {
-        let dd_url = match DdUrl::new(endpoint_url.clone()) {
-            Ok(url) => url,
-            Err(err) => {
-                error!(
-                    "Invalid additional endpoint: {err}. Falling back to 'https://app.datadoghq.com'"
-                );
-                DdUrl::new("https://app.datadoghq.com".to_string())
-                    .expect("additional endpoint fallback URL is invalid")
-            }
-        };
-        let prefix_override = MetricsIntakeUrlPrefixOverride::maybe_new(Some(dd_url), None);
-        let metrics_intake_url = MetricsIntakeUrlPrefix::new(None, prefix_override)
-            .expect("can't parse additional endpoint URL");
-
-        // Create a flusher for each endpoint URL and API key pair
-        for api_key in api_keys {
-            let additional_api_key_factory = Arc::new(ApiKeyFactory::new(api_key));
-            let additional_flusher_config = MetricsFlusherConfig {
-                api_key_factory: additional_api_key_factory,
-                aggregator_handle: metrics_aggr_handle.clone(),
-                metrics_intake_url_prefix: metrics_intake_url.clone(),
-                client: client.clone(),
-                retry_strategy: DsdRetryStrategy::Immediate(3),
-                compression_level: config.metrics_config_compression_level,
-            };
-            flushers.push(MetricsFlusher::new(additional_flusher_config));
-        }
-    }
-    flushers
 }
 
 async fn setup_telemetry_client(

@@ -1,27 +1,17 @@
 //! Flush handles for tracking in-flight flush operations.
 
-use datadog_protos::metrics::SketchPayload;
-use dogstatsd::datadog::Series;
 use libdd_trace_protobuf::pb;
 use libdd_trace_utils::send_data::SendData;
 use tokio::task::JoinHandle;
-
-/// Batch of metrics that failed to flush and need to be retried.
-#[derive(Debug)]
-pub struct MetricsRetryBatch {
-    /// Index of the flusher in the metrics flushers vector.
-    pub flusher_id: usize,
-    /// Series that failed to flush.
-    pub series: Vec<Series>,
-    /// Sketch payloads that failed to flush.
-    pub sketches: Vec<SketchPayload>,
-}
 
 /// Handles for pending flush operations.
 ///
 /// Each field contains a vector of `JoinHandle`s for in-flight flush tasks.
 /// The return type of each handle contains data that may need to be retried
 /// if the flush failed.
+///
+/// Note: metrics flushing is handled entirely by the Saluki topology (encoder +
+/// forwarder with built-in retries), so no metric flush handles are needed here.
 #[derive(Default)]
 #[allow(clippy::struct_field_names)]
 pub struct FlushHandles {
@@ -29,8 +19,6 @@ pub struct FlushHandles {
     pub trace_flush_handles: Vec<JoinHandle<Vec<SendData>>>,
     /// Handles for log flush operations. Returns failed request builders for retry.
     pub log_flush_handles: Vec<JoinHandle<Vec<reqwest::RequestBuilder>>>,
-    /// Handles for metrics flush operations. Returns batch info for retry.
-    pub metric_flush_handles: Vec<JoinHandle<MetricsRetryBatch>>,
     /// Handles for proxy flush operations. Returns failed request builders for retry.
     pub proxy_flush_handles: Vec<JoinHandle<Vec<reqwest::RequestBuilder>>>,
     /// Handles for stats flush operations. Returns failed stats payloads for retry.
@@ -44,7 +32,6 @@ impl FlushHandles {
         Self {
             trace_flush_handles: Vec::new(),
             log_flush_handles: Vec::new(),
-            metric_flush_handles: Vec::new(),
             proxy_flush_handles: Vec::new(),
             stats_flush_handles: Vec::new(),
         }
@@ -55,11 +42,10 @@ impl FlushHandles {
     pub fn has_pending(&self) -> bool {
         let trace_pending = self.trace_flush_handles.iter().any(|h| !h.is_finished());
         let log_pending = self.log_flush_handles.iter().any(|h| !h.is_finished());
-        let metric_pending = self.metric_flush_handles.iter().any(|h| !h.is_finished());
         let proxy_pending = self.proxy_flush_handles.iter().any(|h| !h.is_finished());
         let stats_pending = self.stats_flush_handles.iter().any(|h| !h.is_finished());
 
-        trace_pending || log_pending || metric_pending || proxy_pending || stats_pending
+        trace_pending || log_pending || proxy_pending || stats_pending
     }
 
     /// Returns `true` if all handle vectors are empty.
@@ -67,7 +53,6 @@ impl FlushHandles {
     pub fn is_empty(&self) -> bool {
         self.trace_flush_handles.is_empty()
             && self.log_flush_handles.is_empty()
-            && self.metric_flush_handles.is_empty()
             && self.proxy_flush_handles.is_empty()
             && self.stats_flush_handles.is_empty()
     }
@@ -78,7 +63,6 @@ impl std::fmt::Debug for FlushHandles {
         f.debug_struct("FlushHandles")
             .field("trace_handles_count", &self.trace_flush_handles.len())
             .field("log_handles_count", &self.log_flush_handles.len())
-            .field("metric_handles_count", &self.metric_flush_handles.len())
             .field("proxy_handles_count", &self.proxy_flush_handles.len())
             .field("stats_handles_count", &self.stats_flush_handles.len())
             .finish()
