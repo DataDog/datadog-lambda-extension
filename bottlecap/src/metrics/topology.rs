@@ -112,7 +112,9 @@ pub async fn start_metrics_topology(
     blueprint.add_forwarder("datadog_forwarder", forwarder_config)?;
 
     // --- Wiring ---
-    blueprint.connect_component("aggregate", ["dogstatsd", "enhanced_metrics"])?;
+    // DogStatsD source has named outputs: "metrics", "events", "service_checks".
+    // We only connect the "metrics" output to the aggregation pipeline.
+    blueprint.connect_component("aggregate", ["dogstatsd.metrics", "enhanced_metrics"])?;
     blueprint.connect_component("metrics_encoder", ["aggregate"])?;
     blueprint.connect_component("datadog_forwarder", ["metrics_encoder"])?;
 
