@@ -61,7 +61,7 @@ axum = { version = "0.8.4", default-features = false, features = ["default"] }
 ustr = { version = "1.0.0", default-features = false }
 tower-http = { version = "0.6.6", default-features = false, features = ["limit"] }
 hyper-http-proxy = { version = "1.1.0", default-features = false, features = [
-    "rustls-tls-webpki-roots",
+    "rustls-tls-native-roots",
 ] }
 indexmap = {version = "2.11.0", default-features = false}
 # If you are adding or updating a datadog-owned code dependency, please ensure
@@ -69,8 +69,10 @@ indexmap = {version = "2.11.0", default-features = false}
 # method in favor of our
 # datadog_fips::reqwest_adapter::create_reqwest_client_builder. An example can
 # be found in the clippy.toml file adjacent to this Cargo.toml.
-datadog-protos = { version = "0.1.0", default-features = false, git = "https://github.com/DataDog/saluki/", rev = "f863626dbfe3c59bb390985fa6530b0621c2a0a2"}
-ddsketch-agent = { version = "0.1.0", default-features = false, git = "https://github.com/DataDog/saluki/", rev = "f863626dbfe3c59bb390985fa6530b0621c2a0a2"}
+datadog-protos = { version = "0.1.0", default-features = false, path = "/Users/jordan.gonzalez/dd/saluki/lib/protos/datadog" }
+ddsketch = { version = "0.1.0", default-features = false, path = "/Users/jordan.gonzalez/dd/saluki/lib/ddsketch" }
+saluki-core = { version = "0.1.0", default-features = false, path = "/Users/jordan.gonzalez/dd/saluki/lib/saluki-core" }
+saluki-components = { version = "0.1.0", default-features = false, path = "/Users/jordan.gonzalez/dd/saluki/lib/saluki-components" }
 libdd-common = { git = "https://github.com/DataDog/libdatadog", rev = "c8121f422d2c8d219f8d421ff3cdb1fcbe9e8b09" }
 libdd-trace-protobuf = { git = "https://github.com/DataDog/libdatadog", rev = "c8121f422d2c8d219f8d421ff3cdb1fcbe9e8b09"  }
 libdd-trace-utils = { git = "https://github.com/DataDog/libdatadog", rev = "c8121f422d2c8d219f8d421ff3cdb1fcbe9e8b09" , features = ["mini_agent"] }
@@ -130,6 +132,17 @@ fips = [
     "rustls/fips",
     "rustls-native-certs",
 ]
+
+# Use local path overrides for development. The serverless-components dogstatsd
+# crate pins an older saluki rev that has ddsketch-agent (renamed to ddsketch).
+# Using local paths avoids the diamond dependency conflict.
+[patch."https://github.com/DataDog/saluki/"]
+datadog-protos = { path = "/Users/jordan.gonzalez/dd/saluki/lib/protos/datadog" }
+ddsketch = { path = "/Users/jordan.gonzalez/dd/saluki/lib/ddsketch" }
+
+[patch."https://github.com/DataDog/serverless-components"]
+dogstatsd = { path = "/Users/jordan.gonzalez/dd/serverless-components/crates/dogstatsd" }
+datadog-fips = { path = "/Users/jordan.gonzalez/dd/serverless-components/crates/datadog-fips" }
 
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(coverage,coverage_nightly)'] }
