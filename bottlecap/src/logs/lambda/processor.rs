@@ -599,16 +599,8 @@ impl LambdaProcessor {
         self.held_logs_order.retain(|r| r != request_id);
         let durable_ctx = self.durable_context_map.get(request_id).cloned();
         if let Some(ctx) = durable_ctx {
-            for mut log in held {
-                log.message.lambda.durable_execution_id = Some(ctx.execution_id.clone());
-                log.message.lambda.durable_execution_name = Some(ctx.execution_name.clone());
-                if is_platform_log(&log.message.message) {
-                    log.message.lambda.first_invocation = ctx.first_invocation;
-                }
-                if let Ok(s) = serde_json::to_string(&log) {
-                    drop(log);
-                    self.ready_logs.push(s);
-                }
+            for log in held {
+                self.set_durable_context_and_mark_ready(log, &ctx);
             }
         }
     }
@@ -627,16 +619,8 @@ impl LambdaProcessor {
                 if let Some(ctx) = durable_ctx {
                     // If the request_id is in the durable context map, set durable execution id
                     // and execution name, and add logs to ready_logs.
-                    for mut log in logs {
-                        log.message.lambda.durable_execution_id = Some(ctx.execution_id.clone());
-                        log.message.lambda.durable_execution_name =
-                            Some(ctx.execution_name.clone());
-                        if is_platform_log(&log.message.message) {
-                            log.message.lambda.first_invocation = ctx.first_invocation;
-                        }
-                        if let Ok(s) = serde_json::to_string(&log) {
-                            self.ready_logs.push(s);
-                        }
+                    for log in logs {
+                        self.set_durable_context_and_mark_ready(log, &ctx);
                     }
                 } else {
                     // No context yet — keep logs in held_logs until the aws.lambda span arrives.
@@ -661,6 +645,22 @@ impl LambdaProcessor {
             && LambdaProcessor::apply_rules(&self.rules, &mut log.message.message);
         if should_send_log {
             self.queue_log_after_rules(log);
+        }
+    }
+
+    /// Applies durable execution context to a log and pushes it to `ready_logs`.
+    /// `first_invocation` is set only for platform logs (START/END/REPORT).
+    fn set_durable_context_and_mark_ready(&mut self, mut log: IntakeLog, ctx: &DurableExecutionContext) {
+        log.message.lambda.durable_execution_id = Some(ctx.execution_id.clone());
+        log.message.lambda.durable_execution_name = Some(ctx.execution_name.clone());
+        if is_platform_log(&log.message.message) {
+            log.message.lambda.first_invocation = ctx.first_invocation;
+        }
+        if let Ok(s) = serde_json::to_string(&log) {
+            // explicitly drop log so we don't accidentally re-use it and push
+            // duplicate logs to the aggregator
+            drop(log);
+            self.ready_logs.push(s);
         }
     }
 
@@ -746,17 +746,7 @@ impl LambdaProcessor {
 
                 match durable_ctx {
                     Some(ctx) => {
-                        log.message.lambda.durable_execution_id = Some(ctx.execution_id);
-                        log.message.lambda.durable_execution_name = Some(ctx.execution_name);
-                        if is_platform_log(&log.message.message) {
-                            log.message.lambda.first_invocation = ctx.first_invocation;
-                        }
-                        if let Ok(serialized_log) = serde_json::to_string(&log) {
-                            // explicitly drop log so we don't accidentally re-use it and push
-                            // duplicate logs to the aggregator
-                            drop(log);
-                            self.ready_logs.push(serialized_log);
-                        }
+                        self.set_durable_context_and_mark_ready(log, &ctx);
                     }
                     None => {
                         if let Some(rid) = log.message.lambda.request_id.clone() {
