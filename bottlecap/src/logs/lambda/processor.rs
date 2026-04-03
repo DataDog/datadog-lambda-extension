@@ -650,7 +650,11 @@ impl LambdaProcessor {
 
     /// Applies durable execution context to a log and pushes it to `ready_logs`.
     /// `first_invocation` is set only for platform logs (START/END/REPORT).
-    fn set_durable_context_and_mark_ready(&mut self, mut log: IntakeLog, ctx: &DurableExecutionContext) {
+    fn set_durable_context_and_mark_ready(
+        &mut self,
+        mut log: IntakeLog,
+        ctx: &DurableExecutionContext,
+    ) {
         log.message.lambda.durable_execution_id = Some(ctx.execution_id.clone());
         log.message.lambda.durable_execution_name = Some(ctx.execution_name.clone());
         if is_platform_log(&log.message.message) {
