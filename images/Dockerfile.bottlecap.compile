@@ -25,6 +25,8 @@ ENV PATH="${PATH}:/root/.cargo/bin"
 ENV RUSTFLAGS="-Cpanic=abort --cfg tokio_unstable"
 ENV AWS_LC_FIPS_SYS_CC=clang
 ENV AWS_LC_FIPS_SYS_CXX=clang++
+ENV APP_VERSION="0.0.94"
+ENV APP_IDENTIFIER="lambda-extension"
 
 WORKDIR /tmp/dd/bottlecap
 RUN --mount=type=cache,target=/usr/local/cargo/git \
