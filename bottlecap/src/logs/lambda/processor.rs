@@ -705,7 +705,7 @@ impl LambdaProcessor {
     /// - `Some(false)` → serialize and push straight to `ready_logs`.
     /// - `Some(true)`  → mark this log as ready to be aggregated if its `request_id` is already in `durable_context_map`
     ///   (context was populated by an `aws.lambda` span); otherwise stash in `held_logs`.
-    fn queue_log_after_rules(&mut self, mut log: IntakeLog) {
+    fn queue_log_after_rules(&mut self, log: IntakeLog) {
         // Durable execution SDK logs already carry execution context extracted from executionArn.
         if log.message.lambda.durable_execution_id.is_some() {
             if let Ok(serialized_log) = serde_json::to_string(&log) {
