@@ -1,0 +1,3 @@
+# Required by saluki-core which uses tokio::runtime::Builder::enable_alt_timer()
+[build]
+rustflags = ["--cfg", "tokio_unstable"]
