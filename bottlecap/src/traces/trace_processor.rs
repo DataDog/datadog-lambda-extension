@@ -30,7 +30,7 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 use tokio::sync::mpsc::Sender;
 use tokio::sync::mpsc::error::SendError;
-use tracing::{debug, error};
+use tracing::{debug, error, warn};
 
 use crate::traces::stats_generator::StatsGenerator;
 use crate::traces::trace_aggregator::{OwnedTracerHeaderTags, SendDataBuilderInfo};
@@ -122,7 +122,7 @@ fn compile_regex_filters(filters: Option<&[String]>) -> Vec<RegexFilter> {
                     regex: Some(regex),
                 })
             } else {
-                debug!(
+                warn!(
                     "TRACE_PROCESSOR | Invalid regex pattern '{}' for key '{}', skipping filter",
                     pattern.trim(),
                     key.trim()
@@ -205,6 +205,7 @@ impl TraceChunkProcessor for ChunkProcessor {
     }
 }
 
+/// Returns `true` if the span should be filtered out (dropped).
 fn filter_span_by_tags(span: &Span, tag_filters: &TagFilters) -> bool {
     // Handle required tags from DD_APM_FILTER_TAGS_REQUIRE (exact match)
     if !tag_filters.require.is_empty() {
