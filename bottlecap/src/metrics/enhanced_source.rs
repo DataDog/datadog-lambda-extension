@@ -118,13 +118,12 @@ impl Source for EnhancedMetricsSource {
         health.mark_ready();
         debug!("Enhanced metrics source started.");
 
-        let mut buffer = EventsBuffer::default();
-
         loop {
             tokio::select! {
                 _ = health.live() => continue,
                 _ = &mut shutdown => {
                     // Drain remaining metrics before shutting down
+                    let mut buffer = EventsBuffer::default();
                     while let Ok(metric) = self.rx.try_recv() {
                         if buffer.try_push(Event::Metric(metric)).is_some() {
                             context.dispatcher().dispatch(buffer).await?;
@@ -139,19 +138,22 @@ impl Source for EnhancedMetricsSource {
                 maybe_metric = self.rx.recv() => {
                     match maybe_metric {
                         Some(metric) => {
-                            if buffer.try_push(Event::Metric(metric)).is_some() {
-                                // Buffer full, dispatch and start a new one
-                                context.dispatcher().dispatch(buffer).await?;
-                                buffer = EventsBuffer::default();
+                            // Dispatch each metric immediately — enhanced metrics
+                            // are low-volume (~15 per invocation) and need to reach
+                            // the aggregator before the next flush.
+                            let mut buffer = EventsBuffer::default();
+                            buffer.try_push(Event::Metric(metric));
+
+                            // Drain any additional metrics that arrived at the same time
+                            while let Ok(extra) = self.rx.try_recv() {
+                                if buffer.try_push(Event::Metric(extra)).is_some() {
+                                    break;
+                                }
                             }
+
+                            context.dispatcher().dispatch(buffer).await?;
                         }
-                        None => {
-                            // Channel closed, flush remaining and exit
-                            if !buffer.is_empty() {
-                                context.dispatcher().dispatch(buffer).await?;
-                            }
-                            break;
-                        }
+                        None => break, // Channel closed
                     }
                 }
             }
