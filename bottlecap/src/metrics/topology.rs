@@ -124,13 +124,12 @@ pub async fn start_metrics_topology(
 
     debug!("Metrics topology built, spawning on current runtime...");
 
+    // Use ambient worker pool to reuse bottlecap's existing tokio runtime,
+    // avoiding a dedicated 8-thread pool in Lambda's constrained environment.
     let memory_limiter = MemoryLimiter::noop();
     let running = built
-        .spawn_with_handle(
-            &health_registry,
-            memory_limiter,
-            tokio::runtime::Handle::current(),
-        )
+        .with_ambient_worker_pool()
+        .spawn(&health_registry, memory_limiter)
         .await
         .error_context("Failed to spawn metrics topology")?;
 
