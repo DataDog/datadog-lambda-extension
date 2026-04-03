@@ -1,3 +1,5 @@
-# Required by saluki-core which uses tokio::runtime::Builder::enable_alt_timer()
+# Required by saluki-core which uses tokio::runtime::Builder::enable_alt_timer().
+# For local builds, this sets the cfg. For Docker builds, the Dockerfile also
+# sets it in RUSTFLAGS (which overrides this file's [build].rustflags).
 [build]
 rustflags = ["--cfg", "tokio_unstable"]

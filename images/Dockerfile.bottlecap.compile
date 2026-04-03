@@ -22,7 +22,7 @@ RUN curl https://sh.rustup.rs -sSf | \
 ENV PATH="${PATH}:/root/.cargo/bin"
 
 # Build the binary
-ENV RUSTFLAGS="-Cpanic=abort"
+ENV RUSTFLAGS="-Cpanic=abort --cfg tokio_unstable"
 ENV AWS_LC_FIPS_SYS_CC=clang
 ENV AWS_LC_FIPS_SYS_CXX=clang++
 
