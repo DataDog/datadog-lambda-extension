@@ -16,13 +16,16 @@ use saluki_components::{
     transforms::{AggregateConfiguration, AggregatorHandle},
 };
 use saluki_config::ConfigurationLoader;
+use saluki_context::tags::{SharedTagSet, Tag};
 use saluki_core::topology::{RunningTopology, TopologyBlueprint};
 use saluki_error::{ErrorContext as _, GenericError};
 use saluki_health::HealthRegistry;
+use stringtheory::MetaString;
 use tracing::debug;
 
 use crate::config::Config;
 use crate::metrics::enhanced_source::{EnhancedMetricsHandle, EnhancedMetricsSourceBuilder};
+use crate::tags::provider::Provider as TagProvider;
 
 /// Result of starting the Saluki metrics topology.
 pub struct MetricsTopology {
@@ -65,9 +68,27 @@ fn build_saluki_config(config: &Config) -> serde_json::Value {
     serde_json::Value::Object(map)
 }
 
+/// Convert bottlecap's tags provider into a Saluki `SharedTagSet`.
+///
+/// These base tags (function_name, region, account_id, resource, etc.)
+/// are added to every metric by the encoder.
+fn build_base_tags(tags_provider: &TagProvider) -> SharedTagSet {
+    let tags_string = tags_provider.get_tags_string();
+    let tags: Vec<Tag> = tags_string
+        .split(',')
+        .filter(|s| !s.is_empty())
+        .map(|s| Tag::from(MetaString::from(s.to_owned())))
+        .collect();
+    SharedTagSet::from_iter(tags)
+}
+
 /// Build and spawn the Saluki metrics pipeline from bottlecap's Config.
+///
+/// The `tags_provider` supplies base tags (function_name, region, account_id, etc.)
+/// that are added to every metric at encoding time.
 pub async fn start_metrics_topology(
     config: &Arc<Config>,
+    tags_provider: &Arc<TagProvider>,
 ) -> Result<MetricsTopology, GenericError> {
     // Initialize Saluki's TLS stack. Both aws-lc-rs and ring features are enabled
     // on rustls (saluki brings ring), so we must explicitly install a provider.
@@ -112,8 +133,12 @@ pub async fn start_metrics_topology(
 
     // --- Encoder ---
 
+    // Attach base tags (function_name, region, account_id, etc.) to every metric.
+    // This replaces the old aggregator's base tag merging.
+    let base_tags = build_base_tags(tags_provider);
     let encoder_config = DatadogMetricsConfiguration::from_configuration(&generic_config)
-        .error_context("Failed to create metrics encoder configuration")?;
+        .error_context("Failed to create metrics encoder configuration")?
+        .with_additional_tags(base_tags);
     blueprint.add_encoder("metrics_encoder", encoder_config)?;
 
     // --- Forwarder ---

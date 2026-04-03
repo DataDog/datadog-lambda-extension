@@ -300,7 +300,7 @@ async fn extension_loop_active(
         enhanced_metrics_handle,
         aggregator_handle: saluki_aggr_handle,
         running: metrics_topology,
-    } = topology::start_metrics_topology(config)
+    } = topology::start_metrics_topology(config, &tags_provider)
         .await
         .expect("Failed to start Saluki metrics topology");
 
