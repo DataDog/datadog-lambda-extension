@@ -69,10 +69,13 @@ fn build_saluki_config(config: &Config) -> serde_json::Value {
 pub async fn start_metrics_topology(
     config: &Arc<Config>,
 ) -> Result<MetricsTopology, GenericError> {
-    // Initialize Saluki's default root certificate store from the platform's
-    // native certificates. Uses rustls-native-certs 0.8.2 + openssl-probe 0.1.6
-    // (the fast path that loads a single CA bundle file on Lambda).
-    // This is idempotent — safe to call even if already initialized.
+    // Initialize Saluki's TLS stack. Both aws-lc-rs and ring features are enabled
+    // on rustls (saluki brings ring), so we must explicitly install a provider.
+    // Ignore "already initialized" errors since bottlecap may have set one up first.
+    let _ = saluki_tls::initialize_default_crypto_provider();
+
+    // Load platform root certificates into Saluki's global cert store.
+    // Uses rustls-native-certs 0.8.2 + openssl-probe 0.1.6 (fast single-bundle path).
     if let Err(e) = saluki_tls::load_platform_root_certificates() {
         tracing::warn!("Failed to load platform root certificates for Saluki TLS: {e}");
     }
