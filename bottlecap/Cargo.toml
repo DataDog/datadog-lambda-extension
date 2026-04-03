@@ -73,6 +73,8 @@ datadog-protos = { version = "0.1.0", default-features = false, path = "/Users/j
 ddsketch = { version = "0.1.0", default-features = false, path = "/Users/jordan.gonzalez/dd/saluki/lib/ddsketch" }
 saluki-core = { version = "0.1.0", default-features = false, path = "/Users/jordan.gonzalez/dd/saluki/lib/saluki-core" }
 saluki-components = { version = "0.1.0", default-features = false, path = "/Users/jordan.gonzalez/dd/saluki/lib/saluki-components" }
+saluki-error = { version = "0.1.0", default-features = false, path = "/Users/jordan.gonzalez/dd/saluki/lib/saluki-error" }
+memory-accounting = { version = "0.1.0", default-features = false, path = "/Users/jordan.gonzalez/dd/saluki/lib/memory-accounting" }
 libdd-common = { git = "https://github.com/DataDog/libdatadog", rev = "c8121f422d2c8d219f8d421ff3cdb1fcbe9e8b09" }
 libdd-trace-protobuf = { git = "https://github.com/DataDog/libdatadog", rev = "c8121f422d2c8d219f8d421ff3cdb1fcbe9e8b09"  }
 libdd-trace-utils = { git = "https://github.com/DataDog/libdatadog", rev = "c8121f422d2c8d219f8d421ff3cdb1fcbe9e8b09" , features = ["mini_agent"] }
