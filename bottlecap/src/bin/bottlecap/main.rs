@@ -150,6 +150,9 @@ async fn main() -> anyhow::Result<()> {
     let config = Arc::new(config::get_config(Path::new(&lambda_directory)));
 
     let aws_config = Arc::new(aws_config);
+    // Build one shared reqwest::Client for metrics, logs, trace proxy flushing, and calls to
+    // Datadog APIs (e.g. delegated auth). reqwest::Client is Arc-based internally, so cloning
+    // just increments a refcount and shares the connection pool.
     let shared_client = bottlecap::http::get_client(&config);
     let api_key_factory = create_api_key_factory(&config, &aws_config, &shared_client);
 

@@ -288,5 +288,4 @@ mod tests {
             &vec!["my-org-uuid".to_string()]
         );
     }
-
 }

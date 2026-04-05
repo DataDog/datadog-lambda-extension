@@ -14,24 +14,19 @@ use sha2::{Digest, Sha256};
 use std::io::Error;
 use std::sync::Arc;
 use tokio::time::Instant;
-use tracing::{debug, error, info, warn};
+use tracing::{debug, error};
 
 use crate::secrets::delegated_auth;
 
 pub async fn resolve_secrets(
     config: Arc<Config>,
     aws_config: Arc<AwsConfig>,
-    client: Client,
+    shared_client: Client,
 ) -> Option<String> {
-    if !config.dd_org_uuid.is_empty()
-        && let Some(api_key) = try_delegated_auth(&config, &aws_config, &client).await
-    {
-        return Some(api_key);
-    }
-
     let api_key_candidate = if !config.api_key_secret_arn.is_empty()
         || !config.kms_api_key.is_empty()
         || !config.api_key_ssm_arn.is_empty()
+        || !config.dd_org_uuid.is_empty()
     {
         let before_decrypt = Instant::now();
 
@@ -51,38 +46,17 @@ pub async fn resolve_secrets(
             }
         };
 
-        let mut aws_credentials = AwsCredentials::from_env();
+        let aws_credentials = get_aws_credentials(&client).await?;
 
-        if aws_credentials.aws_secret_access_key.is_empty()
-            && aws_credentials.aws_access_key_id.is_empty()
-            && !aws_credentials
-                .aws_container_credentials_full_uri
-                .is_empty()
-            && !aws_credentials.aws_container_authorization_token.is_empty()
-        {
-            // We're in Snap Start
-            let credentials = match get_snapstart_credentials(&aws_credentials, &client).await {
-                Ok(credentials) => credentials,
-                Err(err) => {
-                    error!("Error getting Snap Start credentials: {}", err);
-                    return None;
-                }
-            };
-            aws_credentials.aws_access_key_id = credentials["AccessKeyId"]
-                .as_str()
-                .unwrap_or_default()
-                .to_string();
-            aws_credentials.aws_secret_access_key = credentials["SecretAccessKey"]
-                .as_str()
-                .unwrap_or_default()
-                .to_string();
-            aws_credentials.aws_session_token = credentials["Token"]
-                .as_str()
-                .unwrap_or_default()
-                .to_string();
-        }
-
-        let decrypted_key = if !config.kms_api_key.is_empty() {
+        let decrypted_key = if !config.dd_org_uuid.is_empty() {
+            delegated_auth::get_delegated_api_key(
+                &config,
+                &aws_config,
+                &shared_client,
+                &aws_credentials,
+            )
+            .await
+        } else if !config.kms_api_key.is_empty() {
             decrypt_aws_kms(
                 &client,
                 config.kms_api_key.clone(),
@@ -122,58 +96,6 @@ pub async fn resolve_secrets(
     };
 
     clean_api_key(api_key_candidate)
-}
-
-async fn try_delegated_auth(
-    config: &Arc<Config>,
-    aws_config: &Arc<AwsConfig>,
-    client: &Client,
-) -> Option<String> {
-    let mut aws_credentials = AwsCredentials::from_env();
-
-    if aws_credentials.aws_secret_access_key.is_empty()
-        && aws_credentials.aws_access_key_id.is_empty()
-        && !aws_credentials
-            .aws_container_credentials_full_uri
-            .is_empty()
-        && !aws_credentials.aws_container_authorization_token.is_empty()
-    {
-        // We're in Snap Start
-        let credentials = match get_snapstart_credentials(&aws_credentials, &client).await {
-            Ok(credentials) => credentials,
-            Err(err) => {
-                error!(
-                    "Error getting Snap Start credentials for delegated auth: {}",
-                    err
-                );
-                return None;
-            }
-        };
-        aws_credentials.aws_access_key_id = credentials["AccessKeyId"]
-            .as_str()
-            .unwrap_or_default()
-            .to_string();
-        aws_credentials.aws_secret_access_key = credentials["SecretAccessKey"]
-            .as_str()
-            .unwrap_or_default()
-            .to_string();
-        aws_credentials.aws_session_token = credentials["Token"]
-            .as_str()
-            .unwrap_or_default()
-            .to_string();
-    }
-
-    match delegated_auth::get_delegated_api_key(config, aws_config, client, &aws_credentials).await
-    {
-        Ok(api_key) => {
-            info!("Delegated auth API key obtained successfully");
-            clean_api_key(Some(api_key))
-        }
-        Err(e) => {
-            warn!("Delegated auth failed, falling back to other methods: {e}");
-            None
-        }
-    }
 }
 
 fn clean_api_key(maybe_key: Option<String>) -> Option<String> {
@@ -319,6 +241,39 @@ async fn decrypt_aws_ssm(
         return Ok(value.to_string());
     }
     Err(Error::new(std::io::ErrorKind::InvalidData, v.to_string()).into())
+}
+
+async fn get_aws_credentials(client: &Client) -> Option<AwsCredentials> {
+    let mut aws_credentials = AwsCredentials::from_env();
+    // We're in SnapStart — fetch short-lived credentials from the container endpoint
+    if aws_credentials.aws_secret_access_key.is_empty()
+        && aws_credentials.aws_access_key_id.is_empty()
+        && !aws_credentials
+            .aws_container_credentials_full_uri
+            .is_empty()
+        && !aws_credentials.aws_container_authorization_token.is_empty()
+    {
+        let credentials = match get_snapstart_credentials(&aws_credentials, client).await {
+            Ok(credentials) => credentials,
+            Err(err) => {
+                error!("Error getting SnapStart credentials: {}", err);
+                return None;
+            }
+        };
+        aws_credentials.aws_access_key_id = credentials["AccessKeyId"]
+            .as_str()
+            .unwrap_or_default()
+            .to_string();
+        aws_credentials.aws_secret_access_key = credentials["SecretAccessKey"]
+            .as_str()
+            .unwrap_or_default()
+            .to_string();
+        aws_credentials.aws_session_token = credentials["Token"]
+            .as_str()
+            .unwrap_or_default()
+            .to_string();
+    }
+    Some(aws_credentials)
 }
 
 async fn get_snapstart_credentials(
