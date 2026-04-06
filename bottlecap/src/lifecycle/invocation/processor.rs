@@ -1375,6 +1375,7 @@ impl Processor {
         request_id: &str,
         execution_id: &str,
         execution_name: &str,
+        first_invocation: Option<bool>,
     ) {
         if let Err(e) = self
             .durable_context_tx
@@ -1382,6 +1383,7 @@ impl Processor {
                 request_id: request_id.to_owned(),
                 execution_id: execution_id.to_owned(),
                 execution_name: execution_name.to_owned(),
+                first_invocation,
             })
             .await
         {

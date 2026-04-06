@@ -52,6 +52,7 @@ impl LogsProcessor {
             &update.request_id,
             &update.execution_id,
             &update.execution_name,
+            update.first_invocation,
         );
         let ready_logs = self.take_ready_logs();
         if !ready_logs.is_empty()
@@ -66,10 +67,16 @@ impl LogsProcessor {
         request_id: &str,
         execution_id: &str,
         execution_name: &str,
+        first_invocation: Option<bool>,
     ) {
         match self {
             LogsProcessor::Lambda(p) => {
-                p.insert_to_durable_context_map(request_id, execution_id, execution_name);
+                p.insert_to_durable_context_map(
+                    request_id,
+                    execution_id,
+                    execution_name,
+                    first_invocation,
+                );
             }
         }
     }

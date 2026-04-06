@@ -86,6 +86,14 @@ fn is_oom_error(error_msg: &str) -> bool {
         .any(|&oom_str| error_msg.contains(oom_str))
 }
 
+/// Returns `true` for START, END, and REPORT platform logs.
+/// These are the only logs that carry the `first_invocation` attribute.
+fn is_platform_log(message: &str) -> bool {
+    message.starts_with("START RequestId:")
+        || message.starts_with("END RequestId:")
+        || message.starts_with("REPORT RequestId:")
+}
+
 /// Parses a Lambda durable execution ARN and returns `(execution_id, execution_name)`.
 ///
 /// Expected format:
@@ -538,9 +546,10 @@ impl LambdaProcessor {
     /// `request_id`.
     pub fn insert_to_durable_context_map(
         &mut self,
-        request_id: &str,     // key
-        execution_id: &str,   // value
-        execution_name: &str, // value
+        request_id: &str,               // key
+        execution_id: &str,             // value
+        execution_name: &str,           // value
+        first_invocation: Option<bool>, // value
     ) {
         if self.durable_context_map.contains_key(request_id) {
             error!("LOGS | insert_to_durable_context_map: request_id={request_id} already in map");
@@ -557,6 +566,7 @@ impl LambdaProcessor {
             DurableExecutionContext {
                 execution_id: execution_id.to_string(),
                 execution_name: execution_name.to_string(),
+                first_invocation,
             },
         );
         self.drain_held_logs_for_request_id(request_id);
@@ -589,13 +599,8 @@ impl LambdaProcessor {
         self.held_logs_order.retain(|r| r != request_id);
         let durable_ctx = self.durable_context_map.get(request_id).cloned();
         if let Some(ctx) = durable_ctx {
-            for mut log in held {
-                log.message.lambda.durable_execution_id = Some(ctx.execution_id.clone());
-                log.message.lambda.durable_execution_name = Some(ctx.execution_name.clone());
-                if let Ok(s) = serde_json::to_string(&log) {
-                    drop(log);
-                    self.ready_logs.push(s);
-                }
+            for log in held {
+                self.set_durable_context_and_mark_ready(log, &ctx);
             }
         }
     }
@@ -614,13 +619,8 @@ impl LambdaProcessor {
                 if let Some(ctx) = durable_ctx {
                     // If the request_id is in the durable context map, set durable execution id
                     // and execution name, and add logs to ready_logs.
-                    for mut log in logs {
-                        log.message.lambda.durable_execution_id = Some(ctx.execution_id.clone());
-                        log.message.lambda.durable_execution_name =
-                            Some(ctx.execution_name.clone());
-                        if let Ok(s) = serde_json::to_string(&log) {
-                            self.ready_logs.push(s);
-                        }
+                    for log in logs {
+                        self.set_durable_context_and_mark_ready(log, &ctx);
                     }
                 } else {
                     // No context yet — keep logs in held_logs until the aws.lambda span arrives.
@@ -645,6 +645,26 @@ impl LambdaProcessor {
             && LambdaProcessor::apply_rules(&self.rules, &mut log.message.message);
         if should_send_log {
             self.queue_log_after_rules(log);
+        }
+    }
+
+    /// Applies durable execution context to a log and pushes it to `ready_logs`.
+    /// `first_invocation` is set only for platform logs (START/END/REPORT).
+    fn set_durable_context_and_mark_ready(
+        &mut self,
+        mut log: IntakeLog,
+        ctx: &DurableExecutionContext,
+    ) {
+        log.message.lambda.durable_execution_id = Some(ctx.execution_id.clone());
+        log.message.lambda.durable_execution_name = Some(ctx.execution_name.clone());
+        if is_platform_log(&log.message.message) {
+            log.message.lambda.first_invocation = ctx.first_invocation;
+        }
+        if let Ok(s) = serde_json::to_string(&log) {
+            // explicitly drop log so we don't accidentally re-use it and push
+            // duplicate logs to the aggregator
+            drop(log);
+            self.ready_logs.push(s);
         }
     }
 
@@ -685,7 +705,7 @@ impl LambdaProcessor {
     /// - `Some(false)` → serialize and push straight to `ready_logs`.
     /// - `Some(true)`  → mark this log as ready to be aggregated if its `request_id` is already in `durable_context_map`
     ///   (context was populated by an `aws.lambda` span); otherwise stash in `held_logs`.
-    fn queue_log_after_rules(&mut self, mut log: IntakeLog) {
+    fn queue_log_after_rules(&mut self, log: IntakeLog) {
         // Durable execution SDK logs already carry execution context extracted from executionArn.
         if log.message.lambda.durable_execution_id.is_some() {
             if let Ok(serialized_log) = serde_json::to_string(&log) {
@@ -730,14 +750,7 @@ impl LambdaProcessor {
 
                 match durable_ctx {
                     Some(ctx) => {
-                        log.message.lambda.durable_execution_id = Some(ctx.execution_id);
-                        log.message.lambda.durable_execution_name = Some(ctx.execution_name);
-                        if let Ok(serialized_log) = serde_json::to_string(&log) {
-                            // explicitly drop log so we don't accidentally re-use it and push
-                            // duplicate logs to the aggregator
-                            drop(log);
-                            self.ready_logs.push(serialized_log);
-                        }
+                        self.set_durable_context_and_mark_ready(log, &ctx);
                     }
                     None => {
                         if let Some(rid) = log.message.lambda.request_id.clone() {
@@ -2515,11 +2528,11 @@ mod tests {
         assert_eq!(batches.len(), 1);
         let logs: Vec<serde_json::Value> = serde_json::from_slice(&batches[0]).unwrap();
         assert_eq!(
-            logs[0]["message"]["lambda"]["durable_execution_id"],
+            logs[0]["message"]["lambda"]["durable_function.execution_id"],
             "my-id"
         );
         assert_eq!(
-            logs[0]["message"]["lambda"]["durable_execution_name"],
+            logs[0]["message"]["lambda"]["durable_function.execution_name"],
             "my-name"
         );
     }
