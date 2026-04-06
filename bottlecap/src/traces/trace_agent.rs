@@ -570,8 +570,9 @@ impl TraceAgent {
                 // We need to update the trace ID of the cold start span, reparent the `aws.lambda.load`
                 // span to the cold start span, and eventually send the cold start span.
                 if span.name == LAMBDA_LOAD_SPAN {
+                    let propagated_tid = span.meta.get("_dd.p.tid").cloned();
                     match invocation_processor_handle
-                        .set_cold_start_span_trace_id(span.trace_id)
+                        .set_cold_start_span_trace_id(span.trace_id, propagated_tid)
                         .await
                     {
                         Ok(Some(cold_start_span_id)) => {
