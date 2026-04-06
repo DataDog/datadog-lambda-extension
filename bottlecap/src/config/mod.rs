@@ -364,6 +364,8 @@ pub struct Config {
     pub span_dedup_timeout: Option<Duration>,
     pub api_key_secret_reload_interval: Option<Duration>,
 
+    pub dd_org_uuid: String,
+
     pub serverless_appsec_enabled: bool,
     pub appsec_rules: Option<String>,
     pub appsec_waf_timeout: Duration,
@@ -478,6 +480,8 @@ impl Default for Config {
             compute_trace_stats_on_extension: false,
             span_dedup_timeout: None,
             api_key_secret_reload_interval: None,
+
+            dd_org_uuid: String::default(),
 
             serverless_appsec_enabled: false,
             appsec_rules: None,
