@@ -105,6 +105,7 @@ pub enum ProcessorCommand {
     },
     SetColdStartSpanTraceId {
         trace_id: u64,
+        propagated_tid: Option<String>,
         response: oneshot::Sender<Result<Option<u64>, ProcessorError>>,
     },
     AddTracerSpan {
@@ -359,12 +360,14 @@ impl InvocationProcessorHandle {
     pub async fn set_cold_start_span_trace_id(
         &self,
         trace_id: u64,
+        propagated_tid: Option<String>,
     ) -> Result<Option<u64>, ProcessorError> {
         let (response_tx, response_rx) = oneshot::channel();
 
         self.sender
             .send(ProcessorCommand::SetColdStartSpanTraceId {
                 trace_id,
+                propagated_tid,
                 response: response_tx,
             })
             .await
@@ -608,8 +611,14 @@ impl InvocationProcessorService {
                     let result = Ok(self.processor.update_reparenting(reparenting_info));
                     let _ = response.send(result);
                 }
-                ProcessorCommand::SetColdStartSpanTraceId { trace_id, response } => {
-                    let result = Ok(self.processor.set_cold_start_span_trace_id(trace_id));
+                ProcessorCommand::SetColdStartSpanTraceId {
+                    trace_id,
+                    propagated_tid,
+                    response,
+                } => {
+                    let result = Ok(self
+                        .processor
+                        .set_cold_start_span_trace_id(trace_id, propagated_tid));
                     let _ = response.send(result);
                 }
                 ProcessorCommand::AddTracerSpan {
