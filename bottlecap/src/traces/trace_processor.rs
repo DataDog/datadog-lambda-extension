@@ -360,9 +360,20 @@ impl TraceProcessor for ServerlessTraceProcessor {
                 } else {
                     "0"
                 };
+                debug!("TRACE_PROCESSOR | header_tags.client_computed_stats: {}, compute_stats: {}", header_tags.client_computed_stats, compute_stats);
                 tracer_payload
                     .tags
                     .insert(COMPUTE_STATS_KEY.to_string(), compute_stats.to_string());
+                // Also propagate to each span's meta so backends that read _dd.compute_stats
+                // from the root span's meta field (rather than the payload-level tags) still
+                // work correctly. This restores the pre-#1118 behavior where the tag was
+                // applied to every span via get_tags_map() / ChunkProcessor.
+                for chunk in &mut tracer_payload.chunks {
+                    for span in &mut chunk.spans {
+                        span.meta
+                            .insert(COMPUTE_STATS_KEY.to_string(), compute_stats.to_string());
+                    }
+                }
             }
         }
         let endpoint = Endpoint {
@@ -1513,9 +1524,21 @@ mod tests {
                     .tags
                     .get(crate::tags::lambda::tags::COMPUTE_STATS_KEY),
                 Some(&expected_tag.to_string()),
-                "_dd.compute_stats must be {expected_tag} (compute_trace_stats_on_extension={compute_trace_stats_on_extension}, \
+                "_dd.compute_stats must be {expected_tag} in payload.tags (compute_trace_stats_on_extension={compute_trace_stats_on_extension}, \
                  client_computed_stats={client_computed_stats})"
             );
+            // Also verify _dd.compute_stats is set on each span's meta so the backend
+            // can read it from the root span.
+            for chunk in &payload.chunks {
+                for span in &chunk.spans {
+                    assert_eq!(
+                        span.meta.get(crate::tags::lambda::tags::COMPUTE_STATS_KEY),
+                        Some(&expected_tag.to_string()),
+                        "_dd.compute_stats must be {expected_tag} in span.meta (compute_trace_stats_on_extension={compute_trace_stats_on_extension}, \
+                         client_computed_stats={client_computed_stats})"
+                    );
+                }
+            }
         }
     }
 
