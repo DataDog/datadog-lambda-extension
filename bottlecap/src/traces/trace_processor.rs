@@ -90,8 +90,10 @@ impl TraceChunkProcessor for ChunkProcessor {
                 } else {
                     "0"
                 };
-            span.meta
-                .insert(COMPUTE_STATS_KEY.to_string(), compute_stats_value.to_string());
+            span.meta.insert(
+                COMPUTE_STATS_KEY.to_string(),
+                compute_stats_value.to_string(),
+            );
             obfuscate_span(span, &self.obfuscation_config);
         }
 
@@ -1515,7 +1517,9 @@ mod tests {
         };
         for payload in payloads {
             assert!(
-                !payload.tags.contains_key(crate::tags::lambda::tags::COMPUTE_STATS_KEY),
+                !payload
+                    .tags
+                    .contains_key(crate::tags::lambda::tags::COMPUTE_STATS_KEY),
                 "_dd.compute_stats must not be in payload.tags"
             );
             // _dd.compute_stats is set on each span's meta so the backend can read it
