@@ -360,7 +360,10 @@ impl TraceProcessor for ServerlessTraceProcessor {
                 } else {
                     "0"
                 };
-                debug!("TRACE_PROCESSOR | header_tags.client_computed_stats: {}, compute_stats: {}", header_tags.client_computed_stats, compute_stats);
+                debug!(
+                    "TRACE_PROCESSOR | header_tags.client_computed_stats: {}, compute_stats: {}",
+                    header_tags.client_computed_stats, compute_stats
+                );
                 tracer_payload
                     .tags
                     .insert(COMPUTE_STATS_KEY.to_string(), compute_stats.to_string());
