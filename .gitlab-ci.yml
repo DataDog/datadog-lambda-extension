@@ -54,6 +54,11 @@ generator:
 
 generated pipeline:
   stage: run
+  variables:
+    # Forward MR context to child pipeline since $CI_PIPELINE_SOURCE becomes
+    # "parent_pipeline" in downstream pipelines and MR variables are not inherited.
+    PARENT_PIPELINE_SOURCE: $CI_PIPELINE_SOURCE
+    PARENT_OPEN_MRS: $CI_OPEN_MERGE_REQUESTS
   trigger:
     include:
       - artifact: .gitlab/pipeline.yaml

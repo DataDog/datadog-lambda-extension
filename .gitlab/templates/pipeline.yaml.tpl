@@ -244,7 +244,7 @@ publish layer e2e sandbox ({{ $f.name }}):
       when: on_success
       variables:
         LAYER_DESCRIPTION: $CI_COMMIT_TAG
-    - if: '$CI_PIPELINE_SOURCE == "merge_request_event" || $CI_MERGE_REQUEST_IID || $CI_OPEN_MERGE_REQUESTS'
+    - if: '$PARENT_PIPELINE_SOURCE == "merge_request_event" || $PARENT_OPEN_MRS'
       when: on_success
       variables:
         LAYER_DESCRIPTION: $CI_COMMIT_SHORT_SHA
@@ -283,7 +283,7 @@ e2e-test ({{ $f.name }}):
       when: on_success
       variables:
         EXTENSION_VERSION: $CI_COMMIT_TAG
-    - if: '$CI_PIPELINE_SOURCE == "merge_request_event" || $CI_MERGE_REQUEST_IID || $CI_OPEN_MERGE_REQUESTS'
+    - if: '$PARENT_PIPELINE_SOURCE == "merge_request_event" || $PARENT_OPEN_MRS'
       when: on_success
       variables:
         EXTENSION_VERSION: $CI_COMMIT_SHORT_SHA
@@ -301,7 +301,7 @@ e2e-test-status ({{ $f.name }}):
   rules:
     - if: '$CI_COMMIT_TAG =~ /^v.*/'
       when: on_success
-    - if: '$CI_PIPELINE_SOURCE == "merge_request_event" || $CI_MERGE_REQUEST_IID || $CI_OPEN_MERGE_REQUESTS'
+    - if: '$PARENT_PIPELINE_SOURCE == "merge_request_event" || $PARENT_OPEN_MRS'
       when: on_success
   needs:
     - job: "e2e-test ({{ $f.name }})"
