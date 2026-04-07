@@ -81,6 +81,9 @@ impl TraceChunkProcessor for ChunkProcessor {
             span.meta.insert("origin".to_string(), "lambda".to_string());
             span.meta
                 .insert("_dd.origin".to_string(), "lambda".to_string());
+            // Tell the backend whether to compute stats:
+            // - "1" (compute on backend) if neither the tracer nor the extension is computing them
+            // - "0" (skip on backend) if the extension or the tracer has already computed them
             let compute_stats_value =
                 if !self.config.compute_trace_stats_on_extension && !self.client_computed_stats {
                     "1"
@@ -672,7 +675,8 @@ mod tests {
         let tracer_payload = tracer_payload.expect("expected Some payload");
 
         let expected_tags = tags_provider.get_function_tags_map();
-        // process_traces sets _dd.compute_stats on each span's meta.
+        // process_traces always sets _dd.compute_stats:"1"
+        // because compute_trace_stats_on_extension is false and client_computed_stats is false.
         let mut expected_span = span.clone();
         expected_span
             .meta
