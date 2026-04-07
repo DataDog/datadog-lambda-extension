@@ -347,10 +347,6 @@ impl TraceProcessor for ServerlessTraceProcessor {
         } else {
             "0"
         };
-        debug!(
-            "TRACE_PROCESSOR | header_tags.client_computed_stats: {}, compute_stats: {}",
-            header_tags.client_computed_stats, compute_stats_value
-        );
         let mut payload = trace_utils::collect_pb_trace_chunks(
             traces,
             &header_tags,

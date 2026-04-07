@@ -323,7 +323,6 @@ impl TraceAgent {
     }
 
     async fn stats(State(state): State<StatsState>, request: Request) -> Response {
-        debug!("TRACE_AGENT | stats request: {request:?}");
         match state
             .stats_processor
             .process_stats(request, state.stats_tx)
@@ -504,8 +503,6 @@ impl TraceAgent {
 
         let tracer_header_tags: libdd_trace_utils::tracer_header_tags::TracerHeaderTags<'_> =
             (&parts.headers).into();
-
-        debug!("TRACE_AGENT | tracer_header_tags: {tracer_header_tags:?}");
 
         let (body_size, mut traces): (usize, Vec<Vec<pb::Span>>) = match version {
             ApiVersion::V04 => {
