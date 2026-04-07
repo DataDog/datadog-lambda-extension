@@ -6,9 +6,9 @@ stages:
   - build
   - integration-tests
   - self-monitoring
+  - e2e
   - sign
   - publish
-  - e2e
 
 default:
   retry:
@@ -151,9 +151,6 @@ publish layer {{ $environment_name }} ({{ $flavor.name }}):
   tags: ["arch:amd64"]
   image: ${CI_DOCKER_TARGET_IMAGE}:${CI_DOCKER_TARGET_VERSION}
   rules:
-    # MR pipelines: auto-publish all extension flavors to the e2e region only (see $e2e_region).
-    - if: '"{{ $environment_name }}" == "sandbox" && $REGION == "{{ $e2e_region }}"'
-      when: on_success
     - if: '"{{ $environment_name }}" == "sandbox"'
       when: manual
       allow_failure: true
@@ -233,9 +230,48 @@ publish layer [self-monitoring] ({{ $flavor.name }}):
 
 {{ end }}  # end flavors
 
-# MR: one serverless-e2e-tests child pipeline per publishable flavor (amd64, arm64, amd64 fips, arm64 fips).
 {{ range $f := (ds "flavors").flavors }}
 {{ if $f.needs_layer_publish }}
+{{- $dotenvE2E := printf "%s_sandbox_e2e.env" $f.suffix }}
+{{ with $environment := (ds "environments").environments.sandbox }}
+
+publish layer e2e sandbox ({{ $f.name }}):
+  stage: e2e
+  tags: ["arch:amd64"]
+  image: ${CI_DOCKER_TARGET_IMAGE}:${CI_DOCKER_TARGET_VERSION}
+  rules:
+    - if: '$CI_COMMIT_TAG =~ /^v.*/'
+      when: on_success
+      variables:
+        LAYER_DESCRIPTION: $CI_COMMIT_TAG
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event" || $CI_MERGE_REQUEST_IID'
+      when: on_success
+      variables:
+        LAYER_DESCRIPTION: $CI_COMMIT_SHORT_SHA
+  needs:
+    - layer ({{ $f.name }})
+{{ if and (index $f "max_layer_compressed_size_mb") (index $f "max_layer_uncompressed_size_mb") }}
+    - check layer size ({{ $f.name }})
+{{ end }}
+  dependencies:
+    - layer ({{ $f.name }})
+  artifacts:
+    reports:
+      dotenv: {{ $dotenvE2E }}
+  variables:
+    LAYER_NAME_BASE_SUFFIX: {{ $f.layer_name_base_suffix }}
+    ARCHITECTURE: {{ $f.arch }}
+    LAYER_FILE: datadog_extension-{{ $f.suffix }}.zip
+    REGION: {{ $e2e_region }}
+    ADD_LAYER_VERSION_PERMISSIONS: {{ $environment.add_layer_version_permissions }}
+    AUTOMATICALLY_BUMP_VERSION: {{ $environment.automatically_bump_version }}
+    DOTENV: {{ $dotenvE2E }}
+  before_script:
+    - EXTERNAL_ID_NAME={{ $environment.external_id }} ROLE_TO_ASSUME={{ $environment.role_to_assume }} AWS_ACCOUNT={{ $environment.account }} source .gitlab/scripts/get_secrets.sh
+  script:
+    - .gitlab/scripts/publish_layers.sh
+
+{{ end }}
 
 e2e-test ({{ $f.name }}):
   stage: e2e
@@ -243,13 +279,18 @@ e2e-test ({{ $f.name }}):
     project: DataDog/serverless-e2e-tests
     strategy: depend
   rules:
-    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CI_COMMIT_TAG =~ /^v.*/'
       when: on_success
+      variables:
+        EXTENSION_VERSION: $CI_COMMIT_TAG
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event" || $CI_MERGE_REQUEST_IID'
+      when: on_success
+      variables:
+        EXTENSION_VERSION: $CI_COMMIT_SHORT_SHA
   needs:
-    - job: "publish layer sandbox ({{ $f.name }}): [{{ $e2e_region }}]"
+    - job: "publish layer e2e sandbox ({{ $f.name }})"
       artifacts: true
   variables:
-    EXTENSION_VERSION: ${CI_COMMIT_SHORT_SHA}
     EXTENSION_LAYER_ARN: ${EXTENSION_LAYER_ARN}
 
 e2e-test-status ({{ $f.name }}):
@@ -258,7 +299,9 @@ e2e-test-status ({{ $f.name }}):
   tags: ["arch:amd64"]
   timeout: 3h
   rules:
-    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CI_COMMIT_TAG =~ /^v.*/'
+      when: on_success
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event" || $CI_MERGE_REQUEST_IID'
       when: on_success
   needs:
     - job: "e2e-test ({{ $f.name }})"
