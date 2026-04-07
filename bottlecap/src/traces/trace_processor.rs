@@ -351,14 +351,19 @@ impl TraceProcessor for ServerlessTraceProcessor {
             for tracer_payload in collection.iter_mut() {
                 tracer_payload.tags.extend(tags.clone());
                 // Tell the backend whether to compute stats:
-                // - "1" (compute on backend) if neither the tracer nor the extension is computing them
-                // - "0" (skip on backend) if the extension or the tracer has already computed them
-                let compute_stats = if !config.compute_trace_stats_on_extension
-                    && !header_tags.client_computed_stats
-                {
-                    "1"
-                } else {
+                // - "1" (compute on backend) if the extension is NOT computing stats
+                // - "0" (skip on backend) if the extension is computing stats
+                //
+                // We intentionally ignore client_computed_stats here to keep
+                // the backend as a safety net. If the tracer claims it computed
+                // stats but they don't actually reach the backend, setting this
+                // to "0" would cause stats to disappear entirely.
+                // This may lead to double-counting when the tracer also sends
+                // stats, but that is preferable to zero stats.
+                let compute_stats = if config.compute_trace_stats_on_extension {
                     "0"
+                } else {
+                    "1"
                 };
                 tracer_payload
                     .tags
@@ -1400,7 +1405,7 @@ mod tests {
     /// | Input: `compute_trace_stats_on_extension` | Input: `client_computed_stats` | Expected: `_dd.compute_stats` | Expected: Extension generates stats? |
     /// |-------------------------------------------|--------------------------------|-------------------------------|--------------------------------------|
     /// | `false`                                   | `false`                        | `"1"`                         | No                                   |
-    /// | `false`                                   | `true`                         | `"0"`                         | No                                   |
+    /// | `false`                                   | `true`                         | `"1"`                         | No                                   |
     /// | `true`                                    | `false`                        | `"0"`                         | Yes                                  |
     /// | `true`                                    | `true`                         | `"0"`                         | No                                   |
     #[allow(clippy::unwrap_used)]
@@ -1414,11 +1419,12 @@ mod tests {
         use libdd_trace_obfuscation::obfuscation_config::ObfuscationConfig;
         use tokio::sync::mpsc;
 
-        // "_dd.compute_stats" is "1" only when neither side computes stats (backend must do it).
-        let expected_tag = if !compute_trace_stats_on_extension && !client_computed_stats {
-            "1"
-        } else {
+        // "_dd.compute_stats" is "1" when the extension is NOT computing stats (backend must do it).
+        // client_computed_stats does NOT affect this tag — the backend is the safety net.
+        let expected_tag = if compute_trace_stats_on_extension {
             "0"
+        } else {
+            "1"
         };
         // The extension generates stats only when it is configured to do so and the tracer hasn't.
         let expect_stats = compute_trace_stats_on_extension && !client_computed_stats;
@@ -1529,7 +1535,8 @@ mod tests {
     #[tokio::test]
     #[allow(clippy::unwrap_used)]
     async fn test_compute_stats_tag_tracer_computes() {
-        // Tracer computed stats (Datadog-Client-Computed-Stats header set) → tag "0".
+        // Tracer computed stats (Datadog-Client-Computed-Stats header set) → tag "1".
+        // Backend still computes as a safety net; extension skips its own stats generation.
         check_compute_stats_behavior(false, true).await;
     }
 
