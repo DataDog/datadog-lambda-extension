@@ -1,3 +1,5 @@
+{{- $e2e_region := "us-west-2" -}}
+
 stages:
   - test
   - compile
@@ -6,6 +8,7 @@ stages:
   - self-monitoring
   - sign
   - publish
+  - e2e
 
 default:
   retry:
@@ -141,12 +144,16 @@ sign layer ({{ $flavor.name }}):
     - .gitlab/scripts/sign_layers.sh prod
 
 {{ range $environment_name, $environment := (ds "environments").environments }}
+{{- $dotenv := printf "%s_%s.env" $flavor.suffix $environment_name }}
 
 publish layer {{ $environment_name }} ({{ $flavor.name }}):
   stage: publish
   tags: ["arch:amd64"]
   image: ${CI_DOCKER_TARGET_IMAGE}:${CI_DOCKER_TARGET_VERSION}
   rules:
+    # MR pipelines: auto-publish all extension flavors to the e2e region only (see $e2e_region).
+    - if: '"{{ $environment_name }}" == "sandbox" && $REGION == "{{ $e2e_region }}"'
+      when: on_success
     - if: '"{{ $environment_name }}" == "sandbox"'
       when: manual
       allow_failure: true
@@ -172,12 +179,21 @@ publish layer {{ $environment_name }} ({{ $flavor.name }}):
       - REGION: {{ range (ds "regions").regions }}
           - {{ .code }}
         {{- end}}
+{{- if eq $environment_name "sandbox" }}
+  artifacts:
+    reports:
+      dotenv: {{ $dotenv }}
+{{- end }}
   variables:
     LAYER_NAME_BASE_SUFFIX: {{ $flavor.layer_name_base_suffix }}
     ARCHITECTURE: {{ $flavor.arch }}
     LAYER_FILE: datadog_extension-{{ $flavor.suffix }}.zip
     ADD_LAYER_VERSION_PERMISSIONS: {{ $environment.add_layer_version_permissions }}
     AUTOMATICALLY_BUMP_VERSION: {{ $environment.automatically_bump_version }}
+{{- if eq $environment_name "sandbox" }}
+    LAYER_DESCRIPTION: ${CI_COMMIT_SHORT_SHA}
+    DOTENV: {{ $dotenv }}
+{{- end }}
   before_script:
     - EXTERNAL_ID_NAME={{ $environment.external_id }} ROLE_TO_ASSUME={{ $environment.role_to_assume }} AWS_ACCOUNT={{ $environment.account }} source .gitlab/scripts/get_secrets.sh
   script:
@@ -216,6 +232,43 @@ publish layer [self-monitoring] ({{ $flavor.name }}):
 {{ end }} # end needs_layer_publish
 
 {{ end }}  # end flavors
+
+# MR: one serverless-e2e-tests child pipeline per publishable flavor (amd64, arm64, amd64 fips, arm64 fips).
+{{ range $f := (ds "flavors").flavors }}
+{{ if $f.needs_layer_publish }}
+
+e2e-test ({{ $f.name }}):
+  stage: e2e
+  trigger:
+    project: DataDog/serverless-e2e-tests
+    strategy: depend
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+      when: on_success
+  needs:
+    - job: "publish layer sandbox ({{ $f.name }}): [{{ $e2e_region }}]"
+      artifacts: true
+  variables:
+    EXTENSION_VERSION: ${CI_COMMIT_SHORT_SHA}
+    EXTENSION_LAYER_ARN: ${EXTENSION_LAYER_ARN}
+
+e2e-test-status ({{ $f.name }}):
+  stage: e2e
+  image: registry.ddbuild.io/images/docker:20.10-py3
+  tags: ["arch:amd64"]
+  timeout: 3h
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+      when: on_success
+  needs:
+    - job: "e2e-test ({{ $f.name }})"
+  variables:
+    E2E_BRIDGE_JOB_NAME: "e2e-test ({{ $f.name }})"
+  script:
+    - .gitlab/scripts/poll_e2e.sh
+
+{{ end }}
+{{ end }}
 
 {{ range $multi_arch_image_flavor := (ds "flavors").multi_arch_image_flavors }}
 
