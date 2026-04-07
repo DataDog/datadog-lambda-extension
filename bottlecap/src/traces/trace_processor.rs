@@ -47,6 +47,9 @@ struct ChunkProcessor {
     obfuscation_config: Arc<obfuscation_config::ObfuscationConfig>,
     tags_provider: Arc<provider::Provider>,
     span_pointers: Option<Vec<SpanPointer>>,
+    /// Pre-computed value of `_dd.compute_stats` for this request: `"1"` if the
+    /// backend should compute stats, `"0"` if the extension or tracer already did.
+    compute_stats_value: &'static str,
 }
 
 impl TraceChunkProcessor for ChunkProcessor {
@@ -80,6 +83,10 @@ impl TraceChunkProcessor for ChunkProcessor {
             span.meta.insert("origin".to_string(), "lambda".to_string());
             span.meta
                 .insert("_dd.origin".to_string(), "lambda".to_string());
+            span.meta.insert(
+                COMPUTE_STATS_KEY.to_string(),
+                self.compute_stats_value.to_string(),
+            );
             obfuscate_span(span, &self.obfuscation_config);
         }
 
@@ -330,6 +337,20 @@ impl TraceProcessor for ServerlessTraceProcessor {
         body_size: usize,
         span_pointers: Option<Vec<SpanPointer>>,
     ) -> (Option<SendDataBuilderInfo>, TracerPayloadCollection) {
+        // Tell the backend whether to compute stats for this request:
+        // - "1" if neither the tracer nor the extension is computing them
+        // - "0" if the extension or the tracer has already computed them
+        let compute_stats_value = if !config.compute_trace_stats_on_extension
+            && !header_tags.client_computed_stats
+        {
+            "1"
+        } else {
+            "0"
+        };
+        debug!(
+            "TRACE_PROCESSOR | header_tags.client_computed_stats: {}, compute_stats: {}",
+            header_tags.client_computed_stats, compute_stats_value
+        );
         let mut payload = trace_utils::collect_pb_trace_chunks(
             traces,
             &header_tags,
@@ -338,6 +359,7 @@ impl TraceProcessor for ServerlessTraceProcessor {
                 obfuscation_config: self.obfuscation_config.clone(),
                 tags_provider: tags_provider.clone(),
                 span_pointers,
+                compute_stats_value,
             },
             true, // send agentless since we are the agent
         )
@@ -350,33 +372,6 @@ impl TraceProcessor for ServerlessTraceProcessor {
             let tags = tags_provider.get_function_tags_map();
             for tracer_payload in collection.iter_mut() {
                 tracer_payload.tags.extend(tags.clone());
-                // Tell the backend whether to compute stats:
-                // - "1" (compute on backend) if neither the tracer nor the extension is computing them
-                // - "0" (skip on backend) if the extension or the tracer has already computed them
-                let compute_stats = if !config.compute_trace_stats_on_extension
-                    && !header_tags.client_computed_stats
-                {
-                    "1"
-                } else {
-                    "0"
-                };
-                debug!(
-                    "TRACE_PROCESSOR | header_tags.client_computed_stats: {}, compute_stats: {}",
-                    header_tags.client_computed_stats, compute_stats
-                );
-                tracer_payload
-                    .tags
-                    .insert(COMPUTE_STATS_KEY.to_string(), compute_stats.to_string());
-                // Also propagate to each span's meta so backends that read _dd.compute_stats
-                // from the root span's meta field (rather than the payload-level tags) still
-                // work correctly. This restores the pre-#1118 behavior where the tag was
-                // applied to every span via get_tags_map() / ChunkProcessor.
-                for chunk in &mut tracer_payload.chunks {
-                    for span in &mut chunk.spans {
-                        span.meta
-                            .insert(COMPUTE_STATS_KEY.to_string(), compute_stats.to_string());
-                    }
-                }
             }
         }
         let endpoint = Endpoint {
@@ -688,11 +683,8 @@ mod tests {
         );
         let tracer_payload = tracer_payload.expect("expected Some payload");
 
-        let mut expected_tags = tags_provider.get_function_tags_map();
-        // process_traces always sets _dd.compute_stats:"1"
-        // because compute_trace_stats_on_extension is false and client_computed_stats is false.
-        expected_tags.insert(COMPUTE_STATS_KEY.to_string(), "1".to_string());
-        // process_traces also sets _dd.compute_stats on each span's meta.
+        let expected_tags = tags_provider.get_function_tags_map();
+        // process_traces sets _dd.compute_stats on each span's meta.
         let mut expected_span = span.clone();
         expected_span
             .meta
@@ -952,6 +944,7 @@ mod tests {
                 )]),
             )),
             span_pointers: None,
+            compute_stats_value: "1",
         };
 
         processor.process(&mut chunk, 0);
@@ -1036,6 +1029,7 @@ mod tests {
                 )]),
             )),
             span_pointers: None,
+            compute_stats_value: "1",
         };
 
         processor.process(&mut chunk, 0);
@@ -1119,6 +1113,7 @@ mod tests {
                 )]),
             )),
             span_pointers: None,
+            compute_stats_value: "1",
         };
 
         processor.process(&mut chunk, 0);
@@ -1527,16 +1522,12 @@ mod tests {
             panic!("expected V07");
         };
         for payload in payloads {
-            assert_eq!(
-                payload
-                    .tags
-                    .get(crate::tags::lambda::tags::COMPUTE_STATS_KEY),
-                Some(&expected_tag.to_string()),
-                "_dd.compute_stats must be {expected_tag} in payload.tags (compute_trace_stats_on_extension={compute_trace_stats_on_extension}, \
-                 client_computed_stats={client_computed_stats})"
+            assert!(
+                !payload.tags.contains_key(crate::tags::lambda::tags::COMPUTE_STATS_KEY),
+                "_dd.compute_stats must not be in payload.tags"
             );
-            // Also verify _dd.compute_stats is set on each span's meta so the backend
-            // can read it from the root span.
+            // _dd.compute_stats is set on each span's meta so the backend can read it
+            // from the root span.
             for chunk in &payload.chunks {
                 for span in &chunk.spans {
                     assert_eq!(
