@@ -47,9 +47,7 @@ struct ChunkProcessor {
     obfuscation_config: Arc<obfuscation_config::ObfuscationConfig>,
     tags_provider: Arc<provider::Provider>,
     span_pointers: Option<Vec<SpanPointer>>,
-    /// Pre-computed value of `_dd.compute_stats` for this request: `"1"` if the
-    /// backend should compute stats, `"0"` if the extension or tracer already did.
-    compute_stats_value: &'static str,
+    client_computed_stats: bool,
 }
 
 impl TraceChunkProcessor for ChunkProcessor {
@@ -83,10 +81,14 @@ impl TraceChunkProcessor for ChunkProcessor {
             span.meta.insert("origin".to_string(), "lambda".to_string());
             span.meta
                 .insert("_dd.origin".to_string(), "lambda".to_string());
-            span.meta.insert(
-                COMPUTE_STATS_KEY.to_string(),
-                self.compute_stats_value.to_string(),
-            );
+            let compute_stats_value =
+                if !self.config.compute_trace_stats_on_extension && !self.client_computed_stats {
+                    "1"
+                } else {
+                    "0"
+                };
+            span.meta
+                .insert(COMPUTE_STATS_KEY.to_string(), compute_stats_value.to_string());
             obfuscate_span(span, &self.obfuscation_config);
         }
 
@@ -337,16 +339,6 @@ impl TraceProcessor for ServerlessTraceProcessor {
         body_size: usize,
         span_pointers: Option<Vec<SpanPointer>>,
     ) -> (Option<SendDataBuilderInfo>, TracerPayloadCollection) {
-        // Tell the backend whether to compute stats for this request:
-        // - "1" if neither the tracer nor the extension is computing them
-        // - "0" if the extension or the tracer has already computed them
-        let compute_stats_value = if !config.compute_trace_stats_on_extension
-            && !header_tags.client_computed_stats
-        {
-            "1"
-        } else {
-            "0"
-        };
         let mut payload = trace_utils::collect_pb_trace_chunks(
             traces,
             &header_tags,
@@ -355,7 +347,7 @@ impl TraceProcessor for ServerlessTraceProcessor {
                 obfuscation_config: self.obfuscation_config.clone(),
                 tags_provider: tags_provider.clone(),
                 span_pointers,
-                compute_stats_value,
+                client_computed_stats: header_tags.client_computed_stats,
             },
             true, // send agentless since we are the agent
         )
@@ -940,7 +932,7 @@ mod tests {
                 )]),
             )),
             span_pointers: None,
-            compute_stats_value: "1",
+            client_computed_stats: false,
         };
 
         processor.process(&mut chunk, 0);
@@ -1025,7 +1017,7 @@ mod tests {
                 )]),
             )),
             span_pointers: None,
-            compute_stats_value: "1",
+            client_computed_stats: false,
         };
 
         processor.process(&mut chunk, 0);
@@ -1109,7 +1101,7 @@ mod tests {
                 )]),
             )),
             span_pointers: None,
-            compute_stats_value: "1",
+            client_computed_stats: false,
         };
 
         processor.process(&mut chunk, 0);
