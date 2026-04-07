@@ -2248,7 +2248,7 @@ mod tests {
             "client_computed_stats must be propagated to the aws.lambda span payload"
         );
 
-        // Verify _dd.compute_stats is "0" in the built payload tags: client_computed_stats=true
+        // Verify _dd.compute_stats is "0" in each span's meta: client_computed_stats=true
         // means the tracer has already computed stats, so neither extension nor backend should.
         let send_data = payload.builder.build();
         let libdd_trace_utils::tracer_payload::TracerPayloadCollection::V07(payloads) =
@@ -2257,11 +2257,15 @@ mod tests {
             panic!("expected V07 payload");
         };
         for p in payloads {
-            assert_eq!(
-                p.tags.get(crate::tags::lambda::tags::COMPUTE_STATS_KEY),
-                Some(&"0".to_string()),
-                "_dd.compute_stats must be 0 when client_computed_stats is true"
-            );
+            for chunk in &p.chunks {
+                for span in &chunk.spans {
+                    assert_eq!(
+                        span.meta.get(crate::tags::lambda::tags::COMPUTE_STATS_KEY),
+                        Some(&"0".to_string()),
+                        "_dd.compute_stats must be 0 when client_computed_stats is true"
+                    );
+                }
+            }
         }
     }
 }
