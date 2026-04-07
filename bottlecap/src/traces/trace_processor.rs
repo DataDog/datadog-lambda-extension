@@ -692,6 +692,11 @@ mod tests {
         // process_traces always sets _dd.compute_stats:"1"
         // because compute_trace_stats_on_extension is false and client_computed_stats is false.
         expected_tags.insert(COMPUTE_STATS_KEY.to_string(), "1".to_string());
+        // process_traces also sets _dd.compute_stats on each span's meta.
+        let mut expected_span = span.clone();
+        expected_span
+            .meta
+            .insert(COMPUTE_STATS_KEY.to_string(), "1".to_string());
         let expected_tracer_payload = pb::TracerPayload {
             container_id: "33".to_string(),
             language_name: "nodejs".to_string(),
@@ -701,7 +706,7 @@ mod tests {
             chunks: vec![pb::TraceChunk {
                 priority: i32::from(i8::MIN),
                 origin: "lambda".to_string(),
-                spans: vec![span.clone()],
+                spans: vec![expected_span],
                 tags: HashMap::new(),
                 dropped_trace: false,
             }],
