@@ -653,16 +653,9 @@ impl Processor {
         trace_sender: &Arc<SendingTraceProcessor>,
         context: Context,
     ) {
-        let client_computed_stats = context.client_computed_stats;
         let (traces, body_size) = self.get_ctx_spans(context);
-        self.send_spans(
-            traces,
-            body_size,
-            client_computed_stats,
-            tags_provider,
-            trace_sender,
-        )
-        .await;
+        self.send_spans(traces, body_size, tags_provider, trace_sender)
+            .await;
     }
 
     fn get_ctx_spans(&mut self, context: Context) -> (Vec<Span>, usize) {
@@ -727,7 +720,7 @@ impl Processor {
             let traces = vec![cold_start_span.clone()];
             let body_size = size_of_val(cold_start_span);
 
-            self.send_spans(traces, body_size, false, tags_provider, trace_sender)
+            self.send_spans(traces, body_size, tags_provider, trace_sender)
                 .await;
         }
     }
@@ -739,7 +732,6 @@ impl Processor {
         &mut self,
         traces: Vec<Span>,
         body_size: usize,
-        client_computed_stats: bool,
         tags_provider: &Arc<provider::Provider>,
         trace_sender: &Arc<SendingTraceProcessor>,
     ) {
@@ -752,7 +744,7 @@ impl Processor {
             tracer_version: "",
             container_id: "",
             client_computed_top_level: false,
-            client_computed_stats,
+            client_computed_stats: false,
             dropped_p0_traces: 0,
             dropped_p0_spans: 0,
         };
@@ -1399,10 +1391,9 @@ impl Processor {
     ///
     /// This is used to enrich the invocation span with additional metadata from the tracers
     /// top level span, since we discard the tracer span when we create the invocation span.
-    pub fn add_tracer_span(&mut self, span: &Span, client_computed_stats: bool) {
+    pub fn add_tracer_span(&mut self, span: &Span) {
         if let Some(request_id) = span.meta.get("request_id") {
-            self.context_buffer
-                .add_tracer_span(request_id, span, client_computed_stats);
+            self.context_buffer.add_tracer_span(request_id, span);
         }
     }
 
@@ -2211,98 +2202,6 @@ mod tests {
             result.is_none(),
             "Should return None when no trace context found"
         );
-    }
-
-    /// Verifies that `client_computed_stats` set on a context via `add_tracer_span` is
-    /// propagated all the way through `send_ctx_spans` to the `aws.lambda` payload sent
-    /// to the backend, so the extension does not generate duplicate stats.
-    #[tokio::test]
-    #[allow(clippy::unwrap_used)]
-    async fn test_client_computed_stats_propagated_to_aws_lambda_span() {
-        use crate::traces::stats_concentrator_service::StatsConcentratorService;
-        use crate::traces::stats_generator::StatsGenerator;
-        use libdd_trace_obfuscation::obfuscation_config::ObfuscationConfig;
-        use tokio::sync::mpsc;
-
-        let config = Arc::new(config::Config {
-            apm_dd_url: "https://trace.agent.datadoghq.com".to_string(),
-            ..config::Config::default()
-        });
-        let tags_provider = Arc::new(provider::Provider::new(
-            Arc::clone(&config),
-            LAMBDA_RUNTIME_SLUG.to_string(),
-            &HashMap::from([("function_arn".to_string(), "test-arn".to_string())]),
-        ));
-        let aws_config = Arc::new(AwsConfig {
-            region: "us-east-1".into(),
-            aws_lwa_proxy_lambda_runtime_api: None,
-            function_name: "test-function".into(),
-            sandbox_init_time: Instant::now(),
-            runtime_api: "***".into(),
-            exec_wrapper: None,
-            initialization_type: "on-demand".into(),
-        });
-        let (aggregator_service, aggregator_handle) =
-            AggregatorService::new(EMPTY_TAGS, 1024).expect("failed to create aggregator service");
-        tokio::spawn(aggregator_service.run());
-        let propagator = Arc::new(DatadogCompositePropagator::new(Arc::clone(&config)));
-        let (durable_context_tx, _) = tokio::sync::mpsc::channel(1);
-        let mut p = Processor::new(
-            Arc::clone(&tags_provider),
-            Arc::clone(&config),
-            aws_config,
-            aggregator_handle,
-            propagator,
-            durable_context_tx,
-        );
-
-        let (trace_tx, mut trace_rx) = mpsc::channel(10);
-        let (stats_concentrator_service, stats_concentrator_handle) =
-            StatsConcentratorService::new(Arc::clone(&config));
-        tokio::spawn(stats_concentrator_service.run());
-        let trace_sender = Arc::new(SendingTraceProcessor {
-            appsec: None,
-            processor: Arc::new(trace_processor::ServerlessTraceProcessor {
-                obfuscation_config: Arc::new(
-                    ObfuscationConfig::new().expect("Failed to create ObfuscationConfig"),
-                ),
-            }),
-            trace_tx,
-            stats_generator: Arc::new(StatsGenerator::new(stats_concentrator_handle)),
-        });
-
-        let mut context = Context::from_request_id("req-1");
-        context.invocation_span.trace_id = 1;
-        context.invocation_span.span_id = 2;
-        context.client_computed_stats = true;
-
-        p.send_ctx_spans(&tags_provider, &trace_sender, context)
-            .await;
-
-        let payload = trace_rx
-            .recv()
-            .await
-            .expect("expected payload from trace_tx");
-        assert!(
-            payload.header_tags.client_computed_stats,
-            "client_computed_stats must be propagated to the aws.lambda span payload"
-        );
-
-        // Verify _dd.compute_stats is "0" in the built payload tags: client_computed_stats=true
-        // means the tracer has already computed stats, so neither extension nor backend should.
-        let send_data = payload.builder.build();
-        let libdd_trace_utils::tracer_payload::TracerPayloadCollection::V07(payloads) =
-            send_data.get_payloads()
-        else {
-            panic!("expected V07 payload");
-        };
-        for p in payloads {
-            assert_eq!(
-                p.tags.get(crate::tags::lambda::tags::COMPUTE_STATS_KEY),
-                Some(&"0".to_string()),
-                "_dd.compute_stats must be 0 when client_computed_stats is true"
-            );
-        }
     }
 
     fn make_trace_sender(config: Arc<config::Config>) -> Arc<SendingTraceProcessor> {
