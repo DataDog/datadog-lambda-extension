@@ -1155,9 +1155,10 @@ fn start_trace_agent(
         obfuscation_redis_remove_all_args: false,
     };
 
-    let trace_processor = Arc::new(trace_processor::ServerlessTraceProcessor {
-        obfuscation_config: Arc::new(obfuscation_config),
-    });
+    let trace_processor = Arc::new(trace_processor::ServerlessTraceProcessor::new(
+        config.as_ref(),
+        obfuscation_config,
+    ));
 
     let (span_dedup_service, span_dedup_handle) = span_dedup_service::DedupService::new();
     tokio::spawn(span_dedup_service.run());
