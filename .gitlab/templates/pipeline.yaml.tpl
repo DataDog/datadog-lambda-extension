@@ -508,7 +508,7 @@ integration-suite:
     - export CDK_DEFAULT_ACCOUNT=$(aws sts get-caller-identity --query Account --output text)
     - export CDK_DEFAULT_REGION=us-east-1
     - npm run build
-    - npx cdk deploy "integ-${IDENTIFIER}-${TEST_SUITE}" --require-approval never
+    - npx cdk deploy "integ-${IDENTIFIER}-${TEST_SUITE}" --require-approval never --import-existing-resources
     - echo "Running ${TEST_SUITE} integration tests with identifier ${IDENTIFIER}..."
     - export TEST_SUITE=${TEST_SUITE}
     - npx jest tests/${TEST_SUITE}.test.ts
