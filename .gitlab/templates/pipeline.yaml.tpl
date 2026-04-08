@@ -55,7 +55,12 @@ bottlecap ({{ $flavor.name }}):
   # This job sometimes times out on GitLab for unclear reasons.
   # Set a timeout with retries to work around this.
   timeout: 20m
-  retry: 2
+  retry:
+    max: 2
+    when:
+      - stuck_or_timeout_failure
+      - runner_system_failure
+      - script_failure
   artifacts:
     expire_in: 1 week
     paths:
