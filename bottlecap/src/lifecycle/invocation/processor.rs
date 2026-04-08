@@ -49,6 +49,11 @@ use crate::{
 pub const MS_TO_NS: f64 = 1_000_000.0;
 pub const S_TO_MS: u64 = 1_000;
 pub const S_TO_NS: f64 = 1_000_000_000.0;
+/// Threshold for classifying a Lambda cold start as proactive initialization.
+///
+/// Proactive initialization is a Lambda optimization where the runtime pre-initializes
+/// a sandbox before any invocation is scheduled, to reduce cold start latency for future
+/// requests.
 pub const PROACTIVE_INITIALIZATION_THRESHOLD_MS: u64 = 10_000;
 
 pub const DATADOG_INVOCATION_ERROR_MESSAGE_KEY: &str = "x-datadog-invocation-error-msg";
@@ -96,6 +101,8 @@ pub struct Processor {
     /// logs agent. Decouples the trace agent from the logs agent: the trace agent sends spans
     /// to the lifecycle processor, which extracts durable context and relays it here.
     durable_context_tx: mpsc::Sender<DurableContextUpdate>,
+    /// Time of the `SnapStart` restore event, set when `PlatformRestoreStart` is received.
+    restore_time: Option<Instant>,
 }
 
 impl Processor {
@@ -137,6 +144,7 @@ impl Processor {
             active_invocations: 0,
             awaiting_first_invocation: false,
             durable_context_tx,
+            restore_time: None,
         }
     }
 
@@ -252,12 +260,35 @@ impl Processor {
 
         // If it's empty, then we are in a cold start
         if self.context_buffer.is_empty() {
-            let now = Instant::now();
-            let time_since_sandbox_init = now.duration_since(self.aws_config.sandbox_init_time);
-            if time_since_sandbox_init.as_millis() > PROACTIVE_INITIALIZATION_THRESHOLD_MS.into() {
-                proactive_initialization = true;
+            if self.aws_config.is_snapstart() {
+                match self.restore_time {
+                    None => {
+                        // PlatformRestoreStart hasn't arrived yet — restore and invoke
+                        // happened close together, so this is a cold start (not proactive).
+                        cold_start = true;
+                    }
+                    Some(restore_time) => {
+                        let now = Instant::now();
+                        let time_since_restore = now.duration_since(restore_time);
+                        if time_since_restore.as_millis()
+                            > PROACTIVE_INITIALIZATION_THRESHOLD_MS.into()
+                        {
+                            proactive_initialization = true;
+                        } else {
+                            cold_start = true;
+                        }
+                    }
+                }
             } else {
-                cold_start = true;
+                let now = Instant::now();
+                let time_since_sandbox_init = now.duration_since(self.aws_config.sandbox_init_time);
+                if time_since_sandbox_init.as_millis()
+                    > PROACTIVE_INITIALIZATION_THRESHOLD_MS.into()
+                {
+                    proactive_initialization = true;
+                } else {
+                    cold_start = true;
+                }
             }
 
             // Resolve runtime only once
@@ -383,6 +414,8 @@ impl Processor {
     /// This is used to create a `snapstart_restore` span, since this telemetry event does not
     /// provide a `request_id`, we try to guess which invocation is the restore similar to init.
     pub fn on_platform_restore_start(&mut self, time: DateTime<Utc>) {
+        self.restore_time = Some(Instant::now());
+
         let start_time: i64 = SystemTime::from(time)
             .duration_since(UNIX_EPOCH)
             .expect("time went backwards")
