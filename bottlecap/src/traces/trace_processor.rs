@@ -1620,7 +1620,7 @@ mod tests {
         processor.process(&mut chunk, 0);
 
         assert_eq!(
-            chunk.spans[0].meta.get("_dd.base_service").unwrap(),
+            chunk.spans[0].meta.get("_dd.base_service").expect("_dd.base_service should be present"),
             "my-function",
             "base_service should be the function name when DD_SERVICE is not set"
         );
@@ -1647,7 +1647,7 @@ mod tests {
         processor.process(&mut chunk, 0);
 
         assert_eq!(
-            chunk.spans[0].meta.get("_dd.base_service").unwrap(),
+            chunk.spans[0].meta.get("_dd.base_service").expect("_dd.base_service should be present"),
             "my-payments-api",
             "base_service should be DD_SERVICE when set"
         );
@@ -1674,7 +1674,7 @@ mod tests {
         processor.process(&mut chunk, 0);
 
         assert_eq!(
-            chunk.spans[0].meta.get("_dd.base_service").unwrap(),
+            chunk.spans[0].meta.get("_dd.base_service").expect("_dd.base_service should be present"),
             "aws.lambda",
             "base_service should be 'aws.lambda' when representation is disabled"
         );
@@ -1747,7 +1747,7 @@ mod tests {
         processor.process(&mut chunk, 0);
 
         assert_eq!(
-            chunk.spans[0].meta.get("_dd.base_service").unwrap(),
+            chunk.spans[0].meta.get("_dd.base_service").expect("_dd.base_service should be present"),
             "tracer-set-value",
             "base_service should not be overwritten when already set by the tracer"
         );
