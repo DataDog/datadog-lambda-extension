@@ -1,9 +1,12 @@
+{{- $e2e_region := "us-west-2" -}}
+
 stages:
   - test
   - compile
   - build
   - integration-tests
   - self-monitoring
+  - e2e
   - sign
   - publish
 
@@ -141,6 +144,7 @@ sign layer ({{ $flavor.name }}):
     - .gitlab/scripts/sign_layers.sh prod
 
 {{ range $environment_name, $environment := (ds "environments").environments }}
+{{- $dotenv := printf "%s_%s.env" $flavor.suffix $environment_name }}
 
 publish layer {{ $environment_name }} ({{ $flavor.name }}):
   stage: publish
@@ -172,12 +176,21 @@ publish layer {{ $environment_name }} ({{ $flavor.name }}):
       - REGION: {{ range (ds "regions").regions }}
           - {{ .code }}
         {{- end}}
+{{- if eq $environment_name "sandbox" }}
+  artifacts:
+    reports:
+      dotenv: {{ $dotenv }}
+{{- end }}
   variables:
     LAYER_NAME_BASE_SUFFIX: {{ $flavor.layer_name_base_suffix }}
     ARCHITECTURE: {{ $flavor.arch }}
     LAYER_FILE: datadog_extension-{{ $flavor.suffix }}.zip
     ADD_LAYER_VERSION_PERMISSIONS: {{ $environment.add_layer_version_permissions }}
     AUTOMATICALLY_BUMP_VERSION: {{ $environment.automatically_bump_version }}
+{{- if eq $environment_name "sandbox" }}
+    LAYER_DESCRIPTION: ${CI_COMMIT_SHORT_SHA}
+    DOTENV: {{ $dotenv }}
+{{- end }}
   before_script:
     - EXTERNAL_ID_NAME={{ $environment.external_id }} ROLE_TO_ASSUME={{ $environment.role_to_assume }} AWS_ACCOUNT={{ $environment.account }} source .gitlab/scripts/get_secrets.sh
   script:
@@ -216,6 +229,84 @@ publish layer [self-monitoring] ({{ $flavor.name }}):
 {{ end }} # end needs_layer_publish
 
 {{ end }}  # end flavors
+
+{{ range $f := (ds "flavors").flavors }}
+{{ if $f.needs_layer_publish }}
+{{- $dotenvE2E := printf "%s_sandbox_e2e.env" $f.suffix }}
+{{ with $environment := (ds "environments").environments.sandbox }}
+
+publish layer e2e sandbox ({{ $f.name }}):
+  stage: e2e
+  tags: ["arch:amd64"]
+  image: ${CI_DOCKER_TARGET_IMAGE}:${CI_DOCKER_TARGET_VERSION}
+  rules:
+    - if: '$CI_COMMIT_TAG =~ /^v.*/'
+      when: on_success
+      variables:
+        LAYER_DESCRIPTION: $CI_COMMIT_TAG
+    - when: on_success
+      variables:
+        LAYER_DESCRIPTION: $CI_COMMIT_SHORT_SHA
+  needs:
+    - layer ({{ $f.name }})
+{{ if and (index $f "max_layer_compressed_size_mb") (index $f "max_layer_uncompressed_size_mb") }}
+    - check layer size ({{ $f.name }})
+{{ end }}
+  dependencies:
+    - layer ({{ $f.name }})
+  artifacts:
+    reports:
+      dotenv: {{ $dotenvE2E }}
+  variables:
+    LAYER_NAME_BASE_SUFFIX: {{ $f.layer_name_base_suffix }}
+    ARCHITECTURE: {{ $f.arch }}
+    LAYER_FILE: datadog_extension-{{ $f.suffix }}.zip
+    REGION: {{ $e2e_region }}
+    ADD_LAYER_VERSION_PERMISSIONS: {{ $environment.add_layer_version_permissions }}
+    AUTOMATICALLY_BUMP_VERSION: {{ $environment.automatically_bump_version }}
+    DOTENV: {{ $dotenvE2E }}
+  before_script:
+    - EXTERNAL_ID_NAME={{ $environment.external_id }} ROLE_TO_ASSUME={{ $environment.role_to_assume }} AWS_ACCOUNT={{ $environment.account }} source .gitlab/scripts/get_secrets.sh
+  script:
+    - .gitlab/scripts/publish_layers.sh
+
+{{ end }}
+
+e2e-test ({{ $f.name }}):
+  stage: e2e
+  trigger:
+    project: DataDog/serverless-e2e-tests
+    strategy: depend
+  rules:
+    - if: '$CI_COMMIT_TAG =~ /^v.*/'
+      when: on_success
+      variables:
+        EXTENSION_VERSION: $CI_COMMIT_TAG
+    - when: on_success
+      variables:
+        EXTENSION_VERSION: $CI_COMMIT_SHORT_SHA
+  needs:
+    - job: "publish layer e2e sandbox ({{ $f.name }})"
+      artifacts: true
+  variables:
+    EXTENSION_LAYER_ARN: ${EXTENSION_LAYER_ARN}
+
+e2e-test-status ({{ $f.name }}):
+  stage: e2e
+  image: registry.ddbuild.io/images/docker:20.10-py3
+  tags: ["arch:amd64"]
+  timeout: 3h
+  rules:
+    - when: on_success
+  needs:
+    - job: "e2e-test ({{ $f.name }})"
+  variables:
+    E2E_BRIDGE_JOB_NAME: "e2e-test ({{ $f.name }})"
+  script:
+    - .gitlab/scripts/poll_e2e.sh
+
+{{ end }}
+{{ end }}
 
 {{ range $multi_arch_image_flavor := (ds "flavors").multi_arch_image_flavors }}
 
