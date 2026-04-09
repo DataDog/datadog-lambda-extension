@@ -19,7 +19,7 @@ use tokio::sync::{
 };
 use tokio_util::sync::CancellationToken;
 use tower_http::limit::RequestBodyLimitLayer;
-use tracing::{debug, error, info, warn};
+use tracing::{debug, error, warn};
 
 use crate::traces::trace_processor::SendingTraceProcessor;
 use crate::{
