@@ -5,6 +5,7 @@ use crate::appsec::processor::Processor as AppSecProcessor;
 use crate::appsec::processor::context::HoldArguments;
 use crate::config;
 use crate::lifecycle::invocation::processor::S_TO_MS;
+use crate::lifecycle::invocation::triggers::get_default_service_name;
 use crate::tags::provider;
 use crate::traces::span_pointers::{SpanPointer, attach_span_pointers_to_meta};
 use crate::traces::{
@@ -69,8 +70,25 @@ impl TraceChunkProcessor for ChunkProcessor {
                 span.service.clone_from(service);
             }
 
-            // Remove the _dd.base_service tag for unintentional service name override
-            span.meta.remove("_dd.base_service");
+            // For inferred spans, set _dd.base_service to the resolved execution
+            // span service (same get_default_service_name used in processor.rs).
+            // This covers extension-only languages (Go, .NET, Java, Ruby).
+            if span.meta.contains_key("_inferred_span.tag_source")
+                && !span.meta.contains_key("_dd.base_service")
+            {
+                let base_service = get_default_service_name(
+                    &self
+                        .config
+                        .service
+                        .clone()
+                        .or_else(|| self.tags_provider.get_canonical_resource_name())
+                        .unwrap_or_else(|| "aws.lambda".to_string()),
+                    "aws.lambda",
+                    self.config.trace_aws_service_representation_enabled,
+                );
+                span.meta
+                    .insert("_dd.base_service".to_string(), base_service);
+            }
 
             self.tags_provider.get_tags_map().iter().for_each(|(k, v)| {
                 span.meta.insert(k.clone(), v.clone());
@@ -1367,6 +1385,206 @@ mod tests {
         assert!(
             info.size < 999_999,
             "body_size must be smaller than the original unfiltered request size"
+        );
+    }
+
+    fn create_inferred_span() -> pb::Span {
+        let mut meta = HashMap::new();
+        meta.insert("_inferred_span.tag_source".to_string(), "self".to_string());
+        pb::Span {
+            name: "aws.sqs".to_string(),
+            service: "sqs".to_string(),
+            resource: "my-queue".to_string(),
+            trace_id: 1,
+            span_id: 2,
+            parent_id: 0,
+            start: 1000,
+            duration: 500,
+            error: 0,
+            meta,
+            metrics: HashMap::new(),
+            r#type: "web".to_string(),
+            span_links: vec![],
+            meta_struct: HashMap::new(),
+            span_events: vec![],
+        }
+    }
+
+    fn create_chunk_processor(config: Arc<Config>) -> ChunkProcessor {
+        let tags_provider = create_tags_provider(config.clone());
+        ChunkProcessor {
+            config,
+            obfuscation_config: Arc::new(
+                ObfuscationConfig::new().expect("Failed to create ObfuscationConfig"),
+            ),
+            tags_provider,
+            span_pointers: None,
+        }
+    }
+
+    #[test]
+    fn test_base_service_uses_function_name_when_no_dd_service() {
+        let config = Arc::new(Config {
+            service: None,
+            trace_aws_service_representation_enabled: true,
+            ..Config::default()
+        });
+        let mut processor = create_chunk_processor(config);
+
+        let inferred_span = create_inferred_span();
+        let mut chunk = pb::TraceChunk {
+            priority: 1,
+            origin: "lambda".to_string(),
+            spans: vec![inferred_span],
+            tags: HashMap::new(),
+            dropped_trace: false,
+        };
+
+        processor.process(&mut chunk, 0);
+
+        assert_eq!(
+            chunk.spans[0]
+                .meta
+                .get("_dd.base_service")
+                .expect("_dd.base_service should be present"),
+            "my-function",
+            "base_service should be the function name when DD_SERVICE is not set"
+        );
+    }
+
+    #[test]
+    fn test_base_service_uses_dd_service_when_set() {
+        let config = Arc::new(Config {
+            service: Some("my-payments-api".to_string()),
+            trace_aws_service_representation_enabled: true,
+            ..Config::default()
+        });
+        let mut processor = create_chunk_processor(config);
+
+        let inferred_span = create_inferred_span();
+        let mut chunk = pb::TraceChunk {
+            priority: 1,
+            origin: "lambda".to_string(),
+            spans: vec![inferred_span],
+            tags: HashMap::new(),
+            dropped_trace: false,
+        };
+
+        processor.process(&mut chunk, 0);
+
+        assert_eq!(
+            chunk.spans[0]
+                .meta
+                .get("_dd.base_service")
+                .expect("_dd.base_service should be present"),
+            "my-payments-api",
+            "base_service should be DD_SERVICE when set"
+        );
+    }
+
+    #[test]
+    fn test_base_service_is_aws_lambda_when_representation_disabled() {
+        let config = Arc::new(Config {
+            service: Some("my-payments-api".to_string()),
+            trace_aws_service_representation_enabled: false,
+            ..Config::default()
+        });
+        let mut processor = create_chunk_processor(config);
+
+        let inferred_span = create_inferred_span();
+        let mut chunk = pb::TraceChunk {
+            priority: 1,
+            origin: "lambda".to_string(),
+            spans: vec![inferred_span],
+            tags: HashMap::new(),
+            dropped_trace: false,
+        };
+
+        processor.process(&mut chunk, 0);
+
+        assert_eq!(
+            chunk.spans[0]
+                .meta
+                .get("_dd.base_service")
+                .expect("_dd.base_service should be present"),
+            "aws.lambda",
+            "base_service should be 'aws.lambda' when representation is disabled"
+        );
+    }
+
+    #[test]
+    fn test_base_service_not_set_on_non_inferred_spans() {
+        let config = Arc::new(Config {
+            service: Some("my-service".to_string()),
+            trace_aws_service_representation_enabled: true,
+            ..Config::default()
+        });
+        let mut processor = create_chunk_processor(config);
+
+        let regular_span = pb::Span {
+            name: "http.request".to_string(),
+            service: "my-service".to_string(),
+            resource: "GET /users".to_string(),
+            trace_id: 1,
+            span_id: 3,
+            parent_id: 0,
+            start: 1000,
+            duration: 500,
+            error: 0,
+            meta: HashMap::new(),
+            metrics: HashMap::new(),
+            r#type: "web".to_string(),
+            span_links: vec![],
+            meta_struct: HashMap::new(),
+            span_events: vec![],
+        };
+        let mut chunk = pb::TraceChunk {
+            priority: 1,
+            origin: "lambda".to_string(),
+            spans: vec![regular_span],
+            tags: HashMap::new(),
+            dropped_trace: false,
+        };
+
+        processor.process(&mut chunk, 0);
+
+        assert!(
+            !chunk.spans[0].meta.contains_key("_dd.base_service"),
+            "base_service should not be set on non-inferred spans"
+        );
+    }
+
+    #[test]
+    fn test_base_service_not_overwritten_when_already_set() {
+        let config = Arc::new(Config {
+            service: Some("my-service".to_string()),
+            trace_aws_service_representation_enabled: true,
+            ..Config::default()
+        });
+        let mut processor = create_chunk_processor(config);
+
+        let mut inferred_span = create_inferred_span();
+        inferred_span.meta.insert(
+            "_dd.base_service".to_string(),
+            "tracer-set-value".to_string(),
+        );
+        let mut chunk = pb::TraceChunk {
+            priority: 1,
+            origin: "lambda".to_string(),
+            spans: vec![inferred_span],
+            tags: HashMap::new(),
+            dropped_trace: false,
+        };
+
+        processor.process(&mut chunk, 0);
+
+        assert_eq!(
+            chunk.spans[0]
+                .meta
+                .get("_dd.base_service")
+                .expect("_dd.base_service should be present"),
+            "tracer-set-value",
+            "base_service should not be overwritten when already set by the tracer"
         );
     }
 }
