@@ -368,19 +368,6 @@ impl TraceProcessor for ServerlessTraceProcessor {
             let tags = tags_provider.get_function_tags_map();
             for tracer_payload in collection.iter_mut() {
                 tracer_payload.tags.extend(tags.clone());
-                // Tell the backend whether to compute stats:
-                // - "1" (compute on backend) if neither the tracer nor the extension is computing them
-                // - "0" (skip on backend) if the extension or the tracer has already computed them
-                let compute_stats = if !config.compute_trace_stats_on_extension
-                    && !header_tags.client_computed_stats
-                {
-                    "1"
-                } else {
-                    "0"
-                };
-                tracer_payload
-                    .tags
-                    .insert(COMPUTE_STATS_KEY.to_string(), compute_stats.to_string());
             }
         }
         let endpoint = Endpoint {
@@ -534,7 +521,6 @@ impl SendingTraceProcessor {
             return Ok(());
         }
 
-        let client_computed_stats = header_tags.client_computed_stats;
         let (payload, processed_traces) = self.processor.process_traces(
             config.clone(),
             tags_provider,
@@ -546,9 +532,7 @@ impl SendingTraceProcessor {
 
         // This needs to be after process_traces() because process_traces()
         // performs obfuscation, and we need to compute stats on the obfuscated traces.
-        // Skip if the tracer has already computed stats (Datadog-Client-Computed-Stats header).
         if config.compute_trace_stats_on_extension
-            && !client_computed_stats
             && let Err(err) = self.stats_generator.send(&processed_traces)
         {
             // Just log the error. We don't think trace stats are critical, so we don't want to
@@ -692,10 +676,6 @@ mod tests {
         );
         let tracer_payload = tracer_payload.expect("expected Some payload");
 
-        let mut expected_tags = tags_provider.get_function_tags_map();
-        // process_traces always sets _dd.compute_stats:"1"
-        // because compute_trace_stats_on_extension is false and client_computed_stats is false.
-        expected_tags.insert(COMPUTE_STATS_KEY.to_string(), "1".to_string());
         let expected_tracer_payload = pb::TracerPayload {
             container_id: "33".to_string(),
             language_name: "nodejs".to_string(),
@@ -709,7 +689,7 @@ mod tests {
                 tags: HashMap::new(),
                 dropped_trace: false,
             }],
-            tags: expected_tags,
+            tags: tags_provider.get_function_tags_map(),
             env: "test-env".to_string(),
             hostname: String::new(),
             app_version: String::new(),

@@ -501,8 +501,7 @@ impl TraceAgent {
             );
         }
 
-        let tracer_header_tags: libdd_trace_utils::tracer_header_tags::TracerHeaderTags<'_> =
-            (&parts.headers).into();
+        let tracer_header_tags = (&parts.headers).into();
 
         let (body_size, mut traces): (usize, Vec<Vec<pb::Span>>) = match version {
             ApiVersion::V04 => {
@@ -532,6 +531,7 @@ impl TraceAgent {
                 }
             },
         };
+
         let mut reparenting_info = match invocation_processor_handle.get_reparenting_info().await {
             Ok(info) => info,
             Err(e) => {
@@ -586,7 +586,7 @@ impl TraceAgent {
 
                 if span.resource == INVOCATION_SPAN_RESOURCE
                     && let Err(e) = invocation_processor_handle
-                        .add_tracer_span(span.clone(), tracer_header_tags.client_computed_stats)
+                        .add_tracer_span(span.clone())
                         .await
                 {
                     error!("Failed to add tracer span to processor: {}", e);
