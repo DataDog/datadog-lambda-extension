@@ -557,7 +557,9 @@ impl TraceAgent {
                         should_keep
                     }
                     Err(e) => {
-                        warn!("Failed to check span in deduper, keeping span: {e}");
+                        // Not using warn or error level to avoid confusion for customers.
+                        // No action is needed on customer side.
+                        debug!("Failed to check span in deduper, keeping span: {e}");
                         true
                     }
                 };
