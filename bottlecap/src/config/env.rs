@@ -217,6 +217,12 @@ pub struct EnvConfig {
     /// @env `DD_APM_FEATURES`
     #[serde(deserialize_with = "deserialize_array_from_comma_separated_string")]
     pub apm_features: Vec<String>,
+    /// @env `DD_APM_SPAN_DERIVED_PRIMARY_TAGS`
+    ///
+    /// Comma-separated list of tag keys to extract from spans for use as
+    /// additional aggregation dimensions in APM stats.
+    #[serde(deserialize_with = "deserialize_array_from_comma_separated_string")]
+    pub apm_span_derived_primary_tags: Vec<String>,
     /// @env `DD_APM_ADDITIONAL_ENDPOINTS`
     ///
     /// Additional endpoints to send traces to.
@@ -559,6 +565,7 @@ fn merge_config(config: &mut Config, env_config: &EnvConfig) {
     );
     merge_option_to_value!(config, env_config, apm_config_compression_level);
     merge_vec!(config, env_config, apm_features);
+    merge_vec!(config, env_config, apm_span_derived_primary_tags);
     merge_hashmap!(config, env_config, apm_additional_endpoints);
     merge_option!(config, env_config, apm_filter_tags_require);
     merge_option!(config, env_config, apm_filter_tags_reject);
@@ -796,6 +803,10 @@ mod tests {
                 "DD_APM_FEATURES",
                 "enable_otlp_compute_top_level_by_span_kind,enable_stats_by_span_kind",
             );
+            jail.set_env(
+                "DD_APM_SPAN_DERIVED_PRIMARY_TAGS",
+                "aws.s3.bucket,customer_tier",
+            );
             jail.set_env("DD_APM_ADDITIONAL_ENDPOINTS", "{\"https://trace.agent.datadoghq.com\": [\"apikey2\", \"apikey3\"], \"https://trace.agent.datadoghq.eu\": [\"apikey4\"]}");
             jail.set_env("DD_APM_FILTER_TAGS_REQUIRE", "env:production service:api");
             jail.set_env("DD_APM_FILTER_TAGS_REJECT", "debug:true env:test");
@@ -965,6 +976,10 @@ mod tests {
                 apm_features: vec![
                     "enable_otlp_compute_top_level_by_span_kind".to_string(),
                     "enable_stats_by_span_kind".to_string(),
+                ],
+                apm_span_derived_primary_tags: vec![
+                    "aws.s3.bucket".to_string(),
+                    "customer_tier".to_string(),
                 ],
                 apm_additional_endpoints: HashMap::from([
                     (

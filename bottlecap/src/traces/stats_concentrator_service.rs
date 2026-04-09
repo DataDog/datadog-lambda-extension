@@ -114,6 +114,8 @@ impl StatsConcentratorService {
         let (tx, rx) = mpsc::unbounded_channel();
         let handle = StatsConcentratorHandle::new(tx);
         // TODO: set span_kinds_stats_computed and peer_tag_keys
+        // TODO: call concentrator.set_span_derived_primary_tag_keys(config.apm_span_derived_primary_tags.clone())
+        //       after bumping libdatadog to include DataDog/libdatadog#1858
         let concentrator = SpanConcentrator::new(
             Duration::from_nanos(BUCKET_DURATION_NS),
             SystemTime::now(),

@@ -960,6 +960,7 @@ api_security_sample_delay: 60 # Seconds
                     "enable_otlp_compute_top_level_by_span_kind".to_string(),
                     "enable_stats_by_span_kind".to_string(),
                 ],
+                apm_span_derived_primary_tags: vec![],
                 apm_additional_endpoints: HashMap::from([
                     (
                         "https://trace.agent.datadoghq.com".to_string(),
