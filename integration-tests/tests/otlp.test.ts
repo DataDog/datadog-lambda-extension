@@ -12,7 +12,7 @@ describe('OTLP Integration Tests', () => {
   let telemetry: Record<string, DatadogTelemetry>;
 
   beforeAll(async () => {
-    // Build function configs for all runtimes plus response validation
+    // Build function configs for all runtimes plus response validation and gRPC
     const functions: FunctionConfig[] = [
       ...runtimes.map(runtime => ({
         functionName: `${stackName}-${runtime}-lambda`,
@@ -21,6 +21,10 @@ describe('OTLP Integration Tests', () => {
       {
         functionName: `${stackName}-response-validation-lambda`,
         runtime: 'responseValidation',
+      },
+      {
+        functionName: `${stackName}-node-grpc-lambda`,
+        runtime: 'nodeGrpc',
       },
     ];
 
@@ -82,6 +86,39 @@ describe('OTLP Integration Tests', () => {
         s.attributes?.resource_name === 'test-span-protobuf' && s.attributes?.custom?.encoding === 'protobuf'
       );
       expect(hasProtobufSpan).toBe(true);
+    });
+  });
+
+  describe('OTLP gRPC Protocol', () => {
+    const getResult = () => telemetry['nodeGrpc']?.threads[0]?.[0];
+
+    it('should invoke gRPC Lambda successfully', () => {
+      const result = getResult();
+      expect(result).toBeDefined();
+      expect(result.statusCode).toBe(200);
+    });
+
+    it('should send traces via gRPC to Datadog', () => {
+      const result = getResult();
+      expect(result).toBeDefined();
+      expect(result.traces?.length).toEqual(1);
+    });
+
+    it('should have gRPC handler span with correct attributes', () => {
+      const result = getResult();
+      expect(result).toBeDefined();
+      const allSpans = result.traces?.flatMap(t => t.spans) || [];
+      const hasGrpcSpan = allSpans.some(s =>
+        s.attributes?.resource_name === 'grpc-handler' && s.attributes?.custom?.protocol === 'grpc'
+      );
+      expect(hasGrpcSpan).toBe(true);
+    });
+
+    it('should have spans in the trace', () => {
+      const result = getResult();
+      expect(result).toBeDefined();
+      const trace = result.traces![0];
+      expect(trace.spans.length).toBeGreaterThan(0);
     });
   });
 });

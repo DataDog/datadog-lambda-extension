@@ -30,3 +30,4 @@ integration-tests/cdk.context.json
 
 .gitlab/pipeline*
 /CLAUDE.md
+/AGENTS.md

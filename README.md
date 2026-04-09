@@ -21,7 +21,7 @@ For `v67` through `v87`, you can opt out of the next-generation Lambda Extension
 
 Today, all workloads using Logs and Metrics are supported.
 
-APM Tracing is supported for Python, NodeJS, Go, Java, and .NET runtimes.
+APM Tracing is supported for Python, NodeJS, Go, Java, .NET, and Ruby runtimes.
 
 ### Feedback
 

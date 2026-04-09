@@ -51,6 +51,7 @@ use bottlecap::{
             AggregatorHandle as LogsAggregatorHandle, AggregatorService as LogsAggregatorService,
         },
         flusher::LogsFlusher,
+        lambda::DurableContextUpdate,
     },
     otlp::{agent::Agent as OtlpAgent, should_enable_otlp_agent},
     proxy::{interceptor, should_start_proxy},
@@ -149,7 +150,11 @@ async fn main() -> anyhow::Result<()> {
     let config = Arc::new(config::get_config(Path::new(&lambda_directory)));
 
     let aws_config = Arc::new(aws_config);
-    let api_key_factory = create_api_key_factory(&config, &aws_config);
+    // Build one shared reqwest::Client for metrics, logs, trace proxy flushing, and calls to
+    // Datadog APIs (e.g. delegated auth). reqwest::Client is Arc-based internally, so cloning
+    // just increments a refcount and shares the connection pool.
+    let shared_client = bottlecap::http::get_client(&config);
+    let api_key_factory = create_api_key_factory(&config, &aws_config, &shared_client);
 
     let r = response
         .await
@@ -160,6 +165,7 @@ async fn main() -> anyhow::Result<()> {
         Arc::clone(&aws_config),
         &config,
         &client,
+        shared_client,
         &r,
         Arc::clone(&api_key_factory),
         start_time,
@@ -245,17 +251,23 @@ fn get_flush_strategy_for_mode(
     }
 }
 
-fn create_api_key_factory(config: &Arc<Config>, aws_config: &Arc<AwsConfig>) -> Arc<ApiKeyFactory> {
+fn create_api_key_factory(
+    config: &Arc<Config>,
+    aws_config: &Arc<AwsConfig>,
+    client: &reqwest::Client,
+) -> Arc<ApiKeyFactory> {
     let config = Arc::clone(config);
     let aws_config = Arc::clone(aws_config);
+    let client = client.clone();
     let api_key_secret_reload_interval = config.api_key_secret_reload_interval;
 
     Arc::new(ApiKeyFactory::new_from_resolver(
         Arc::new(move || {
             let config = Arc::clone(&config);
             let aws_config = Arc::clone(&aws_config);
+            let client = client.clone();
 
-            Box::pin(async move { resolve_secrets(config, aws_config).await })
+            Box::pin(async move { resolve_secrets(config, aws_config, client).await })
         }),
         api_key_secret_reload_interval,
     ))
@@ -284,6 +296,7 @@ async fn extension_loop_active(
     aws_config: Arc<AwsConfig>,
     config: &Arc<Config>,
     client: &Client,
+    shared_client: reqwest::Client,
     r: &RegisterResponse,
     api_key_factory: Arc<ApiKeyFactory>,
     start_time: Instant,
@@ -293,20 +306,20 @@ async fn extension_loop_active(
     let account_id = r.account_id.as_ref().unwrap_or(&"none".to_string()).clone();
     let tags_provider = setup_tag_provider(&Arc::clone(&aws_config), config, &account_id);
 
-    // Build one shared reqwest::Client for metrics, logs, and trace proxy flushing.
-    // reqwest::Client is Arc-based internally, so cloning just increments a refcount
-    // and shares the connection pool.
-    let shared_client = bottlecap::http::get_client(config);
-
-    let (logs_agent_channel, logs_flusher, logs_agent_cancel_token, logs_aggregator_handle) =
-        start_logs_agent(
-            config,
-            Arc::clone(&api_key_factory),
-            &tags_provider,
-            event_bus_tx.clone(),
-            aws_config.is_managed_instance_mode(),
-            &shared_client,
-        );
+    let (
+        logs_agent_channel,
+        logs_flusher,
+        logs_agent_cancel_token,
+        logs_aggregator_handle,
+        durable_context_tx,
+    ) = start_logs_agent(
+        config,
+        Arc::clone(&api_key_factory),
+        &tags_provider,
+        event_bus_tx.clone(),
+        aws_config.is_managed_instance_mode(),
+        &shared_client,
+    );
 
     let (metrics_flushers, metrics_aggregator_handle, dogstatsd_cancel_token) = start_dogstatsd(
         tags_provider.clone(),
@@ -325,6 +338,7 @@ async fn extension_loop_active(
             Arc::clone(&aws_config),
             metrics_aggregator_handle.clone(),
             Arc::clone(&propagator),
+            durable_context_tx,
         );
     tokio::spawn(async move {
         invocation_processor_service.run().await;
@@ -1039,6 +1053,7 @@ fn start_logs_agent(
     LogsFlusher,
     CancellationToken,
     LogsAggregatorHandle,
+    Sender<DurableContextUpdate>,
 ) {
     let (aggregator_service, aggregator_handle) = LogsAggregatorService::default();
     // Start service in background
@@ -1046,7 +1061,7 @@ fn start_logs_agent(
         aggregator_service.run().await;
     });
 
-    let (mut agent, tx) = LogsAgent::new(
+    let (mut agent, tx, durable_context_tx) = LogsAgent::new(
         Arc::clone(tags_provider),
         Arc::clone(config),
         event_bus,
@@ -1068,7 +1083,13 @@ fn start_logs_agent(
         config.clone(),
         client.clone(),
     );
-    (tx, flusher, cancel_token, aggregator_handle)
+    (
+        tx,
+        flusher,
+        cancel_token,
+        aggregator_handle,
+        durable_context_tx,
+    )
 }
 
 #[allow(clippy::type_complexity)]
@@ -1357,15 +1378,18 @@ fn start_otlp_agent(
     if !should_enable_otlp_agent(config) {
         return None;
     }
+
     let stats_generator = Arc::new(StatsGenerator::new(stats_concentrator));
+    let cancel_token = CancellationToken::new();
+
     let agent = OtlpAgent::new(
         config.clone(),
         tags_provider,
         trace_processor,
         trace_tx,
         stats_generator,
+        cancel_token.clone(),
     );
-    let cancel_token = agent.cancel_token();
 
     tokio::spawn(async move {
         if let Err(e) = agent.start().await {

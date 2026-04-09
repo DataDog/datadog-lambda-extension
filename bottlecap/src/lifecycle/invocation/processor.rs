@@ -5,11 +5,20 @@ use std::{
 };
 
 use chrono::{DateTime, Utc};
+use datadog_opentelemetry::propagation::{
+    context::SpanContext,
+    datadog::{
+        DATADOG_PARENT_ID_KEY, DATADOG_SAMPLING_PRIORITY_KEY, DATADOG_TAGS_KEY,
+        DATADOG_TRACE_ID_KEY,
+    },
+};
 use libdd_trace_protobuf::pb::Span;
 use libdd_trace_utils::tracer_header_tags;
 use serde_json::Value;
 use tokio::time::Instant;
-use tracing::{debug, trace, warn};
+use tracing::{debug, error, trace, warn};
+
+use tokio::sync::mpsc;
 
 use crate::{
     config::{self, aws::AwsConfig},
@@ -24,6 +33,7 @@ use crate::{
         span_inferrer::{self, SpanInferrer},
         triggers::get_default_service_name,
     },
+    logs::lambda::DurableContextUpdate,
     metrics::enhanced::lambda::{EnhancedMetricData, Lambda as EnhancedMetrics},
     proc::{
         self, CPUData, NetworkData,
@@ -31,14 +41,7 @@ use crate::{
     },
     tags::{lambda::tags::resolve_runtime_from_proc, provider},
     traces::{
-        context::SpanContext,
-        propagation::{
-            DatadogCompositePropagator, Propagator,
-            text_map_propagator::{
-                DATADOG_PARENT_ID_KEY, DATADOG_SAMPLING_PRIORITY_KEY, DATADOG_SPAN_ID_KEY,
-                DATADOG_TRACE_ID_KEY, DatadogHeaderPropagator,
-            },
-        },
+        propagation::{DatadogCompositePropagator, carrier::JsonCarrier},
         trace_processor::SendingTraceProcessor,
     },
 };
@@ -46,12 +49,18 @@ use crate::{
 pub const MS_TO_NS: f64 = 1_000_000.0;
 pub const S_TO_MS: u64 = 1_000;
 pub const S_TO_NS: f64 = 1_000_000_000.0;
+/// Threshold for classifying a Lambda cold start as proactive initialization.
+///
+/// Proactive initialization is a Lambda optimization where the runtime pre-initializes
+/// a sandbox before any invocation is scheduled, to reduce cold start latency for future
+/// requests.
 pub const PROACTIVE_INITIALIZATION_THRESHOLD_MS: u64 = 10_000;
 
 pub const DATADOG_INVOCATION_ERROR_MESSAGE_KEY: &str = "x-datadog-invocation-error-msg";
 pub const DATADOG_INVOCATION_ERROR_TYPE_KEY: &str = "x-datadog-invocation-error-type";
 pub const DATADOG_INVOCATION_ERROR_STACK_KEY: &str = "x-datadog-invocation-error-stack";
 pub const DATADOG_INVOCATION_ERROR_KEY: &str = "x-datadog-invocation-error";
+const DATADOG_SPAN_ID_KEY: &str = "x-datadog-span-id";
 const TAG_SAMPLING_PRIORITY: &str = "_sampling_priority_v1";
 
 pub struct Processor {
@@ -88,6 +97,12 @@ pub struct Processor {
     /// Tracks whether if first invocation after init has been received in Managed Instance mode.
     /// Used to determine if we should search for the empty context on an invocation.
     awaiting_first_invocation: bool,
+    /// Sender used to forward durable execution context extracted from `aws.lambda` spans to the
+    /// logs agent. Decouples the trace agent from the logs agent: the trace agent sends spans
+    /// to the lifecycle processor, which extracts durable context and relays it here.
+    durable_context_tx: mpsc::Sender<DurableContextUpdate>,
+    /// Time of the `SnapStart` restore event, set when `PlatformRestoreStart` is received.
+    restore_time: Option<Instant>,
 }
 
 impl Processor {
@@ -98,6 +113,7 @@ impl Processor {
         aws_config: Arc<AwsConfig>,
         metrics_aggregator: dogstatsd::aggregator::AggregatorHandle,
         propagator: Arc<DatadogCompositePropagator>,
+        durable_context_tx: mpsc::Sender<DurableContextUpdate>,
     ) -> Self {
         let resource = tags_provider
             .get_canonical_resource_name()
@@ -127,6 +143,8 @@ impl Processor {
             dynamic_tags: HashMap::new(),
             active_invocations: 0,
             awaiting_first_invocation: false,
+            durable_context_tx,
+            restore_time: None,
         }
     }
 
@@ -242,12 +260,35 @@ impl Processor {
 
         // If it's empty, then we are in a cold start
         if self.context_buffer.is_empty() {
-            let now = Instant::now();
-            let time_since_sandbox_init = now.duration_since(self.aws_config.sandbox_init_time);
-            if time_since_sandbox_init.as_millis() > PROACTIVE_INITIALIZATION_THRESHOLD_MS.into() {
-                proactive_initialization = true;
+            if self.aws_config.is_snapstart() {
+                match self.restore_time {
+                    None => {
+                        // PlatformRestoreStart hasn't arrived yet — restore and invoke
+                        // happened close together, so this is a cold start (not proactive).
+                        cold_start = true;
+                    }
+                    Some(restore_time) => {
+                        let now = Instant::now();
+                        let time_since_restore = now.duration_since(restore_time);
+                        if time_since_restore.as_millis()
+                            > PROACTIVE_INITIALIZATION_THRESHOLD_MS.into()
+                        {
+                            proactive_initialization = true;
+                        } else {
+                            cold_start = true;
+                        }
+                    }
+                }
             } else {
-                cold_start = true;
+                let now = Instant::now();
+                let time_since_sandbox_init = now.duration_since(self.aws_config.sandbox_init_time);
+                if time_since_sandbox_init.as_millis()
+                    > PROACTIVE_INITIALIZATION_THRESHOLD_MS.into()
+                {
+                    proactive_initialization = true;
+                } else {
+                    cold_start = true;
+                }
             }
 
             // Resolve runtime only once
@@ -373,6 +414,8 @@ impl Processor {
     /// This is used to create a `snapstart_restore` span, since this telemetry event does not
     /// provide a `request_id`, we try to guess which invocation is the restore similar to init.
     pub fn on_platform_restore_start(&mut self, time: DateTime<Utc>) {
+        self.restore_time = Some(Instant::now());
+
         let start_time: i64 = SystemTime::from(time)
             .duration_since(UNIX_EPOCH)
             .expect("time went backwards")
@@ -775,6 +818,11 @@ impl Processor {
         // Release the context now that all processing for this invocation is complete.
         // This prevents unbounded memory growth across warm invocations.
         self.context_buffer.remove(request_id);
+        // Prune the corresponding reparenting entry so that update_reparenting does not
+        // warn about a missing context for already-completed invocations.
+        self.context_buffer
+            .sorted_reparenting_info
+            .retain(|info| info.request_id != *request_id);
         trace!(
             "Context released (buffer size after remove: {})",
             self.context_buffer.size()
@@ -979,7 +1027,10 @@ impl Processor {
 
         // Set the extracted trace context to the spans
         if let Some(sc) = &context.extracted_span_context {
-            context.invocation_span.trace_id = sc.trace_id;
+            #[allow(clippy::cast_possible_truncation)] // Datadog protocol uses lower 64 bits
+            {
+                context.invocation_span.trace_id = sc.trace_id as u64;
+            }
             context.invocation_span.parent_id = sc.span_id;
 
             // Set the right data to the correct root level span,
@@ -1082,7 +1133,7 @@ impl Processor {
     pub fn extract_span_context(
         headers: &HashMap<String, String>,
         payload_value: &Value,
-        propagator: Arc<impl Propagator>,
+        propagator: Arc<DatadogCompositePropagator>,
     ) -> Option<SpanContext> {
         if let Some(sc) =
             span_inferrer::extract_span_context(payload_value, Arc::clone(&propagator))
@@ -1093,14 +1144,14 @@ impl Processor {
         if let Some(sc) = payload_value
             .get("request")
             .and_then(|req| req.get("headers"))
-            .and_then(|headers| propagator.extract(headers))
+            .and_then(|headers| propagator.extract(&JsonCarrier(headers)))
         {
             debug!("Extracted trace context from event.request.headers");
             return Some(sc);
         }
 
         if let Some(payload_headers) = payload_value.get("headers")
-            && let Some(sc) = propagator.extract(payload_headers)
+            && let Some(sc) = propagator.extract(&JsonCarrier(payload_headers))
         {
             debug!("Extracted trace context from event headers");
             return Some(sc);
@@ -1202,14 +1253,17 @@ impl Processor {
             self.inferrer.set_status_code(status_code_as_string);
         }
 
-        let mut trace_id = 0;
-        let mut parent_id = 0;
+        let mut trace_id: u64 = 0;
+        let mut parent_id: u64 = 0;
         let mut tags: HashMap<String, String> = HashMap::new();
 
         // If we have a trace context, this means we got it from
         // distributed tracing
         if let Some(sc) = &context.extracted_span_context {
-            trace_id = sc.trace_id;
+            #[allow(clippy::cast_possible_truncation)] // Datadog protocol uses lower 64 bits
+            {
+                trace_id = sc.trace_id as u64;
+            }
             parent_id = sc.span_id;
             tags.extend(sc.tags.clone());
         }
@@ -1235,9 +1289,9 @@ impl Processor {
                     .insert(TAG_SAMPLING_PRIORITY.to_string(), priority);
             }
 
-            // Extract tags from headers
-            // Used for 128 bit trace ids
-            tags = DatadogHeaderPropagator::extract_tags(&headers);
+            // Extract _dd.p.* propagation tags from x-datadog-tags header
+            let carrier_tags = headers.get(DATADOG_TAGS_KEY).map_or("", String::as_str);
+            tags = crate::traces::propagation::extract_propagation_tags(carrier_tags);
         }
 
         // We should always use the generated span id from the tracer
@@ -1342,6 +1396,29 @@ impl Processor {
             self.context_buffer.add_tracer_span(request_id, span);
         }
     }
+
+    /// Forwards durable execution context extracted from an `aws.lambda` span to the logs
+    /// pipeline so it can release held logs and tag them with durable execution metadata.
+    pub async fn forward_durable_context(
+        &mut self,
+        request_id: &str,
+        execution_id: &str,
+        execution_name: &str,
+        first_invocation: Option<bool>,
+    ) {
+        if let Err(e) = self
+            .durable_context_tx
+            .send(DurableContextUpdate {
+                request_id: request_id.to_owned(),
+                execution_id: execution_id.to_owned(),
+                execution_name: execution_name.to_owned(),
+                first_invocation,
+            })
+            .await
+        {
+            error!("Invocation Processor | Failed to forward durable context to logs agent: {e}");
+        }
+    }
 }
 
 #[cfg(test)]
@@ -1387,7 +1464,15 @@ mod tests {
         tokio::spawn(service.run());
 
         let propagator = Arc::new(DatadogCompositePropagator::new(Arc::clone(&config)));
-        Processor::new(tags_provider, config, aws_config, handle, propagator)
+        let (durable_context_tx, _) = tokio::sync::mpsc::channel(1);
+        Processor::new(
+            tags_provider,
+            config,
+            aws_config,
+            handle,
+            propagator,
+            durable_context_tx,
+        )
     }
 
     #[test]
@@ -1924,7 +2009,15 @@ mod tests {
 
         let propagator = Arc::new(DatadogCompositePropagator::new(Arc::clone(&config)));
 
-        let processor = Processor::new(tags_provider, config, aws_config, handle, propagator);
+        let (durable_context_tx, _) = tokio::sync::mpsc::channel(1);
+        let processor = Processor::new(
+            tags_provider,
+            config,
+            aws_config,
+            handle,
+            propagator,
+            durable_context_tx,
+        );
 
         assert!(
             processor.is_managed_instance_mode(),
@@ -2048,8 +2141,8 @@ mod tests {
     fn test_extract_span_context_priority_order() {
         let config = Arc::new(config::Config {
             trace_propagation_style_extract: vec![
-                config::trace_propagation_style::TracePropagationStyle::Datadog,
-                config::trace_propagation_style::TracePropagationStyle::TraceContext,
+                datadog_opentelemetry::propagation::TracePropagationStyle::Datadog,
+                datadog_opentelemetry::propagation::TracePropagationStyle::TraceContext,
             ],
             ..config::Config::default()
         });
@@ -2086,8 +2179,8 @@ mod tests {
     fn test_extract_span_context_no_request_headers() {
         let config = Arc::new(config::Config {
             trace_propagation_style_extract: vec![
-                config::trace_propagation_style::TracePropagationStyle::Datadog,
-                config::trace_propagation_style::TracePropagationStyle::TraceContext,
+                datadog_opentelemetry::propagation::TracePropagationStyle::Datadog,
+                datadog_opentelemetry::propagation::TracePropagationStyle::TraceContext,
             ],
             ..config::Config::default()
         });
@@ -2108,6 +2201,135 @@ mod tests {
         assert!(
             result.is_none(),
             "Should return None when no trace context found"
+        );
+    }
+
+    fn make_trace_sender(config: Arc<config::Config>) -> Arc<SendingTraceProcessor> {
+        use libdd_trace_obfuscation::obfuscation_config::ObfuscationConfig;
+        let (stats_concentrator_service, stats_concentrator_handle) =
+            StatsConcentratorService::new(Arc::clone(&config));
+        tokio::spawn(stats_concentrator_service.run());
+        Arc::new(SendingTraceProcessor {
+            appsec: None,
+            processor: Arc::new(trace_processor::ServerlessTraceProcessor {
+                obfuscation_config: Arc::new(
+                    ObfuscationConfig::new().expect("Failed to create ObfuscationConfig"),
+                ),
+            }),
+            trace_tx: tokio::sync::mpsc::channel(1).0,
+            stats_generator: Arc::new(StatsGenerator::new(stats_concentrator_handle)),
+        })
+    }
+
+    // Regression test for SLES-2810: sorted_reparenting_info must be pruned when the
+    // context is released in on_platform_report, so that update_reparenting does not
+    // emit spurious warnings for already-completed invocations.
+    #[tokio::test]
+    async fn test_reparenting_info_pruned_after_on_platform_report() {
+        let mut p = setup();
+        let request_id = String::from("test-request-id");
+
+        p.on_invoke_event(request_id.clone());
+        p.add_reparenting(request_id.clone(), 42, 0);
+        assert_eq!(
+            p.context_buffer.sorted_reparenting_info.len(),
+            1,
+            "reparenting entry must exist before report"
+        );
+
+        let config = Arc::new(config::Config::default());
+        let tags_provider = Arc::new(provider::Provider::new(
+            Arc::clone(&config),
+            LAMBDA_RUNTIME_SLUG.to_string(),
+            &HashMap::from([("function_arn".to_string(), "test-arn".to_string())]),
+        ));
+        let trace_sender = make_trace_sender(config);
+
+        p.on_platform_report(
+            &request_id,
+            ReportMetrics::OnDemand(OnDemandReportMetrics {
+                duration_ms: 10.0,
+                billed_duration_ms: 11,
+                memory_size_mb: 128,
+                max_memory_used_mb: 64,
+                init_duration_ms: None,
+                restore_duration_ms: None,
+            }),
+            chrono::Utc::now().timestamp(),
+            Status::Success,
+            None,
+            None,
+            tags_provider,
+            trace_sender,
+        )
+        .await;
+
+        assert!(
+            p.context_buffer.sorted_reparenting_info.is_empty(),
+            "reparenting entry must be pruned after on_platform_report"
+        );
+    }
+
+    // Regression test for SLES-2810: update_reparenting must not visit stale entries
+    // whose context has already been released, preventing the warning flood.
+    #[tokio::test]
+    async fn test_update_reparenting_ignores_completed_invocations() {
+        let mut p = setup();
+
+        // Invocation A completes fully.
+        let request_id_a = String::from("request-a");
+        p.on_invoke_event(request_id_a.clone());
+        p.add_reparenting(request_id_a.clone(), 11, 0);
+
+        let config = Arc::new(config::Config::default());
+        let tags_provider = Arc::new(provider::Provider::new(
+            Arc::clone(&config),
+            LAMBDA_RUNTIME_SLUG.to_string(),
+            &HashMap::from([("function_arn".to_string(), "test-arn".to_string())]),
+        ));
+        let trace_sender = make_trace_sender(Arc::clone(&config));
+
+        p.on_platform_report(
+            &request_id_a,
+            ReportMetrics::OnDemand(OnDemandReportMetrics {
+                duration_ms: 10.0,
+                billed_duration_ms: 11,
+                memory_size_mb: 128,
+                max_memory_used_mb: 64,
+                init_duration_ms: None,
+                restore_duration_ms: None,
+            }),
+            chrono::Utc::now().timestamp(),
+            Status::Success,
+            None,
+            None,
+            tags_provider,
+            trace_sender,
+        )
+        .await;
+
+        // Invocation B is in-flight (context still live).
+        let request_id_b = String::from("request-b");
+        p.on_invoke_event(request_id_b.clone());
+        p.add_reparenting(request_id_b.clone(), 22, 0);
+
+        // Simulate the trace agent path: clone reparenting_info, then call update_reparenting.
+        // Before the fix this clone contained the stale entry for request-a, causing a warning.
+        let reparenting_info = p.get_reparenting_info();
+
+        // Only the live invocation B should be present.
+        assert_eq!(
+            reparenting_info.len(),
+            1,
+            "only the in-flight invocation must remain in reparenting_info"
+        );
+        assert_eq!(reparenting_info[0].request_id, request_id_b);
+
+        // update_reparenting must return no contexts to send (span IDs still unset).
+        let ctx_to_send = p.update_reparenting(reparenting_info);
+        assert!(
+            ctx_to_send.is_empty(),
+            "no contexts should be ready to send yet"
         );
     }
 }

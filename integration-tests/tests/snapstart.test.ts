@@ -101,6 +101,23 @@ describe('Snapstart Integration Tests', () => {
         );
         expect(coldStartSpan).toBeUndefined();
       });
+
+      it('should have aws.lambda span with cold_start=true', () => {
+        const result = getRestoreInvocation();
+        expect(result).toBeDefined();
+        const trace = result.traces![0];
+        const awsLambdaSpan = trace.spans.find((span: any) =>
+          span.attributes.operation_name === 'aws.lambda'
+        );
+        expect(awsLambdaSpan).toBeDefined();
+        expect(awsLambdaSpan).toMatchObject({
+          attributes: {
+            custom: {
+              cold_start: 'true'
+            }
+          }
+        });
+      });
     });
 
     describe('second invocation (warm)', () => {
@@ -145,6 +162,23 @@ describe('Snapstart Integration Tests', () => {
           span.attributes.operation_name === 'aws.lambda.cold_start'
         );
         expect(coldStartSpan).toBeUndefined();
+      });
+
+      it('should have aws.lambda span with cold_start=false', () => {
+        const result = getWarmInvocation();
+        expect(result).toBeDefined();
+        const trace = result.traces![0];
+        const awsLambdaSpan = trace.spans.find((span: any) =>
+          span.attributes.operation_name === 'aws.lambda'
+        );
+        expect(awsLambdaSpan).toBeDefined();
+        expect(awsLambdaSpan).toMatchObject({
+          attributes: {
+            custom: {
+              cold_start: 'false'
+            }
+          }
+        });
       });
     });
 

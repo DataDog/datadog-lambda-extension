@@ -29,7 +29,7 @@ use crate::{
     lifecycle::invocation::{
         context::ReparentingInfo, processor_service::InvocationProcessorHandle,
     },
-    tags::provider,
+    tags::{self, provider},
     traces::{
         INVOCATION_SPAN_RESOURCE,
         proxy_aggregator::{self, ProxyRequest},
@@ -458,7 +458,7 @@ impl TraceAgent {
                     V2_DEBUGGER_ENDPOINT_PATH,
                     DEBUGGER_DIAGNOSTICS_ENDPOINT_PATH,
                 ],
-                "client_drop_p0s": true,
+                "client_drop_p0s": false,
             }
         );
         (StatusCode::OK, response_json.to_string()).into_response()
@@ -593,6 +593,32 @@ impl TraceAgent {
                 {
                     error!("Failed to add tracer span to processor: {}", e);
                 }
+
+                if span.name == "aws.lambda"
+                    && let (Some(request_id), Some(execution_id), Some(execution_name)) = (
+                        span.meta.get(tags::lambda::tags::REQUEST_ID_KEY),
+                        span.meta.get(tags::lambda::tags::DURABLE_EXECUTION_ID_KEY),
+                        span.meta
+                            .get(tags::lambda::tags::DURABLE_EXECUTION_NAME_KEY),
+                    )
+                {
+                    let first_invocation = span
+                        .meta
+                        .get(tags::lambda::tags::DURABLE_FUNCTION_FIRST_INVOCATION_KEY)
+                        .map(|v| v == "true");
+                    if let Err(e) = invocation_processor_handle
+                        .forward_durable_context(
+                            request_id.clone(),
+                            execution_id.clone(),
+                            execution_name.clone(),
+                            first_invocation,
+                        )
+                        .await
+                    {
+                        error!("Failed to forward durable context to processor: {e}");
+                    }
+                }
+
                 handle_reparenting(&mut reparenting_info, &mut span);
 
                 // Keep the span

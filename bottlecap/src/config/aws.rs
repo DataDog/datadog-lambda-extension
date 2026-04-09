@@ -1,6 +1,8 @@
 use std::env;
 use tokio::time::Instant;
 
+use crate::tags::lambda::tags::SNAP_START_VALUE;
+
 const AWS_DEFAULT_REGION: &str = "AWS_DEFAULT_REGION";
 const AWS_ACCESS_KEY_ID: &str = "AWS_ACCESS_KEY_ID";
 const AWS_SECRET_ACCESS_KEY: &str = "AWS_SECRET_ACCESS_KEY";
@@ -45,6 +47,11 @@ impl AwsConfig {
     pub fn is_managed_instance_mode(&self) -> bool {
         self.initialization_type
             .eq(LAMBDA_MANAGED_INSTANCES_INIT_TYPE)
+    }
+
+    #[must_use]
+    pub fn is_snapstart(&self) -> bool {
+        self.initialization_type.eq(SNAP_START_VALUE)
     }
 }
 

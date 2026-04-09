@@ -6,7 +6,7 @@ import * as lambda from 'aws-cdk-lib/aws-lambda';
 import { LayerVersion } from "aws-cdk-lib/aws-lambda";
 import {ACCOUNT, REGION} from "../config";
 
-export const datadogSecretArn = process.env.DATADOG_API_SECRET_ARN!;
+export const datadogSecretArn = 'arn:aws:secretsmanager:us-east-1:425362996713:secret:extension-integration-tests-api-key-PnEPHz';
 export const extensionLayerArn = process.env.EXTENSION_LAYER_ARN!;
 
 export const defaultNodeRuntime = lambda.Runtime.NODEJS_24_X;
