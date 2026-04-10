@@ -282,6 +282,7 @@ async fn extension_loop_idle(
         match extension::next_event(client, &r.extension_id, &aws_config.runtime_api).await {
             Ok(_) => {
                 debug!("Extension is idle, skipping next event");
+                debug!("This is a test");
             }
             Err(e) => {
                 error!("Error getting next event: {e:?}");
