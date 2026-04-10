@@ -9,7 +9,6 @@ use tokio::sync::OnceCell;
 use crate::FLUSH_RETRY_COUNT;
 use crate::config;
 use crate::lifecycle::invocation::processor::S_TO_MS;
-use crate::traces::http_client::HttpClient;
 use crate::traces::stats_aggregator::StatsAggregator;
 use dogstatsd::api_key::ApiKeyFactory;
 use libdd_common::Endpoint;
@@ -22,7 +21,6 @@ pub struct StatsFlusher {
     config: Arc<config::Config>,
     api_key_factory: Arc<ApiKeyFactory>,
     endpoint: OnceCell<Endpoint>,
-    http_client: HttpClient,
 }
 
 impl StatsFlusher {
@@ -31,14 +29,12 @@ impl StatsFlusher {
         api_key_factory: Arc<ApiKeyFactory>,
         aggregator: Arc<Mutex<StatsAggregator>>,
         config: Arc<config::Config>,
-        http_client: HttpClient,
     ) -> Self {
         StatsFlusher {
             aggregator,
             config,
             api_key_factory,
             endpoint: OnceCell::new(),
-            http_client,
         }
     }
 
@@ -96,11 +92,10 @@ impl StatsFlusher {
 
         for attempt in 1..=FLUSH_RETRY_COUNT {
             let start = std::time::Instant::now();
-            let resp = stats_utils::send_stats_payload_with_client(
+            let resp = stats_utils::send_stats_payload::<crate::traces::http_client::HttpClient>(
                 serialized_stats_payload.clone(),
                 endpoint,
                 api_key.as_str(),
-                Some(&self.http_client),
             )
             .await;
             let elapsed = start.elapsed();

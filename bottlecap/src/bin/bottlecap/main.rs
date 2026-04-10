@@ -1130,7 +1130,6 @@ fn start_trace_agent(
         api_key_factory.clone(),
         stats_aggregator.clone(),
         Arc::clone(config),
-        trace_http_client.clone(),
     ));
 
     let stats_processor = Arc::new(stats_processor::ServerlessStatsProcessor {});
