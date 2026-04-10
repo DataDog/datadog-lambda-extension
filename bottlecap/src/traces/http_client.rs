@@ -6,9 +6,11 @@
 //! This module provides the HTTP client type required by `libdd_trace_utils`
 //! for sending traces and stats to Datadog intake endpoints.
 
+use http_body_util::BodyExt;
 use hyper_http_proxy;
 use hyper_rustls::HttpsConnectorBuilder;
-use libdd_common::{GenericHttpClient, http_common};
+use libdd_common::capabilities::{HttpClientTrait, HttpError};
+use libdd_common::http_common::{self, Body, GenericHttpClient};
 use rustls::RootCertStore;
 use rustls_pki_types::CertificateDer;
 use std::error::Error;
@@ -17,18 +19,58 @@ use std::io::BufReader;
 use std::sync::{Arc, LazyLock};
 use tracing::debug;
 
-/// Type alias for the HTTP client used by trace and stats flushers.
-///
-/// This is the client type expected by `libdd_trace_utils::SendData::send()`.
-pub type HttpClient =
+type InnerHttpClient =
     GenericHttpClient<hyper_http_proxy::ProxyConnector<libdd_common::connector::Connector>>;
 
+/// HTTP client wrapper that implements `HttpClientTrait` for use with
+/// `libdd_trace_utils` trace and stats sending APIs.
+#[derive(Clone, Debug)]
+pub struct HttpClient {
+    inner: InnerHttpClient,
+}
+
+impl HttpClientTrait for HttpClient {
+    fn new_client() -> Self {
+        let connector = libdd_common::connector::Connector::default();
+        let proxy_connector =
+            hyper_http_proxy::ProxyConnector::new(connector).expect("Failed to create connector");
+        Self {
+            inner: http_common::client_builder()
+                .pool_max_idle_per_host(0)
+                .build(proxy_connector),
+        }
+    }
+
+    #[allow(clippy::manual_async_fn)]
+    fn request(
+        &self,
+        req: hyper::http::Request<bytes::Bytes>,
+    ) -> impl std::future::Future<Output = Result<hyper::http::Response<bytes::Bytes>, HttpError>> + Send
+    {
+        let client = self.inner.clone();
+        async move {
+            let hyper_req = req.map(Body::from_bytes);
+            let response = client
+                .request(hyper_req)
+                .await
+                .map_err(|e| HttpError::Network(e.into()))?;
+            let (parts, body) = response.into_parts();
+            let collected = body
+                .collect()
+                .await
+                .map_err(|e| HttpError::ResponseBody(e.into()))?
+                .to_bytes();
+            Ok(hyper::http::Response::from_parts(parts, collected))
+        }
+    }
+}
+
 /// Initialize the crypto provider needed for setting custom root certificates.
+/// Uses ring for non-FIPS builds; FIPS builds install the aws-lc-rs FIPS provider
+/// in `fips::prepare_client_provider()` before this is called.
 fn ensure_crypto_provider_initialized() {
     static INIT_CRYPTO_PROVIDER: LazyLock<()> = LazyLock::new(|| {
-        #[cfg(unix)]
-        if let Err(_already_installed) =
-            rustls::crypto::aws_lc_rs::default_provider().install_default()
+        if let Err(_already_installed) = rustls::crypto::ring::default_provider().install_default()
         {
             debug!(
                 "HTTP_CLIENT | Default CryptoProvider already installed, using existing provider"
@@ -106,7 +148,7 @@ pub fn create_client(
     proxy_https: Option<&String>,
     tls_cert_file: Option<&String>,
     skip_ssl_validation: bool,
-) -> Result<HttpClient, Box<dyn Error>> {
+) -> Result<HttpClient, Box<dyn Error + Send + Sync>> {
     if skip_ssl_validation && tls_cert_file.is_some() {
         debug!(
             "HTTP_CLIENT | skip_ssl_validation=true overrides tls_cert_file={:?}, custom certificate will be ignored",
@@ -178,20 +220,22 @@ pub fn create_client(
         // invocations. Pooled connections become stale during this time, causing failures
         // when reused. Setting pool_max_idle_per_host(0) ensures each request gets a fresh
         // connection, matching the pattern used in libdatadog's new_client_periodic().
-        let client = http_common::client_builder()
+        let inner = http_common::client_builder()
             .pool_max_idle_per_host(0)
             .build(proxy_connector);
         debug!(
             "HTTP_CLIENT | Proxy connector created with proxy: {:?}",
             proxy_https
         );
-        Ok(client)
+        Ok(HttpClient { inner })
     } else {
         let proxy_connector = hyper_http_proxy::ProxyConnector::new(connector)?;
         // Disable connection pooling to avoid stale connections after Lambda freeze/resume.
         // See comment above for detailed explanation.
-        Ok(http_common::client_builder()
-            .pool_max_idle_per_host(0)
-            .build(proxy_connector))
+        Ok(HttpClient {
+            inner: http_common::client_builder()
+                .pool_max_idle_per_host(0)
+                .build(proxy_connector),
+        })
     }
 }
