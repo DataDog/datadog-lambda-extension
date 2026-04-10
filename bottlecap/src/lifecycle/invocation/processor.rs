@@ -1146,6 +1146,7 @@ impl Processor {
             .and_then(|req| req.get("headers"))
             .and_then(|headers| propagator.extract(&JsonCarrier(headers)))
         {
+            debug!("Another test");
             debug!("Extracted trace context from event.request.headers");
             return Some(sc);
         }
