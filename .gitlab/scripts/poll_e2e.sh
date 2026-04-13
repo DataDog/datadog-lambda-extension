@@ -38,7 +38,7 @@ TRIGGER_RESPONSE=$(curl --silent --request POST \
         --arg ref "$E2E_REF" \
         --arg arn "$EXTENSION_LAYER_ARN" \
         --arg ver "${EXTENSION_VERSION:-}" \
-        '{ref: $ref, variables: [{key: "EXTENSION_LAYER_ARN", value: $arn}, {key: "EXTENSION_VERSION", value: $ver}]}')" \
+        '{ref: $ref, variables: [{key: "DD_EXTENSION_ARN", value: $arn}, {key: "EXTENSION_VERSION", value: $ver}]}')" \
     "${CI_API_V4_URL}/projects/${E2E_PROJECT_ENCODED}/pipeline")
 
 PIPELINE_ID=$(echo "$TRIGGER_RESPONSE" | jq -r '.id // empty')
