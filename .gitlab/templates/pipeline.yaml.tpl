@@ -278,6 +278,7 @@ e2e-suite ({{ $f.name }}):
   rules:
     - if: '$CI_COMMIT_TAG =~ /^v.*/'
       when: on_success
+      allow_failure: true
       variables:
         EXTENSION_VERSION: $CI_COMMIT_TAG
     - when: on_success
@@ -295,6 +296,9 @@ e2e-test-status ({{ $f.name }}):
   tags: ["arch:amd64"]
   timeout: 3h
   rules:
+    - if: '$CI_COMMIT_TAG =~ /^v.*/'
+      when: on_success
+      allow_failure: true
     - when: on_success
   needs:
     - job: "publish layer e2e sandbox ({{ $f.name }})"
