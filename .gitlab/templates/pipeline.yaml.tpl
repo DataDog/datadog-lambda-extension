@@ -272,9 +272,9 @@ publish layer e2e sandbox ({{ $f.name }}):
 
 e2e-suite ({{ $f.name }}):
   stage: e2e
-  trigger:
-    project: DataDog/serverless-e2e-tests
-    strategy: depend
+  image: registry.ddbuild.io/images/docker:20.10-py3
+  tags: ["arch:amd64"]
+  timeout: 3h
   rules:
     - if: '$CI_COMMIT_TAG =~ /^v.*/'
       when: on_success
@@ -287,23 +287,6 @@ e2e-suite ({{ $f.name }}):
   needs:
     - job: "publish layer e2e sandbox ({{ $f.name }})"
       artifacts: true
-  variables:
-    EXTENSION_LAYER_ARN: ${EXTENSION_LAYER_ARN}
-
-e2e-test-status ({{ $f.name }}):
-  stage: e2e
-  image: registry.ddbuild.io/images/docker:20.10-py3
-  tags: ["arch:amd64"]
-  timeout: 3h
-  rules:
-    - if: '$CI_COMMIT_TAG =~ /^v.*/'
-      when: on_success
-      allow_failure: true
-    - when: on_success
-  needs:
-    - job: "publish layer e2e sandbox ({{ $f.name }})"
-  variables:
-    E2E_BRIDGE_JOB_NAME: "e2e-suite ({{ $f.name }})"
   script:
     - .gitlab/scripts/poll_e2e.sh
 
