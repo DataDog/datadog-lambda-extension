@@ -230,19 +230,15 @@ publish layer [self-monitoring] ({{ $flavor.name }}):
 
 {{ end }}  # end flavors
 
+{{ range $f := (ds "flavors").flavors }}
+{{ if $f.needs_layer_publish }}
+{{- $dotenvE2E := printf "%s_sandbox_e2e.env" $f.suffix }}
 {{ with $environment := (ds "environments").environments.sandbox }}
 
-publish layer e2e sandbox:
+publish layer e2e sandbox ({{ $f.name }}):
   stage: e2e
   tags: ["arch:amd64"]
   image: ${CI_DOCKER_TARGET_IMAGE}:${CI_DOCKER_TARGET_VERSION}
-  parallel:
-    matrix:
-      {{ range (ds "flavors").flavors }}{{ if .needs_layer_publish }}
-      - FLAVOR: {{ .suffix }}
-        ARCHITECTURE: {{ .arch }}
-        LAYER_NAME_BASE_SUFFIX: "{{ .layer_name_base_suffix }}"
-      {{ end }}{{ end }}
   rules:
     - if: '$CI_COMMIT_TAG =~ /^v.*/'
       when: on_success
@@ -252,42 +248,33 @@ publish layer e2e sandbox:
       variables:
         LAYER_DESCRIPTION: $CI_COMMIT_SHORT_SHA
   needs:
-    {{ range (ds "flavors").flavors }}{{ if .needs_layer_publish }}
-    - layer ({{ .name }})
-    {{ if and (index . "max_layer_compressed_size_mb") (index . "max_layer_uncompressed_size_mb") }}
-    - check layer size ({{ .name }})
-    {{ end }}
-    {{ end }}{{ end }}
+    - layer ({{ $f.name }})
+{{ if and (index $f "max_layer_compressed_size_mb") (index $f "max_layer_uncompressed_size_mb") }}
+    - check layer size ({{ $f.name }})
+{{ end }}
   dependencies:
-    {{ range (ds "flavors").flavors }}{{ if .needs_layer_publish }}
-    - layer ({{ .name }})
-    {{ end }}{{ end }}
+    - layer ({{ $f.name }})
   artifacts:
     reports:
-      dotenv: e2e_layer.env
+      dotenv: {{ $dotenvE2E }}
   variables:
-    LAYER_FILE: "datadog_extension-${FLAVOR}.zip"
+    LAYER_NAME_BASE_SUFFIX: {{ $f.layer_name_base_suffix }}
+    ARCHITECTURE: {{ $f.arch }}
+    LAYER_FILE: datadog_extension-{{ $f.suffix }}.zip
     REGION: {{ $e2e_region }}
     ADD_LAYER_VERSION_PERMISSIONS: {{ $environment.add_layer_version_permissions }}
     AUTOMATICALLY_BUMP_VERSION: {{ $environment.automatically_bump_version }}
-    DOTENV: e2e_layer.env
+    DOTENV: {{ $dotenvE2E }}
   before_script:
     - EXTERNAL_ID_NAME={{ $environment.external_id }} ROLE_TO_ASSUME={{ $environment.role_to_assume }} AWS_ACCOUNT={{ $environment.account }} source .gitlab/scripts/get_secrets.sh
   script:
     - .gitlab/scripts/publish_layers.sh
 
-e2e-suite:
+e2e-suite ({{ $f.name }}):
   stage: e2e
   trigger:
     project: DataDog/serverless-e2e-tests
     strategy: depend
-  parallel:
-    matrix:
-      {{ range (ds "flavors").flavors }}{{ if .needs_layer_publish }}
-      - FLAVOR: {{ .suffix }}
-        ARCHITECTURE: {{ .arch }}
-        LAYER_NAME_BASE_SUFFIX: "{{ .layer_name_base_suffix }}"
-      {{ end }}{{ end }}
   rules:
     - if: '$CI_COMMIT_TAG =~ /^v.*/'
       when: on_success
@@ -297,42 +284,27 @@ e2e-suite:
       variables:
         EXTENSION_VERSION: $CI_COMMIT_SHORT_SHA
   needs:
-    - job: "publish layer e2e sandbox"
-      parallel:
-        matrix:
-          - FLAVOR: $FLAVOR
-            ARCHITECTURE: $ARCHITECTURE
-            LAYER_NAME_BASE_SUFFIX: $LAYER_NAME_BASE_SUFFIX
+    - job: "publish layer e2e sandbox ({{ $f.name }})"
       artifacts: true
   variables:
     EXTENSION_LAYER_ARN: ${EXTENSION_LAYER_ARN}
 
-e2e-test-status:
+e2e-test-status ({{ $f.name }}):
   stage: e2e
   image: registry.ddbuild.io/images/docker:20.10-py3
   tags: ["arch:amd64"]
   timeout: 3h
   rules:
     - when: on_success
-  parallel:
-    matrix:
-      {{ range (ds "flavors").flavors }}{{ if .needs_layer_publish }}
-      - FLAVOR: {{ .suffix }}
-        ARCHITECTURE: {{ .arch }}
-        LAYER_NAME_BASE_SUFFIX: "{{ .layer_name_base_suffix }}"
-      {{ end }}{{ end }}
   needs:
-    - job: "publish layer e2e sandbox"
-      parallel:
-        matrix:
-          - FLAVOR: $FLAVOR
-            ARCHITECTURE: $ARCHITECTURE
-            LAYER_NAME_BASE_SUFFIX: $LAYER_NAME_BASE_SUFFIX
+    - job: "publish layer e2e sandbox ({{ $f.name }})"
   variables:
-    E2E_BRIDGE_JOB_NAME: "e2e-suite: [$FLAVOR, $ARCHITECTURE, $LAYER_NAME_BASE_SUFFIX]"
+    E2E_BRIDGE_JOB_NAME: "e2e-suite ({{ $f.name }})"
   script:
     - .gitlab/scripts/poll_e2e.sh
 
+{{ end }}
+{{ end }}
 {{ end }}
 
 {{ range $multi_arch_image_flavor := (ds "flavors").multi_arch_image_flavors }}
