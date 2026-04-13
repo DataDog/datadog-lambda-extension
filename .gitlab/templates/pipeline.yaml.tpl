@@ -235,7 +235,7 @@ publish private images ({{ $multi_arch_image_flavor.name }}):
   variables:
     SUFFIX: {{ $multi_arch_image_flavor.suffix }}
   before_script:
-    {{ with $environment := (ds "environments").environments.sandbox }}
+    {{ with $environment := (ds "environments").environments.serverless_testing }}
     - EXTERNAL_ID_NAME={{ $environment.external_id }} ROLE_TO_ASSUME={{ $environment.role_to_assume }} AWS_ACCOUNT={{ $environment.account }} source .gitlab/scripts/get_secrets.sh
     {{ end }}
   script:
