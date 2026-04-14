@@ -279,11 +279,7 @@ e2e-suite ({{ $f.name }}):
     - if: '$CI_COMMIT_TAG =~ /^v.*/'
       when: on_success
       allow_failure: true
-      variables:
-        EXTENSION_VERSION: $CI_COMMIT_TAG
     - when: on_success
-      variables:
-        EXTENSION_VERSION: $CI_COMMIT_SHORT_SHA
   needs:
     - job: "publish layer e2e sandbox ({{ $f.name }})"
       artifacts: true
