@@ -77,10 +77,10 @@ while true; do
             exit 0
             ;;
         running|pending|created|waiting_for_resource|preparing)
-            echo "still running, retrying in 2 minutes..."
+            echo "still running, checking again in 2 minutes..."
             ;;
         *)
-            echo "unknown status, retrying in 2 minutes..."
+            echo "unknown status, checking again in 2 minutes..."
             ;;
     esac
 
