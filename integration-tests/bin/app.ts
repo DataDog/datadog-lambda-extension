@@ -7,6 +7,7 @@ import {Snapstart} from '../lib/stacks/snapstart';
 import {LambdaManagedInstancesStack} from '../lib/stacks/lmi';
 import {AuthStack} from '../lib/stacks/auth';
 import {AuthRoleStack} from '../lib/auth-role';
+import {Svls8800Stack} from '../lib/stacks/svls-8800';
 import {ACCOUNT, getIdentifier, REGION} from '../config';
 import {CapacityProviderStack} from "../lib/capacity-provider";
 
@@ -38,6 +39,9 @@ const stacks = [
         env,
     }),
     new AuthStack(app, `integ-${identifier}-auth`, {
+        env,
+    }),
+    new Svls8800Stack(app, `integ-${identifier}-svls-8800`, {
         env,
     }),
 ]

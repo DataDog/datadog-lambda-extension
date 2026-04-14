@@ -103,6 +103,12 @@ pub struct Processor {
     durable_context_tx: mpsc::Sender<DurableContextUpdate>,
     /// Time of the `SnapStart` restore event, set when `PlatformRestoreStart` is received.
     restore_time: Option<Instant>,
+    /// Tracks whether `PlatformInitStart` has been received. Used to defer the first
+    /// invocation metric in On-Demand mode until the `durable_function` tag is known.
+    platform_init_start_received: bool,
+    /// Timestamp for the first invocation metric, deferred in On-Demand cold-start mode
+    /// until `PlatformInitStart` fires and sets the `durable_function` tag (if applicable).
+    pending_invocation_metric_timestamp: Option<i64>,
 }
 
 impl Processor {
@@ -145,12 +151,23 @@ impl Processor {
             awaiting_first_invocation: false,
             durable_context_tx,
             restore_time: None,
+            platform_init_start_received: false,
+            pending_invocation_metric_timestamp: None,
         }
     }
 
     /// Given a `request_id`, creates the context and adds the enhanced metric offsets to the context buffer.
     ///
     pub fn on_invoke_event(&mut self, request_id: String) {
+        // Capture cold-start state before start_context() is called below.
+        // In On-Demand mode, PlatformInitStart arrives AFTER InvokeEvent during a cold start, so
+        // we cannot set the durable_function metric tag before emitting the invocation metric.
+        // Deferring the metric until PlatformInitStart fires fixes that race condition.
+        // SnapStart restores are excluded: they fire PlatformRestoreStart/Report (not
+        // PlatformInitStart/Report), so deferring would silently drop the invocation metric.
+        let is_on_demand_cold_start = !self.aws_config.is_managed_instance_mode()
+            && !self.aws_config.is_snapstart()
+            && self.context_buffer.is_empty();
         // In Managed Instance mode, if awaiting the first invocation after init, find and update the empty context created on init start
         if self.aws_config.is_managed_instance_mode() && self.awaiting_first_invocation {
             if self
@@ -215,8 +232,15 @@ impl Processor {
                 .add_enhanced_metric_data(&request_id, enhanced_metric_offsets);
         }
 
-        // Increment the invocation metric
-        self.enhanced_metrics.increment_invocation_metric(timestamp);
+        // Increment the invocation metric.
+        // In On-Demand cold-start mode, PlatformInitStart has not yet arrived, so we defer
+        // metric emission until on_platform_init_start (or on_platform_init_report as a
+        // fallback) to ensure the durable_function tag is set first if applicable.
+        if is_on_demand_cold_start && !self.platform_init_start_received {
+            self.pending_invocation_metric_timestamp = Some(timestamp);
+        } else {
+            self.enhanced_metrics.increment_invocation_metric(timestamp);
+        }
         self.enhanced_metrics.set_invoked_received();
 
         // MANAGED INSTANCE MODE: Check for buffered UniversalInstrumentationStart with request_id
@@ -332,6 +356,15 @@ impl Processor {
         {
             self.enhanced_metrics.set_durable_function_tag();
         }
+
+        // Set flag and emit the deferred invocation metric now that the durable_function tag
+        // (if applicable) has been set above.  This resolves the On-Demand cold-start race
+        // where InvokeEvent arrives before PlatformInitStart.
+        self.platform_init_start_received = true;
+        if let Some(ts) = self.pending_invocation_metric_timestamp.take() {
+            self.enhanced_metrics.increment_invocation_metric(ts);
+        }
+
         let start_time: i64 = SystemTime::from(time)
             .duration_since(UNIX_EPOCH)
             .expect("time went backwards")
@@ -386,6 +419,12 @@ impl Processor {
         duration_ms: f64,
         timestamp: i64,
     ) {
+        // Fallback: emit the deferred invocation metric if PlatformInitStart was never received
+        // (e.g., the telemetry event was dropped or arrived out of order).
+        if let Some(ts) = self.pending_invocation_metric_timestamp.take() {
+            self.enhanced_metrics.increment_invocation_metric(ts);
+        }
+
         self.enhanced_metrics
             .set_init_duration_metric(init_type, duration_ms, timestamp);
 
@@ -2330,6 +2369,192 @@ mod tests {
         assert!(
             ctx_to_send.is_empty(),
             "no contexts should be ready to send yet"
+        );
+    }
+
+    /// Regression test for SVLS-8800: in On-Demand mode the first invocation metric must carry
+    /// `durable_function:true` even though `InvokeEvent` arrives before `PlatformInitStart`.
+    ///
+    /// In the test environment `resolve_runtime_from_proc` returns `"unknown"`, so the full
+    /// expected tag set is `cold_start:true,durable_function:true,runtime:unknown`.
+    #[tokio::test]
+    async fn test_durable_function_tag_present_on_first_on_demand_cold_start_invocation() {
+        let mut processor = setup(); // on-demand mode
+
+        // Simulate the race: InvokeEvent arrives BEFORE PlatformInitStart.
+        processor.on_invoke_event("request-1".to_string());
+
+        // PlatformInitStart arrives after, carrying the DurableFunction runtime version.
+        let time = Utc::now();
+        processor.on_platform_init_start(time, Some("dotnet:8.DurableFunction.v4".to_string()));
+
+        // The metric should have been emitted by on_platform_init_start with the full tag set.
+        // Tags: cold_start:true (from set_init_tags), durable_function:true, runtime:unknown
+        // (resolve_runtime_from_proc returns "unknown" in non-Lambda test environments).
+        let ts: i64 = std::time::UNIX_EPOCH
+            .elapsed()
+            .expect("unable to poll clock, unrecoverable")
+            .as_secs()
+            .try_into()
+            .unwrap_or_default();
+        let ts_bucket = (ts / 10) * 10;
+
+        let full_tags = dogstatsd::metric::SortedTags::parse(
+            "cold_start:true,durable_function:true,runtime:unknown",
+        )
+        .ok();
+        let entry = processor
+            .enhanced_metrics
+            .aggr_handle
+            .get_entry_by_id(
+                crate::metrics::enhanced::constants::INVOCATIONS_METRIC.into(),
+                full_tags,
+                ts_bucket,
+            )
+            .await
+            .unwrap();
+        assert!(
+            entry.is_some(),
+            "Expected invocation metric with durable_function:true on first On-Demand cold-start"
+        );
+    }
+
+    /// Verify that a non-durable On-Demand cold start still emits the invocation metric after
+    /// PlatformInitStart (no durable_function tag expected).
+    ///
+    /// Expected tag set: `cold_start:true,runtime:unknown`
+    #[tokio::test]
+    async fn test_invocation_metric_emitted_after_platform_init_start_for_regular_runtime() {
+        let mut processor = setup(); // on-demand mode
+
+        processor.on_invoke_event("request-1".to_string());
+
+        let time = Utc::now();
+        processor.on_platform_init_start(time, Some("python:3.12.v10".to_string()));
+
+        let ts: i64 = std::time::UNIX_EPOCH
+            .elapsed()
+            .expect("unable to poll clock, unrecoverable")
+            .as_secs()
+            .try_into()
+            .unwrap_or_default();
+        let ts_bucket = (ts / 10) * 10;
+
+        // Metric should exist (emitted from on_platform_init_start).
+        let regular_tags =
+            dogstatsd::metric::SortedTags::parse("cold_start:true,runtime:unknown").ok();
+        let entry = processor
+            .enhanced_metrics
+            .aggr_handle
+            .get_entry_by_id(
+                crate::metrics::enhanced::constants::INVOCATIONS_METRIC.into(),
+                regular_tags,
+                ts_bucket,
+            )
+            .await
+            .unwrap();
+        assert!(
+            entry.is_some(),
+            "Expected invocation metric to be emitted after PlatformInitStart for regular runtime"
+        );
+
+        // durable_function:true must NOT be present.
+        let durable_tags = dogstatsd::metric::SortedTags::parse(
+            "cold_start:true,durable_function:true,runtime:unknown",
+        )
+        .ok();
+        let durable_entry = processor
+            .enhanced_metrics
+            .aggr_handle
+            .get_entry_by_id(
+                crate::metrics::enhanced::constants::INVOCATIONS_METRIC.into(),
+                durable_tags,
+                ts_bucket,
+            )
+            .await
+            .unwrap();
+        assert!(
+            durable_entry.is_none(),
+            "Expected no durable_function:true tag for regular runtime"
+        );
+    }
+
+    /// SnapStart restores must emit the invocation metric immediately (no deferral).
+    /// PlatformInitStart/Report are never fired for restores, so if we deferred the metric
+    /// it would be silently dropped — a regression vs. pre-fix behavior.
+    #[tokio::test]
+    async fn test_invocation_metric_emitted_immediately_for_snapstart_restore() {
+        let aws_config = Arc::new(AwsConfig {
+            region: "us-east-1".into(),
+            aws_lwa_proxy_lambda_runtime_api: Some("***".into()),
+            function_name: "test-function".into(),
+            sandbox_init_time: Instant::now(),
+            runtime_api: "***".into(),
+            exec_wrapper: None,
+            initialization_type: "snap-start".into(),
+        });
+
+        let config = Arc::new(config::Config {
+            service: Some("test-service".to_string()),
+            tags: HashMap::from([("test".to_string(), "tags".to_string())]),
+            ..config::Config::default()
+        });
+
+        let tags_provider = Arc::new(provider::Provider::new(
+            Arc::clone(&config),
+            LAMBDA_RUNTIME_SLUG.to_string(),
+            &HashMap::from([("function_arn".to_string(), "test-arn".to_string())]),
+        ));
+
+        let (service, handle) =
+            AggregatorService::new(EMPTY_TAGS, 1024).expect("failed to create aggregator service");
+        tokio::spawn(service.run());
+
+        let propagator = Arc::new(DatadogCompositePropagator::new(Arc::clone(&config)));
+        let (durable_context_tx, _) = tokio::sync::mpsc::channel(1);
+        let mut processor = Processor::new(
+            tags_provider,
+            config,
+            aws_config,
+            handle,
+            propagator,
+            durable_context_tx,
+        );
+
+        // Simulate a SnapStart restore: InvokeEvent fires, PlatformInitStart never arrives.
+        processor.on_invoke_event("request-1".to_string());
+
+        // Metric must have been emitted immediately (pending_invocation_metric_timestamp must be None).
+        assert!(
+            processor.pending_invocation_metric_timestamp.is_none(),
+            "SnapStart restore must not defer the invocation metric"
+        );
+
+        let ts: i64 = std::time::UNIX_EPOCH
+            .elapsed()
+            .expect("unable to poll clock, unrecoverable")
+            .as_secs()
+            .try_into()
+            .unwrap_or_default();
+        let ts_bucket = (ts / 10) * 10;
+
+        // The metric should be present in the aggregator (emitted immediately).
+        // SnapStart with no restore_time sets cold_start:true; resolve_runtime_from_proc
+        // returns "unknown" in non-Lambda test environments.
+        let tags = dogstatsd::metric::SortedTags::parse("cold_start:true,runtime:unknown").ok();
+        let entry = processor
+            .enhanced_metrics
+            .aggr_handle
+            .get_entry_by_id(
+                crate::metrics::enhanced::constants::INVOCATIONS_METRIC.into(),
+                tags,
+                ts_bucket,
+            )
+            .await
+            .unwrap();
+        assert!(
+            entry.is_some(),
+            "Expected invocation metric to be emitted immediately for SnapStart restore"
         );
     }
 }

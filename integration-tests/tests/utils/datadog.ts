@@ -289,6 +289,46 @@ export async function getEnhancedMetrics(
   return metrics;
 }
 
+/**
+ * Query the aws.lambda.enhanced.invocations count metric for a given function.
+ * Optionally filter by additional tags (e.g. "durable_function:true").
+ */
+export async function getInvocationMetricPoints(
+  functionName: string,
+  fromTime: number,
+  toTime: number,
+  extraTagFilter?: string,
+): Promise<MetricPoint[]> {
+  const baseFunctionName = getServiceName(functionName).toLowerCase();
+  let tagFilter = `functionname:${baseFunctionName}`;
+  if (extraTagFilter) {
+    tagFilter += `,${extraTagFilter}`;
+  }
+  const query = `sum:aws.lambda.enhanced.invocations{${tagFilter}}`;
+
+  console.log(`Querying invocation metric: ${query}`);
+
+  const response = await datadogClient.get('/api/v1/query', {
+    params: {
+      query,
+      from: Math.floor(fromTime / 1000),
+      to: Math.floor(toTime / 1000),
+    },
+  });
+
+  const series = response.data.series || [];
+  console.log(`Found ${series.length} series for aws.lambda.enhanced.invocations`);
+
+  if (series.length === 0) {
+    return [];
+  }
+
+  return (series[0].pointlist || []).map((p: [number, number]) => ({
+    timestamp: p[0],
+    value: p[1],
+  }));
+}
+
 async function getMetrics(
   metricName: string,
   functionName: string,
