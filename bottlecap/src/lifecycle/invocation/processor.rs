@@ -2420,7 +2420,7 @@ mod tests {
     }
 
     /// Verify that a non-durable On-Demand cold start still emits the invocation metric after
-    /// PlatformInitStart (no durable_function tag expected).
+    /// `PlatformInitStart` (no `durable_function` tag expected).
     ///
     /// Expected tag set: `cold_start:true,runtime:unknown`
     #[tokio::test]
@@ -2479,8 +2479,8 @@ mod tests {
         );
     }
 
-    /// SnapStart restores must emit the invocation metric immediately (no deferral).
-    /// PlatformInitStart/Report are never fired for restores, so if we deferred the metric
+    /// `SnapStart` restores must emit the invocation metric immediately (no deferral).
+    /// `PlatformInitStart`/Report are never fired for restores, so if we deferred the metric
     /// it would be silently dropped — a regression vs. pre-fix behavior.
     #[tokio::test]
     async fn test_invocation_metric_emitted_immediately_for_snapstart_restore() {
