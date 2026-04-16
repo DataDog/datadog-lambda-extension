@@ -12,6 +12,66 @@ use tracing::error;
 const S_TO_NS: u64 = 1_000_000_000;
 const BUCKET_DURATION_NS: u64 = 10 * S_TO_NS; // 10 seconds
 
+/// Span kinds eligible for stats computation, matching the Go agent's default
+/// `ComputeStatsBySpanKind: true` behavior.
+/// Reference: datadog-agent/pkg/trace/stats/span_concentrator.go (KindsComputed)
+///
+/// TODO: Move to datadog-agent-config in serverless-components so both bottlecap and
+/// serverless-compat can share this list.
+const STATS_ELIGIBLE_SPAN_KINDS: [&str; 4] = ["client", "consumer", "producer", "server"];
+
+/// Default peer tag keys for stats aggregation, matching the Go agent's `basePeerTags`
+/// derived from pkg/trace/semantics/mappings.json via the 16 peer tag concepts.
+/// Reference: datadog-agent/pkg/trace/config/peer_tags.go (peerTagConcepts + basePeerTags)
+///
+/// TODO: Move to datadog-agent-config in serverless-components so both bottlecap and
+/// serverless-compat can share this list.
+const DEFAULT_PEER_TAG_KEYS: [&str; 43] = [
+    "_dd.base_service",
+    "active_record.db.vendor",
+    "amqp.destination",
+    "amqp.exchange",
+    "amqp.queue",
+    "aws.queue.name",
+    "aws.s3.bucket",
+    "bucketname",
+    "cassandra.keyspace",
+    "db.cassandra.contact.points",
+    "db.couchbase.seed.nodes",
+    "db.hostname",
+    "db.instance",
+    "db.name",
+    "db.namespace",
+    "db.system",
+    "db.type",
+    "dns.hostname",
+    "grpc.host",
+    "hostname",
+    "http.host",
+    "http.server_name",
+    "messaging.destination",
+    "messaging.destination.name",
+    "messaging.kafka.bootstrap.servers",
+    "messaging.rabbitmq.exchange",
+    "messaging.system",
+    "mongodb.db",
+    "msmq.queue.path",
+    "net.peer.name",
+    "network.destination.ip",
+    "network.destination.name",
+    "out.host",
+    "peer.hostname",
+    "peer.service",
+    "queuename",
+    "rpc.service",
+    "rpc.system",
+    "sequel.db.vendor",
+    "server.address",
+    "streamname",
+    "tablename",
+    "topicname",
+];
+
 #[derive(Debug, thiserror::Error)]
 pub enum StatsError {
     #[error("Failed to send command to concentrator: {0}")]
@@ -113,12 +173,11 @@ impl StatsConcentratorService {
     pub fn new(config: Arc<Config>) -> (Self, StatsConcentratorHandle) {
         let (tx, rx) = mpsc::unbounded_channel();
         let handle = StatsConcentratorHandle::new(tx);
-        // TODO: set span_kinds_stats_computed and peer_tag_keys
         let concentrator = SpanConcentrator::new(
             Duration::from_nanos(BUCKET_DURATION_NS),
             SystemTime::now(),
-            vec![],
-            vec![],
+            STATS_ELIGIBLE_SPAN_KINDS.iter().map(|s| s.to_string()).collect(),
+            DEFAULT_PEER_TAG_KEYS.iter().map(|s| s.to_string()).collect(),
         );
         let service: StatsConcentratorService = Self {
             concentrator,
