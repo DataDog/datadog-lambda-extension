@@ -264,9 +264,9 @@ mod tests {
     use super::*;
     use std::collections::HashMap;
 
-    /// Create a pb::Span with the given meta tags and metrics.
-    /// The span is non-root (parent_id=1) and not measured, so it will only be
-    /// eligible for stats if span_kinds_stats_computed includes its span.kind.
+    /// Create a `pb::Span` with the given meta tags and metrics.
+    /// The span is non-root (`parent_id=1`) and not measured, so it will only be
+    /// eligible for stats if `span_kinds_stats_computed` includes its `span.kind`.
     fn create_span_kind_span(span_kind: &str, meta: Vec<(&str, &str)>) -> pb::Span {
         let now_ns = SystemTime::now()
             .duration_since(SystemTime::UNIX_EPOCH)
@@ -296,8 +296,8 @@ mod tests {
         }
     }
 
-    /// A non-root, non-measured span with span.kind="client" should produce stats
-    /// when ComputeStatsBySpanKind is enabled (i.e. span_kinds_stats_computed is
+    /// A non-root, non-measured span with `span.kind`="client" should produce stats
+    /// when `ComputeStatsBySpanKind` is enabled (i.e. `span_kinds_stats_computed` is
     /// populated). With the current empty vec, this span is silently dropped.
     #[tokio::test]
     async fn test_span_kind_stats_computed() {
@@ -331,9 +331,9 @@ mod tests {
         );
     }
 
-    /// A client span with peer tag meta keys (db.instance, db.system) should produce
-    /// stats with non-empty peer_tags when peer_tag_keys is configured. With the
-    /// current empty vec, peer_tags in the output will always be empty.
+    /// A client span with peer tag meta keys (`db.instance`, `db.system`) should produce
+    /// stats with non-empty `peer_tags` when `peer_tag_keys` is configured. With the
+    /// current empty vec, `peer_tags` in the output will always be empty.
     #[tokio::test]
     async fn test_peer_tags_populated() {
         let config = Arc::new(Config::default());
