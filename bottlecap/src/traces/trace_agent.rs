@@ -616,7 +616,7 @@ impl TraceAgent {
                             execution_id.clone(),
                             execution_name.clone(),
                             first_invocation,
-                            execution_status.clone(),
+                            execution_status,
                         )
                         .await
                     {
