@@ -663,7 +663,7 @@ impl LambdaProcessor {
             log.message.lambda.first_invocation = ctx.first_invocation;
         }
         if log.message.message.starts_with("END RequestId:") {
-            log.message.lambda.durable_execution_status = ctx.execution_status.clone();
+            log.message.lambda.durable_execution_status.clone_from(&ctx.execution_status);
         }
         if let Ok(s) = serde_json::to_string(&log) {
             // explicitly drop log so we don't accidentally re-use it and push
