@@ -14,7 +14,7 @@ const BUCKET_DURATION_NS: u64 = 10 * S_TO_NS; // 10 seconds
 
 /// Span kinds eligible for stats computation, matching the Go agent's default
 /// `ComputeStatsBySpanKind: true` behavior.
-/// Reference: datadog-agent/pkg/trace/stats/span_concentrator.go (KindsComputed)
+/// Reference: `datadog-agent/pkg/trace/stats/span_concentrator.go` (`KindsComputed`)
 ///
 /// TODO: Move to datadog-agent-config in serverless-components so both bottlecap and
 /// serverless-compat can share this list.
@@ -22,7 +22,7 @@ const STATS_ELIGIBLE_SPAN_KINDS: [&str; 4] = ["client", "consumer", "producer", 
 
 /// Default peer tag keys for stats aggregation, matching the Go agent's `basePeerTags`
 /// derived from pkg/trace/semantics/mappings.json via the 16 peer tag concepts.
-/// Reference: datadog-agent/pkg/trace/config/peer_tags.go (peerTagConcepts + basePeerTags)
+/// Reference: `datadog-agent/pkg/trace/config/peer_tags.go` (`peerTagConcepts` + `basePeerTags`)
 ///
 /// TODO: Move to datadog-agent-config in serverless-components so both bottlecap and
 /// serverless-compat can share this list.
@@ -176,8 +176,14 @@ impl StatsConcentratorService {
         let concentrator = SpanConcentrator::new(
             Duration::from_nanos(BUCKET_DURATION_NS),
             SystemTime::now(),
-            STATS_ELIGIBLE_SPAN_KINDS.iter().map(|s| s.to_string()).collect(),
-            DEFAULT_PEER_TAG_KEYS.iter().map(|s| s.to_string()).collect(),
+            STATS_ELIGIBLE_SPAN_KINDS
+                .iter()
+                .map(ToString::to_string)
+                .collect(),
+            DEFAULT_PEER_TAG_KEYS
+                .iter()
+                .map(ToString::to_string)
+                .collect(),
         );
         let service: StatsConcentratorService = Self {
             concentrator,
@@ -261,10 +267,7 @@ mod tests {
     /// Create a pb::Span with the given meta tags and metrics.
     /// The span is non-root (parent_id=1) and not measured, so it will only be
     /// eligible for stats if span_kinds_stats_computed includes its span.kind.
-    fn create_span_kind_span(
-        span_kind: &str,
-        meta: Vec<(&str, &str)>,
-    ) -> pb::Span {
+    fn create_span_kind_span(span_kind: &str, meta: Vec<(&str, &str)>) -> pb::Span {
         let now_ns = SystemTime::now()
             .duration_since(SystemTime::UNIX_EPOCH)
             .unwrap()
