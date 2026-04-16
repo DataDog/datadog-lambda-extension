@@ -606,12 +606,17 @@ impl TraceAgent {
                         .meta
                         .get(tags::lambda::tags::DURABLE_FUNCTION_FIRST_INVOCATION_KEY)
                         .map(|v| v == "true");
+                    let execution_status = span
+                        .meta
+                        .get(tags::lambda::tags::DURABLE_FUNCTION_EXECUTION_STATUS_KEY)
+                        .cloned();
                     if let Err(e) = invocation_processor_handle
                         .forward_durable_context(
                             request_id.clone(),
                             execution_id.clone(),
                             execution_name.clone(),
                             first_invocation,
+                            execution_status.clone(),
                         )
                         .await
                     {
