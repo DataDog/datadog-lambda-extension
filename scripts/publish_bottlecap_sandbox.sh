@@ -12,7 +12,7 @@
 # ARCHITECTURE - Which architecture to build for (amd64 or arm64). The default is amd64.
 # RELEASE_CANDIDATE - If true, publish as a release candidate to us-east-1. The default is false.
 
-set -e
+set -eo pipefail
 
 _init_arg(){
   if [ "$ARCHITECTURE" == "amd64" ]; then
@@ -24,7 +24,7 @@ _init_arg(){
       LAYER_PATH=".layers/datadog_extension-arm64.zip"
       LAYER_NAME="Datadog-Bottlecap-Beta-ARM"
   fi
-  if [ -z $ARCHITECTURE ]; then
+  if [ -z "$ARCHITECTURE" ]; then
       echo "No architecture specified, defaulting to amd64"
       ARCHITECTURE="amd64"
   fi
@@ -33,7 +33,7 @@ _init_arg(){
      LAYER_NAME+="-$SUFFIX"
   fi
 
-  if [ -z $REGION ]; then
+  if [ -z "$REGION" ]; then
       echo "No region specified, defaulting to us-east-1"
       REGION="us-east-1"
   fi
@@ -44,7 +44,11 @@ publish(){
   NEW_VERSION=$(aws-vault exec sso-serverless-sandbox-account-admin -- aws lambda publish-layer-version --layer-name "${LAYER_NAME}" \
       --description "Datadog Bottlecap Beta" \
       --zip-file "fileb://${LAYER_PATH}" \
-      --region $REGION | jq -r '.Version')
+      --region "$REGION" | jq -r '.Version')
+  if [ -z "$NEW_VERSION" ] || [ "$NEW_VERSION" = "null" ]; then
+    echo "ERROR: Failed to publish layer $LAYER_NAME to region $REGION"
+    exit 1
+  fi
   echo "DONE: Published version $NEW_VERSION of layer $LAYER_NAME to region $REGION"
 }
 
