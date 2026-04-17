@@ -392,7 +392,7 @@ dependencies = [
  "bitflags 2.11.0",
  "cexpr",
  "clang-sys",
- "itertools 0.13.0",
+ "itertools 0.11.0",
  "log",
  "prettyplease",
  "proc-macro2",
@@ -515,7 +515,7 @@ dependencies = [
  "ordered_hash_map",
  "proptest",
  "prost 0.14.3",
- "rand 0.8.5",
+ "rand 0.8.6",
  "regex",
  "reqwest",
  "rustls",
@@ -800,7 +800,7 @@ dependencies = [
  "opentelemetry",
  "opentelemetry-semantic-conventions 0.31.0",
  "opentelemetry_sdk",
- "rand 0.8.5",
+ "rand 0.8.6",
  "rustc_version_runtime",
  "serde",
  "serde_json",
@@ -1747,15 +1747,6 @@ dependencies = [
 
 [[package]]
 name = "itertools"
-version = "0.13.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "413ee7dfc52ee1a4949ceeb7dbc8a33f2d6c088194d9f922fb8318faf1f01186"
-dependencies = [
- "either",
-]
-
-[[package]]
-name = "itertools"
 version = "0.14.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2b192c782037fadd9cfa75548310488aabdbf3d2da73885b31bd0abd03351285"
@@ -2119,7 +2110,7 @@ dependencies = [
  "libdd-trace-normalization 1.0.0",
  "libdd-trace-protobuf 1.0.0",
  "prost 0.14.3",
- "rand 0.8.5",
+ "rand 0.8.6",
  "rmp",
  "rmp-serde",
  "rmpv",
@@ -2148,7 +2139,7 @@ dependencies = [
  "libdd-trace-normalization 1.0.2",
  "libdd-trace-protobuf 2.0.0",
  "prost 0.14.3",
- "rand 0.8.5",
+ "rand 0.8.6",
  "rmp",
  "rmp-serde",
  "rmpv",
@@ -2343,7 +2334,7 @@ dependencies = [
  "mime",
  "mime_guess",
  "quick-error",
- "rand 0.8.5",
+ "rand 0.8.6",
  "safemem",
  "tempfile",
  "twoway",
@@ -2469,7 +2460,7 @@ dependencies = [
  "futures-util",
  "opentelemetry",
  "percent-encoding",
- "rand 0.9.2",
+ "rand 0.9.4",
  "thiserror 2.0.18",
 ]
 
@@ -2734,7 +2725,7 @@ dependencies = [
  "bit-vec 0.8.0",
  "bitflags 2.11.0",
  "num-traits",
- "rand 0.9.2",
+ "rand 0.9.4",
  "rand_chacha 0.9.0",
  "rand_xorshift",
  "regex-syntax",
@@ -2914,7 +2905,7 @@ dependencies = [
  "bytes",
  "getrandom 0.3.4",
  "lru-slab",
- "rand 0.9.2",
+ "rand 0.9.4",
  "ring",
  "rustc-hash",
  "rustls",
@@ -2963,9 +2954,9 @@ checksum = "f8dcc9c7d52a811697d2151c701e0d08956f92b0e24136cf4cf27b57a6a0d9bf"
 
 [[package]]
 name = "rand"
-version = "0.8.5"
+version = "0.8.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "34af8d1a0e25924bc5b7c43c079c942339d8f0a8b57c39049bef581b46327404"
+checksum = "5ca0ecfa931c29007047d1bc58e623ab12e5590e8c7cc53200d5202b69266d8a"
 dependencies = [
  "libc",
  "rand_chacha 0.3.1",
@@ -2974,9 +2965,9 @@ dependencies = [
 
 [[package]]
 name = "rand"
-version = "0.9.2"
+version = "0.9.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6db2770f06117d490610c7488547d543617b21bfa07796d7a12f6f1bd53850d1"
+checksum = "44c5af06bb1b7d3216d91932aed5265164bf384dc89cd6ba05cf59a35f5f76ea"
 dependencies = [
  "rand_chacha 0.9.0",
  "rand_core 0.9.5",
@@ -3270,9 +3261,9 @@ dependencies = [
 
 [[package]]
 name = "rustls-webpki"
-version = "0.103.10"
+version = "0.103.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "df33b2b81ac578cabaf06b89b0631153a3f416b0a886e8a7a1707fb51abbd1ef"
+checksum = "8279bb85272c9f10811ae6a6c547ff594d6a7f3c6c6b02ee9726d1d0dcfcdd06"
 dependencies = [
  "aws-lc-rs",
  "ring",
