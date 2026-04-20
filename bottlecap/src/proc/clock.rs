@@ -1,3 +1,4 @@
+#[cfg(not(target_os = "windows"))]
 use nix::unistd::{SysconfVar, sysconf};
 use std::io;
 
