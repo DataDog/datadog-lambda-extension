@@ -395,6 +395,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(not(target_os = "windows"))]
     fn test_get_cpu_data() {
         let path = "./tests/proc/stat/valid_stat";
         let cpu_data_result = get_cpu_data_from_path(path_from_root(path).as_str());
