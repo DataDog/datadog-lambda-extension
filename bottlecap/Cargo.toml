@@ -79,10 +79,10 @@ libdd-trace-stats = { git = "https://github.com/DataDog/libdatadog", rev = "c812
 datadog-opentelemetry = { git = "https://github.com/DataDog/dd-trace-rs", rev = "f51cefc4ad24bec81b38fb2f36b1ed93f21ae913", default-features = false }
 dogstatsd = { git = "https://github.com/DataDog/serverless-components", rev = "28f796bf767fff56caf08153ade5cd80c8e8f705", default-features = false }
 datadog-fips = { git = "https://github.com/DataDog/serverless-components", rev = "28f796bf767fff56caf08153ade5cd80c8e8f705", default-features = false }
-libddwaf = { version = "1.28.1", git = "https://github.com/DataDog/libddwaf-rust", rev = "d1534a158d976bd4f747bf9fcc58e0712d2d17fc", default-features = false, features = ["serde"] }
 
 [target.'cfg(not(target_os = "windows"))'.dependencies]
 nix = { version = "0.26", default-features = false, features = ["feature", "fs"] }
+libddwaf = { version = "1.28.1", git = "https://github.com/DataDog/libddwaf-rust", rev = "d1534a158d976bd4f747bf9fcc58e0712d2d17fc", default-features = false, features = ["serde"] }
 
 [dev-dependencies]
 figment = { version = "0.10", default-features = false, features = ["yaml", "env", "test"] }

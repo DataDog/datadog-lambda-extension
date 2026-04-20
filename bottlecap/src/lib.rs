@@ -19,6 +19,11 @@
 // Allow use of the `coverage_nightly` attribute
 #![cfg_attr(coverage_nightly, feature(coverage_attribute))]
 
+#[cfg(not(target_os = "windows"))]
+pub mod appsec;
+
+#[cfg(target_os = "windows")]
+#[path = "appsec_stub.rs"]
 pub mod appsec;
 pub mod config;
 pub mod event_bus;
