@@ -92,6 +92,9 @@ tower = { version = "0.5", features = ["util"] }
 mock_instant = "0.6"
 serial_test = "3.1"
 tempfile = "3.20"
+# fake-intake test harness: decode msgpack+gzip stats payloads on arrival
+rmp-serde = { version = "1.3.1", default-features = false }
+flate2 = { version = "1.1", default-features = false, features = ["rust_backend"] }
 
 [build-dependencies]
 # No external dependencies needed for the build script
