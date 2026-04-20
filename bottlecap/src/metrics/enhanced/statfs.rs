@@ -21,11 +21,8 @@ pub fn statfs_info(path: &str) -> Result<(f64, f64, f64), io::Error> {
 }
 
 #[cfg(target_os = "windows")]
-fn statfs_info(path: &str) -> Result<(f64, f64, f64), io::Error> {
-    Err(io::Error::new(
-        io::ErrorKind::Other,
-        "Cannot get tmp data on Windows",
-    ))
+fn statfs_info(_path: &str) -> Result<(f64, f64, f64), io::Error> {
+    Err(io::Error::other("Cannot get tmp data on Windows"))
 }
 
 pub fn get_tmp_max() -> Result<f64, io::Error> {

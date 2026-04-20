@@ -16,6 +16,7 @@ pub struct Body {
 impl Body {
     /// Obtains a reader to the data contained in this [`Body`], decoded from
     /// Base64 if [`Body::is_base64_encoded`] is `true`.
+    #[cfg_attr(target_os = "windows", allow(dead_code))]
     pub(crate) fn reader<'a>(&'a self) -> Result<Option<Box<dyn Read + 'a>>, base64::DecodeError> {
         let Some(body) = &self.body else {
             return Ok(None);
