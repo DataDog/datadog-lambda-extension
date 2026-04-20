@@ -1,3 +1,6 @@
+// appsec is stubbed out on Windows; this test exercises the real libddwaf-backed API.
+#![cfg(not(target_os = "windows"))]
+
 use std::collections::HashMap;
 use std::num::NonZero;
 use std::path::PathBuf;
