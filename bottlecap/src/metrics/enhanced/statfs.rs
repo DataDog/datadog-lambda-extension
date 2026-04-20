@@ -1,8 +1,10 @@
 #![allow(clippy::module_name_repetitions)]
 
 use crate::metrics::enhanced::constants;
+#[cfg(not(target_os = "windows"))]
 use nix::sys::statfs::statfs;
 use std::io;
+#[cfg(not(target_os = "windows"))]
 use std::path::Path;
 
 #[cfg(not(target_os = "windows"))]
