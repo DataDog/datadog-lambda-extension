@@ -219,8 +219,7 @@ fn decompress(headers: &HeaderMap, body: &Bytes) -> Vec<u8> {
                 .expect("fake_intake: gzip decode failed");
             out
         }
-        "zstd" => zstd::stream::decode_all(body.as_ref())
-            .expect("fake_intake: zstd decode failed"),
+        "zstd" => zstd::stream::decode_all(body.as_ref()).expect("fake_intake: zstd decode failed"),
         _ => body.to_vec(),
     }
 }
