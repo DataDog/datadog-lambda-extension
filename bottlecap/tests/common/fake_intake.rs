@@ -10,8 +10,8 @@
 //!
 //! Endpoints supported:
 //!
-//! - `POST /api/v0.2/stats`  — msgpack, gzip-compressed, `pb::StatsPayload`
-//! - `POST /api/v0.2/traces` — protobuf (optionally zstd-compressed), `pb::AgentPayload`
+//! - `POST /api/v0.2/stats`: msgpack, gzip-compressed, `pb::StatsPayload`
+//! - `POST /api/v0.2/traces`: protobuf (optionally zstd-compressed), `pb::AgentPayload`
 //!
 //! Prototype for APMSVLS-494 phase 1. If the API proves out, this file gets
 //! extracted into the shared `datadog/apm-agent-parity-rs` repo in phase 2.
@@ -91,7 +91,7 @@ impl FakeIntake {
     }
 
     /// Base URL (e.g. `http://127.0.0.1:54321`). Append the intake path to
-    /// build a full URL — or use the helpers below.
+    /// build a full URL, or use the helpers below.
     #[must_use]
     pub fn base_url(&self) -> &str {
         &self.base_url
@@ -202,7 +202,7 @@ async fn handle_traces(
 
 /// Decompress a request body based on its `Content-Encoding` header.
 /// Supports `gzip` and `zstd`. An unknown or absent encoding is treated as
-/// identity — the body is returned unchanged.
+/// identity: the body is returned unchanged.
 fn decompress(headers: &HeaderMap, body: &Bytes) -> Vec<u8> {
     let encoding = headers
         .get("content-encoding")
