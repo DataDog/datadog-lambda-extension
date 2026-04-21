@@ -131,8 +131,6 @@ async fn stats_payload_roundtrip_through_fake_intake() {
                 grpc_status_code: String::new(),
                 http_endpoint: "/fake".to_string(),
                 http_method: "GET".to_string(),
-                service_source: String::new(),
-                span_derived_primary_tags: vec![],
             }],
         }],
         agent_aggregation: String::new(),
