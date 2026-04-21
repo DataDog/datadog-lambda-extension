@@ -25,11 +25,11 @@ pub mod processor {
         use crate::traces::span_pointers::SpanPointer;
         use crate::traces::trace_processor::SendingTraceProcessor;
 
-        #[derive(Debug, Copy, Clone)]
+        #[derive(Debug)]
         pub struct Context;
 
         impl Context {
-            pub fn hold_trace(
+            pub(crate) fn hold_trace(
                 &mut self,
                 _trace: Vec<Span>,
                 _sender: SendingTraceProcessor,
@@ -56,7 +56,7 @@ pub mod processor {
         }
     }
 
-    #[derive(Debug, Copy, Clone)]
+    #[derive(Debug)]
     pub struct Processor;
 
     impl Processor {
@@ -77,7 +77,7 @@ pub mod processor {
         pub async fn process_invocation_result(&mut self, _rid: &str, _payload: &Bytes) {}
     }
 
-    #[derive(thiserror::Error, Debug, Clone, Copy)]
+    #[derive(thiserror::Error, Debug)]
     pub enum Error {
         #[error("aap: feature is not enabled")]
         FeatureDisabled,
