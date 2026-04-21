@@ -388,7 +388,7 @@ mod tests {
         let mut file = File::create(&path).unwrap();
         file.write_all(content.as_bytes()).unwrap();
 
-        let runtime = resolve_runtime_from_proc("", path.to_str().unwrap());
+        let runtime = resolve_runtime_from_proc("", &path.to_string_lossy());
         fs::remove_file(&path).unwrap();
         assert_eq!(runtime, "provided.al2");
     }
@@ -401,7 +401,7 @@ mod tests {
         let mut file = File::create(&path).unwrap();
         file.write_all(content.as_bytes()).unwrap();
 
-        let runtime = resolve_runtime_from_proc("", path.to_str().unwrap());
+        let runtime = resolve_runtime_from_proc("", &path.to_string_lossy());
         fs::remove_file(&path).unwrap();
         assert_eq!(runtime, "provided.al2023");
     }
