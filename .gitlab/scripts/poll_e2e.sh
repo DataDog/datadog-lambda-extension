@@ -23,13 +23,11 @@ BTI_RESPONSE=$(curl --silent --request GET \
 GITLAB_TOKEN=$(echo "$BTI_RESPONSE" | jq -r '.token // empty')
 if [ -z "$GITLAB_TOKEN" ]; then
     echo "ERROR: could not obtain GitLab token from BTI"
-    echo "BTI response: $BTI_RESPONSE"
     exit 1
 fi
 
 echo "Triggering DataDog/serverless-e2e-tests pipeline (ref: ${E2E_REF})..."
 echo "  EXTENSION_LAYER_ARN=${EXTENSION_LAYER_ARN}"
-echo "  EXTENSION_VERSION=${EXTENSION_VERSION:-}"
 
 TRIGGER_RESPONSE=$(curl --silent --request POST \
     --header "PRIVATE-TOKEN: ${GITLAB_TOKEN}" \
