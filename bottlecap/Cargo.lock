@@ -770,7 +770,7 @@ dependencies = [
 [[package]]
 name = "datadog-fips"
 version = "0.1.0"
-source = "git+https://github.com/DataDog/serverless-components?rev=28f796bf767fff56caf08153ade5cd80c8e8f705#28f796bf767fff56caf08153ade5cd80c8e8f705"
+source = "git+https://github.com/DataDog/serverless-components?rev=8b229c13e41b4932b595d2513154829da0354eb9#8b229c13e41b4932b595d2513154829da0354eb9"
 dependencies = [
  "reqwest",
  "rustls",
