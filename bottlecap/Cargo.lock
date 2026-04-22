@@ -515,7 +515,7 @@ dependencies = [
  "ordered_hash_map",
  "proptest",
  "prost 0.14.3",
- "rand 0.8.5",
+ "rand 0.9.2",
  "regex",
  "reqwest",
  "rustls",
