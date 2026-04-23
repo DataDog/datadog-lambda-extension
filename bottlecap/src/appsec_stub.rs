@@ -5,7 +5,6 @@
     unused_variables,
     clippy::unused_self,
     clippy::unused_async,
-    clippy::needless_pass_by_value
 )]
 
 pub mod processor {
@@ -29,6 +28,7 @@ pub mod processor {
         pub struct Context;
 
         impl Context {
+            #[allow(clippy::needless_pass_by_value)]
             pub(crate) fn hold_trace(
                 &mut self,
                 _trace: Vec<Span>,
