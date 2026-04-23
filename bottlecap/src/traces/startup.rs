@@ -25,12 +25,9 @@ use crate::traces::{
     trace_flusher, trace_processor,
 };
 
-pub use crate::traces::stats_concentrator_service::StatsConcentratorHandle;
-
 /// Return tuple common to [`build_trace_agent`] and [`start_trace_agent`].
 /// Kept as a `type` alias to avoid re-declaring the same eight-tuple in two
 /// places.
-#[allow(clippy::type_complexity)]
 pub type TraceAgentPipeline = (
     Sender<SendDataBuilderInfo>,
     Arc<trace_flusher::TraceFlusher>,
@@ -38,7 +35,7 @@ pub type TraceAgentPipeline = (
     Arc<stats_flusher::StatsFlusher>,
     Arc<ProxyFlusher>,
     CancellationToken,
-    StatsConcentratorHandle,
+    stats_concentrator_service::StatsConcentratorHandle,
     TraceAggregatorHandle,
 );
 
