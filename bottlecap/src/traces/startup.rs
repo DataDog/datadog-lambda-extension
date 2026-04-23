@@ -5,8 +5,7 @@ use std::sync::Arc;
 
 use dogstatsd::api_key::ApiKeyFactory;
 use libdd_trace_obfuscation::obfuscation_config;
-use tokio::sync::Mutex as TokioMutex;
-use tokio::sync::mpsc::Sender;
+use tokio::sync::{Mutex as TokioMutex, mpsc::Sender};
 use tokio_util::sync::CancellationToken;
 use tracing::error;
 
