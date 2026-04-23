@@ -131,7 +131,7 @@ impl FakeIntake {
             let _ = tx.send(());
         }
         if let Some(task) = self.task.take() {
-            let _ = task.await;
+            task.await.expect("fake_intake: server task panicked");
         }
     }
 }
