@@ -11,7 +11,7 @@
 //!
 //! Each test spins up a `FakeIntake`, points the flusher at it, triggers a
 //! flush, then decodes the captured payload and asserts on concrete fields.
-//! This is what APMSVLS-494 phase 1 unblocks: regression coverage for
+//! This is what APMSVLS-496 phase 1 unblocks: regression coverage for
 //! payload-level changes that `body_contains`-style mocks can't catch.
 
 use std::str::FromStr;
