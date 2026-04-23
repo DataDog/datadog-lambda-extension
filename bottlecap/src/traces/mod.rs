@@ -8,6 +8,7 @@ pub mod proxy_flusher;
 pub mod span_dedup;
 pub mod span_dedup_service;
 pub mod span_pointers;
+pub mod startup;
 pub mod stats_aggregator;
 pub mod stats_concentrator_service;
 pub mod stats_flusher;
@@ -18,6 +19,8 @@ pub mod trace_aggregator;
 pub mod trace_aggregator_service;
 pub mod trace_flusher;
 pub mod trace_processor;
+
+pub use startup::start_trace_agent;
 
 // URL for a call to the Lambda runtime API. The value may be replaced if `AWS_LAMBDA_RUNTIME_API` is set.
 const LAMBDA_RUNTIME_URL_PREFIX: &str = "http://127.0.0.1:9001";
