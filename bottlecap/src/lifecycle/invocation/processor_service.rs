@@ -749,4 +749,86 @@ mod tests {
             .await
             .expect("noop on_out_of_memory_error");
     }
+
+    #[tokio::test]
+    async fn noop_platform_runtime_done_and_report_respond_without_blocking() {
+        use std::collections::HashMap;
+        use crate::{
+            LAMBDA_RUNTIME_SLUG,
+            config,
+            extension::telemetry::events::OnDemandReportMetrics,
+            traces::{
+                stats_concentrator_service::StatsConcentratorService,
+                stats_generator::StatsGenerator,
+                trace_processor::ServerlessTraceProcessor,
+            },
+        };
+        use libdd_trace_obfuscation::obfuscation_config::ObfuscationConfig;
+
+        let config = Arc::new(config::Config::default());
+        let (svc, concentrator) = StatsConcentratorService::new(Arc::clone(&config));
+        tokio::spawn(svc.run());
+        let trace_sender = Arc::new(SendingTraceProcessor {
+            appsec: None,
+            processor: Arc::new(ServerlessTraceProcessor {
+                obfuscation_config: Arc::new(
+                    ObfuscationConfig::new().expect("ObfuscationConfig"),
+                ),
+            }),
+            trace_tx: tokio::sync::mpsc::channel(1).0,
+            stats_generator: Arc::new(StatsGenerator::new(concentrator)),
+        });
+        let tags_provider = Arc::new(provider::Provider::new(
+            Arc::clone(&config),
+            LAMBDA_RUNTIME_SLUG.to_string(),
+            &HashMap::from([("function_arn".to_string(), "test-arn".to_string())]),
+        ));
+
+        let handle = InvocationProcessorHandle::noop();
+
+        let (tx, rx) = oneshot::channel::<()>();
+        handle
+            .sender
+            .send(ProcessorCommand::PlatformRuntimeDone {
+                request_id: "rid".to_string(),
+                metrics: RuntimeDoneMetrics {
+                    duration_ms: 0.0,
+                    produced_bytes: None,
+                },
+                status: Status::Success,
+                error_type: None,
+                tags_provider: Arc::clone(&tags_provider),
+                trace_sender: Arc::clone(&trace_sender),
+                timestamp: 0,
+                response: tx,
+            })
+            .await
+            .expect("send PlatformRuntimeDone");
+        rx.await.expect("noop must respond to PlatformRuntimeDone");
+
+        let (tx, rx) = oneshot::channel::<()>();
+        handle
+            .sender
+            .send(ProcessorCommand::PlatformReport {
+                request_id: "rid".to_string(),
+                metrics: ReportMetrics::OnDemand(OnDemandReportMetrics {
+                    duration_ms: 0.0,
+                    billed_duration_ms: 0,
+                    memory_size_mb: 0,
+                    max_memory_used_mb: 0,
+                    init_duration_ms: None,
+                    restore_duration_ms: None,
+                }),
+                timestamp: 0,
+                status: Status::Success,
+                error_type: None,
+                spans: None,
+                tags_provider,
+                trace_sender,
+                response: tx,
+            })
+            .await
+            .expect("send PlatformReport");
+        rx.await.expect("noop must respond to PlatformReport");
+    }
 }
