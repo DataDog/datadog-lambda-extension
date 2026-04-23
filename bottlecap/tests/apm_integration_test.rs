@@ -142,7 +142,7 @@ async fn stats_payload_roundtrip_through_fake_intake() {
         process_tags: String::new(),
     };
 
-    let failed = flusher.send(vec![client_stats.clone()]).await;
+    let failed = flusher.send(vec![client_stats]).await;
     assert!(
         failed.is_none(),
         "stats send reported a retry-able failure: {failed:?}",
