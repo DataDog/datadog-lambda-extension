@@ -713,16 +713,22 @@ mod tests {
     async fn noop_request_response_methods_return_defaults() {
         let handle = InvocationProcessorHandle::noop();
 
-        let info = handle.get_reparenting_info().await.unwrap();
+        let info = handle
+            .get_reparenting_info()
+            .await
+            .expect("noop get_reparenting_info");
         assert!(info.is_empty());
 
         let contexts = handle
             .update_reparenting(std::collections::VecDeque::new())
             .await
-            .unwrap();
+            .expect("noop update_reparenting");
         assert!(contexts.is_empty());
 
-        let cold_start = handle.set_cold_start_span_trace_id(42).await.unwrap();
+        let cold_start = handle
+            .set_cold_start_span_trace_id(42)
+            .await
+            .expect("noop set_cold_start_span_trace_id");
         assert!(cold_start.is_none());
     }
 
@@ -730,8 +736,17 @@ mod tests {
     async fn noop_fire_and_forget_commands_do_not_panic() {
         let handle = InvocationProcessorHandle::noop();
 
-        handle.on_invoke_event("rid".to_string()).await.unwrap();
-        handle.on_shutdown_event().await.unwrap();
-        handle.on_out_of_memory_error(0).await.unwrap();
+        handle
+            .on_invoke_event("rid".to_string())
+            .await
+            .expect("noop on_invoke_event");
+        handle
+            .on_shutdown_event()
+            .await
+            .expect("noop on_shutdown_event");
+        handle
+            .on_out_of_memory_error(0)
+            .await
+            .expect("noop on_out_of_memory_error");
     }
 }
