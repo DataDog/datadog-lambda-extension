@@ -325,6 +325,9 @@ impl TraceAgent {
     }
 
     async fn flush(State(flushing_service): State<Arc<FlushingService>>) -> StatusCode {
+        // Isolate panics: run the flush on a spawned task so an
+        // `.expect(...)` or other panic inside `flush_blocking_final`
+        // surfaces as a 500 instead of tearing down the handler task.
         match tokio::task::spawn(async move {
             flushing_service.flush_blocking_final().await;
         })
