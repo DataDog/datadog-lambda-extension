@@ -61,7 +61,7 @@ pub mod processor {
 
     impl Processor {
         pub fn new(_cfg: &Config) -> Result<Self, Error> {
-            Err(Error::FeatureDisabled)
+            Err(Error::Unavailable)
         }
 
         pub fn service_entry_span_mut(_trace: &mut [Span]) -> Option<&mut Span> {
