@@ -752,18 +752,16 @@ mod tests {
 
     #[tokio::test]
     async fn noop_platform_runtime_done_and_report_respond_without_blocking() {
-        use std::collections::HashMap;
         use crate::{
-            LAMBDA_RUNTIME_SLUG,
-            config,
+            LAMBDA_RUNTIME_SLUG, config,
             extension::telemetry::events::OnDemandReportMetrics,
             traces::{
                 stats_concentrator_service::StatsConcentratorService,
-                stats_generator::StatsGenerator,
-                trace_processor::ServerlessTraceProcessor,
+                stats_generator::StatsGenerator, trace_processor::ServerlessTraceProcessor,
             },
         };
         use libdd_trace_obfuscation::obfuscation_config::ObfuscationConfig;
+        use std::collections::HashMap;
 
         let config = Arc::new(config::Config::default());
         let (svc, concentrator) = StatsConcentratorService::new(Arc::clone(&config));
@@ -771,9 +769,7 @@ mod tests {
         let trace_sender = Arc::new(SendingTraceProcessor {
             appsec: None,
             processor: Arc::new(ServerlessTraceProcessor {
-                obfuscation_config: Arc::new(
-                    ObfuscationConfig::new().expect("ObfuscationConfig"),
-                ),
+                obfuscation_config: Arc::new(ObfuscationConfig::new().expect("ObfuscationConfig")),
             }),
             trace_tx: tokio::sync::mpsc::channel(1).0,
             stats_generator: Arc::new(StatsGenerator::new(concentrator)),
