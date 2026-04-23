@@ -167,3 +167,15 @@ while [ $latest_version -lt $VERSION ]; do
 done
 
 printf "[$REGION] Finished publishing layers...\n"
+
+if [ -n "${DOTENV:-}" ]; then
+    printf "[$REGION] Exporting layer ARN to %s...\n" "$DOTENV"
+    dotenv_key="${DOTENV_VAR_NAME:-EXTENSION_LAYER_ARN}"
+    latest_arn=$(aws lambda get-layer-version \
+        --layer-name "$LAYER_NAME" \
+        --version-number "$VERSION" \
+        --region "$REGION" \
+        --query 'LayerVersionArn' --output text)
+    echo "${dotenv_key}=${latest_arn}" >>"$DOTENV"
+    cat "$DOTENV"
+fi
