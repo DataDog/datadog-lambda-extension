@@ -93,7 +93,7 @@ impl FakeIntake {
     /// Base URL (e.g. `http://127.0.0.1:54321`). Append the intake path to
     /// build a full URL, or use the helpers below.
     #[must_use]
-    pub fn base_url(&self) -> &str {
+    fn base_url(&self) -> &str {
         &self.base_url
     }
 
@@ -159,7 +159,13 @@ async fn handle_stats(
     headers: HeaderMap,
     body: Bytes,
 ) -> StatusCode {
-    let decoded = decompress(&headers, &body);
+    let decoded = match decompress(&headers, &body) {
+        Ok(d) => d,
+        Err(e) => {
+            eprintln!("{e}");
+            return StatusCode::BAD_REQUEST;
+        }
+    };
     match rmp_serde::from_slice::<pb::StatsPayload>(&decoded) {
         Ok(payload) => {
             state
@@ -182,7 +188,13 @@ async fn handle_traces(
     headers: HeaderMap,
     body: Bytes,
 ) -> StatusCode {
-    let decoded = decompress(&headers, &body);
+    let decoded = match decompress(&headers, &body) {
+        Ok(d) => d,
+        Err(e) => {
+            eprintln!("{e}");
+            return StatusCode::BAD_REQUEST;
+        }
+    };
     match pb::AgentPayload::decode(decoded.as_slice()) {
         Ok(payload) => {
             state
@@ -203,7 +215,7 @@ async fn handle_traces(
 /// Decompress a request body based on its `Content-Encoding` header.
 /// Supports `gzip` and `zstd`. An unknown or absent encoding is treated as
 /// identity: the body is returned unchanged.
-fn decompress(headers: &HeaderMap, body: &Bytes) -> Vec<u8> {
+fn decompress(headers: &HeaderMap, body: &Bytes) -> Result<Vec<u8>, String> {
     let encoding = headers
         .get("content-encoding")
         .and_then(|v| v.to_str().ok())
@@ -216,10 +228,16 @@ fn decompress(headers: &HeaderMap, body: &Bytes) -> Vec<u8> {
             let mut out = Vec::new();
             decoder
                 .read_to_end(&mut out)
-                .expect("fake_intake: gzip decode failed");
-            out
+                .map_err(|e| format!("fake_intake: gzip decode failed: {e}"))?;
+            Ok(out)
         }
-        "zstd" => zstd::stream::decode_all(body.as_ref()).expect("fake_intake: zstd decode failed"),
-        _ => body.to_vec(),
+        "zstd" => zstd::stream::decode_all(body.as_ref())
+            .map_err(|e| format!("fake_intake: zstd decode failed: {e}")),
+        _ => {
+            if !encoding.is_empty() {
+                eprintln!("fake_intake: unrecognized Content-Encoding '{encoding}', treating as identity");
+            }
+            Ok(body.to_vec())
+        }
     }
 }
