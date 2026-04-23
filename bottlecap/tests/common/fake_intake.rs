@@ -75,11 +75,12 @@ impl FakeIntake {
 
         let (shutdown_tx, shutdown_rx) = oneshot::channel::<()>();
         let task = tokio::spawn(async move {
-            let _ = axum::serve(listener, router)
+            axum::serve(listener, router)
                 .with_graceful_shutdown(async move {
                     let _ = shutdown_rx.await;
                 })
-                .await;
+                .await
+                .expect("fake_intake: axum server error");
         });
 
         Self {
