@@ -325,8 +325,14 @@ impl TraceAgent {
     }
 
     async fn flush(State(flushing_service): State<Arc<FlushingService>>) -> StatusCode {
-        flushing_service.flush_blocking_final().await;
-        StatusCode::NO_CONTENT
+        match tokio::task::spawn(async move {
+            flushing_service.flush_blocking_final().await;
+        })
+        .await
+        {
+            Ok(()) => StatusCode::NO_CONTENT,
+            Err(_) => StatusCode::INTERNAL_SERVER_ERROR,
+        }
     }
 
     async fn graceful_shutdown(shutdown_token: CancellationToken) {
