@@ -235,7 +235,9 @@ fn decompress(headers: &HeaderMap, body: &Bytes) -> Result<Vec<u8>, String> {
             .map_err(|e| format!("fake_intake: zstd decode failed: {e}")),
         _ => {
             if !encoding.is_empty() {
-                eprintln!("fake_intake: unrecognized Content-Encoding '{encoding}', treating as identity");
+                eprintln!(
+                    "fake_intake: unrecognized Content-Encoding '{encoding}', treating as identity"
+                );
             }
             Ok(body.to_vec())
         }
