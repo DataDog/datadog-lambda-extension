@@ -57,7 +57,7 @@ elif [ $ENVIRONMENT = "us1-fed" ]; then
         exit 1
     fi
 
-elif [ $ENVIRONMENT = "fed-us2" ]; then
+elif [ "$ENVIRONMENT" = "fed-us2" ]; then
     AWS_VAULT_ROLE=sso-govcloud-fed-us2-lambda-layer-operator
 
     export ADD_LAYER_VERSION_PERMISSIONS=1
