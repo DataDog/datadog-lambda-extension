@@ -325,16 +325,16 @@ impl TraceAgent {
     }
 
     async fn flush(State(flushing_service): State<Arc<FlushingService>>) -> StatusCode {
-        // Isolate panics: run the flush on a spawned task so an
-        // `.expect(...)` or other panic inside `flush_blocking_final`
-        // surfaces as a 500 instead of tearing down the handler task.
-        match tokio::task::spawn(async move {
+        // Isolate panics and bound execution time: spawn so a panic in
+        // flush_blocking_final surfaces as 500, timeout so a stuck flush
+        // returns 504 instead of hanging the test harness.
+        let task = tokio::task::spawn(async move {
             flushing_service.flush_blocking_final().await;
-        })
-        .await
-        {
-            Ok(()) => StatusCode::NO_CONTENT,
-            Err(_) => StatusCode::INTERNAL_SERVER_ERROR,
+        });
+        match tokio::time::timeout(std::time::Duration::from_secs(30), task).await {
+            Ok(Ok(())) => StatusCode::NO_CONTENT,
+            Ok(Err(_)) => StatusCode::INTERNAL_SERVER_ERROR,
+            Err(_) => StatusCode::GATEWAY_TIMEOUT,
         }
     }
 
