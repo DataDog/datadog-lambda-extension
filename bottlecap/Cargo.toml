@@ -40,6 +40,8 @@ sha2 = { version = "0.10", default-features = false }
 hex = { version = "0.4", default-features = false, features = ["std"] }
 base64 = { version = "0.22", default-features = false }
 rustls = { version = "0.23.18", default-features = false, features = ["aws-lc-rs"] }
+# Transitive via rustls. Pinned to >=0.103.13 so cargo audit passes (RUSTSEC-2026-0098, RUSTSEC-2026-0099, RUSTSEC-2026-0104).
+rustls-webpki = { version = "0.103.13", default-features = false }
 rustls-pemfile = { version = "2.0", default-features = false, features = ["std"] }
 rustls-pki-types = { version = "1.0", default-features = false }
 hyper-rustls = { version = "0.27.7", default-features = false }
