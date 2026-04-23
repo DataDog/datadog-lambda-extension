@@ -276,8 +276,11 @@ e2e-suite ({{ $f.name }}):
   tags: ["arch:amd64"]
   timeout: 3h
   rules:
-    - when: on_success
+    # Do not block on release, in case E2E is flaky
+    - if: '$CI_COMMIT_TAG =~ /^v.*/'
+      when: on_success
       allow_failure: true
+    - when: on_success
   needs:
     - job: "publish layer e2e sandbox ({{ $f.name }})"
       artifacts: true
