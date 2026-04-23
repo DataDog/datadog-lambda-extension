@@ -48,6 +48,12 @@ pub type TraceAgentPipeline = (
 /// [`trace_agent::TraceAgent::with_flushing_service`] to enable the
 /// test-mode `POST /flush` route).
 ///
+/// Note: the aggregator/concentrator/dedup tasks spawned here have no
+/// external shutdown signal; they run until their command channels are
+/// dropped. Callers that abandon the returned `TraceAgent` without either
+/// spawning it or dropping the pipeline handles will leak those background
+/// tasks for the lifetime of the process.
+///
 /// Most callers want [`start_trace_agent`] instead, which handles the spawn.
 pub fn build_trace_agent(
     config: &Arc<Config>,
