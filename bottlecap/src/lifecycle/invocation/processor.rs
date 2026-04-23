@@ -687,14 +687,23 @@ impl Processor {
         (traces, body_size)
     }
 
-    /// For Node/Python: Updates the cold start span with the given trace ID.
+    /// For Node/Python: Updates the cold start span with the given trace ID and optional
+    /// `_dd.p.tid` tag (upper 64 bits of a 128-bit trace ID).
     /// Returns the Span ID of the cold start span so we can reparent the `aws.lambda.load` span.
-    pub fn set_cold_start_span_trace_id(&mut self, trace_id: u64) -> Option<u64> {
+    pub fn set_cold_start_span_trace_id(
+        &mut self,
+        trace_id: u64,
+        propagated_tid: Option<String>,
+    ) -> Option<u64> {
         if let Some(cold_start_context) = self.context_buffer.get_context_with_cold_start()
             && let Some(cold_start_span) = &mut cold_start_context.cold_start_span
         {
             if cold_start_span.trace_id == 0 {
                 cold_start_span.trace_id = trace_id;
+            }
+
+            if let Some(tid) = propagated_tid {
+                cold_start_span.meta.insert("_dd.p.tid".to_string(), tid);
             }
 
             return Some(cold_start_span.span_id);
@@ -2330,6 +2339,96 @@ mod tests {
         assert!(
             ctx_to_send.is_empty(),
             "no contexts should be ready to send yet"
+        );
+    }
+
+    /// Verifies that `set_cold_start_span_trace_id` with `Some(tid)` inserts `_dd.p.tid`
+    /// into the cold start span's meta, enabling correct 128-bit trace ID reconstruction.
+    #[tokio::test]
+    async fn test_set_cold_start_span_trace_id_with_propagated_tid() {
+        let mut p = setup();
+
+        // Seed a context with a cold start span in the context buffer
+        let invocation_span =
+            create_empty_span(String::from("aws.lambda"), &p.resource, &p.service);
+        p.context_buffer
+            .start_context("req-tid-test", invocation_span);
+        let context = p
+            .context_buffer
+            .get_mut(&"req-tid-test".to_string())
+            .expect("context must exist");
+        let mut cold_start_span = create_empty_span(
+            String::from("aws.lambda.cold_start"),
+            &p.resource,
+            &p.service,
+        );
+        cold_start_span.span_id = 42;
+        context.cold_start_span = Some(cold_start_span);
+
+        // Call with a Some(tid)
+        let tid = "aabbccddeeff0011".to_string();
+        let span_id = p.set_cold_start_span_trace_id(12345, Some(tid.clone()));
+
+        // Should return the cold start span_id
+        assert_eq!(span_id, Some(42));
+
+        // _dd.p.tid must be set in the cold start span meta
+        let cold_start_meta = &p
+            .context_buffer
+            .get_context_with_cold_start()
+            .expect("context must exist")
+            .cold_start_span
+            .as_ref()
+            .expect("cold start span must exist")
+            .meta;
+        assert_eq!(
+            cold_start_meta.get("_dd.p.tid"),
+            Some(&tid),
+            "_dd.p.tid must be set when propagated_tid is Some"
+        );
+    }
+
+    /// Verifies that `set_cold_start_span_trace_id` with `None` does NOT insert `_dd.p.tid`
+    /// into the cold start span's meta (64-bit trace ID path, no upper-half tag needed).
+    #[tokio::test]
+    async fn test_set_cold_start_span_trace_id_without_propagated_tid() {
+        let mut p = setup();
+
+        // Seed a context with a cold start span in the context buffer
+        let invocation_span =
+            create_empty_span(String::from("aws.lambda"), &p.resource, &p.service);
+        p.context_buffer
+            .start_context("req-no-tid-test", invocation_span);
+        let context = p
+            .context_buffer
+            .get_mut(&"req-no-tid-test".to_string())
+            .expect("context must exist");
+        let mut cold_start_span = create_empty_span(
+            String::from("aws.lambda.cold_start"),
+            &p.resource,
+            &p.service,
+        );
+        cold_start_span.span_id = 99;
+        context.cold_start_span = Some(cold_start_span);
+
+        // Call with None
+        let span_id = p.set_cold_start_span_trace_id(67890, None);
+
+        // Should return the cold start span_id
+        assert_eq!(span_id, Some(99));
+
+        // _dd.p.tid must NOT be present in the cold start span meta
+        let cold_start_meta = &p
+            .context_buffer
+            .get_context_with_cold_start()
+            .expect("context must exist")
+            .cold_start_span
+            .as_ref()
+            .expect("cold start span must exist")
+            .meta;
+        assert!(
+            !cold_start_meta.contains_key("_dd.p.tid"),
+            "_dd.p.tid must not be set when propagated_tid is None"
         );
     }
 }
