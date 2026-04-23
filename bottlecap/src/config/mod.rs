@@ -29,9 +29,9 @@ use crate::config::{
     log_level::LogLevel,
     logs_additional_endpoints::LogsAdditionalEndpoint,
     processing_rule::{ProcessingRule, deserialize_processing_rules},
-    trace_propagation_style::TracePropagationStyle,
     yaml::YamlConfigSource,
 };
+use datadog_opentelemetry::propagation::TracePropagationStyle;
 
 /// Helper macro to merge Option<String> fields to String fields
 ///
@@ -256,6 +256,7 @@ pub struct Config {
     pub proxy_no_proxy: Vec<String>,
     pub http_protocol: Option<String>,
     pub tls_cert_file: Option<String>,
+    pub skip_ssl_validation: bool,
 
     // Endpoints
     pub dd_url: String,
@@ -363,6 +364,8 @@ pub struct Config {
     pub span_dedup_timeout: Option<Duration>,
     pub api_key_secret_reload_interval: Option<Duration>,
 
+    pub dd_org_uuid: String,
+
     pub serverless_appsec_enabled: bool,
     pub appsec_rules: Option<String>,
     pub appsec_waf_timeout: Duration,
@@ -383,6 +386,7 @@ impl Default for Config {
             proxy_no_proxy: vec![],
             http_protocol: None,
             tls_cert_file: None,
+            skip_ssl_validation: false,
 
             // Endpoints
             dd_url: String::default(),
@@ -477,12 +481,46 @@ impl Default for Config {
             span_dedup_timeout: None,
             api_key_secret_reload_interval: None,
 
+            dd_org_uuid: String::default(),
+
             serverless_appsec_enabled: false,
             appsec_rules: None,
             appsec_waf_timeout: Duration::from_millis(5),
             api_security_enabled: true,
             api_security_sample_delay: Duration::from_secs(30),
         }
+    }
+}
+
+impl datadog_opentelemetry::propagation::PropagationConfig for Config {
+    fn trace_propagation_style(&self) -> Option<&[TracePropagationStyle]> {
+        if self.trace_propagation_style.is_empty() {
+            None
+        } else {
+            Some(&self.trace_propagation_style)
+        }
+    }
+
+    fn trace_propagation_style_extract(&self) -> Option<&[TracePropagationStyle]> {
+        if self.trace_propagation_style_extract.is_empty() {
+            None
+        } else {
+            Some(&self.trace_propagation_style_extract)
+        }
+    }
+
+    fn trace_propagation_style_inject(&self) -> Option<&[TracePropagationStyle]> {
+        // Bottlecap does not configure injection styles separately
+        None
+    }
+
+    fn trace_propagation_extract_first(&self) -> bool {
+        self.trace_propagation_extract_first
+    }
+
+    fn datadog_tags_max_length(&self) -> usize {
+        // Default max length matching dd-trace-rs
+        512
     }
 }
 
@@ -817,8 +855,8 @@ pub mod tests {
         flush_strategy::{FlushStrategy, PeriodicStrategy},
         log_level::LogLevel,
         processing_rule::ProcessingRule,
-        trace_propagation_style::TracePropagationStyle,
     };
+    use datadog_opentelemetry::propagation::TracePropagationStyle;
 
     #[test]
     fn test_default_logs_intake_url() {
@@ -1297,17 +1335,12 @@ pub mod tests {
     fn test_parse_trace_propagation_style() {
         figment::Jail::expect_with(|jail| {
             jail.clear_env();
-            jail.set_env(
-                "DD_TRACE_PROPAGATION_STYLE",
-                "datadog,tracecontext,b3,b3multi",
-            );
+            jail.set_env("DD_TRACE_PROPAGATION_STYLE", "datadog,tracecontext");
             let config = get_config(Path::new(""));
 
             let expected_styles = vec![
                 TracePropagationStyle::Datadog,
                 TracePropagationStyle::TraceContext,
-                TracePropagationStyle::B3,
-                TracePropagationStyle::B3Multi,
             ];
             assert_eq!(config.trace_propagation_style, expected_styles);
             assert_eq!(config.trace_propagation_style_extract, expected_styles);

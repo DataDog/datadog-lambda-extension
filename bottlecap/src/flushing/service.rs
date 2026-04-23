@@ -5,8 +5,7 @@ use std::sync::Arc;
 use tracing::{debug, error};
 
 use dogstatsd::{
-    aggregator_service::AggregatorHandle as MetricsAggregatorHandle,
-    flusher::Flusher as MetricsFlusher,
+    aggregator::AggregatorHandle as MetricsAggregatorHandle, flusher::Flusher as MetricsFlusher,
 };
 
 use crate::flushing::handles::{FlushHandles, MetricsRetryBatch};

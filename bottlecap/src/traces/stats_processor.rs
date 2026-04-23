@@ -12,12 +12,12 @@ use axum::{
 use tokio::sync::mpsc::Sender;
 use tracing::{debug, error};
 
-use libdd_common::hyper_migration;
+use libdd_common::http_common;
 use libdd_trace_protobuf::pb;
 use libdd_trace_utils::stats_utils;
 
-use super::trace_agent::MAX_CONTENT_LENGTH;
 use crate::http::extract_request_body;
+use crate::traces::trace_agent::MAX_CONTENT_LENGTH;
 
 #[async_trait]
 pub trait StatsProcessor {
@@ -66,7 +66,7 @@ impl StatsProcessor for ServerlessStatsProcessor {
         // deserialize trace stats from the request body, convert to protobuf structs (see
         // trace-protobuf crate)
         let mut stats: pb::ClientStatsPayload =
-            match stats_utils::get_stats_from_request_body(hyper_migration::Body::from_bytes(body))
+            match stats_utils::get_stats_from_request_body(http_common::Body::from_bytes(body))
                 .await
             {
                 Ok(result) => result,

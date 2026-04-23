@@ -5,16 +5,12 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 
-use crate::{
-    lifecycle::invocation::triggers::{
-        FUNCTION_TRIGGER_EVENT_SOURCE_TAG, ServiceNameResolver, Trigger,
-    },
-    traces::{
-        context::{Sampling, SpanContext},
-        propagation::text_map_propagator::{
-            DATADOG_HIGHER_ORDER_TRACE_ID_BITS_KEY, DATADOG_TAGS_KEY, DatadogHeaderPropagator,
-        },
-    },
+use crate::lifecycle::invocation::triggers::{
+    FUNCTION_TRIGGER_EVENT_SOURCE_TAG, ServiceNameResolver, Trigger,
+};
+use datadog_opentelemetry::propagation::{
+    context::{Sampling, SpanContext},
+    datadog::DATADOG_HIGHER_ORDER_TRACE_ID_BITS_KEY,
 };
 
 use super::DATADOG_CARRIER_KEY;
@@ -155,10 +151,7 @@ impl StepFunctionEvent {
                     .parse()
                     .unwrap_or(Self::generate_trace_id(self.execution.id.clone()).0);
 
-                let tags = DatadogHeaderPropagator::extract_tags(&HashMap::from([(
-                    DATADOG_TAGS_KEY.to_string(),
-                    trace_tags.clone(),
-                )]));
+                let tags = crate::traces::propagation::extract_propagation_tags(trace_tags);
 
                 (lo_tid, tags)
             } else {
@@ -184,16 +177,17 @@ impl StepFunctionEvent {
         );
 
         SpanContext {
-            trace_id: lo_tid,
+            trace_id: u128::from(lo_tid),
             span_id: parent_id,
             // Priority Auto Keep
-            sampling: Some(Sampling {
-                priority: Some(1),
+            sampling: Sampling {
+                priority: "1".parse().ok(),
                 mechanism: None,
-            }),
+            },
             origin: Some("states".to_string()),
             tags,
             links: vec![],
+            ..Default::default()
         }
     }
 
@@ -259,7 +253,7 @@ impl ServiceNameResolver for StepFunctionEvent {
 mod tests {
     use super::*;
     use crate::lifecycle::invocation::triggers::test_utils::read_json_file;
-    use crate::traces::propagation::text_map_propagator::DATADOG_SAMPLING_DECISION_KEY;
+    use datadog_opentelemetry::constants::SAMPLING_DECISION_MAKER_TAG_KEY as DATADOG_SAMPLING_DECISION_KEY;
 
     #[test]
     fn test_new_event() {
@@ -468,16 +462,16 @@ mod tests {
                 SpanContext {
                     trace_id: 5_744_042_798_732_701_615,
                     span_id: 2_902_498_116_043_018_663,
-                    sampling: Some(Sampling {
-                        priority: Some(1),
+                    sampling: Sampling {
+                        priority: "1".parse().ok(),
                         mechanism: None,
-                    }),
+                    },
                     origin: Some("states".to_string()),
                     tags: HashMap::from([(
                         DATADOG_HIGHER_ORDER_TRACE_ID_BITS_KEY.to_string(),
                         "1914fe7789eb32be".to_string(),
                     )]),
-                    links: vec![],
+                    ..Default::default()
                 },
             ),
             (
@@ -485,16 +479,16 @@ mod tests {
                 SpanContext {
                     trace_id: 5_744_042_798_732_701_615,
                     span_id: 2_902_498_116_043_018_663,
-                    sampling: Some(Sampling {
-                        priority: Some(1),
+                    sampling: Sampling {
+                        priority: "1".parse().ok(),
                         mechanism: None,
-                    }),
+                    },
                     origin: Some("states".to_string()),
                     tags: HashMap::from([(
                         DATADOG_HIGHER_ORDER_TRACE_ID_BITS_KEY.to_string(),
                         "1914fe7789eb32be".to_string(),
                     )]),
-                    links: vec![],
+                    ..Default::default()
                 },
             ),
             (
@@ -502,16 +496,16 @@ mod tests {
                 SpanContext {
                     trace_id: 1_322_229_001_489_018_110,
                     span_id: 8_947_638_978_974_359_093,
-                    sampling: Some(Sampling {
-                        priority: Some(1),
+                    sampling: Sampling {
+                        priority: "1".parse().ok(),
                         mechanism: None,
-                    }),
+                    },
                     origin: Some("states".to_string()),
                     tags: HashMap::from([(
                         DATADOG_HIGHER_ORDER_TRACE_ID_BITS_KEY.to_string(),
                         "579d19b3ee216ee9".to_string(),
                     )]),
-                    links: vec![],
+                    ..Default::default()
                 },
             ),
             (
@@ -519,16 +513,16 @@ mod tests {
                 SpanContext {
                     trace_id: 1_322_229_001_489_018_110,
                     span_id: 8_947_638_978_974_359_093,
-                    sampling: Some(Sampling {
-                        priority: Some(1),
+                    sampling: Sampling {
+                        priority: "1".parse().ok(),
                         mechanism: None,
-                    }),
+                    },
                     origin: Some("states".to_string()),
                     tags: HashMap::from([(
                         DATADOG_HIGHER_ORDER_TRACE_ID_BITS_KEY.to_string(),
                         "579d19b3ee216ee9".to_string(),
                     )]),
-                    links: vec![],
+                    ..Default::default()
                 },
             ),
             (
@@ -536,10 +530,10 @@ mod tests {
                 SpanContext {
                     trace_id: 5_821_803_790_426_892_636,
                     span_id: 8_947_638_978_974_359_093,
-                    sampling: Some(Sampling {
-                        priority: Some(1),
+                    sampling: Sampling {
+                        priority: "1".parse().ok(),
                         mechanism: None,
-                    }),
+                    },
                     origin: Some("states".to_string()),
                     tags: HashMap::from([
                         (
@@ -548,7 +542,7 @@ mod tests {
                         ),
                         (DATADOG_SAMPLING_DECISION_KEY.to_string(), "-0".to_string()),
                     ]),
-                    links: vec![],
+                    ..Default::default()
                 },
             ),
             (
@@ -556,10 +550,10 @@ mod tests {
                 SpanContext {
                     trace_id: 5_821_803_790_426_892_636,
                     span_id: 8_947_638_978_974_359_093,
-                    sampling: Some(Sampling {
-                        priority: Some(1),
+                    sampling: Sampling {
+                        priority: "1".parse().ok(),
                         mechanism: None,
-                    }),
+                    },
                     origin: Some("states".to_string()),
                     tags: HashMap::from([
                         (
@@ -568,7 +562,7 @@ mod tests {
                         ),
                         (DATADOG_SAMPLING_DECISION_KEY.to_string(), "-0".to_string()),
                     ]),
-                    links: vec![],
+                    ..Default::default()
                 },
             ),
         ];

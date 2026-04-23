@@ -6,7 +6,7 @@ import * as lambda from 'aws-cdk-lib/aws-lambda';
 import { LayerVersion } from "aws-cdk-lib/aws-lambda";
 import {ACCOUNT, REGION} from "../config";
 
-export const datadogSecretArn = process.env.DATADOG_API_SECRET_ARN!;
+export const datadogSecretArn = 'arn:aws:secretsmanager:us-east-1:425362996713:secret:extension-integration-tests-api-key-PnEPHz';
 export const extensionLayerArn = process.env.EXTENSION_LAYER_ARN!;
 
 export const defaultNodeRuntime = lambda.Runtime.NODEJS_24_X;
@@ -14,10 +14,10 @@ export const defaultPythonRuntime = lambda.Runtime.PYTHON_3_13;
 export const defaultJavaRuntime = lambda.Runtime.JAVA_21;
 export const defaultDotnetRuntime = lambda.Runtime.DOTNET_8;
 
-export const defaultNodeLayerArn = 'arn:aws:lambda:us-east-1:464622532012:layer:Datadog-Node24-x:132';
-export const defaultPythonLayerArn = 'arn:aws:lambda:us-east-1:464622532012:layer:Datadog-Python313-ARM:117';
-export const defaultJavaLayerArn = 'arn:aws:lambda:us-east-1:464622532012:layer:dd-trace-java:25';
-export const defaultDotnetLayerArn = 'arn:aws:lambda:us-east-1:464622532012:layer:dd-trace-dotnet-ARM:23';
+export const defaultNodeLayerArn = process.env.NODE_TRACER_LAYER_ARN || 'arn:aws:lambda:us-east-1:464622532012:layer:Datadog-Node24-x:132';
+export const defaultPythonLayerArn = process.env.PYTHON_TRACER_LAYER_ARN || 'arn:aws:lambda:us-east-1:464622532012:layer:Datadog-Python313-ARM:117';
+export const defaultJavaLayerArn = process.env.JAVA_TRACER_LAYER_ARN || 'arn:aws:lambda:us-east-1:464622532012:layer:dd-trace-java:25';
+export const defaultDotnetLayerArn = process.env.DOTNET_TRACER_LAYER_ARN || 'arn:aws:lambda:us-east-1:464622532012:layer:dd-trace-dotnet-ARM:23';
 
 export const defaultDatadogEnvVariables = {
     DD_API_KEY_SECRET_ARN: datadogSecretArn,

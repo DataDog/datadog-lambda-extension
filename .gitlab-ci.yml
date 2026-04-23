@@ -5,12 +5,6 @@ variables:
   # This will be overwritten by the tag version if it is a release.
   VERSION: dev
   # Manual trigger variables
-  AGENT_BRANCH:
-    description: "Branch of the datadog-agent repository to use."
-    value: main
-  AGENT_VERSION:
-    description: "Latest release version of the datadog-agent to tag the build with."
-    value: "7.66.0"
   PIPELINE_LAYER_SUFFIX:
     description: "Suffix to be appended to the layer name (default empty)."
     value: ""
@@ -29,10 +23,15 @@ ci image:
       changes:
         - .gitlab/Dockerfile
       when: on_success
+  id_tokens:
+    DDSIGN_ID_TOKEN:
+      aud: image-integrity
   variables:
     DOCKER_TARGET: ${DOCKER_TARGET_IMAGE}:${DOCKER_TARGET_VERSION}
   script:
-    - docker buildx build --platform linux/amd64,linux/arm64 --no-cache --pull --push --tag ${DOCKER_TARGET} -f .gitlab/Dockerfile .
+    - METADATA_FILE=$(mktemp)
+    - docker buildx build --platform linux/amd64,linux/arm64 --no-cache --pull --push --tag ${DOCKER_TARGET} --metadata-file ${METADATA_FILE} -f .gitlab/Dockerfile .
+    - ddsign sign ${DOCKER_TARGET} --docker-metadata-file ${METADATA_FILE}
 
 .go-cache: &go-cache
   key: datadog-lambda-extension-go-cache

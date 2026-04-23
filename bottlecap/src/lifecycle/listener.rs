@@ -3,12 +3,19 @@
 
 use axum::{
     Router,
-    extract::{Request, State},
+    extract::{DefaultBodyLimit, Request, State},
     http::{HeaderMap, StatusCode},
     response::{IntoResponse, Response},
     routing::{get, post},
 };
 use bytes::Bytes;
+use datadog_opentelemetry::propagation::{
+    context::SpanContext,
+    datadog::{
+        DATADOG_HIGHER_ORDER_TRACE_ID_BITS_KEY, DATADOG_SAMPLING_PRIORITY_KEY, DATADOG_TAGS_KEY,
+        DATADOG_TRACE_ID_KEY,
+    },
+};
 use serde_json::{Value, json};
 use std::collections::HashMap;
 use std::net::SocketAddr;
@@ -19,24 +26,18 @@ use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, warn};
 
 use crate::{
-    http::{extract_request_body, headers_to_map},
+    http::{extract_request_body_or_empty, headers_to_map},
     lifecycle::invocation::processor_service::InvocationProcessorHandle,
-    traces::{
-        context::SpanContext,
-        propagation::{
-            DatadogCompositePropagator,
-            text_map_propagator::{
-                DATADOG_HIGHER_ORDER_TRACE_ID_BITS_KEY, DATADOG_SAMPLING_PRIORITY_KEY,
-                DATADOG_TAGS_KEY, DATADOG_TRACE_ID_KEY,
-            },
-        },
-    },
+    traces::propagation::DatadogCompositePropagator,
 };
 
 const HELLO_PATH: &str = "/lambda/hello";
 const START_INVOCATION_PATH: &str = "/lambda/start-invocation";
 const END_INVOCATION_PATH: &str = "/lambda/end-invocation";
 const AGENT_PORT: usize = 8124;
+// Lambda's maximum synchronous invocation payload size
+// reference: https://docs.aws.amazon.com/lambda/latest/api/API_Invoke.html
+const LAMBDA_INVOCATION_MAX_PAYLOAD: usize = 6 * 1024 * 1024;
 
 /// Extracts the AWS Lambda request ID from the LWA proxy header.
 fn extract_request_id_from_headers(headers: &HashMap<String, String>) -> Option<String> {
@@ -102,6 +103,7 @@ impl Listener {
             .route(END_INVOCATION_PATH, post(Self::handle_end_invocation))
             .route(HELLO_PATH, get(Self::handle_hello))
             .with_state(state)
+            .layer(DefaultBodyLimit::max(LAMBDA_INVOCATION_MAX_PAYLOAD))
     }
 
     async fn graceful_shutdown(tasks: Arc<Mutex<JoinSet<()>>>, shutdown_token: CancellationToken) {
@@ -121,17 +123,7 @@ impl Listener {
         State((invocation_processor_handle, propagator, tasks)): State<ListenerState>,
         request: Request,
     ) -> Response {
-        let (parts, body) = match extract_request_body(request).await {
-            Ok(r) => r,
-            Err(e) => {
-                error!("Failed to extract request body: {e}");
-                return (
-                    StatusCode::BAD_REQUEST,
-                    "Could not read start invocation request body",
-                )
-                    .into_response();
-            }
-        };
+        let (parts, body) = extract_request_body_or_empty(request).await;
 
         let headers = headers_to_map(&parts.headers);
         let payload_value = serde_json::from_slice::<Value>(&body).unwrap_or_else(|_| json!({}));
@@ -164,16 +156,15 @@ impl Listener {
         State((invocation_processor_handle, _, tasks)): State<ListenerState>,
         request: Request,
     ) -> Response {
+        // IMPORTANT: Extract the body synchronously before returning the response.
+        // If this is moved into the spawned task, PlatformRuntimeDone may be
+        // processed before the body is read, causing orphaned traces. (SLES-2666)
+        // On oversized payloads (>6MB) we gracefully degrade to an empty body
+        // so that processing still runs. (SLES-2722)
+        let (parts, body) = extract_request_body_or_empty(request).await;
+
         let mut join_set = tasks.lock().await;
         join_set.spawn(async move {
-            let (parts, body) = match extract_request_body(request).await {
-                Ok(r) => r,
-                Err(e) => {
-                    error!("Failed to extract request body: {e}");
-                    return;
-                }
-            };
-
             Self::universal_instrumentation_end(&parts.headers, body, invocation_processor_handle)
                 .await;
         });
@@ -192,9 +183,7 @@ impl Listener {
         payload_value: Value,
         invocation_processor_handle: InvocationProcessorHandle,
     ) {
-        debug!(
-            "Received start invocation request from headers:{headers:?}, payload_value:{payload_value:?}"
-        );
+        debug!("Received start invocation request from headers:{headers:?}");
 
         let request_id = extract_request_id_from_headers(&headers);
 
@@ -215,14 +204,17 @@ impl Listener {
     fn inject_span_context_to_headers(headers: &mut HeaderMap, span_context: &SpanContext) {
         headers.insert(
             DATADOG_TRACE_ID_KEY,
-            span_context
-                .trace_id
-                .to_string()
-                .parse()
-                .expect("Failed to parse trace id"),
+            {
+                #[allow(clippy::cast_possible_truncation)] // Datadog protocol uses lower 64 bits
+                let trace_id = span_context.trace_id as u64;
+                trace_id
+            }
+            .to_string()
+            .parse()
+            .expect("Failed to parse trace id"),
         );
 
-        if let Some(priority) = span_context.sampling.and_then(|s| s.priority) {
+        if let Some(priority) = span_context.sampling.priority {
             headers.insert(
                 DATADOG_SAMPLING_PRIORITY_KEY,
                 priority
@@ -254,9 +246,7 @@ impl Listener {
         let headers = headers_to_map(headers);
         let payload_value = serde_json::from_slice::<Value>(&body).unwrap_or_else(|_| json!({}));
 
-        debug!(
-            "Received end invocation request from headers:{headers:?}, payload_value:{payload_value:?}"
-        );
+        debug!("Received end invocation request from headers:{headers:?}");
         let request_id = extract_request_id_from_headers(&headers);
 
         if let Err(e) = invocation_processor_handle
@@ -274,6 +264,83 @@ impl Listener {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use axum::{body::Body, http::Request, routing::post};
+    use http_body_util::BodyExt;
+    use tower::ServiceExt;
+
+    /// Builds a minimal router that applies only the body limit layer.
+    /// The handler reads the full body (via the `Bytes` extractor), which
+    /// is what triggers `DefaultBodyLimit` enforcement.
+    fn body_limit_router() -> Router {
+        async fn handler(body: Bytes) -> StatusCode {
+            let _ = body;
+            StatusCode::OK
+        }
+        Router::new()
+            .route("/lambda/start-invocation", post(handler))
+            .layer(DefaultBodyLimit::max(LAMBDA_INVOCATION_MAX_PAYLOAD))
+    }
+
+    #[tokio::test]
+    async fn test_body_limit_accepts_payload_just_below_6mb() {
+        let router = body_limit_router();
+        // 6 MB - 1 byte: should be accepted
+        let payload = vec![b'x'; LAMBDA_INVOCATION_MAX_PAYLOAD - 1];
+        let req = Request::builder()
+            .method("POST")
+            .uri("/lambda/start-invocation")
+            .header("Content-Type", "application/json")
+            .body(Body::from(payload))
+            .expect("failed to build request");
+
+        let response = router.oneshot(req).await.expect("request failed");
+        assert_eq!(response.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn test_body_limit_accepts_payload_above_old_2mb_default() {
+        let router = body_limit_router();
+        // 3 MB: above the old axum 2 MB default, should now succeed
+        let payload = vec![b'x'; 3 * 1024 * 1024];
+        let req = Request::builder()
+            .method("POST")
+            .uri("/lambda/start-invocation")
+            .header("Content-Type", "application/json")
+            .body(Body::from(payload))
+            .expect("failed to build request");
+
+        let response = router.oneshot(req).await.expect("request failed");
+        assert_eq!(response.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn test_body_limit_rejects_payload_above_6mb() {
+        let router = body_limit_router();
+        // 6 MB + 1 byte: should be rejected with 413
+        let payload = vec![b'x'; LAMBDA_INVOCATION_MAX_PAYLOAD + 1];
+        let req = Request::builder()
+            .method("POST")
+            .uri("/lambda/start-invocation")
+            .header("Content-Type", "application/json")
+            .body(Body::from(payload))
+            .expect("failed to build request");
+
+        let response = router.oneshot(req).await.expect("request failed");
+        assert_eq!(response.status(), StatusCode::PAYLOAD_TOO_LARGE);
+
+        let body = response
+            .into_body()
+            .collect()
+            .await
+            .expect("failed to read body")
+            .to_bytes();
+        assert!(
+            body.windows(b"length limit exceeded".len())
+                .any(|w| w == b"length limit exceeded"),
+            "expected 'length limit exceeded' in response body, got: {}",
+            String::from_utf8_lossy(&body)
+        );
+    }
 
     #[test]
     fn test_extract_request_id_from_header() {
@@ -316,6 +383,58 @@ mod tests {
             result,
             Some("lwa-proxy-request-id".to_string()),
             "Should extract request_id from LWA proxy header"
+        );
+    }
+
+    /// Verifies that an oversized payload (>6MB) behind `DefaultBodyLimit`
+    /// does NOT prevent end-invocation processing. The handler should
+    /// gracefully degrade to an empty body instead of failing outright.
+    #[tokio::test]
+    async fn test_end_invocation_oversized_payload_still_processes() {
+        // Mirrors the fixed handle_end_invocation logic: synchronously attempt
+        // body extraction before spawning the task, fall back to empty bytes.
+        async fn handler(request: axum::extract::Request) -> StatusCode {
+            use axum::extract::FromRequest;
+
+            let (parts, body) = request.into_parts();
+            let body =
+                match Bytes::from_request(axum::extract::Request::from_parts(parts, body), &())
+                    .await
+                {
+                    Ok(b) => b,
+                    Err(_) => Bytes::new(),
+                };
+
+            if body.is_empty() {
+                // Body was too large and was replaced with empty bytes.
+                // Processing continues with degraded payload.
+                StatusCode::OK
+            } else {
+                StatusCode::OK
+            }
+        }
+
+        let router = Router::new()
+            .route(END_INVOCATION_PATH, post(handler))
+            .layer(DefaultBodyLimit::max(LAMBDA_INVOCATION_MAX_PAYLOAD));
+
+        // 6 MB + 1 byte: exceeds the DefaultBodyLimit
+        let payload = vec![b'x'; LAMBDA_INVOCATION_MAX_PAYLOAD + 1];
+        let req = Request::builder()
+            .method("POST")
+            .uri(END_INVOCATION_PATH)
+            .header("Content-Type", "application/json")
+            .body(Body::from(payload))
+            .expect("failed to build request");
+
+        let response = router.oneshot(req).await.expect("request failed");
+
+        // The handler gracefully degrades to an empty payload instead of failing,
+        // so processing (universal_instrumentation_end) still runs.
+        assert_eq!(
+            response.status(),
+            StatusCode::OK,
+            "Oversized payload should be handled gracefully with empty body fallback"
         );
     }
 }

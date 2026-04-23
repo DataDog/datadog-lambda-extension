@@ -7,8 +7,8 @@ use tracing::debug;
 
 use crate::config::Config;
 use crate::lifecycle::invocation::triggers::IdentifiedTrigger;
+use crate::traces::propagation::DatadogCompositePropagator;
 use crate::traces::span_pointers::SpanPointer;
-use crate::traces::{context::SpanContext, propagation::Propagator};
 use crate::{
     config::aws::AwsConfig,
     lifecycle::invocation::{
@@ -21,6 +21,7 @@ use crate::{
         },
     },
 };
+use datadog_opentelemetry::propagation::context::SpanContext;
 
 #[derive(Default)]
 pub struct SpanInferrer {
@@ -111,6 +112,13 @@ impl SpanInferrer {
 
                     wrapped_inferred_span.duration =
                         inferred_span.start - wrapped_inferred_span.start;
+                    wrapped_inferred_span
+                        .meta
+                        .insert("_inferred_span.tag_source".to_string(), "self".to_string());
+                    wrapped_inferred_span.meta.insert(
+                        "_inferred_span.synchronicity".to_string(),
+                        "async".to_string(),
+                    );
 
                     return Some(wrapped_inferred_span);
                 } else if let Ok(event_bridge_entity) =
@@ -130,6 +138,13 @@ impl SpanInferrer {
 
                     wrapped_inferred_span.duration =
                         inferred_span.start - wrapped_inferred_span.start;
+                    wrapped_inferred_span
+                        .meta
+                        .insert("_inferred_span.tag_source".to_string(), "self".to_string());
+                    wrapped_inferred_span.meta.insert(
+                        "_inferred_span.synchronicity".to_string(),
+                        "async".to_string(),
+                    );
 
                     return Some(wrapped_inferred_span);
                 }
@@ -157,6 +172,13 @@ impl SpanInferrer {
 
                     wrapped_inferred_span.duration =
                         inferred_span.start - wrapped_inferred_span.start;
+                    wrapped_inferred_span
+                        .meta
+                        .insert("_inferred_span.tag_source".to_string(), "self".to_string());
+                    wrapped_inferred_span.meta.insert(
+                        "_inferred_span.synchronicity".to_string(),
+                        "async".to_string(),
+                    );
 
                     return Some(wrapped_inferred_span);
                 }
@@ -247,6 +269,14 @@ impl SpanInferrer {
             if should_skip_inferred_span {
                 self.inferred_span = None;
             } else {
+                let synchronicity = if t.is_async() { "async" } else { "sync" };
+                inferred_span
+                    .meta
+                    .insert("_inferred_span.tag_source".to_string(), "self".to_string());
+                inferred_span.meta.insert(
+                    "_inferred_span.synchronicity".to_string(),
+                    synchronicity.to_string(),
+                );
                 self.inferred_span = Some(inferred_span);
             }
         }
@@ -363,7 +393,7 @@ fn propagate_appsec(
 
 pub fn extract_span_context(
     payload_value: &Value,
-    propagator: Arc<impl Propagator>,
+    propagator: Arc<DatadogCompositePropagator>,
 ) -> Option<SpanContext> {
     let identified_trigger = IdentifiedTrigger::from_value(payload_value);
     let generated_span_context = extract_generated_span_context(&identified_trigger);
@@ -405,13 +435,18 @@ pub fn extract_generated_span_context(
 mod tests {
     use super::*;
     use crate::lifecycle::invocation::triggers::test_utils::read_json_file;
-    use crate::traces::propagation::text_map_propagator::DatadogHeaderPropagator;
+    use crate::traces::propagation::DatadogCompositePropagator;
+    use datadog_opentelemetry::propagation::TracePropagationStyle;
     use serde_json::json;
     use std::sync::Arc;
     use tokio::time::Instant;
 
     fn test_context_source(payload: &Value, expected_source: &str) {
-        let propagator = Arc::new(DatadogHeaderPropagator);
+        let config = Arc::new(Config {
+            trace_propagation_style_extract: vec![TracePropagationStyle::Datadog],
+            ..Config::default()
+        });
+        let propagator = Arc::new(DatadogCompositePropagator::new(config));
         let context = extract_span_context(payload, propagator);
 
         let context = context.expect("Should return a span context");

@@ -24,10 +24,11 @@ use crate::{
         },
         processing_rule::{ProcessingRule, deserialize_processing_rules},
         service_mapping::deserialize_service_mapping,
-        trace_propagation_style::{TracePropagationStyle, deserialize_trace_propagation_style},
+        trace_propagation_style::deserialize_trace_propagation_style,
     },
     merge_hashmap, merge_option, merge_option_to_value, merge_string, merge_vec,
 };
+use datadog_opentelemetry::propagation::TracePropagationStyle;
 
 #[derive(Debug, PartialEq, Deserialize, Clone, Default)]
 #[serde(default)]
@@ -80,6 +81,11 @@ pub struct EnvConfig {
     /// Example: `/opt/ca-cert.pem`
     #[serde(deserialize_with = "deserialize_optional_string")]
     pub tls_cert_file: Option<String>,
+    /// @env `DD_SKIP_SSL_VALIDATION`
+    ///
+    /// If set to true, the Agent will skip TLS certificate validation for outgoing connections.
+    #[serde(deserialize_with = "deserialize_optional_bool_from_anything")]
+    pub skip_ssl_validation: Option<bool>,
 
     // Metrics
     /// @env `DD_DD_URL`
@@ -476,6 +482,12 @@ pub struct EnvConfig {
     /// The delay between two samples of the API Security schema collection, in seconds.
     #[serde(deserialize_with = "deserialize_optional_duration_from_seconds")]
     pub api_security_sample_delay: Option<Duration>,
+
+    /// @env `DD_ORG_UUID`
+    ///
+    /// The Datadog organization UUID. When set, delegated auth is auto-enabled.
+    #[serde(deserialize_with = "deserialize_string_or_int")]
+    pub org_uuid: Option<String>,
 }
 
 #[allow(clippy::too_many_lines)]
@@ -497,6 +509,7 @@ fn merge_config(config: &mut Config, env_config: &EnvConfig) {
     merge_vec!(config, env_config, proxy_no_proxy);
     merge_option!(config, env_config, http_protocol);
     merge_option!(config, env_config, tls_cert_file);
+    merge_option_to_value!(config, env_config, skip_ssl_validation);
 
     // Endpoints
     merge_string!(config, env_config, dd_url);
@@ -677,6 +690,8 @@ fn merge_config(config: &mut Config, env_config: &EnvConfig) {
     merge_option_to_value!(config, env_config, appsec_waf_timeout);
     merge_option_to_value!(config, env_config, api_security_enabled);
     merge_option_to_value!(config, env_config, api_security_sample_delay);
+
+    merge_string!(config, dd_org_uuid, env_config, org_uuid);
 }
 
 #[derive(Debug, PartialEq, Clone, Copy)]
@@ -713,8 +728,8 @@ mod tests {
         flush_strategy::{FlushStrategy, PeriodicStrategy},
         log_level::LogLevel,
         processing_rule::{Kind, ProcessingRule},
-        trace_propagation_style::TracePropagationStyle,
     };
+    use datadog_opentelemetry::propagation::TracePropagationStyle;
 
     #[test]
     #[allow(clippy::too_many_lines)]
@@ -733,6 +748,7 @@ mod tests {
             jail.set_env("DD_PROXY_NO_PROXY", "localhost,127.0.0.1");
             jail.set_env("DD_HTTP_PROTOCOL", "http1");
             jail.set_env("DD_TLS_CERT_FILE", "/opt/ca-cert.pem");
+            jail.set_env("DD_SKIP_SSL_VALIDATION", "true");
 
             // Metrics
             jail.set_env("DD_DD_URL", "https://metrics.datadoghq.com");
@@ -795,7 +811,7 @@ mod tests {
             jail.set_env("DD_METRICS_CONFIG_COMPRESSION_LEVEL", "3");
             // Trace Propagation
             jail.set_env("DD_TRACE_PROPAGATION_STYLE", "datadog");
-            jail.set_env("DD_TRACE_PROPAGATION_STYLE_EXTRACT", "b3");
+            jail.set_env("DD_TRACE_PROPAGATION_STYLE_EXTRACT", "tracecontext");
             jail.set_env("DD_TRACE_PROPAGATION_EXTRACT_FIRST", "true");
             jail.set_env("DD_TRACE_PROPAGATION_HTTP_BAGGAGE_ENABLED", "true");
             jail.set_env("DD_TRACE_AWS_SERVICE_REPRESENTATION_ENABLED", "true");
@@ -895,6 +911,7 @@ mod tests {
                 proxy_no_proxy: vec!["localhost".to_string(), "127.0.0.1".to_string()],
                 http_protocol: Some("http1".to_string()),
                 tls_cert_file: Some("/opt/ca-cert.pem".to_string()),
+                skip_ssl_validation: true,
                 dd_url: "https://metrics.datadoghq.com".to_string(),
                 url: "https://app.datadoghq.com".to_string(),
                 additional_endpoints: HashMap::from([
@@ -976,7 +993,7 @@ mod tests {
                     "debug:^true$".to_string(),
                 ]),
                 trace_propagation_style: vec![TracePropagationStyle::Datadog],
-                trace_propagation_style_extract: vec![TracePropagationStyle::B3],
+                trace_propagation_style_extract: vec![TracePropagationStyle::TraceContext],
                 trace_propagation_extract_first: true,
                 trace_propagation_http_baggage_enabled: true,
                 trace_aws_service_representation_enabled: true,
@@ -1035,6 +1052,8 @@ mod tests {
                 appsec_waf_timeout: Duration::from_secs(1),
                 api_security_enabled: false,
                 api_security_sample_delay: Duration::from_secs(60),
+
+                dd_org_uuid: String::default(),
             };
 
             assert_eq!(config, expected_config);

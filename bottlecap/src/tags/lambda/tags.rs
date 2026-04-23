@@ -45,10 +45,18 @@ const FUNCTION_TAGS_KEY: &str = "_dd.tags.function";
 // TODO(astuyve) decide what to do with the version
 const EXTENSION_VERSION_KEY: &str = "dd_extension_version";
 // TODO(duncanista) figure out a better way to not hardcode this
-pub const EXTENSION_VERSION: &str = "92-next";
+pub const EXTENSION_VERSION: &str = "96-next";
 
 const REGION_KEY: &str = "region";
 const ACCOUNT_ID_KEY: &str = "account_id";
+
+// Span tag keys for durable function execution context
+pub const REQUEST_ID_KEY: &str = "request_id";
+pub const DURABLE_EXECUTION_ID_KEY: &str = "aws_lambda.durable_function.execution_id";
+pub const DURABLE_EXECUTION_NAME_KEY: &str = "aws_lambda.durable_function.execution_name";
+pub const DURABLE_FUNCTION_FIRST_INVOCATION_KEY: &str =
+    "aws_lambda.durable_function.first_invocation";
+
 const AWS_ACCOUNT_KEY: &str = "aws_account";
 const RESOURCE_KEY: &str = "resource";
 

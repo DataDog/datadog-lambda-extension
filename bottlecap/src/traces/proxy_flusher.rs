@@ -5,11 +5,10 @@ use thiserror::Error as ThisError;
 use tokio::sync::OnceCell;
 use tokio::{sync::Mutex, task::JoinSet};
 
-use tracing::{debug, error};
+use tracing::{debug, error, info};
 
 use crate::{
     FLUSH_RETRY_COUNT, config,
-    http::get_client,
     tags::provider,
     traces::{
         DD_ADDITIONAL_TAGS_HEADER,
@@ -39,9 +38,8 @@ impl Flusher {
         aggregator: Arc<Mutex<Aggregator>>,
         tags_provider: Arc<provider::Provider>,
         config: Arc<config::Config>,
+        client: reqwest::Client,
     ) -> Self {
-        let client = get_client(&config);
-
         Flusher {
             client,
             aggregator,
@@ -161,13 +159,22 @@ impl Flusher {
                             "PROXY_FLUSHER | Successfully sent request in {} ms to {url}",
                             elapsed.as_millis()
                         );
-                    } else {
+                        return Ok(());
+                    } else if attempts >= FLUSH_RETRY_COUNT {
+                        // Final attempt. Log with error level and return error.
+                        let body_string = body.unwrap_or_default();
                         error!(
-                            "PROXY_FLUSHER | Request failed with status {status} to {url}: {body:?}"
+                            "PROXY_FLUSHER | Request failed with status {status} to {url}: {body_string} after {attempts} attempts"
                         );
+                        return Err(Box::new(FailedProxyRequestError {
+                            request,
+                            message: format!("Request failed with status {status}: {body_string}"),
+                        }));
                     }
-
-                    return Ok(());
+                    // Not the final attempt. Log with info level and retry.
+                    info!(
+                        "PROXY_FLUSHER | Request failed with status {status} to {url}: {body:?} (attempt {attempts}/{FLUSH_RETRY_COUNT})"
+                    );
                 }
                 Err(e) => {
                     if attempts >= FLUSH_RETRY_COUNT {

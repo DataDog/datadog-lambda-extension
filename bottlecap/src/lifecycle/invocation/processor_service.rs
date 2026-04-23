@@ -1,7 +1,8 @@
 use std::{collections::HashMap, sync::Arc};
 
 use chrono::{DateTime, Utc};
-use dogstatsd::aggregator_service::AggregatorHandle;
+use datadog_opentelemetry::propagation::context::SpanContext;
+use dogstatsd::aggregator::AggregatorHandle;
 use libdd_trace_protobuf::pb::Span;
 use serde_json::Value;
 use thiserror::Error;
@@ -17,11 +18,9 @@ use crate::{
         context::{Context, ReparentingInfo},
         processor::Processor,
     },
+    logs::lambda::DurableContextUpdate,
     tags::provider,
-    traces::{
-        context::SpanContext, propagation::DatadogCompositePropagator,
-        trace_processor::SendingTraceProcessor,
-    },
+    traces::{propagation::DatadogCompositePropagator, trace_processor::SendingTraceProcessor},
 };
 
 #[derive(Error, Debug)]
@@ -40,6 +39,7 @@ pub enum ProcessorCommand {
     },
     PlatformInitStart {
         time: DateTime<Utc>,
+        runtime_version: Option<String>,
     },
     PlatformInitReport {
         init_type: InitType,
@@ -110,6 +110,12 @@ pub enum ProcessorCommand {
     AddTracerSpan {
         span: Box<Span>,
     },
+    ForwardDurableContext {
+        request_id: String,
+        execution_id: String,
+        execution_name: String,
+        first_invocation: Option<bool>,
+    },
     OnOutOfMemoryError {
         timestamp: i64,
     },
@@ -140,9 +146,13 @@ impl InvocationProcessorHandle {
     pub async fn on_platform_init_start(
         &self,
         time: DateTime<Utc>,
+        runtime_version: Option<String>,
     ) -> Result<(), mpsc::error::SendError<ProcessorCommand>> {
         self.sender
-            .send(ProcessorCommand::PlatformInitStart { time })
+            .send(ProcessorCommand::PlatformInitStart {
+                time,
+                runtime_version,
+            })
             .await
     }
 
@@ -375,6 +385,23 @@ impl InvocationProcessorHandle {
             .await
     }
 
+    pub async fn forward_durable_context(
+        &self,
+        request_id: String,
+        execution_id: String,
+        execution_name: String,
+        first_invocation: Option<bool>,
+    ) -> Result<(), mpsc::error::SendError<ProcessorCommand>> {
+        self.sender
+            .send(ProcessorCommand::ForwardDurableContext {
+                request_id,
+                execution_id,
+                execution_name,
+                first_invocation,
+            })
+            .await
+    }
+
     pub async fn on_out_of_memory_error(
         &self,
         timestamp: i64,
@@ -425,6 +452,7 @@ impl InvocationProcessorService {
         aws_config: Arc<AwsConfig>,
         metrics_aggregator_handle: AggregatorHandle,
         propagator: Arc<DatadogCompositePropagator>,
+        durable_context_tx: mpsc::Sender<DurableContextUpdate>,
     ) -> (InvocationProcessorHandle, Self) {
         let (sender, receiver) = mpsc::channel(1000);
 
@@ -434,6 +462,7 @@ impl InvocationProcessorService {
             aws_config,
             metrics_aggregator_handle,
             propagator,
+            durable_context_tx,
         );
 
         let handle = InvocationProcessorHandle { sender };
@@ -454,8 +483,11 @@ impl InvocationProcessorService {
                 ProcessorCommand::InvokeEvent { request_id } => {
                     self.processor.on_invoke_event(request_id);
                 }
-                ProcessorCommand::PlatformInitStart { time } => {
-                    self.processor.on_platform_init_start(time);
+                ProcessorCommand::PlatformInitStart {
+                    time,
+                    runtime_version,
+                } => {
+                    self.processor.on_platform_init_start(time, runtime_version);
                 }
                 ProcessorCommand::PlatformInitReport {
                     init_type,
@@ -579,6 +611,21 @@ impl InvocationProcessorService {
                 }
                 ProcessorCommand::AddTracerSpan { span } => {
                     self.processor.add_tracer_span(&span);
+                }
+                ProcessorCommand::ForwardDurableContext {
+                    request_id,
+                    execution_id,
+                    execution_name,
+                    first_invocation,
+                } => {
+                    self.processor
+                        .forward_durable_context(
+                            &request_id,
+                            &execution_id,
+                            &execution_name,
+                            first_invocation,
+                        )
+                        .await;
                 }
                 ProcessorCommand::OnOutOfMemoryError { timestamp } => {
                     self.processor.on_out_of_memory_error(timestamp);

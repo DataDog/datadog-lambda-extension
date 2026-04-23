@@ -1,21 +1,20 @@
 use std::time::Duration;
 use std::{collections::HashMap, path::PathBuf};
 
+use datadog_opentelemetry::propagation::TracePropagationStyle;
+
 use crate::{
     config::{
         Config, ConfigError, ConfigSource, ProcessingRule,
-        additional_endpoints::deserialize_additional_endpoints,
-        deserialize_apm_replace_rules, deserialize_key_value_pair_array_to_hashmap,
-        deserialize_option_lossless, deserialize_optional_bool_from_anything,
-        deserialize_optional_duration_from_microseconds,
+        additional_endpoints::deserialize_additional_endpoints, deserialize_apm_replace_rules,
+        deserialize_key_value_pair_array_to_hashmap, deserialize_option_lossless,
+        deserialize_optional_bool_from_anything, deserialize_optional_duration_from_microseconds,
         deserialize_optional_duration_from_seconds,
         deserialize_optional_duration_from_seconds_ignore_zero, deserialize_optional_string,
-        deserialize_processing_rules, deserialize_string_or_int,
-        flush_strategy::FlushStrategy,
-        log_level::LogLevel,
-        logs_additional_endpoints::LogsAdditionalEndpoint,
+        deserialize_processing_rules, deserialize_string_or_int, flush_strategy::FlushStrategy,
+        log_level::LogLevel, logs_additional_endpoints::LogsAdditionalEndpoint,
         service_mapping::deserialize_service_mapping,
-        trace_propagation_style::{TracePropagationStyle, deserialize_trace_propagation_style},
+        trace_propagation_style::deserialize_trace_propagation_style,
     },
     merge_hashmap, merge_option, merge_option_to_value, merge_string, merge_vec,
 };
@@ -55,6 +54,8 @@ pub struct YamlConfig {
     pub http_protocol: Option<String>,
     #[serde(deserialize_with = "deserialize_optional_string")]
     pub tls_cert_file: Option<String>,
+    #[serde(deserialize_with = "deserialize_optional_bool_from_anything")]
+    pub skip_ssl_validation: Option<bool>,
 
     // Endpoints
     #[serde(deserialize_with = "deserialize_additional_endpoints")]
@@ -431,6 +432,7 @@ fn merge_config(config: &mut Config, yaml_config: &YamlConfig) {
     merge_option_to_value!(config, proxy_no_proxy, yaml_config.proxy, no_proxy);
     merge_option!(config, yaml_config, http_protocol);
     merge_option!(config, yaml_config, tls_cert_file);
+    merge_option_to_value!(config, yaml_config, skip_ssl_validation);
 
     // Endpoints
     merge_hashmap!(config, yaml_config, additional_endpoints);
@@ -767,6 +769,7 @@ proxy:
 dd_url: "https://metrics.datadoghq.com"
 http_protocol: "http1"
 tls_cert_file: "/opt/ca-cert.pem"
+skip_ssl_validation: true
 
 # Endpoints
 additional_endpoints:
@@ -822,7 +825,7 @@ service_mapping: old-service:new-service
 
 # Trace Propagation
 trace_propagation_style: "datadog"
-trace_propagation_style_extract: "b3"
+trace_propagation_style_extract: "tracecontext"
 trace_propagation_extract_first: true
 trace_propagation_http_baggage_enabled: true
 trace_aws_service_representation_enabled: true
@@ -907,6 +910,7 @@ api_security_sample_delay: 60 # Seconds
                 proxy_no_proxy: vec!["localhost".to_string(), "127.0.0.1".to_string()],
                 http_protocol: Some("http1".to_string()),
                 tls_cert_file: Some("/opt/ca-cert.pem".to_string()),
+                skip_ssl_validation: true,
                 dd_url: "https://metrics.datadoghq.com".to_string(),
                 url: String::new(), // doesnt exist in yaml
                 additional_endpoints: HashMap::from([
@@ -967,7 +971,7 @@ api_security_sample_delay: 60 # Seconds
                     ),
                 ]),
                 trace_propagation_style: vec![TracePropagationStyle::Datadog],
-                trace_propagation_style_extract: vec![TracePropagationStyle::B3],
+                trace_propagation_style_extract: vec![TracePropagationStyle::TraceContext],
                 trace_propagation_extract_first: true,
                 trace_propagation_http_baggage_enabled: true,
                 trace_aws_service_representation_enabled: true,
@@ -1032,6 +1036,8 @@ api_security_sample_delay: 60 # Seconds
                 dogstatsd_so_rcvbuf: Some(1_048_576),
                 dogstatsd_buffer_size: Some(65507),
                 dogstatsd_queue_size: Some(2048),
+
+                dd_org_uuid: String::default(),
             };
 
             // Assert that

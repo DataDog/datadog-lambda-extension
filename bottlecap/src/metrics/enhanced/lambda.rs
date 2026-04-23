@@ -5,7 +5,7 @@ use crate::metrics::enhanced::usage_metrics::{EnhancedMetricsHandle, EnhancedMet
 use crate::proc::{self, CPUData, NetworkData};
 use dogstatsd::metric::SortedTags;
 use dogstatsd::metric::{Metric, MetricValue};
-use dogstatsd::{aggregator_service::AggregatorHandle, metric};
+use dogstatsd::{aggregator::AggregatorHandle, metric};
 use std::collections::HashMap;
 use std::env::consts::ARCH;
 use std::sync::Arc;
@@ -59,6 +59,12 @@ impl Lambda {
     pub fn set_runtime_tag(&mut self, runtime: &str) {
         self.dynamic_value_tags
             .insert(String::from("runtime"), runtime.to_string());
+    }
+
+    /// Sets the `durable_function:true` tag in `dynamic_value_tags`
+    pub fn set_durable_function_tag(&mut self) {
+        self.dynamic_value_tags
+            .insert(String::from("durable_function"), String::from("true"));
     }
 
     fn get_dynamic_value_tags(&self) -> Option<SortedTags> {
@@ -146,10 +152,11 @@ impl Lambda {
         if !self.config.enhanced_metrics {
             return;
         }
+        let tags = self.get_dynamic_value_tags();
         let metric = Metric::new(
             metric_name.into(),
             MetricValue::distribution(1f64),
-            self.get_dynamic_value_tags(),
+            tags,
             Some(timestamp),
         );
         if let Err(e) = self.aggr_handle.insert_batch(vec![metric]) {
@@ -802,7 +809,7 @@ mod tests {
     use super::*;
     use crate::config;
     use crate::extension::telemetry::events::{OnDemandReportMetrics, ReportMetrics};
-    use dogstatsd::aggregator_service::AggregatorService;
+    use dogstatsd::aggregator::AggregatorService;
     use dogstatsd::metric::EMPTY_TAGS;
     const PRECISION: f64 = 0.000_000_01;
 
@@ -836,6 +843,33 @@ mod tests {
         } else {
             panic!("{}", format!("{metric_id} not found"));
         }
+    }
+
+    #[tokio::test]
+    async fn test_set_durable_function_tag() {
+        let (metrics_aggr, my_config) = setup();
+        let mut lambda = Lambda::new(metrics_aggr.clone(), my_config);
+        let now: i64 = std::time::UNIX_EPOCH
+            .elapsed()
+            .expect("unable to poll clock, unrecoverable")
+            .as_secs()
+            .try_into()
+            .unwrap_or_default();
+
+        lambda.set_durable_function_tag();
+        lambda.increment_invocation_metric(now);
+
+        // Verify the metric was emitted with the durable_function:true tag
+        let ts = (now / 10) * 10;
+        let durable_tags = SortedTags::parse("durable_function:true").ok();
+        let entry = metrics_aggr
+            .get_entry_by_id(constants::INVOCATIONS_METRIC.into(), durable_tags, ts)
+            .await
+            .unwrap();
+        assert!(
+            entry.is_some(),
+            "Expected metric with durable_function:true tag"
+        );
     }
 
     #[tokio::test]

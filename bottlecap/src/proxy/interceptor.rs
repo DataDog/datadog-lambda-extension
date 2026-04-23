@@ -436,7 +436,7 @@ mod tests {
     use std::{collections::HashMap, time::Duration};
     use tokio::{sync::Mutex as TokioMutex, time::Instant};
 
-    use dogstatsd::{aggregator_service::AggregatorService, metric::EMPTY_TAGS};
+    use dogstatsd::{aggregator::AggregatorService, metric::EMPTY_TAGS};
     use http_body_util::Full;
     use hyper::{server::conn::http1, service::service_fn};
     use hyper_util::rt::TokioIo;
@@ -499,6 +499,7 @@ mod tests {
             initialization_type: "on-demand".into(),
         });
         let propagator = Arc::new(DatadogCompositePropagator::new(Arc::clone(&config)));
+        let (durable_context_tx, _durable_context_rx) = tokio::sync::mpsc::channel(1);
         let (invocation_processor_handle, invocation_processor_service) =
             InvocationProcessorService::new(
                 Arc::clone(&tags_provider),
@@ -506,6 +507,7 @@ mod tests {
                 Arc::clone(&aws_config),
                 metrics_aggregator,
                 Arc::clone(&propagator),
+                durable_context_tx,
             );
         tokio::spawn(async move {
             invocation_processor_service.run().await;

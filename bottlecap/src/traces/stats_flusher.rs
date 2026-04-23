@@ -6,9 +6,10 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 use tokio::sync::OnceCell;
 
+use crate::FLUSH_RETRY_COUNT;
 use crate::config;
 use crate::lifecycle::invocation::processor::S_TO_MS;
-use crate::traces::hyper_client::{self, HyperClient};
+use crate::traces::http_client::HttpClient;
 use crate::traces::stats_aggregator::StatsAggregator;
 use dogstatsd::api_key::ApiKeyFactory;
 use libdd_common::Endpoint;
@@ -21,10 +22,7 @@ pub struct StatsFlusher {
     config: Arc<config::Config>,
     api_key_factory: Arc<ApiKeyFactory>,
     endpoint: OnceCell<Endpoint>,
-    /// Cached HTTP client, lazily initialized on first use.
-    /// TODO: `StatsFlusher` and `TraceFlusher` both hit trace.agent.datadoghq.{site} and could
-    /// share a single HTTP client for better connection pooling.
-    http_client: OnceCell<HyperClient>,
+    http_client: HttpClient,
 }
 
 impl StatsFlusher {
@@ -33,13 +31,14 @@ impl StatsFlusher {
         api_key_factory: Arc<ApiKeyFactory>,
         aggregator: Arc<Mutex<StatsAggregator>>,
         config: Arc<config::Config>,
+        http_client: HttpClient,
     ) -> Self {
         StatsFlusher {
             aggregator,
             config,
             api_key_factory,
             endpoint: OnceCell::new(),
-            http_client: OnceCell::new(),
+            http_client,
         }
     }
 
@@ -72,6 +71,7 @@ impl StatsFlusher {
                         api_key: Some(api_key_clone.into()),
                         timeout_ms: self.config.flush_timeout * S_TO_MS,
                         test_token: None,
+                        use_system_resolver: false,
                     }
                 }
             })
@@ -94,39 +94,36 @@ impl StatsFlusher {
 
         let stats_url = trace_stats_url(&self.config.site);
 
-        let start = std::time::Instant::now();
+        for attempt in 1..=FLUSH_RETRY_COUNT {
+            let start = std::time::Instant::now();
+            let resp = stats_utils::send_stats_payload_with_client(
+                serialized_stats_payload.clone(),
+                endpoint,
+                api_key.as_str(),
+                Some(&self.http_client),
+            )
+            .await;
+            let elapsed = start.elapsed();
 
-        // Get or create the cached HTTP client
-        let http_client = self.get_or_init_http_client().await;
-        let Some(http_client) = http_client else {
-            error!("STATS | Failed to create HTTP client, will retry");
-            return Some(stats);
-        };
-
-        let resp = stats_utils::send_stats_payload_with_client(
-            serialized_stats_payload,
-            endpoint,
-            api_key.as_str(),
-            Some(http_client),
-        )
-        .await;
-        let elapsed = start.elapsed();
-        debug!(
-            "STATS | Stats request to {} took {} ms",
-            stats_url,
-            elapsed.as_millis()
-        );
-        match resp {
-            Ok(()) => {
-                debug!("STATS | Successfully flushed stats");
-                None
-            }
-            Err(e) => {
-                // Network/server errors are temporary - return stats for retry
-                error!("STATS | Error sending stats: {e:?}");
-                Some(stats)
+            match resp {
+                Ok(()) => {
+                    debug!(
+                        "STATS | Successfully flushed stats to {stats_url} in {} ms (attempt {attempt}/{FLUSH_RETRY_COUNT})",
+                        elapsed.as_millis()
+                    );
+                    return None;
+                }
+                Err(e) => {
+                    debug!(
+                        "STATS | Failed to send stats to {stats_url} in {} ms (attempt {attempt}/{FLUSH_RETRY_COUNT}): {e:?}",
+                        elapsed.as_millis()
+                    );
+                }
             }
         }
+
+        error!("STATS | Exhausted all {FLUSH_RETRY_COUNT} attempts, returning stats for redrive");
+        Some(stats)
     }
 
     /// Flushes stats from the aggregator.
@@ -167,31 +164,6 @@ impl StatsFlusher {
             None
         } else {
             Some(all_failed)
-        }
-    }
-    /// Returns a reference to the cached HTTP client, initializing it if necessary.
-    ///
-    /// The client is created once and reused for all subsequent flushes,
-    /// providing connection pooling and TLS session reuse.
-    ///
-    /// Returns `None` if client creation fails. The error is logged but not cached,
-    /// allowing retry on subsequent calls.
-    async fn get_or_init_http_client(&self) -> Option<&HyperClient> {
-        match self
-            .http_client
-            .get_or_try_init(|| async {
-                hyper_client::create_client(
-                    self.config.proxy_https.as_ref(),
-                    self.config.tls_cert_file.as_ref(),
-                )
-            })
-            .await
-        {
-            Ok(client) => Some(client),
-            Err(e) => {
-                error!("STATS_FLUSHER | Failed to create HTTP client: {e}");
-                None
-            }
         }
     }
 }

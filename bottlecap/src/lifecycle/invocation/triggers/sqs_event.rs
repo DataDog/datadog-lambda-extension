@@ -7,7 +7,7 @@ use crate::lifecycle::invocation::{
         sns_event::{SnsEntity, SnsRecord},
     },
 };
-use crate::traces::context::{Sampling, SpanContext};
+use datadog_opentelemetry::propagation::context::{Sampling, SpanContext};
 use libdd_trace_protobuf::pb::Span;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -259,15 +259,16 @@ pub(crate) fn extract_trace_context_from_aws_trace_header(
     Some(SpanContext {
         // the context from AWS Header is used by Datadog only and does not contain the upper
         // 64 bits like other 128 w3c compliant trace ids
-        trace_id,
+        trace_id: u128::from(trace_id),
         span_id: parent_id,
-        sampling: Some(Sampling {
-            priority: Some(sampling_priority),
+        sampling: Sampling {
+            priority: sampling_priority.to_string().parse().ok(),
             mechanism: None,
-        }),
+        },
         origin: None,
         tags: HashMap::new(),
         links: Vec::new(),
+        ..Default::default()
     })
 }
 
@@ -612,13 +613,13 @@ mod tests {
             SpanContext {
                 trace_id: 130_944_522_478_755_159,
                 span_id: 9_032_698_535_745_367_362,
-                sampling: Some(Sampling {
-                    priority: Some("0".parse().unwrap()),
+                sampling: Sampling {
+                    priority: "0".parse().ok(),
                     mechanism: None,
-                }),
+                },
                 origin: None,
                 tags: HashMap::new(),
-                links: Vec::new(),
+                ..Default::default()
             }
         );
     }

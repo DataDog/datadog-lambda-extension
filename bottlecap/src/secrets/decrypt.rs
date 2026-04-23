@@ -14,13 +14,19 @@ use sha2::{Digest, Sha256};
 use std::io::Error;
 use std::sync::Arc;
 use tokio::time::Instant;
-use tracing::debug;
-use tracing::error;
+use tracing::{debug, error};
 
-pub async fn resolve_secrets(config: Arc<Config>, aws_config: Arc<AwsConfig>) -> Option<String> {
+use crate::secrets::delegated_auth;
+
+pub async fn resolve_secrets(
+    config: Arc<Config>,
+    aws_config: Arc<AwsConfig>,
+    shared_client: Client,
+) -> Option<String> {
     let api_key_candidate = if !config.api_key_secret_arn.is_empty()
         || !config.kms_api_key.is_empty()
         || !config.api_key_ssm_arn.is_empty()
+        || !config.dd_org_uuid.is_empty()
     {
         let before_decrypt = Instant::now();
 
@@ -40,38 +46,17 @@ pub async fn resolve_secrets(config: Arc<Config>, aws_config: Arc<AwsConfig>) ->
             }
         };
 
-        let mut aws_credentials = AwsCredentials::from_env();
+        let aws_credentials = get_aws_credentials(&client).await?;
 
-        if aws_credentials.aws_secret_access_key.is_empty()
-            && aws_credentials.aws_access_key_id.is_empty()
-            && !aws_credentials
-                .aws_container_credentials_full_uri
-                .is_empty()
-            && !aws_credentials.aws_container_authorization_token.is_empty()
-        {
-            // We're in Snap Start
-            let credentials = match get_snapstart_credentials(&aws_credentials, &client).await {
-                Ok(credentials) => credentials,
-                Err(err) => {
-                    error!("Error getting Snap Start credentials: {}", err);
-                    return None;
-                }
-            };
-            aws_credentials.aws_access_key_id = credentials["AccessKeyId"]
-                .as_str()
-                .unwrap_or_default()
-                .to_string();
-            aws_credentials.aws_secret_access_key = credentials["SecretAccessKey"]
-                .as_str()
-                .unwrap_or_default()
-                .to_string();
-            aws_credentials.aws_session_token = credentials["Token"]
-                .as_str()
-                .unwrap_or_default()
-                .to_string();
-        }
-
-        let decrypted_key = if !config.kms_api_key.is_empty() {
+        let decrypted_key = if !config.dd_org_uuid.is_empty() {
+            delegated_auth::get_delegated_api_key(
+                &config,
+                &aws_config,
+                &shared_client,
+                &aws_credentials,
+            )
+            .await
+        } else if !config.kms_api_key.is_empty() {
             decrypt_aws_kms(
                 &client,
                 config.kms_api_key.clone(),
@@ -217,8 +202,20 @@ async fn decrypt_aws_sm(
     );
 
     let v = request(json_body, headers?, client).await?;
+    extract_secret_string(&v)
+}
 
+// When a Secrets Manager secret is a JSON object, this key is used to extract the API key.
+// Falls back to the raw secret string if the key is absent or the value is not valid JSON.
+const JSON_SECRET_DD_API_KEY: &str = "dd_api_key";
+
+fn extract_secret_string(v: &Value) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
     if let Some(secret_string) = v["SecretString"].as_str() {
+        if let Ok(parsed) = serde_json::from_str::<Value>(secret_string)
+            && let Some(extracted) = parsed[JSON_SECRET_DD_API_KEY].as_str()
+        {
+            return Ok(extracted.to_string());
+        }
         Ok(secret_string.to_string())
     } else {
         Err(Error::new(std::io::ErrorKind::InvalidData, v.to_string()).into())
@@ -256,6 +253,39 @@ async fn decrypt_aws_ssm(
         return Ok(value.to_string());
     }
     Err(Error::new(std::io::ErrorKind::InvalidData, v.to_string()).into())
+}
+
+async fn get_aws_credentials(client: &Client) -> Option<AwsCredentials> {
+    let mut aws_credentials = AwsCredentials::from_env();
+    // We're in SnapStart — fetch short-lived credentials from the container endpoint
+    if aws_credentials.aws_secret_access_key.is_empty()
+        && aws_credentials.aws_access_key_id.is_empty()
+        && !aws_credentials
+            .aws_container_credentials_full_uri
+            .is_empty()
+        && !aws_credentials.aws_container_authorization_token.is_empty()
+    {
+        let credentials = match get_snapstart_credentials(&aws_credentials, client).await {
+            Ok(credentials) => credentials,
+            Err(err) => {
+                error!("Error getting SnapStart credentials: {}", err);
+                return None;
+            }
+        };
+        aws_credentials.aws_access_key_id = credentials["AccessKeyId"]
+            .as_str()
+            .unwrap_or_default()
+            .to_string();
+        aws_credentials.aws_secret_access_key = credentials["SecretAccessKey"]
+            .as_str()
+            .unwrap_or_default()
+            .to_string();
+        aws_credentials.aws_session_token = credentials["Token"]
+            .as_str()
+            .unwrap_or_default()
+            .to_string();
+    }
+    Some(aws_credentials)
 }
 
 async fn get_snapstart_credentials(
@@ -400,6 +430,40 @@ fn get_aws4_signature_key(
 mod tests {
     use super::*;
     use chrono::{NaiveDateTime, TimeZone};
+
+    fn make_sm_response(secret_string: &str) -> Value {
+        serde_json::json!({ "SecretString": secret_string })
+    }
+
+    #[test]
+    fn test_json_secret_extraction() {
+        let v = make_sm_response(r#"{"dd_api_key":"abc123"}"#);
+        let result = extract_secret_string(&v).expect("should extract dd_api_key");
+        assert_eq!(result, "abc123");
+    }
+
+    #[test]
+    fn test_json_secret_missing_key_falls_back_to_raw() {
+        let raw = r#"{"other_key":"abc123"}"#;
+        let v = make_sm_response(raw);
+        let result = extract_secret_string(&v).expect("should fall back to raw JSON string");
+        assert_eq!(result, raw);
+    }
+
+    #[test]
+    fn test_plain_secret_unaffected() {
+        let v = make_sm_response("abc123");
+        let result = extract_secret_string(&v).expect("should return raw value");
+        assert_eq!(result, "abc123");
+    }
+
+    #[test]
+    fn test_malformed_json_secret_falls_back_to_raw() {
+        let raw = r#"{"dd_api_key":"abc123""#; // missing closing brace
+        let v = make_sm_response(raw);
+        let result = extract_secret_string(&v).expect("should fall back to raw string");
+        assert_eq!(result, raw);
+    }
 
     #[test]
     fn key_cleanup() {

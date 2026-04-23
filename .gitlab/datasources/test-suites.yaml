@@ -1,5 +1,6 @@
 test_suites:
-  - name: base
+  - name: on-demand
   - name: otlp
   - name: snapstart
   - name: lmi
+  - name: auth

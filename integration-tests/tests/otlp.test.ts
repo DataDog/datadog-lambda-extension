@@ -1,123 +1,124 @@
-import { invokeLambdaAndGetDatadogData, LambdaInvocationDatadogData, DATADOG_INDEXING_WAIT_5_MIN_MS } from './utils/util';
-import { getIdentifier } from '../config';
-import { LambdaClient, InvokeCommand } from '@aws-sdk/client-lambda';
+import { invokeAndCollectTelemetry, FunctionConfig } from './utils/default';
+import { DatadogTelemetry } from './utils/datadog';
+import { getIdentifier, DATADOG_INDEXING_WAIT_5_MIN_MS } from '../config';
+
+const runtimes = ['node', 'python', 'java', 'dotnet'] as const;
+type Runtime = typeof runtimes[number];
+
+const identifier = getIdentifier();
+const stackName = `integ-${identifier}-otlp`;
 
 describe('OTLP Integration Tests', () => {
-  const results: Record<string, LambdaInvocationDatadogData> = {};
+  let telemetry: Record<string, DatadogTelemetry>;
 
   beforeAll(async () => {
-    const identifier = getIdentifier();
-    const functions = {
-      node: `integ-${identifier}-otlp-node-lambda`,
-      python: `integ-${identifier}-otlp-python-lambda`,
-      java: `integ-${identifier}-otlp-java-lambda`,
-      dotnet: `integ-${identifier}-otlp-dotnet-lambda`,
-    };
+    // Build function configs for all runtimes plus response validation and gRPC
+    const functions: FunctionConfig[] = [
+      ...runtimes.map(runtime => ({
+        functionName: `${stackName}-${runtime}-lambda`,
+        runtime,
+      })),
+      {
+        functionName: `${stackName}-response-validation-lambda`,
+        runtime: 'responseValidation',
+      },
+      {
+        functionName: `${stackName}-node-grpc-lambda`,
+        runtime: 'nodeGrpc',
+      },
+    ];
 
-    console.log('Invoking all OTLP Lambda functions in parallel...');
+    console.log('Invoking all OTLP Lambda functions...');
 
-    // Invoke all Lambdas in parallel (using 5 minute wait for OTLP indexing)
-    const invocationResults = await Promise.all([
-      invokeLambdaAndGetDatadogData(functions.node, {}, true, true, DATADOG_INDEXING_WAIT_5_MIN_MS),
-      invokeLambdaAndGetDatadogData(functions.python, {}, true, true, DATADOG_INDEXING_WAIT_5_MIN_MS),
-      invokeLambdaAndGetDatadogData(functions.java, {}, true, true, DATADOG_INDEXING_WAIT_5_MIN_MS),
-      invokeLambdaAndGetDatadogData(functions.dotnet, {}, true, true, DATADOG_INDEXING_WAIT_5_MIN_MS),
-    ]);
-
-    // Store results
-    results.node = invocationResults[0];
-    results.python = invocationResults[1];
-    results.java = invocationResults[2];
-    results.dotnet = invocationResults[3];
+    // Invoke all OTLP functions and collect telemetry
+    telemetry = await invokeAndCollectTelemetry(functions, 1, 1, 0, {}, DATADOG_INDEXING_WAIT_5_MIN_MS);
 
     console.log('All OTLP Lambda invocations and data fetching completed');
-  }, 700000); // 11.6 minute timeout
+  }, 700000);
 
-  describe('Node.js Runtime', () => {
-    it('should invoke Node.js Lambda successfully', () => {
-      expect(results.node.statusCode).toBe(200);
+  describe.each(runtimes)('%s Runtime', (runtime) => {
+    const getResult = () => telemetry[runtime]?.threads[0]?.[0];
+
+    it('should invoke Lambda successfully', () => {
+      const result = getResult();
+      expect(result).toBeDefined();
+      expect(result.statusCode).toBe(200);
     });
 
     it('should send at least one trace to Datadog', () => {
-      expect(results.node.traces?.length).toBeGreaterThan(0);
+      const result = getResult();
+      expect(result).toBeDefined();
+      expect(result.traces?.length).toBeGreaterThan(0);
     });
 
     it('should have spans in the trace', () => {
-      const trace = results.node.traces![0];
-      expect(trace.spans.length).toBeGreaterThan(0);
-    });
-  });
-
-  describe('Python Runtime', () => {
-    it('should invoke Python Lambda successfully', () => {
-      expect(results.python.statusCode).toBe(200);
-    });
-
-    it('should send at least one trace to Datadog', () => {
-      expect(results.python.traces?.length).toBeGreaterThan(0);
-    });
-
-    it('should have spans in the trace', () => {
-      const trace = results.python.traces![0];
-      expect(trace.spans.length).toBeGreaterThan(0);
-    });
-  });
-
-  describe('Java Runtime', () => {
-    it('should invoke Java Lambda successfully', () => {
-      expect(results.java.statusCode).toBe(200);
-    });
-
-    it('should send at least one trace to Datadog', () => {
-      expect(results.java.traces?.length).toBeGreaterThan(0);
-    });
-
-    it('should have spans in the trace', () => {
-      const trace = results.java.traces![0];
-      expect(trace.spans.length).toBeGreaterThan(0);
-    });
-  });
-
-  describe('.NET Runtime', () => {
-    it('should invoke .NET Lambda successfully', () => {
-      expect(results.dotnet.statusCode).toBe(200);
-    });
-
-    it('should send at least one trace to Datadog', () => {
-      expect(results.dotnet.traces?.length).toBeGreaterThan(0);
-    });
-
-    it('should have spans in the trace', () => {
-      const trace = results.dotnet.traces![0];
+      const result = getResult();
+      expect(result).toBeDefined();
+      const trace = result.traces![0];
       expect(trace.spans.length).toBeGreaterThan(0);
     });
   });
 
   describe('OTLP Response Validation', () => {
-    const lambdaClient = new LambdaClient({ region: 'us-east-1' });
-    const identifier = getIdentifier();
-    const functionName = `integ-${identifier}-otlp-response-validation-lambda`;
+    const getResult = () => telemetry['responseValidation']?.threads[0]?.[0];
 
-    it('should return OTLP-compliant protobuf responses', async () => {
-      console.log(`Invoking ${functionName}...`);
+    it('should invoke response validation Lambda successfully', () => {
+      const result = getResult();
+      expect(result).toBeDefined();
+      expect(result.statusCode).toBe(200);
+    });
 
-      const command = new InvokeCommand({
-        FunctionName: functionName,
-        Payload: Buffer.from(JSON.stringify({})),
-      });
+    it('should have JSON encoded span in Datadog', () => {
+      const result = getResult();
+      expect(result).toBeDefined();
+      const allSpans = result.traces?.flatMap(t => t.spans) || [];
+      const hasJsonSpan = allSpans.some(s =>
+        s.attributes?.resource_name === 'test-span-json' && s.attributes?.custom?.encoding === 'json'
+      );
+      expect(hasJsonSpan).toBe(true);
+    });
 
-      const response = await lambdaClient.send(command);
+    it('should have Protobuf encoded span in Datadog', () => {
+      const result = getResult();
+      expect(result).toBeDefined();
+      const allSpans = result.traces?.flatMap(t => t.spans) || [];
+      const hasProtobufSpan = allSpans.some(s =>
+        s.attributes?.resource_name === 'test-span-protobuf' && s.attributes?.custom?.encoding === 'protobuf'
+      );
+      expect(hasProtobufSpan).toBe(true);
+    });
+  });
 
-      expect(response.StatusCode).toBe(200);
-      expect(response.FunctionError).toBeUndefined();
+  describe('OTLP gRPC Protocol', () => {
+    const getResult = () => telemetry['nodeGrpc']?.threads[0]?.[0];
 
-      const payload = JSON.parse(Buffer.from(response.Payload!).toString());
+    it('should invoke gRPC Lambda successfully', () => {
+      const result = getResult();
+      expect(result).toBeDefined();
+      expect(result.statusCode).toBe(200);
+    });
 
-      const validationResult = JSON.parse(payload.body);
-      expect(validationResult.success).toBe(true);
-      expect(validationResult.statusCode).toBe(200);
-      expect(validationResult.contentType).toBe('application/x-protobuf');
-      expect(validationResult.message).toBe('OTLP response is properly formatted and decodable');
-    }, 60000);
+    it('should send traces via gRPC to Datadog', () => {
+      const result = getResult();
+      expect(result).toBeDefined();
+      expect(result.traces?.length).toEqual(1);
+    });
+
+    it('should have gRPC handler span with correct attributes', () => {
+      const result = getResult();
+      expect(result).toBeDefined();
+      const allSpans = result.traces?.flatMap(t => t.spans) || [];
+      const hasGrpcSpan = allSpans.some(s =>
+        s.attributes?.resource_name === 'grpc-handler' && s.attributes?.custom?.protocol === 'grpc'
+      );
+      expect(hasGrpcSpan).toBe(true);
+    });
+
+    it('should have spans in the trace', () => {
+      const result = getResult();
+      expect(result).toBeDefined();
+      const trace = result.traces![0];
+      expect(trace.spans.length).toBeGreaterThan(0);
+    });
   });
 });
