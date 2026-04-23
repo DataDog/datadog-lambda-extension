@@ -145,7 +145,7 @@ impl InvocationProcessorHandle {
     /// hanging the caller on its oneshot.
     #[must_use]
     pub fn noop() -> Self {
-        let (sender, mut receiver) = mpsc::channel::<ProcessorCommand>(32);
+        let (sender, mut receiver) = mpsc::channel::<ProcessorCommand>(1000);
         tokio::spawn(async move {
             while let Some(command) = receiver.recv().await {
                 match command {
