@@ -135,6 +135,58 @@ pub struct InvocationProcessorHandle {
 }
 
 impl InvocationProcessorHandle {
+    /// Returns a handle backed by a background task that acknowledges every
+    /// command with a sensible default. Intended for the `bottlecap-testmode`
+    /// binary, which reuses `TraceAgent` / `handle_traces` but has no Lambda
+    /// lifecycle state to drive.
+    ///
+    /// The match below is exhaustive: adding a new `ProcessorCommand` variant
+    /// will fail to compile here, so test-mode's behavior for it must be
+    /// decided explicitly rather than silently dropping a response and
+    /// hanging the caller on its oneshot.
+    #[must_use]
+    pub fn noop() -> Self {
+        let (sender, mut receiver) = mpsc::channel::<ProcessorCommand>(32);
+        tokio::spawn(async move {
+            while let Some(command) = receiver.recv().await {
+                match command {
+                    // Request-response commands: reply with a default so the
+                    // caller doesn't block on the oneshot forever.
+                    ProcessorCommand::GetReparentingInfo { response } => {
+                        let _ = response.send(Ok(std::collections::VecDeque::new()));
+                    }
+                    ProcessorCommand::UpdateReparenting { response, .. } => {
+                        let _ = response.send(Ok(Vec::new()));
+                    }
+                    ProcessorCommand::SetColdStartSpanTraceId { response, .. } => {
+                        let _ = response.send(Ok(None));
+                    }
+                    ProcessorCommand::PlatformRuntimeDone { response, .. }
+                    | ProcessorCommand::PlatformReport { response, .. } => {
+                        let _ = response.send(());
+                    }
+                    // Fire-and-forget commands: drop silently.
+                    ProcessorCommand::InvokeEvent { .. }
+                    | ProcessorCommand::PlatformInitStart { .. }
+                    | ProcessorCommand::PlatformInitReport { .. }
+                    | ProcessorCommand::PlatformRestoreStart { .. }
+                    | ProcessorCommand::PlatformRestoreReport { .. }
+                    | ProcessorCommand::PlatformStart { .. }
+                    | ProcessorCommand::UniversalInstrumentationStart { .. }
+                    | ProcessorCommand::UniversalInstrumentationEnd { .. }
+                    | ProcessorCommand::AddReparenting { .. }
+                    | ProcessorCommand::AddTracerSpan { .. }
+                    | ProcessorCommand::ForwardDurableContext { .. }
+                    | ProcessorCommand::OnOutOfMemoryError { .. }
+                    | ProcessorCommand::OnShutdownEvent
+                    | ProcessorCommand::SendCtxSpans { .. }
+                    | ProcessorCommand::Shutdown => {}
+                }
+            }
+        });
+        InvocationProcessorHandle { sender }
+    }
+
     pub async fn on_invoke_event(
         &self,
         request_id: String,
@@ -655,5 +707,36 @@ impl InvocationProcessorService {
         }
 
         debug!("InvocationProcessorService stopped");
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn noop_request_response_methods_return_defaults() {
+        let handle = InvocationProcessorHandle::noop();
+
+        let info = handle.get_reparenting_info().await.unwrap();
+        assert!(info.is_empty());
+
+        let contexts = handle
+            .update_reparenting(std::collections::VecDeque::new())
+            .await
+            .unwrap();
+        assert!(contexts.is_empty());
+
+        let cold_start = handle.set_cold_start_span_trace_id(42).await.unwrap();
+        assert!(cold_start.is_none());
+    }
+
+    #[tokio::test]
+    async fn noop_fire_and_forget_commands_do_not_panic() {
+        let handle = InvocationProcessorHandle::noop();
+
+        handle.on_invoke_event("rid".to_string()).await.unwrap();
+        handle.on_shutdown_event().await.unwrap();
+        handle.on_out_of_memory_error(0).await.unwrap();
     }
 }
