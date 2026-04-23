@@ -328,13 +328,20 @@ impl TraceAgent {
         // Isolate panics and bound execution time: spawn so a panic in
         // flush_blocking_final surfaces as 500, timeout so a stuck flush
         // returns 504 instead of hanging the test harness.
-        let task = tokio::task::spawn(async move {
+        let mut task = tokio::task::spawn(async move {
             flushing_service.flush_blocking_final().await;
         });
-        match tokio::time::timeout(std::time::Duration::from_secs(30), task).await {
+        match tokio::time::timeout(std::time::Duration::from_secs(30), &mut task).await {
             Ok(Ok(())) => StatusCode::NO_CONTENT,
             Ok(Err(_)) => StatusCode::INTERNAL_SERVER_ERROR,
-            Err(_) => StatusCode::GATEWAY_TIMEOUT,
+            Err(_) => {
+                task.abort();
+                match task.await {
+                    Err(join_err) if join_err.is_cancelled() => StatusCode::GATEWAY_TIMEOUT,
+                    Err(_) => StatusCode::INTERNAL_SERVER_ERROR,
+                    Ok(()) => StatusCode::GATEWAY_TIMEOUT,
+                }
+            }
         }
     }
 
