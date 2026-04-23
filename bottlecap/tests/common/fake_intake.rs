@@ -90,13 +90,6 @@ impl FakeIntake {
         }
     }
 
-    /// Base URL (e.g. `http://127.0.0.1:54321`). Append the intake path to
-    /// build a full URL, or use the helpers below.
-    #[must_use]
-    fn base_url(&self) -> &str {
-        &self.base_url
-    }
-
     /// Full URL for the stats endpoint.
     #[must_use]
     pub fn stats_url(&self) -> String {
