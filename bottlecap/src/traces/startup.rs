@@ -49,7 +49,6 @@ pub type TraceAgentPipeline = (
 /// test-mode `POST /flush` route).
 ///
 /// Most callers want [`start_trace_agent`] instead, which handles the spawn.
-#[allow(clippy::type_complexity)]
 pub fn build_trace_agent(
     config: &Arc<Config>,
     api_key_factory: &Arc<ApiKeyFactory>,
