@@ -20,7 +20,7 @@ pub mod trace_aggregator_service;
 pub mod trace_flusher;
 pub mod trace_processor;
 
-pub use startup::start_trace_agent;
+pub use startup::{build_trace_agent, start_trace_agent};
 
 // URL for a call to the Lambda runtime API. The value may be replaced if `AWS_LAMBDA_RUNTIME_API` is set.
 const LAMBDA_RUNTIME_URL_PREFIX: &str = "http://127.0.0.1:9001";
