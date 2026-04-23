@@ -25,6 +25,7 @@ use crate::traces::trace_processor::SendingTraceProcessor;
 use crate::{
     appsec::processor::Processor as AppSecProcessor,
     config,
+    flushing::FlushingService,
     http::{extract_request_body, handler_not_found},
     lifecycle::invocation::{
         context::ReparentingInfo, processor_service::InvocationProcessorHandle,
@@ -66,6 +67,10 @@ const V1_DEBUGGER_ENDPOINT_PATH: &str = "/debugger/v1/input";
 const V2_DEBUGGER_ENDPOINT_PATH: &str = "/debugger/v2/input";
 const DEBUGGER_DIAGNOSTICS_ENDPOINT_PATH: &str = "/debugger/v1/diagnostics";
 const INSTRUMENTATION_ENDPOINT_PATH: &str = "/telemetry/proxy/api/v2/apmtelemetry";
+
+// Test-mode only: exposed when a FlushingService is attached via
+// TraceAgent::with_flushing_service.
+const FLUSH_ENDPOINT_PATH: &str = "/flush";
 
 // Intake endpoints
 const DSM_INTAKE_PATH: &str = "/api/v0.1/pipeline_stats";
@@ -118,6 +123,11 @@ pub struct TraceAgent {
     tx: Sender<SendDataBuilderInfo>,
     stats_concentrator: StatsConcentratorHandle,
     span_deduper: DedupHandle,
+    /// Optional flushing service that, when attached via
+    /// [`TraceAgent::with_flushing_service`], backs a `POST /flush` route on
+    /// the same listener as the trace endpoints. Used by the
+    /// `bottlecap-testmode` binary; never attached by the Lambda binary.
+    flushing_service: Option<Arc<FlushingService>>,
 }
 
 #[derive(Clone, Copy)]
@@ -170,7 +180,19 @@ impl TraceAgent {
             shutdown_token: CancellationToken::new(),
             stats_concentrator,
             span_deduper,
+            flushing_service: None,
         }
+    }
+
+    /// Attaches a [`FlushingService`] that will back a `POST /flush` route
+    /// registered on the same listener as the trace endpoints. Intended for
+    /// the `bottlecap-testmode` binary, which needs a deterministic drain
+    /// hook for the APM parity harness. The Lambda binary does not attach a
+    /// flushing service; `POST /flush` is not exposed in Lambda mode.
+    #[must_use]
+    pub fn with_flushing_service(mut self, flushing_service: Arc<FlushingService>) -> Self {
+        self.flushing_service = Some(flushing_service);
+        self
     }
 
     #[allow(clippy::cast_possible_truncation)]
@@ -281,14 +303,30 @@ impl TraceAgent {
 
         let info_router = Router::new().route(INFO_ENDPOINT_PATH, any(Self::info));
 
-        Router::new()
+        let mut router = Router::new()
             .merge(trace_router)
             .merge(stats_router)
             .merge(proxy_router)
-            .merge(info_router)
+            .merge(info_router);
+
+        // POST /flush is only registered when a FlushingService has been
+        // attached via TraceAgent::with_flushing_service (test-mode only).
+        if let Some(flushing_service) = &self.flushing_service {
+            let flush_router = Router::new()
+                .route(FLUSH_ENDPOINT_PATH, post(Self::flush))
+                .with_state(Arc::clone(flushing_service));
+            router = router.merge(flush_router);
+        }
+
+        router
             .fallback(handler_not_found)
             // Disable the default body limit so we can use our own limit
             .layer(DefaultBodyLimit::disable())
+    }
+
+    async fn flush(State(flushing_service): State<Arc<FlushingService>>) -> StatusCode {
+        flushing_service.flush_blocking_final().await;
+        StatusCode::NO_CONTENT
     }
 
     async fn graceful_shutdown(shutdown_token: CancellationToken) {

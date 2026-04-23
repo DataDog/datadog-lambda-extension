@@ -27,20 +27,11 @@ use crate::traces::{
 
 pub use crate::traces::stats_concentrator_service::StatsConcentratorHandle;
 
-/// Wires up the full trace-processing pipeline (trace + stats + proxy
-/// aggregators, services, flushers, and the [`trace_agent::TraceAgent`] HTTP
-/// listener) and spawns each background task onto the current tokio runtime.
-/// Returns the handles callers need to drive flushing and cancel the
-/// listener.
+/// Return tuple common to [`build_trace_agent`] and [`start_trace_agent`].
+/// Kept as a `type` alias to avoid re-declaring the same eight-tuple in two
+/// places.
 #[allow(clippy::type_complexity)]
-pub fn start_trace_agent(
-    config: &Arc<Config>,
-    api_key_factory: &Arc<ApiKeyFactory>,
-    tags_provider: &Arc<TagProvider>,
-    invocation_processor_handle: InvocationProcessorHandle,
-    appsec_processor: Option<Arc<TokioMutex<AppSecProcessor>>>,
-    client: &reqwest::Client,
-) -> (
+pub type TraceAgentPipeline = (
     Sender<SendDataBuilderInfo>,
     Arc<trace_flusher::TraceFlusher>,
     Arc<trace_processor::ServerlessTraceProcessor>,
@@ -49,7 +40,27 @@ pub fn start_trace_agent(
     CancellationToken,
     StatsConcentratorHandle,
     TraceAggregatorHandle,
-) {
+);
+
+/// Builds the full trace-processing pipeline (trace + stats + proxy
+/// aggregators, services, flushers) and the [`trace_agent::TraceAgent`] that
+/// owns the HTTP listener. Spawns the aggregator/concentrator/dedup services
+/// onto the current tokio runtime, but does **not** spawn the `TraceAgent`
+/// itself. The caller owns `trace_agent` and is responsible for spawning
+/// `trace_agent.start()` (optionally after calling
+/// [`trace_agent::TraceAgent::with_flushing_service`] to enable the
+/// test-mode `POST /flush` route).
+///
+/// Most callers want [`start_trace_agent`] instead, which handles the spawn.
+#[allow(clippy::type_complexity)]
+pub fn build_trace_agent(
+    config: &Arc<Config>,
+    api_key_factory: &Arc<ApiKeyFactory>,
+    tags_provider: &Arc<TagProvider>,
+    invocation_processor_handle: InvocationProcessorHandle,
+    appsec_processor: Option<Arc<TokioMutex<AppSecProcessor>>>,
+    client: &reqwest::Client,
+) -> (trace_agent::TraceAgent, TraceAgentPipeline) {
     // Build one shared hyper-based HTTP client for trace and stats flushing.
     // This client type is required by libdd_trace_utils for SendData::send().
     let trace_http_client = trace_http_client::create_client(
@@ -129,13 +140,7 @@ pub fn start_trace_agent(
     let trace_agent_channel = trace_agent.get_sender_copy();
     let shutdown_token = trace_agent.shutdown_token();
 
-    tokio::spawn(async move {
-        if let Err(e) = trace_agent.start().await {
-            error!("Error starting trace agent: {e:?}");
-        }
-    });
-
-    (
+    let pipeline = (
         trace_agent_channel,
         trace_flusher,
         trace_processor,
@@ -144,5 +149,43 @@ pub fn start_trace_agent(
         shutdown_token,
         stats_concentrator_handle,
         trace_aggregator_handle,
-    )
+    );
+
+    (trace_agent, pipeline)
+}
+
+/// Builds the trace-processing pipeline with [`build_trace_agent`] and spawns
+/// the [`trace_agent::TraceAgent`] HTTP listener onto the current tokio
+/// runtime. This is the convenience entry point used by the Lambda binary.
+///
+/// Callers that need to attach a
+/// [`crate::flushing::FlushingService`](crate::flushing::FlushingService),
+/// notably the `bottlecap-testmode` binary (which uses it to back a
+/// `POST /flush` route), should use [`build_trace_agent`] directly and spawn
+/// the returned `TraceAgent` themselves after calling
+/// [`trace_agent::TraceAgent::with_flushing_service`].
+pub fn start_trace_agent(
+    config: &Arc<Config>,
+    api_key_factory: &Arc<ApiKeyFactory>,
+    tags_provider: &Arc<TagProvider>,
+    invocation_processor_handle: InvocationProcessorHandle,
+    appsec_processor: Option<Arc<TokioMutex<AppSecProcessor>>>,
+    client: &reqwest::Client,
+) -> TraceAgentPipeline {
+    let (trace_agent, pipeline) = build_trace_agent(
+        config,
+        api_key_factory,
+        tags_provider,
+        invocation_processor_handle,
+        appsec_processor,
+        client,
+    );
+
+    tokio::spawn(async move {
+        if let Err(e) = trace_agent.start().await {
+            error!("Error starting trace agent: {e:?}");
+        }
+    });
+
+    pipeline
 }
