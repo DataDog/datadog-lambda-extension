@@ -377,7 +377,8 @@ mod tests {
 
         let runtime =
             resolve_runtime_from_proc(proc_id_folder.parent().unwrap().to_str().unwrap(), "");
-        fs::remove_file(path).unwrap();
+        fs::remove_file(&path).unwrap();
+        fs::remove_dir_all(std::env::temp_dir().join("test-bottlecap")).unwrap();
         assert_eq!(runtime, "java123");
     }
 
