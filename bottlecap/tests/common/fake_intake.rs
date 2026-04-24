@@ -125,16 +125,6 @@ impl FakeIntake {
             .clone()
     }
 
-    /// Stop the server. Called automatically on drop, but tests can call it
-    /// explicitly to observe any server-side panics via the awaited task.
-    pub async fn shutdown(mut self) {
-        if let Some(tx) = self.shutdown_tx.take() {
-            let _ = tx.send(());
-        }
-        if let Some(task) = self.task.take() {
-            task.await.expect("fake_intake: server task panicked");
-        }
-    }
 }
 
 impl Drop for FakeIntake {
