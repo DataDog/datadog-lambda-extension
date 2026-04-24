@@ -1131,6 +1131,7 @@ fn start_trace_agent(
         stats_aggregator.clone(),
         Arc::clone(config),
         trace_http_client.clone(),
+        libdd_trace_utils::config_utils::trace_stats_url(&config.site),
     ));
 
     let stats_processor = Arc::new(stats_processor::ServerlessStatsProcessor {});
