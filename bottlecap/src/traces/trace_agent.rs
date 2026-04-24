@@ -116,10 +116,7 @@ pub struct ProxyState {
 /// `.with_state(...)` on their sub-router before merging, because
 /// `Router::merge` requires both routers to share the same state type.
 pub trait RouterExtension: Send + Sync {
-    fn extend(
-        &self,
-        router: Router,
-    ) -> Result<Router, Box<dyn std::error::Error>>;
+    fn extend(&self, router: Router) -> Result<Router, Box<dyn std::error::Error>>;
 }
 
 pub struct TraceAgent {
@@ -825,10 +822,7 @@ mod tests {
     }
 
     impl RouterExtension for SpyExtension {
-        fn extend(
-            &self,
-            router: Router,
-        ) -> Result<Router, Box<dyn std::error::Error>> {
+        fn extend(&self, router: Router) -> Result<Router, Box<dyn std::error::Error>> {
             Ok(router.merge(
                 Router::new()
                     .route(
