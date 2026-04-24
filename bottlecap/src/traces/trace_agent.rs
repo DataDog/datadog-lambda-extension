@@ -106,17 +106,20 @@ pub struct ProxyState {
 }
 
 /// Extension seam for the [`TraceAgent`] HTTP router. Implementors receive
-/// the fully-assembled production router and return a router with any
-/// additional routes merged in. Used to attach optional routes (for example,
-/// a deterministic drain endpoint) without adding a dedicated field per
+/// the fully-assembled production router and return it with any additional
+/// routes merged in. Used to attach optional routes (for example, a
+/// deterministic drain endpoint) without adding a dedicated field per
 /// route to [`TraceAgent`].
 ///
-/// Implementors must apply `.with_state(...)` to their sub-router before
-/// returning, so the type parameter of the returned [`Router`] is the same
-/// as the one passed in (axum's `Router::merge` requires matching state
-/// types).
+/// Returning `Err` aborts agent startup: the error propagates through
+/// [`TraceAgent::start`]. Implementors that carry state must call
+/// `.with_state(...)` on their sub-router before merging, because
+/// `Router::merge` requires both routers to share the same state type.
 pub trait RouterExtension: Send + Sync {
-    fn extend(&self, router: Router) -> Router;
+    fn extend(
+        &self,
+        router: Router,
+    ) -> Result<Router, Box<dyn std::error::Error>>;
 }
 
 pub struct TraceAgent {
@@ -220,7 +223,7 @@ impl TraceAgent {
             }
         });
 
-        let router = self.make_router(stats_tx);
+        let router = self.make_router(stats_tx)?;
 
         let port = u16::try_from(TRACE_AGENT_PORT).expect("TRACE_AGENT_PORT is too large");
         let socket = SocketAddr::from(([127, 0, 0, 1], port));
@@ -240,7 +243,10 @@ impl TraceAgent {
         Ok(())
     }
 
-    fn make_router(&self, stats_tx: Sender<pb::ClientStatsPayload>) -> Router {
+    fn make_router(
+        &self,
+        stats_tx: Sender<pb::ClientStatsPayload>,
+    ) -> Result<Router, Box<dyn std::error::Error>> {
         let stats_generator = Arc::new(StatsGenerator::new(self.stats_concentrator.clone()));
         let trace_state = TraceState {
             config: Arc::clone(&self.config),
@@ -316,13 +322,13 @@ impl TraceAgent {
             .merge(info_router);
 
         if let Some(extension) = &self.router_extension {
-            router = extension.extend(router);
+            router = extension.extend(router)?;
         }
 
-        router
+        Ok(router
             .fallback(handler_not_found)
             // Disable the default body limit so we can use our own limit
-            .layer(DefaultBodyLimit::disable())
+            .layer(DefaultBodyLimit::disable()))
     }
 
     async fn graceful_shutdown(shutdown_token: CancellationToken) {
@@ -819,8 +825,11 @@ mod tests {
     }
 
     impl RouterExtension for SpyExtension {
-        fn extend(&self, router: Router) -> Router {
-            router.merge(
+        fn extend(
+            &self,
+            router: Router,
+        ) -> Result<Router, Box<dyn std::error::Error>> {
+            Ok(router.merge(
                 Router::new()
                     .route(
                         "/spy",
@@ -830,7 +839,7 @@ mod tests {
                         }),
                     )
                     .with_state(Arc::clone(&self.hits)),
-            )
+            ))
         }
     }
 
@@ -877,7 +886,7 @@ mod tests {
             hits: Arc::clone(&hits),
         }));
         let (stats_tx, _stats_rx) = mpsc::channel::<pb::ClientStatsPayload>(1);
-        let router = agent.make_router(stats_tx);
+        let router = agent.make_router(stats_tx).expect("make_router");
 
         let response = router
             .oneshot(
@@ -898,7 +907,7 @@ mod tests {
     async fn make_router_returns_404_for_extension_route_when_none_attached() {
         let agent = build_test_agent();
         let (stats_tx, _stats_rx) = mpsc::channel::<pb::ClientStatsPayload>(1);
-        let router = agent.make_router(stats_tx);
+        let router = agent.make_router(stats_tx).expect("make_router");
 
         let response = router
             .oneshot(
