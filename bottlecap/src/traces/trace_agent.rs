@@ -132,10 +132,8 @@ pub struct TraceAgent {
     tx: Sender<SendDataBuilderInfo>,
     stats_concentrator: StatsConcentratorHandle,
     span_deduper: DedupHandle,
-    /// Optional router extension that, when attached via
-    /// [`TraceAgent::with_router_extension`], adds routes to the listener
-    /// alongside the trace endpoints. `None` when the caller wants no
-    /// extra routes.
+    /// `None` when the caller wants no extra routes. See
+    /// [`TraceAgent::with_router_extension`].
     router_extension: Option<Arc<dyn RouterExtension>>,
 }
 
@@ -195,10 +193,8 @@ impl TraceAgent {
 
     /// Attaches a [`RouterExtension`] that will be applied to the
     /// fully-assembled production router before the outer fallback and
-    /// body-limit layers. Use this to add optional routes (for example, a
-    /// deterministic on-demand drain endpoint) without wiring a dedicated
-    /// field per route into [`TraceAgent`]. Without this call, the agent
-    /// exposes only its production routes.
+    /// body-limit layers. Without this call, the agent exposes only its
+    /// production routes.
     #[must_use]
     pub fn with_router_extension(mut self, extension: Arc<dyn RouterExtension>) -> Self {
         self.router_extension = Some(extension);
@@ -803,15 +799,21 @@ fn success_response(message: &str) -> Response {
 #[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
+    use crate::{
+        LAMBDA_RUNTIME_SLUG, config,
+        traces::{
+            span_dedup_service::DedupService, stats_concentrator_service::StatsConcentratorService,
+            trace_aggregator_service::AggregatorService,
+        },
+    };
     use axum::body::Body;
     use axum::http::Request;
+    use libdd_trace_obfuscation::obfuscation_config::ObfuscationConfig;
+    use std::collections::HashMap;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use tower::ServiceExt;
 
-    /// Test extension that records how many times its route was hit, to
-    /// prove the [`RouterExtension`] seam end-to-end: trait shape compiles,
-    /// state is carried through an [`Arc`], and merged routes are reachable
-    /// via the composed [`Router`].
+    /// Test extension that records how many times its route was hit.
     struct SpyExtension {
         hits: Arc<AtomicUsize>,
     }
@@ -832,14 +834,50 @@ mod tests {
         }
     }
 
-    #[tokio::test]
-    async fn router_extension_adds_reachable_route_with_state() {
-        let hits = Arc::new(AtomicUsize::new(0));
-        let extension: Arc<dyn RouterExtension> = Arc::new(SpyExtension {
-            hits: Arc::clone(&hits),
+    fn build_test_agent() -> TraceAgent {
+        let config = Arc::new(config::Config::default());
+        let (concentrator_svc, concentrator) = StatsConcentratorService::new(Arc::clone(&config));
+        tokio::spawn(concentrator_svc.run());
+        let (aggregator_svc, aggregator_handle) = AggregatorService::default();
+        tokio::spawn(aggregator_svc.run());
+        let (dedup_svc, dedup_handle) = DedupService::new();
+        tokio::spawn(dedup_svc.run());
+        let trace_processor = Arc::new(trace_processor::ServerlessTraceProcessor {
+            obfuscation_config: Arc::new(ObfuscationConfig::new().expect("ObfuscationConfig")),
         });
+        let stats_aggregator = Arc::new(Mutex::new(
+            stats_aggregator::StatsAggregator::new_with_concentrator(concentrator.clone()),
+        ));
+        let proxy_aggregator = Arc::new(Mutex::new(proxy_aggregator::Aggregator::default()));
+        let tags_provider = Arc::new(provider::Provider::new(
+            Arc::clone(&config),
+            LAMBDA_RUNTIME_SLUG.to_string(),
+            &HashMap::from([("function_arn".to_string(), "test-arn".to_string())]),
+        ));
 
-        let router = extension.extend(Router::new());
+        TraceAgent::new(
+            config,
+            aggregator_handle,
+            trace_processor,
+            stats_aggregator,
+            Arc::new(stats_processor::ServerlessStatsProcessor {}),
+            proxy_aggregator,
+            InvocationProcessorHandle::noop(),
+            None,
+            tags_provider,
+            concentrator,
+            dedup_handle,
+        )
+    }
+
+    #[tokio::test]
+    async fn with_router_extension_adds_reachable_route_to_make_router() {
+        let hits = Arc::new(AtomicUsize::new(0));
+        let agent = build_test_agent().with_router_extension(Arc::new(SpyExtension {
+            hits: Arc::clone(&hits),
+        }));
+        let (stats_tx, _stats_rx) = mpsc::channel::<pb::ClientStatsPayload>(1);
+        let router = agent.make_router(stats_tx);
 
         let response = router
             .oneshot(
@@ -854,5 +892,25 @@ mod tests {
 
         assert_eq!(response.status(), StatusCode::NO_CONTENT);
         assert_eq!(hits.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn make_router_returns_404_for_extension_route_when_none_attached() {
+        let agent = build_test_agent();
+        let (stats_tx, _stats_rx) = mpsc::channel::<pb::ClientStatsPayload>(1);
+        let router = agent.make_router(stats_tx);
+
+        let response = router
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/spy")
+                    .body(Body::empty())
+                    .expect("build request"),
+            )
+            .await
+            .expect("route response");
+
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
     }
 }

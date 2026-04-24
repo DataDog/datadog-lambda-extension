@@ -158,12 +158,10 @@ pub fn build_trace_agent(
 /// runtime. Convenience entry point for callers that do not need to
 /// further configure the `TraceAgent` before spawning it.
 ///
-/// Callers that need to attach a
-/// [`trace_agent::RouterExtension`](trace_agent::RouterExtension) (or
-/// otherwise customize the `TraceAgent`) should use [`build_trace_agent`]
-/// directly and spawn the returned `TraceAgent` themselves after applying
-/// the extra configuration, e.g. via
-/// [`trace_agent::TraceAgent::with_router_extension`].
+/// Callers that need to customize the `TraceAgent` (for example via
+/// [`trace_agent::TraceAgent::with_router_extension`]) should use
+/// [`build_trace_agent`] directly and spawn the returned `TraceAgent`
+/// themselves after applying the extra configuration.
 pub fn start_trace_agent(
     config: &Arc<Config>,
     api_key_factory: &Arc<ApiKeyFactory>,
