@@ -124,7 +124,6 @@ impl FakeIntake {
             .traces
             .clone()
     }
-
 }
 
 impl Drop for FakeIntake {
