@@ -33,9 +33,10 @@ use libdd_trace_utils::trace_utils::TracerHeaderTags;
 use libdd_trace_utils::tracer_payload::TracerPayloadCollection;
 use tokio::sync::Mutex;
 
-mod common;
+#[path = "common/fake_intake.rs"]
+mod fake_intake;
 
-use common::fake_intake::FakeIntake;
+use fake_intake::FakeIntake;
 
 const DD_API_KEY: &str = "my_test_key";
 

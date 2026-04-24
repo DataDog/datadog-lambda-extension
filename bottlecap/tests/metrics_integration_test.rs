@@ -9,8 +9,6 @@ use dogstatsd::metric::SortedTags;
 use httpmock::prelude::*;
 use std::sync::Arc;
 
-mod common;
-
 #[tokio::test]
 async fn test_enhanced_metrics() {
     let dd_api_key = "my_test_key";
