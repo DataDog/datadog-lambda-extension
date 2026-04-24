@@ -826,4 +826,106 @@ mod tests {
             .await
             .expect("noop on_platform_report");
     }
+
+    /// Guards against a future `ProcessorCommand` variant with a `response`
+    /// field being accidentally placed in the fire-and-forget arm: that would
+    /// silently drop the sender, causing `rx.await` to return
+    /// `ProcessorError::ChannelReceive`. With an explicit timeout, any such
+    /// regression fails fast instead of hanging the test suite.
+    #[tokio::test]
+    async fn noop_request_response_variants_complete_within_timeout() {
+        use crate::{
+            LAMBDA_RUNTIME_SLUG, config,
+            extension::telemetry::events::OnDemandReportMetrics,
+            traces::{
+                stats_concentrator_service::StatsConcentratorService,
+                stats_generator::StatsGenerator, trace_processor::ServerlessTraceProcessor,
+            },
+        };
+        use libdd_trace_obfuscation::obfuscation_config::ObfuscationConfig;
+        use std::collections::HashMap;
+        use tokio::time::{Duration, timeout};
+
+        let timeout_dur = Duration::from_millis(500);
+
+        let config = Arc::new(config::Config::default());
+        let (svc, concentrator) = StatsConcentratorService::new(Arc::clone(&config));
+        tokio::spawn(svc.run());
+        let trace_sender = Arc::new(SendingTraceProcessor {
+            appsec: None,
+            processor: Arc::new(ServerlessTraceProcessor {
+                obfuscation_config: Arc::new(ObfuscationConfig::new().expect("ObfuscationConfig")),
+            }),
+            trace_tx: tokio::sync::mpsc::channel(1).0,
+            stats_generator: Arc::new(StatsGenerator::new(concentrator)),
+        });
+        let tags_provider = Arc::new(provider::Provider::new(
+            Arc::clone(&config),
+            LAMBDA_RUNTIME_SLUG.to_string(),
+            &HashMap::from([("function_arn".to_string(), "test-arn".to_string())]),
+        ));
+
+        let handle = InvocationProcessorHandle::noop();
+
+        timeout(timeout_dur, handle.get_reparenting_info())
+            .await
+            .expect("get_reparenting_info timed out")
+            .expect("get_reparenting_info");
+
+        timeout(
+            timeout_dur,
+            handle.update_reparenting(std::collections::VecDeque::new()),
+        )
+        .await
+        .expect("update_reparenting timed out")
+        .expect("update_reparenting");
+
+        timeout(timeout_dur, handle.set_cold_start_span_trace_id(42))
+            .await
+            .expect("set_cold_start_span_trace_id timed out")
+            .expect("set_cold_start_span_trace_id");
+
+        timeout(
+            timeout_dur,
+            handle.on_platform_runtime_done(
+                "rid".to_string(),
+                RuntimeDoneMetrics {
+                    duration_ms: 0.0,
+                    produced_bytes: None,
+                },
+                Status::Success,
+                None,
+                Arc::clone(&tags_provider),
+                Arc::clone(&trace_sender),
+                0,
+            ),
+        )
+        .await
+        .expect("on_platform_runtime_done timed out")
+        .expect("on_platform_runtime_done");
+
+        timeout(
+            timeout_dur,
+            handle.on_platform_report(
+                "rid",
+                ReportMetrics::OnDemand(OnDemandReportMetrics {
+                    duration_ms: 0.0,
+                    billed_duration_ms: 0,
+                    memory_size_mb: 0,
+                    max_memory_used_mb: 0,
+                    init_duration_ms: None,
+                    restore_duration_ms: None,
+                }),
+                0,
+                Status::Success,
+                &None,
+                &None,
+                tags_provider,
+                trace_sender,
+            ),
+        )
+        .await
+        .expect("on_platform_report timed out")
+        .expect("on_platform_report");
+    }
 }
