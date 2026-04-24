@@ -344,7 +344,7 @@ async fn extension_loop_active(
         }
     };
 
-    let bottlecap::traces::TraceAgentPipeline {
+    let bottlecap::startup::TraceAgentPipeline {
         trace_tx: trace_agent_channel,
         trace_flusher,
         trace_processor,
@@ -353,7 +353,7 @@ async fn extension_loop_active(
         shutdown_token: trace_agent_shutdown_token,
         stats_concentrator,
         trace_aggregator_handle,
-    } = bottlecap::traces::start_trace_agent(
+    } = bottlecap::startup::start_trace_agent(
         config,
         &api_key_factory,
         &tags_provider,
