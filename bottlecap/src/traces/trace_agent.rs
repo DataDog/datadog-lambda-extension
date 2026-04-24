@@ -105,6 +105,20 @@ pub struct ProxyState {
     pub proxy_aggregator: Arc<Mutex<proxy_aggregator::Aggregator>>,
 }
 
+/// Extension seam for the [`TraceAgent`] HTTP router. Implementors receive
+/// the fully-assembled production router and return it with any additional
+/// routes merged in. Used to attach optional routes (for example, a
+/// deterministic drain endpoint) without adding a dedicated field per
+/// route to [`TraceAgent`].
+///
+/// Returning `Err` aborts agent startup: the error propagates through
+/// [`TraceAgent::start`]. Implementors that carry state must call
+/// `.with_state(...)` on their sub-router before merging, because
+/// `Router::merge` requires both routers to share the same state type.
+pub trait RouterExtension: Send + Sync {
+    fn extend(&self, router: Router) -> Result<Router, Box<dyn std::error::Error>>;
+}
+
 pub struct TraceAgent {
     pub config: Arc<config::Config>,
     pub trace_processor: Arc<dyn trace_processor::TraceProcessor + Send + Sync>,
@@ -118,6 +132,9 @@ pub struct TraceAgent {
     tx: Sender<SendDataBuilderInfo>,
     stats_concentrator: StatsConcentratorHandle,
     span_deduper: DedupHandle,
+    /// `None` when the caller wants no extra routes. See
+    /// [`TraceAgent::with_router_extension`].
+    router_extension: Option<Arc<dyn RouterExtension>>,
 }
 
 #[derive(Clone, Copy)]
@@ -170,7 +187,18 @@ impl TraceAgent {
             shutdown_token: CancellationToken::new(),
             stats_concentrator,
             span_deduper,
+            router_extension: None,
         }
+    }
+
+    /// Attaches a [`RouterExtension`] that will be applied to the
+    /// fully-assembled production router before the outer fallback and
+    /// body-limit layers. Without this call, the agent exposes only its
+    /// production routes.
+    #[must_use]
+    pub fn with_router_extension(mut self, extension: Arc<dyn RouterExtension>) -> Self {
+        self.router_extension = Some(extension);
+        self
     }
 
     #[allow(clippy::cast_possible_truncation)]
@@ -192,7 +220,7 @@ impl TraceAgent {
             }
         });
 
-        let router = self.make_router(stats_tx);
+        let router = self.make_router(stats_tx)?;
 
         let port = u16::try_from(TRACE_AGENT_PORT).expect("TRACE_AGENT_PORT is too large");
         let socket = SocketAddr::from(([127, 0, 0, 1], port));
@@ -212,7 +240,10 @@ impl TraceAgent {
         Ok(())
     }
 
-    fn make_router(&self, stats_tx: Sender<pb::ClientStatsPayload>) -> Router {
+    fn make_router(
+        &self,
+        stats_tx: Sender<pb::ClientStatsPayload>,
+    ) -> Result<Router, Box<dyn std::error::Error>> {
         let stats_generator = Arc::new(StatsGenerator::new(self.stats_concentrator.clone()));
         let trace_state = TraceState {
             config: Arc::clone(&self.config),
@@ -281,14 +312,20 @@ impl TraceAgent {
 
         let info_router = Router::new().route(INFO_ENDPOINT_PATH, any(Self::info));
 
-        Router::new()
+        let mut router = Router::new()
             .merge(trace_router)
             .merge(stats_router)
             .merge(proxy_router)
-            .merge(info_router)
+            .merge(info_router);
+
+        if let Some(extension) = &self.router_extension {
+            router = extension.extend(router)?;
+        }
+
+        Ok(router
             .fallback(handler_not_found)
             // Disable the default body limit so we can use our own limit
-            .layer(DefaultBodyLimit::disable())
+            .layer(DefaultBodyLimit::disable()))
     }
 
     async fn graceful_shutdown(shutdown_token: CancellationToken) {
@@ -759,4 +796,124 @@ fn warn_response<E: std::fmt::Display>(status: StatusCode, error: E) -> Response
 fn success_response(message: &str) -> Response {
     debug!("{}", message);
     (StatusCode::OK, json!({"rate_by_service": {}}).to_string()).into_response()
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod tests {
+    use super::*;
+    use crate::{
+        LAMBDA_RUNTIME_SLUG, config,
+        traces::{
+            span_dedup_service::DedupService, stats_concentrator_service::StatsConcentratorService,
+            trace_aggregator_service::AggregatorService,
+        },
+    };
+    use axum::body::Body;
+    use axum::http::Request;
+    use libdd_trace_obfuscation::obfuscation_config::ObfuscationConfig;
+    use std::collections::HashMap;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use tower::ServiceExt;
+
+    /// Test extension that records how many times its route was hit.
+    struct SpyExtension {
+        hits: Arc<AtomicUsize>,
+    }
+
+    impl RouterExtension for SpyExtension {
+        fn extend(&self, router: Router) -> Result<Router, Box<dyn std::error::Error>> {
+            Ok(router.merge(
+                Router::new()
+                    .route(
+                        "/spy",
+                        post(|State(hits): State<Arc<AtomicUsize>>| async move {
+                            hits.fetch_add(1, Ordering::SeqCst);
+                            StatusCode::NO_CONTENT
+                        }),
+                    )
+                    .with_state(Arc::clone(&self.hits)),
+            ))
+        }
+    }
+
+    fn build_test_agent() -> TraceAgent {
+        let config = Arc::new(config::Config::default());
+        let (concentrator_svc, concentrator) = StatsConcentratorService::new(Arc::clone(&config));
+        tokio::spawn(concentrator_svc.run());
+        let (aggregator_svc, aggregator_handle) = AggregatorService::default();
+        tokio::spawn(aggregator_svc.run());
+        let (dedup_svc, dedup_handle) = DedupService::new();
+        tokio::spawn(dedup_svc.run());
+        let trace_processor = Arc::new(trace_processor::ServerlessTraceProcessor {
+            obfuscation_config: Arc::new(ObfuscationConfig::new().expect("ObfuscationConfig")),
+        });
+        let stats_aggregator = Arc::new(Mutex::new(
+            stats_aggregator::StatsAggregator::new_with_concentrator(concentrator.clone()),
+        ));
+        let proxy_aggregator = Arc::new(Mutex::new(proxy_aggregator::Aggregator::default()));
+        let tags_provider = Arc::new(provider::Provider::new(
+            Arc::clone(&config),
+            LAMBDA_RUNTIME_SLUG.to_string(),
+            &HashMap::from([("function_arn".to_string(), "test-arn".to_string())]),
+        ));
+
+        TraceAgent::new(
+            config,
+            aggregator_handle,
+            trace_processor,
+            stats_aggregator,
+            Arc::new(stats_processor::ServerlessStatsProcessor {}),
+            proxy_aggregator,
+            InvocationProcessorHandle::noop(),
+            None,
+            tags_provider,
+            concentrator,
+            dedup_handle,
+        )
+    }
+
+    #[tokio::test]
+    async fn with_router_extension_adds_reachable_route_to_make_router() {
+        let hits = Arc::new(AtomicUsize::new(0));
+        let agent = build_test_agent().with_router_extension(Arc::new(SpyExtension {
+            hits: Arc::clone(&hits),
+        }));
+        let (stats_tx, _stats_rx) = mpsc::channel::<pb::ClientStatsPayload>(1);
+        let router = agent.make_router(stats_tx).expect("make_router");
+
+        let response = router
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/spy")
+                    .body(Body::empty())
+                    .expect("build request"),
+            )
+            .await
+            .expect("route response");
+
+        assert_eq!(response.status(), StatusCode::NO_CONTENT);
+        assert_eq!(hits.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn make_router_returns_404_for_extension_route_when_none_attached() {
+        let agent = build_test_agent();
+        let (stats_tx, _stats_rx) = mpsc::channel::<pb::ClientStatsPayload>(1);
+        let router = agent.make_router(stats_tx).expect("make_router");
+
+        let response = router
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/spy")
+                    .body(Body::empty())
+                    .expect("build request"),
+            )
+            .await
+            .expect("route response");
+
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    }
 }

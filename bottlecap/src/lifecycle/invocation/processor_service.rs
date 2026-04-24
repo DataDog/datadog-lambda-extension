@@ -134,6 +134,60 @@ pub struct InvocationProcessorHandle {
 }
 
 impl InvocationProcessorHandle {
+    /// Returns a handle backed by a background task that acknowledges every
+    /// command with a sensible default. Use this for callers that need an
+    /// `InvocationProcessorHandle` (for example, to reuse `TraceAgent` or
+    /// `handle_traces`) but have no Lambda lifecycle state to drive.
+    ///
+    /// The match below is exhaustive: adding a new `ProcessorCommand` variant
+    /// will fail to compile here, so the noop behavior for it must be
+    /// decided explicitly. A response-carrying variant placed in the
+    /// fire-and-forget arm would silently drop its sender, causing the
+    /// caller to receive `ProcessorError::ChannelReceive` instead of the
+    /// intended default.
+    #[must_use]
+    pub fn noop() -> Self {
+        let (sender, mut receiver) = mpsc::channel::<ProcessorCommand>(1000);
+        tokio::spawn(async move {
+            while let Some(command) = receiver.recv().await {
+                match command {
+                    // Request-response commands: reply with a default so the
+                    // caller doesn't block on the oneshot forever.
+                    ProcessorCommand::GetReparentingInfo { response } => {
+                        let _ = response.send(Ok(std::collections::VecDeque::new()));
+                    }
+                    ProcessorCommand::UpdateReparenting { response, .. } => {
+                        let _ = response.send(Ok(Vec::new()));
+                    }
+                    ProcessorCommand::SetColdStartSpanTraceId { response, .. } => {
+                        let _ = response.send(Ok(None));
+                    }
+                    ProcessorCommand::PlatformRuntimeDone { response, .. }
+                    | ProcessorCommand::PlatformReport { response, .. } => {
+                        let _ = response.send(());
+                    }
+                    // Fire-and-forget commands: drop silently.
+                    ProcessorCommand::InvokeEvent { .. }
+                    | ProcessorCommand::PlatformInitStart { .. }
+                    | ProcessorCommand::PlatformInitReport { .. }
+                    | ProcessorCommand::PlatformRestoreStart { .. }
+                    | ProcessorCommand::PlatformRestoreReport { .. }
+                    | ProcessorCommand::PlatformStart { .. }
+                    | ProcessorCommand::UniversalInstrumentationStart { .. }
+                    | ProcessorCommand::UniversalInstrumentationEnd { .. }
+                    | ProcessorCommand::AddReparenting { .. }
+                    | ProcessorCommand::AddTracerSpan { .. }
+                    | ProcessorCommand::ForwardDurableContext { .. }
+                    | ProcessorCommand::OnOutOfMemoryError { .. }
+                    | ProcessorCommand::OnShutdownEvent
+                    | ProcessorCommand::SendCtxSpans { .. }
+                    | ProcessorCommand::Shutdown => {}
+                }
+            }
+        });
+        InvocationProcessorHandle { sender }
+    }
+
     pub async fn on_invoke_event(
         &self,
         request_id: String,
@@ -650,5 +704,223 @@ impl InvocationProcessorService {
         }
 
         debug!("InvocationProcessorService stopped");
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn noop_request_response_methods_return_defaults() {
+        let handle = InvocationProcessorHandle::noop();
+
+        let info = handle
+            .get_reparenting_info()
+            .await
+            .expect("noop get_reparenting_info");
+        assert!(info.is_empty());
+
+        let contexts = handle
+            .update_reparenting(std::collections::VecDeque::new())
+            .await
+            .expect("noop update_reparenting");
+        assert!(contexts.is_empty());
+
+        let cold_start = handle
+            .set_cold_start_span_trace_id(42)
+            .await
+            .expect("noop set_cold_start_span_trace_id");
+        assert!(cold_start.is_none());
+    }
+
+    #[tokio::test]
+    async fn noop_fire_and_forget_commands_do_not_panic() {
+        let handle = InvocationProcessorHandle::noop();
+
+        handle
+            .on_invoke_event("rid".to_string())
+            .await
+            .expect("noop on_invoke_event");
+        handle
+            .on_shutdown_event()
+            .await
+            .expect("noop on_shutdown_event");
+        handle
+            .on_out_of_memory_error(0)
+            .await
+            .expect("noop on_out_of_memory_error");
+    }
+
+    #[tokio::test]
+    async fn noop_platform_runtime_done_and_report_respond_without_blocking() {
+        use crate::{
+            LAMBDA_RUNTIME_SLUG, config,
+            extension::telemetry::events::OnDemandReportMetrics,
+            traces::{
+                stats_concentrator_service::StatsConcentratorService,
+                stats_generator::StatsGenerator, trace_processor::ServerlessTraceProcessor,
+            },
+        };
+        use libdd_trace_obfuscation::obfuscation_config::ObfuscationConfig;
+        use std::collections::HashMap;
+
+        let config = Arc::new(config::Config::default());
+        let (svc, concentrator) = StatsConcentratorService::new(Arc::clone(&config));
+        tokio::spawn(svc.run());
+        let trace_sender = Arc::new(SendingTraceProcessor {
+            appsec: None,
+            processor: Arc::new(ServerlessTraceProcessor {
+                obfuscation_config: Arc::new(ObfuscationConfig::new().expect("ObfuscationConfig")),
+            }),
+            trace_tx: tokio::sync::mpsc::channel(1).0,
+            stats_generator: Arc::new(StatsGenerator::new(concentrator)),
+        });
+        let tags_provider = Arc::new(provider::Provider::new(
+            Arc::clone(&config),
+            LAMBDA_RUNTIME_SLUG.to_string(),
+            &HashMap::from([("function_arn".to_string(), "test-arn".to_string())]),
+        ));
+
+        let handle = InvocationProcessorHandle::noop();
+
+        handle
+            .on_platform_runtime_done(
+                "rid".to_string(),
+                RuntimeDoneMetrics {
+                    duration_ms: 0.0,
+                    produced_bytes: None,
+                },
+                Status::Success,
+                None,
+                Arc::clone(&tags_provider),
+                Arc::clone(&trace_sender),
+                0,
+            )
+            .await
+            .expect("noop on_platform_runtime_done");
+
+        handle
+            .on_platform_report(
+                "rid",
+                ReportMetrics::OnDemand(OnDemandReportMetrics {
+                    duration_ms: 0.0,
+                    billed_duration_ms: 0,
+                    memory_size_mb: 0,
+                    max_memory_used_mb: 0,
+                    init_duration_ms: None,
+                    restore_duration_ms: None,
+                }),
+                0,
+                Status::Success,
+                &None,
+                &None,
+                tags_provider,
+                trace_sender,
+            )
+            .await
+            .expect("noop on_platform_report");
+    }
+
+    /// Guards against a future `ProcessorCommand` variant with a `response`
+    /// field being accidentally placed in the fire-and-forget arm: that would
+    /// silently drop the sender, causing `rx.await` to return
+    /// `ProcessorError::ChannelReceive`. With an explicit timeout, any such
+    /// regression fails fast instead of hanging the test suite.
+    #[tokio::test]
+    async fn noop_request_response_variants_complete_within_timeout() {
+        use crate::{
+            LAMBDA_RUNTIME_SLUG, config,
+            extension::telemetry::events::OnDemandReportMetrics,
+            traces::{
+                stats_concentrator_service::StatsConcentratorService,
+                stats_generator::StatsGenerator, trace_processor::ServerlessTraceProcessor,
+            },
+        };
+        use libdd_trace_obfuscation::obfuscation_config::ObfuscationConfig;
+        use std::collections::HashMap;
+        use tokio::time::{Duration, timeout};
+
+        let timeout_dur = Duration::from_millis(500);
+
+        let config = Arc::new(config::Config::default());
+        let (svc, concentrator) = StatsConcentratorService::new(Arc::clone(&config));
+        tokio::spawn(svc.run());
+        let trace_sender = Arc::new(SendingTraceProcessor {
+            appsec: None,
+            processor: Arc::new(ServerlessTraceProcessor {
+                obfuscation_config: Arc::new(ObfuscationConfig::new().expect("ObfuscationConfig")),
+            }),
+            trace_tx: tokio::sync::mpsc::channel(1).0,
+            stats_generator: Arc::new(StatsGenerator::new(concentrator)),
+        });
+        let tags_provider = Arc::new(provider::Provider::new(
+            Arc::clone(&config),
+            LAMBDA_RUNTIME_SLUG.to_string(),
+            &HashMap::from([("function_arn".to_string(), "test-arn".to_string())]),
+        ));
+
+        let handle = InvocationProcessorHandle::noop();
+
+        timeout(timeout_dur, handle.get_reparenting_info())
+            .await
+            .expect("get_reparenting_info timed out")
+            .expect("get_reparenting_info");
+
+        timeout(
+            timeout_dur,
+            handle.update_reparenting(std::collections::VecDeque::new()),
+        )
+        .await
+        .expect("update_reparenting timed out")
+        .expect("update_reparenting");
+
+        timeout(timeout_dur, handle.set_cold_start_span_trace_id(42))
+            .await
+            .expect("set_cold_start_span_trace_id timed out")
+            .expect("set_cold_start_span_trace_id");
+
+        timeout(
+            timeout_dur,
+            handle.on_platform_runtime_done(
+                "rid".to_string(),
+                RuntimeDoneMetrics {
+                    duration_ms: 0.0,
+                    produced_bytes: None,
+                },
+                Status::Success,
+                None,
+                Arc::clone(&tags_provider),
+                Arc::clone(&trace_sender),
+                0,
+            ),
+        )
+        .await
+        .expect("on_platform_runtime_done timed out")
+        .expect("on_platform_runtime_done");
+
+        timeout(
+            timeout_dur,
+            handle.on_platform_report(
+                "rid",
+                ReportMetrics::OnDemand(OnDemandReportMetrics {
+                    duration_ms: 0.0,
+                    billed_duration_ms: 0,
+                    memory_size_mb: 0,
+                    max_memory_used_mb: 0,
+                    init_duration_ms: None,
+                    restore_duration_ms: None,
+                }),
+                0,
+                Status::Success,
+                &None,
+                &None,
+                tags_provider,
+                trace_sender,
+            ),
+        )
+        .await
+        .expect("on_platform_report timed out")
+        .expect("on_platform_report");
     }
 }
