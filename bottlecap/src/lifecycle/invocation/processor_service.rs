@@ -142,8 +142,10 @@ impl InvocationProcessorHandle {
     ///
     /// The match below is exhaustive: adding a new `ProcessorCommand` variant
     /// will fail to compile here, so the noop behavior for it must be
-    /// decided explicitly rather than silently dropping a response and
-    /// hanging the caller on its oneshot.
+    /// decided explicitly. A response-carrying variant placed in the
+    /// fire-and-forget arm would silently drop its sender, causing the
+    /// caller to receive `ProcessorError::ChannelReceive` instead of the
+    /// intended default.
     #[must_use]
     pub fn noop() -> Self {
         let (sender, mut receiver) = mpsc::channel::<ProcessorCommand>(1000);
