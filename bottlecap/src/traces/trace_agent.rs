@@ -25,7 +25,6 @@ use crate::traces::trace_processor::SendingTraceProcessor;
 use crate::{
     appsec::processor::Processor as AppSecProcessor,
     config,
-    flushing::FlushingService,
     http::{extract_request_body, handler_not_found},
     lifecycle::invocation::{
         context::ReparentingInfo, processor_service::InvocationProcessorHandle,
@@ -68,10 +67,6 @@ const V2_DEBUGGER_ENDPOINT_PATH: &str = "/debugger/v2/input";
 const DEBUGGER_DIAGNOSTICS_ENDPOINT_PATH: &str = "/debugger/v1/diagnostics";
 const INSTRUMENTATION_ENDPOINT_PATH: &str = "/telemetry/proxy/api/v2/apmtelemetry";
 
-// Test-mode only: exposed when a FlushingService is attached via
-// TraceAgent::with_flushing_service.
-const FLUSH_ENDPOINT_PATH: &str = "/flush";
-
 // Intake endpoints
 const DSM_INTAKE_PATH: &str = "/api/v0.1/pipeline_stats";
 const LLM_OBS_SPANS_INTAKE_PATH: &str = "/api/v2/llmobs";
@@ -110,6 +105,20 @@ pub struct ProxyState {
     pub proxy_aggregator: Arc<Mutex<proxy_aggregator::Aggregator>>,
 }
 
+/// Extension seam for the [`TraceAgent`] HTTP router. Implementors receive
+/// the fully-assembled production router and return a router with any
+/// additional routes merged in. Used to attach optional routes (for example,
+/// a deterministic drain endpoint) without adding a dedicated field per
+/// route to [`TraceAgent`].
+///
+/// Implementors must apply `.with_state(...)` to their sub-router before
+/// returning, so the type parameter of the returned [`Router`] is the same
+/// as the one passed in (axum's `Router::merge` requires matching state
+/// types).
+pub trait RouterExtension: Send + Sync {
+    fn extend(&self, router: Router) -> Router;
+}
+
 pub struct TraceAgent {
     pub config: Arc<config::Config>,
     pub trace_processor: Arc<dyn trace_processor::TraceProcessor + Send + Sync>,
@@ -123,11 +132,11 @@ pub struct TraceAgent {
     tx: Sender<SendDataBuilderInfo>,
     stats_concentrator: StatsConcentratorHandle,
     span_deduper: DedupHandle,
-    /// Optional flushing service that, when attached via
-    /// [`TraceAgent::with_flushing_service`], backs a `POST /flush` route on
-    /// the same listener as the trace endpoints. `None` when the caller
-    /// wants no external flush trigger.
-    flushing_service: Option<Arc<FlushingService>>,
+    /// Optional router extension that, when attached via
+    /// [`TraceAgent::with_router_extension`], adds routes to the listener
+    /// alongside the trace endpoints. `None` when the caller wants no
+    /// extra routes.
+    router_extension: Option<Arc<dyn RouterExtension>>,
 }
 
 #[derive(Clone, Copy)]
@@ -180,18 +189,19 @@ impl TraceAgent {
             shutdown_token: CancellationToken::new(),
             stats_concentrator,
             span_deduper,
-            flushing_service: None,
+            router_extension: None,
         }
     }
 
-    /// Attaches a [`FlushingService`] that will back a `POST /flush` route
-    /// registered on the same listener as the trace endpoints. Use this for
-    /// callers that need a deterministic, on-demand drain hook (for example,
-    /// a test harness that flushes between requests). Without this call,
-    /// the agent never registers a `POST /flush` route.
+    /// Attaches a [`RouterExtension`] that will be applied to the
+    /// fully-assembled production router before the outer fallback and
+    /// body-limit layers. Use this to add optional routes (for example, a
+    /// deterministic on-demand drain endpoint) without wiring a dedicated
+    /// field per route into [`TraceAgent`]. Without this call, the agent
+    /// exposes only its production routes.
     #[must_use]
-    pub fn with_flushing_service(mut self, flushing_service: Arc<FlushingService>) -> Self {
-        self.flushing_service = Some(flushing_service);
+    pub fn with_router_extension(mut self, extension: Arc<dyn RouterExtension>) -> Self {
+        self.router_extension = Some(extension);
         self
     }
 
@@ -309,36 +319,14 @@ impl TraceAgent {
             .merge(proxy_router)
             .merge(info_router);
 
-        // POST /flush is only registered when a FlushingService has been
-        // attached via TraceAgent::with_flushing_service.
-        if let Some(flushing_service) = &self.flushing_service {
-            let flush_router = Router::new()
-                .route(FLUSH_ENDPOINT_PATH, post(Self::flush))
-                .with_state(Arc::clone(flushing_service));
-            router = router.merge(flush_router);
+        if let Some(extension) = &self.router_extension {
+            router = extension.extend(router);
         }
 
         router
             .fallback(handler_not_found)
             // Disable the default body limit so we can use our own limit
             .layer(DefaultBodyLimit::disable())
-    }
-
-    async fn flush(State(flushing_service): State<Arc<FlushingService>>) -> StatusCode {
-        // Isolate panics and bound execution time: spawn so a panic in
-        // flush_blocking_final surfaces as 500, timeout so a stuck flush
-        // returns 504 instead of hanging the test harness.
-        let mut task = tokio::task::spawn(async move {
-            flushing_service.flush_blocking_final().await;
-        });
-        match tokio::time::timeout(std::time::Duration::from_secs(30), &mut task).await {
-            Ok(Ok(())) => StatusCode::NO_CONTENT,
-            Ok(Err(_)) => StatusCode::INTERNAL_SERVER_ERROR,
-            Err(_) => {
-                task.abort();
-                StatusCode::GATEWAY_TIMEOUT
-            }
-        }
     }
 
     async fn graceful_shutdown(shutdown_token: CancellationToken) {
@@ -814,4 +802,62 @@ fn warn_response<E: std::fmt::Display>(status: StatusCode, error: E) -> Response
 fn success_response(message: &str) -> Response {
     debug!("{}", message);
     (StatusCode::OK, json!({"rate_by_service": {}}).to_string()).into_response()
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod tests {
+    use super::*;
+    use axum::body::Body;
+    use axum::http::Request;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use tower::ServiceExt;
+
+    /// Test extension that records how many times its route was hit, to
+    /// prove the [`RouterExtension`] seam end-to-end: trait shape compiles,
+    /// state is carried through an [`Arc`], and merged routes are reachable
+    /// via the composed [`Router`].
+    struct SpyExtension {
+        hits: Arc<AtomicUsize>,
+    }
+
+    impl RouterExtension for SpyExtension {
+        fn extend(&self, router: Router) -> Router {
+            router.merge(
+                Router::new()
+                    .route(
+                        "/spy",
+                        post(|State(hits): State<Arc<AtomicUsize>>| async move {
+                            hits.fetch_add(1, Ordering::SeqCst);
+                            StatusCode::NO_CONTENT
+                        }),
+                    )
+                    .with_state(Arc::clone(&self.hits)),
+            )
+        }
+    }
+
+    #[tokio::test]
+    async fn router_extension_adds_reachable_route_with_state() {
+        let hits = Arc::new(AtomicUsize::new(0));
+        let extension: Arc<dyn RouterExtension> = Arc::new(SpyExtension {
+            hits: Arc::clone(&hits),
+        });
+
+        let router = extension.extend(Router::new());
+
+        let response = router
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/spy")
+                    .body(Body::empty())
+                    .expect("build request"),
+            )
+            .await
+            .expect("route response");
+
+        assert_eq!(response.status(), StatusCode::NO_CONTENT);
+        assert_eq!(hits.load(Ordering::SeqCst), 1);
+    }
 }
