@@ -14,13 +14,14 @@ use crate::traces::stats_aggregator::StatsAggregator;
 use dogstatsd::api_key::ApiKeyFactory;
 use libdd_common::Endpoint;
 use libdd_trace_protobuf::pb;
-use libdd_trace_utils::{config_utils::trace_stats_url, stats_utils};
+use libdd_trace_utils::stats_utils;
 use tracing::{debug, error};
 
 pub struct StatsFlusher {
     aggregator: Arc<Mutex<StatsAggregator>>,
     config: Arc<config::Config>,
     api_key_factory: Arc<ApiKeyFactory>,
+    stats_url: String,
     endpoint: OnceCell<Endpoint>,
     http_client: HttpClient,
 }
@@ -32,11 +33,13 @@ impl StatsFlusher {
         aggregator: Arc<Mutex<StatsAggregator>>,
         config: Arc<config::Config>,
         http_client: HttpClient,
+        stats_url: String,
     ) -> Self {
         StatsFlusher {
             aggregator,
             config,
             api_key_factory,
+            stats_url,
             endpoint: OnceCell::new(),
             http_client,
         }
@@ -64,9 +67,8 @@ impl StatsFlusher {
             .endpoint
             .get_or_init({
                 move || async move {
-                    let stats_url = trace_stats_url(&self.config.site);
                     Endpoint {
-                        url: hyper::Uri::from_str(&stats_url)
+                        url: hyper::Uri::from_str(&self.stats_url)
                             .expect("can't make URI from stats url, exiting"),
                         api_key: Some(api_key_clone.into()),
                         timeout_ms: self.config.flush_timeout * S_TO_MS,
@@ -92,8 +94,6 @@ impl StatsFlusher {
             }
         };
 
-        let stats_url = trace_stats_url(&self.config.site);
-
         for attempt in 1..=FLUSH_RETRY_COUNT {
             let start = std::time::Instant::now();
             let resp = stats_utils::send_stats_payload_with_client(
@@ -108,14 +108,16 @@ impl StatsFlusher {
             match resp {
                 Ok(()) => {
                     debug!(
-                        "STATS | Successfully flushed stats to {stats_url} in {} ms (attempt {attempt}/{FLUSH_RETRY_COUNT})",
+                        "STATS | Successfully flushed stats to {} in {} ms (attempt {attempt}/{FLUSH_RETRY_COUNT})",
+                        endpoint.url,
                         elapsed.as_millis()
                     );
                     return None;
                 }
                 Err(e) => {
                     debug!(
-                        "STATS | Failed to send stats to {stats_url} in {} ms (attempt {attempt}/{FLUSH_RETRY_COUNT}): {e:?}",
+                        "STATS | Failed to send stats to {} in {} ms (attempt {attempt}/{FLUSH_RETRY_COUNT}): {e:?}",
+                        endpoint.url,
                         elapsed.as_millis()
                     );
                 }
