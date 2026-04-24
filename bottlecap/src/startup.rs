@@ -46,7 +46,7 @@ pub struct TraceAgentPipeline {
 /// onto the current tokio runtime, but does **not** spawn the `TraceAgent`
 /// itself. The caller owns `trace_agent` and is responsible for spawning
 /// `trace_agent.start()`, optionally after further configuring it (for
-/// example, via [`trace_agent::TraceAgent::with_flushing_service`]).
+/// example, via [`trace_agent::TraceAgent::with_router_extension`]).
 ///
 /// Note: the aggregator/concentrator/dedup tasks spawned here have no
 /// external shutdown signal; they run until their command channels are
@@ -159,11 +159,11 @@ pub fn build_trace_agent(
 /// further configure the `TraceAgent` before spawning it.
 ///
 /// Callers that need to attach a
-/// [`crate::flushing::FlushingService`](crate::flushing::FlushingService)
-/// (or otherwise customize the `TraceAgent`) should use
-/// [`build_trace_agent`] directly and spawn the returned `TraceAgent`
-/// themselves after applying the extra configuration, e.g. via
-/// [`trace_agent::TraceAgent::with_flushing_service`].
+/// [`trace_agent::RouterExtension`](trace_agent::RouterExtension) (or
+/// otherwise customize the `TraceAgent`) should use [`build_trace_agent`]
+/// directly and spawn the returned `TraceAgent` themselves after applying
+/// the extra configuration, e.g. via
+/// [`trace_agent::TraceAgent::with_router_extension`].
 pub fn start_trace_agent(
     config: &Arc<Config>,
     api_key_factory: &Arc<ApiKeyFactory>,
