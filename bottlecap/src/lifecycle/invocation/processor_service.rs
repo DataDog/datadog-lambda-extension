@@ -787,32 +787,26 @@ mod tests {
 
         let handle = InvocationProcessorHandle::noop();
 
-        let (tx, rx) = oneshot::channel::<()>();
         handle
-            .sender
-            .send(ProcessorCommand::PlatformRuntimeDone {
-                request_id: "rid".to_string(),
-                metrics: RuntimeDoneMetrics {
+            .on_platform_runtime_done(
+                "rid".to_string(),
+                RuntimeDoneMetrics {
                     duration_ms: 0.0,
                     produced_bytes: None,
                 },
-                status: Status::Success,
-                error_type: None,
-                tags_provider: Arc::clone(&tags_provider),
-                trace_sender: Arc::clone(&trace_sender),
-                timestamp: 0,
-                response: tx,
-            })
+                Status::Success,
+                None,
+                Arc::clone(&tags_provider),
+                Arc::clone(&trace_sender),
+                0,
+            )
             .await
-            .expect("send PlatformRuntimeDone");
-        rx.await.expect("noop must respond to PlatformRuntimeDone");
+            .expect("noop on_platform_runtime_done");
 
-        let (tx, rx) = oneshot::channel::<()>();
         handle
-            .sender
-            .send(ProcessorCommand::PlatformReport {
-                request_id: "rid".to_string(),
-                metrics: ReportMetrics::OnDemand(OnDemandReportMetrics {
+            .on_platform_report(
+                "rid",
+                ReportMetrics::OnDemand(OnDemandReportMetrics {
                     duration_ms: 0.0,
                     billed_duration_ms: 0,
                     memory_size_mb: 0,
@@ -820,16 +814,14 @@ mod tests {
                     init_duration_ms: None,
                     restore_duration_ms: None,
                 }),
-                timestamp: 0,
-                status: Status::Success,
-                error_type: None,
-                spans: None,
+                0,
+                Status::Success,
+                &None,
+                &None,
                 tags_provider,
                 trace_sender,
-                response: tx,
-            })
+            )
             .await
-            .expect("send PlatformReport");
-        rx.await.expect("noop must respond to PlatformReport");
+            .expect("noop on_platform_report");
     }
 }
