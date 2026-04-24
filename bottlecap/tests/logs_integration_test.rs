@@ -9,8 +9,6 @@ use httpmock::prelude::*;
 use std::collections::HashMap;
 use std::sync::Arc;
 
-mod common;
-
 #[tokio::test]
 async fn test_logs() {
     let arch = match std::env::consts::ARCH {
