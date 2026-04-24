@@ -336,11 +336,7 @@ impl TraceAgent {
             Ok(Err(_)) => StatusCode::INTERNAL_SERVER_ERROR,
             Err(_) => {
                 task.abort();
-                match task.await {
-                    Err(join_err) if join_err.is_cancelled() => StatusCode::GATEWAY_TIMEOUT,
-                    Err(_) => StatusCode::INTERNAL_SERVER_ERROR,
-                    Ok(()) => StatusCode::GATEWAY_TIMEOUT,
-                }
+                StatusCode::GATEWAY_TIMEOUT
             }
         }
     }
