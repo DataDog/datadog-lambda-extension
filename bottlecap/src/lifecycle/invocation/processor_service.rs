@@ -135,12 +135,12 @@ pub struct InvocationProcessorHandle {
 
 impl InvocationProcessorHandle {
     /// Returns a handle backed by a background task that acknowledges every
-    /// command with a sensible default. Intended for the `bottlecap-testmode`
-    /// binary, which reuses `TraceAgent` / `handle_traces` but has no Lambda
-    /// lifecycle state to drive.
+    /// command with a sensible default. Use this for callers that need an
+    /// `InvocationProcessorHandle` (for example, to reuse `TraceAgent` or
+    /// `handle_traces`) but have no Lambda lifecycle state to drive.
     ///
     /// The match below is exhaustive: adding a new `ProcessorCommand` variant
-    /// will fail to compile here, so test-mode's behavior for it must be
+    /// will fail to compile here, so the noop behavior for it must be
     /// decided explicitly rather than silently dropping a response and
     /// hanging the caller on its oneshot.
     #[must_use]

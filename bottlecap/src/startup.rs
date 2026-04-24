@@ -45,9 +45,8 @@ pub struct TraceAgentPipeline {
 /// owns the HTTP listener. Spawns the aggregator/concentrator/dedup services
 /// onto the current tokio runtime, but does **not** spawn the `TraceAgent`
 /// itself. The caller owns `trace_agent` and is responsible for spawning
-/// `trace_agent.start()` (optionally after calling
-/// [`trace_agent::TraceAgent::with_flushing_service`] to enable the
-/// test-mode `POST /flush` route).
+/// `trace_agent.start()`, optionally after further configuring it (for
+/// example, via [`trace_agent::TraceAgent::with_flushing_service`]).
 ///
 /// Note: the aggregator/concentrator/dedup tasks spawned here have no
 /// external shutdown signal; they run until their command channels are
@@ -156,13 +155,14 @@ pub fn build_trace_agent(
 
 /// Builds the trace-processing pipeline with [`build_trace_agent`] and spawns
 /// the [`trace_agent::TraceAgent`] HTTP listener onto the current tokio
-/// runtime. This is the convenience entry point used by the Lambda binary.
+/// runtime. Convenience entry point for callers that do not need to
+/// further configure the `TraceAgent` before spawning it.
 ///
 /// Callers that need to attach a
-/// [`crate::flushing::FlushingService`](crate::flushing::FlushingService),
-/// notably the `bottlecap-testmode` binary (which uses it to back a
-/// `POST /flush` route), should use [`build_trace_agent`] directly and spawn
-/// the returned `TraceAgent` themselves after calling
+/// [`crate::flushing::FlushingService`](crate::flushing::FlushingService)
+/// (or otherwise customize the `TraceAgent`) should use
+/// [`build_trace_agent`] directly and spawn the returned `TraceAgent`
+/// themselves after applying the extra configuration, e.g. via
 /// [`trace_agent::TraceAgent::with_flushing_service`].
 pub fn start_trace_agent(
     config: &Arc<Config>,
