@@ -56,6 +56,8 @@ pub const DURABLE_EXECUTION_ID_KEY: &str = "aws_lambda.durable_function.executio
 pub const DURABLE_EXECUTION_NAME_KEY: &str = "aws_lambda.durable_function.execution_name";
 pub const DURABLE_FUNCTION_FIRST_INVOCATION_KEY: &str =
     "aws_lambda.durable_function.first_invocation";
+pub const DURABLE_FUNCTION_EXECUTION_STATUS_KEY: &str =
+    "aws_lambda.durable_function.execution_status";
 
 const AWS_ACCOUNT_KEY: &str = "aws_account";
 const RESOURCE_KEY: &str = "resource";

@@ -53,6 +53,7 @@ impl LogsProcessor {
             &update.execution_id,
             &update.execution_name,
             update.first_invocation,
+            update.execution_status,
         );
         let ready_logs = self.take_ready_logs();
         if !ready_logs.is_empty()
@@ -68,6 +69,7 @@ impl LogsProcessor {
         execution_id: &str,
         execution_name: &str,
         first_invocation: Option<bool>,
+        execution_status: Option<String>,
     ) {
         match self {
             LogsProcessor::Lambda(p) => {
@@ -76,6 +78,7 @@ impl LogsProcessor {
                     execution_id,
                     execution_name,
                     first_invocation,
+                    execution_status,
                 );
             }
         }
