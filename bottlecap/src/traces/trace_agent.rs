@@ -125,8 +125,8 @@ pub struct TraceAgent {
     span_deduper: DedupHandle,
     /// Optional flushing service that, when attached via
     /// [`TraceAgent::with_flushing_service`], backs a `POST /flush` route on
-    /// the same listener as the trace endpoints. Used by the
-    /// `bottlecap-testmode` binary; never attached by the Lambda binary.
+    /// the same listener as the trace endpoints. `None` when the caller
+    /// wants no external flush trigger.
     flushing_service: Option<Arc<FlushingService>>,
 }
 
@@ -185,10 +185,10 @@ impl TraceAgent {
     }
 
     /// Attaches a [`FlushingService`] that will back a `POST /flush` route
-    /// registered on the same listener as the trace endpoints. Intended for
-    /// the `bottlecap-testmode` binary, which needs a deterministic drain
-    /// hook for the APM parity harness. The Lambda binary does not attach a
-    /// flushing service; `POST /flush` is not exposed in Lambda mode.
+    /// registered on the same listener as the trace endpoints. Use this for
+    /// callers that need a deterministic, on-demand drain hook (for example,
+    /// a test harness that flushes between requests). Without this call,
+    /// the agent never registers a `POST /flush` route.
     #[must_use]
     pub fn with_flushing_service(mut self, flushing_service: Arc<FlushingService>) -> Self {
         self.flushing_service = Some(flushing_service);
@@ -310,7 +310,7 @@ impl TraceAgent {
             .merge(info_router);
 
         // POST /flush is only registered when a FlushingService has been
-        // attached via TraceAgent::with_flushing_service (test-mode only).
+        // attached via TraceAgent::with_flushing_service.
         if let Some(flushing_service) = &self.flushing_service {
             let flush_router = Router::new()
                 .route(FLUSH_ENDPOINT_PATH, post(Self::flush))
