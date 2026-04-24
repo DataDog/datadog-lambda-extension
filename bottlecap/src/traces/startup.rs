@@ -18,25 +18,27 @@ use crate::traces::{
     proxy_flusher::Flusher as ProxyFlusher,
     span_dedup_service,
     stats_aggregator::StatsAggregator,
-    stats_concentrator_service, stats_flusher, stats_processor, trace_agent,
+    stats_concentrator_service::{self, StatsConcentratorHandle},
+    stats_flusher, stats_processor, trace_agent,
     trace_aggregator::SendDataBuilderInfo,
     trace_aggregator_service::{self, AggregatorHandle as TraceAggregatorHandle},
     trace_flusher, trace_processor,
 };
 
-/// Return tuple common to [`build_trace_agent`] and [`start_trace_agent`].
-/// Kept as a `type` alias to avoid re-declaring the same eight-tuple in two
-/// places.
-pub type TraceAgentPipeline = (
-    Sender<SendDataBuilderInfo>,
-    Arc<trace_flusher::TraceFlusher>,
-    Arc<trace_processor::ServerlessTraceProcessor>,
-    Arc<stats_flusher::StatsFlusher>,
-    Arc<ProxyFlusher>,
-    CancellationToken,
-    stats_concentrator_service::StatsConcentratorHandle,
-    TraceAggregatorHandle,
-);
+/// Handles produced by [`build_trace_agent`] / [`start_trace_agent`]. Holds
+/// the trace-channel sender, the per-domain flushers, the shutdown token, and
+/// the aggregator/concentrator handles the caller needs to drive flushes and
+/// shut the pipeline down.
+pub struct TraceAgentPipeline {
+    pub trace_tx: Sender<SendDataBuilderInfo>,
+    pub trace_flusher: Arc<trace_flusher::TraceFlusher>,
+    pub trace_processor: Arc<trace_processor::ServerlessTraceProcessor>,
+    pub stats_flusher: Arc<stats_flusher::StatsFlusher>,
+    pub proxy_flusher: Arc<ProxyFlusher>,
+    pub shutdown_token: CancellationToken,
+    pub stats_concentrator: StatsConcentratorHandle,
+    pub trace_aggregator_handle: TraceAggregatorHandle,
+}
 
 /// Builds the full trace-processing pipeline (trace + stats + proxy
 /// aggregators, services, flushers) and the [`trace_agent::TraceAgent`] that
@@ -138,19 +140,16 @@ pub fn build_trace_agent(
         stats_concentrator_handle.clone(),
         span_dedup_handle,
     );
-    let trace_agent_channel = trace_agent.get_sender_copy();
-    let shutdown_token = trace_agent.shutdown_token();
-
-    let pipeline = (
-        trace_agent_channel,
+    let pipeline = TraceAgentPipeline {
+        trace_tx: trace_agent.get_sender_copy(),
         trace_flusher,
         trace_processor,
         stats_flusher,
         proxy_flusher,
-        shutdown_token,
-        stats_concentrator_handle,
+        shutdown_token: trace_agent.shutdown_token(),
+        stats_concentrator: stats_concentrator_handle,
         trace_aggregator_handle,
-    );
+    };
 
     (trace_agent, pipeline)
 }
