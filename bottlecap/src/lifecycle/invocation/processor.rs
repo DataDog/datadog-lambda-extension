@@ -615,7 +615,6 @@ impl Processor {
             );
         }
 
-        // todo(duncanista): Add missing metric tags for ASM
         // Add dynamic and trigger tags
         context
             .invocation_span
@@ -624,6 +623,19 @@ impl Processor {
 
         if let Some(trigger_tags) = self.inferrer.get_trigger_tags() {
             context.invocation_span.meta.extend(trigger_tags);
+        }
+
+        // Ensure _dd.appsec.enabled is present on the invocation span when AAP is enabled.
+        // complete_inferred_spans (called below) propagates this metric from the invocation
+        // span to the inferred trigger span. AppSec's process_span will set it again from the
+        // security context when it runs, but this baseline guarantees the tag is always present
+        // even when the context cannot be found at flush time.
+        if self.config.serverless_appsec_enabled {
+            context
+                .invocation_span
+                .metrics
+                .entry("_dd.appsec.enabled".to_string())
+                .or_insert(1.0);
         }
 
         self.inferrer
