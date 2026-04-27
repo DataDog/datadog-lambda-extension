@@ -49,6 +49,7 @@ fi
 
 echo "Triggered downstream pipeline: ${PIPELINE_URL} (ID: ${PIPELINE_ID})"
 
+set +e
 while true; do
     STATUS=$(curl --silent \
         --header "PRIVATE-TOKEN: ${GITLAB_TOKEN}" \
