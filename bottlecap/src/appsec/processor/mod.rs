@@ -821,4 +821,41 @@ mod tests {
             result
         );
     }
+
+    #[test]
+    fn service_entry_span_mut_skips_placeholder_lambda_span() {
+        let mut trace = vec![
+            Span {
+                name: "aws.lambda".into(),
+                resource: crate::traces::INVOCATION_SPAN_RESOURCE.into(),
+                span_id: 1,
+                ..Default::default()
+            },
+            Span {
+                name: "aws.lambda".into(),
+                resource: "real.lambda.invocation".into(),
+                span_id: 2,
+                ..Default::default()
+            },
+        ];
+
+        let selected = Processor::service_entry_span_mut(&mut trace)
+            .expect("expected non-placeholder aws.lambda span");
+
+        assert_eq!(selected.name, "aws.lambda");
+        assert_ne!(selected.resource, crate::traces::INVOCATION_SPAN_RESOURCE);
+        assert_eq!(selected.span_id, 2);
+    }
+
+    #[test]
+    fn service_entry_span_mut_returns_none_for_only_placeholder() {
+        let mut trace = vec![Span {
+            name: "aws.lambda".into(),
+            resource: crate::traces::INVOCATION_SPAN_RESOURCE.into(),
+            span_id: 1,
+            ..Default::default()
+        }];
+
+        assert!(Processor::service_entry_span_mut(&mut trace).is_none());
+    }
 }
