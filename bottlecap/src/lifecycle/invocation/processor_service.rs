@@ -149,6 +149,10 @@ impl InvocationProcessorHandle {
     ///
     /// Compiled only under unit tests and when the `test-mode` feature is
     /// enabled, so this constructor does not exist in production builds.
+    ///
+    /// Must be called from within an active Tokio runtime: the constructor
+    /// uses `tokio::spawn` to start the draining task, which panics if no
+    /// runtime is registered for the current thread.
     #[cfg(any(test, feature = "test-mode"))]
     #[must_use]
     pub fn noop() -> Self {
