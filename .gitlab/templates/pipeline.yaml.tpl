@@ -231,7 +231,7 @@ publish layer [self-monitoring] ({{ $flavor.name }}):
 {{ end }}  # end flavors
 
 {{ range $f := (ds "flavors").flavors }}
-{{ if $f.needs_layer_publish }}
+{{ if and $f.needs_layer_publish (eq $f.arch "arm64") }}
 {{- $dotenvE2E := printf "%s_sandbox_e2e.env" $f.suffix }}
 {{ with $environment := (ds "environments").environments.sandbox }}
 
