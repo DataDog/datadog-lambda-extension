@@ -146,6 +146,10 @@ impl InvocationProcessorHandle {
     /// fire-and-forget arm would silently drop its sender, causing the
     /// caller to receive `ProcessorError::ChannelReceive` instead of the
     /// intended default.
+    ///
+    /// Compiled only under unit tests and when the `test-mode` feature is
+    /// enabled, so this constructor does not exist in production builds.
+    #[cfg(any(test, feature = "test-mode"))]
     #[must_use]
     pub fn noop() -> Self {
         let (sender, mut receiver) = mpsc::channel::<ProcessorCommand>(1000);
