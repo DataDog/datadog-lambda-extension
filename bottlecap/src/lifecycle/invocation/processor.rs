@@ -615,7 +615,6 @@ impl Processor {
             );
         }
 
-        // todo(duncanista): Add missing metric tags for ASM
         // Add dynamic and trigger tags
         context
             .invocation_span
@@ -624,6 +623,19 @@ impl Processor {
 
         if let Some(trigger_tags) = self.inferrer.get_trigger_tags() {
             context.invocation_span.meta.extend(trigger_tags);
+        }
+
+        // Ensure _dd.appsec.enabled is present on the invocation span when AAP is enabled.
+        // complete_inferred_spans (called below) propagates this metric from the invocation
+        // span to the inferred trigger span. AppSec's process_span will set it again from the
+        // security context when it runs, but this baseline guarantees the tag is always present
+        // even when the context cannot be found at flush time.
+        if self.config.serverless_appsec_enabled {
+            context
+                .invocation_span
+                .metrics
+                .entry("_dd.appsec.enabled".to_string())
+                .or_insert(1.0);
         }
 
         self.inferrer
@@ -2332,6 +2344,105 @@ mod tests {
         assert!(
             ctx_to_send.is_empty(),
             "no contexts should be ready to send yet"
+        );
+    }
+
+    fn setup_appsec() -> Processor {
+        let aws_config = Arc::new(AwsConfig {
+            region: "us-east-1".into(),
+            aws_lwa_proxy_lambda_runtime_api: Some("***".into()),
+            function_name: "test-function".into(),
+            sandbox_init_time: Instant::now(),
+            runtime_api: "***".into(),
+            exec_wrapper: None,
+            initialization_type: "on-demand".into(),
+        });
+        let config = Arc::new(config::Config {
+            service: Some("test-service".to_string()),
+            serverless_appsec_enabled: true,
+            ..config::Config::default()
+        });
+        let tags_provider = Arc::new(provider::Provider::new(
+            Arc::clone(&config),
+            LAMBDA_RUNTIME_SLUG.to_string(),
+            &HashMap::from([("function_arn".to_string(), "test-arn".to_string())]),
+        ));
+        let (service, handle) =
+            dogstatsd::aggregator::AggregatorService::new(dogstatsd::metric::EMPTY_TAGS, 1024)
+                .expect("failed to create aggregator service");
+        tokio::spawn(service.run());
+        let propagator = Arc::new(DatadogCompositePropagator::new(Arc::clone(&config)));
+        let (durable_context_tx, _) = tokio::sync::mpsc::channel(1);
+        Processor::new(
+            tags_provider,
+            config,
+            aws_config,
+            handle,
+            propagator,
+            durable_context_tx,
+        )
+    }
+
+    #[tokio::test]
+    async fn enrich_ctx_sets_appsec_enabled_when_aap_enabled() {
+        let mut p = setup_appsec();
+        let request_id = String::from("req-appsec");
+        p.on_invoke_event(request_id.clone());
+        p.on_platform_start(request_id.clone(), chrono::Utc::now());
+
+        let ctx = p
+            .enrich_ctx_at_platform_done(&request_id, Status::Success)
+            .expect("context must be present");
+
+        assert_eq!(
+            ctx.invocation_span.metrics.get("_dd.appsec.enabled"),
+            Some(&1.0),
+            "_dd.appsec.enabled must be 1.0 when AAP is enabled"
+        );
+    }
+
+    #[tokio::test]
+    async fn enrich_ctx_does_not_set_appsec_enabled_when_aap_disabled() {
+        let mut p = setup();
+        let request_id = String::from("req-no-appsec");
+        p.on_invoke_event(request_id.clone());
+        p.on_platform_start(request_id.clone(), chrono::Utc::now());
+
+        let ctx = p
+            .enrich_ctx_at_platform_done(&request_id, Status::Success)
+            .expect("context must be present");
+
+        assert!(
+            !ctx.invocation_span
+                .metrics
+                .contains_key("_dd.appsec.enabled"),
+            "_dd.appsec.enabled must not be set when AAP is disabled"
+        );
+    }
+
+    #[tokio::test]
+    async fn enrich_ctx_does_not_override_existing_appsec_enabled() {
+        let mut p = setup_appsec();
+        let request_id = String::from("req-appsec-preset");
+        p.on_invoke_event(request_id.clone());
+        p.on_platform_start(request_id.clone(), chrono::Utc::now());
+
+        // Pre-set a different value to verify or_insert does not overwrite it.
+        p.context_buffer
+            .get_mut(&request_id)
+            .expect("context must exist")
+            .invocation_span
+            .metrics
+            .insert("_dd.appsec.enabled".to_string(), 0.0);
+
+        let ctx = p
+            .enrich_ctx_at_platform_done(&request_id, Status::Success)
+            .expect("context must be present");
+
+        assert_eq!(
+            ctx.invocation_span.metrics.get("_dd.appsec.enabled"),
+            Some(&0.0),
+            "pre-existing _dd.appsec.enabled value must not be overwritten"
         );
     }
 }
