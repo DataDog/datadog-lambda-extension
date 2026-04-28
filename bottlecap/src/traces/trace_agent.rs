@@ -111,10 +111,16 @@ pub struct ProxyState {
 /// deterministic drain endpoint) without adding a dedicated field per
 /// route to [`TraceAgent`].
 ///
-/// Returning `Err` aborts agent startup: the error propagates through
-/// [`TraceAgent::start`]. Implementors that carry state must call
-/// `.with_state(...)` on their sub-router before merging, because
-/// `Router::merge` requires both routers to share the same state type.
+/// Returning `Err` propagates out of [`TraceAgent::start`], aborting the
+/// HTTP listener task. Note that the production convenience entry point
+/// [`crate::startup::start_trace_agent`] spawns `start` and only logs its
+/// error; the surrounding pipeline does not observe the failure. Callers
+/// that need to react to startup errors must use
+/// [`crate::startup::build_trace_agent`] and spawn the agent themselves.
+///
+/// Implementors that carry state must call `.with_state(...)` on their
+/// sub-router before merging, because `Router::merge` requires both
+/// routers to share the same state type.
 pub trait RouterExtension: Send + Sync {
     fn extend(&self, router: Router) -> Result<Router, Box<dyn std::error::Error>>;
 }
@@ -842,6 +848,16 @@ mod tests {
         }
     }
 
+    /// Test extension that always fails, used to assert that `make_router`
+    /// surfaces extension errors instead of swallowing them.
+    struct FailingExtension;
+
+    impl RouterExtension for FailingExtension {
+        fn extend(&self, _router: Router) -> Result<Router, Box<dyn std::error::Error>> {
+            Err("extension failed during make_router".into())
+        }
+    }
+
     fn build_test_agent() -> TraceAgent {
         let config = Arc::new(config::Config::default());
         let (concentrator_svc, concentrator) = StatsConcentratorService::new(Arc::clone(&config));
@@ -900,6 +916,22 @@ mod tests {
 
         assert_eq!(response.status(), StatusCode::NO_CONTENT);
         assert_eq!(hits.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn make_router_propagates_extension_error() {
+        let agent = build_test_agent().with_router_extension(Arc::new(FailingExtension));
+        let (stats_tx, _stats_rx) = mpsc::channel::<pb::ClientStatsPayload>(1);
+
+        let err = agent
+            .make_router(stats_tx)
+            .expect_err("make_router should surface extension error");
+
+        assert!(
+            err.to_string()
+                .contains("extension failed during make_router"),
+            "unexpected error: {err}"
+        );
     }
 
     #[tokio::test]
