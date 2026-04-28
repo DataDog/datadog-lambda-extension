@@ -154,15 +154,14 @@ impl Processor {
     /// Placeholder spans (resource == `INVOCATION_SPAN_RESOURCE`) emitted by
     /// Go and Java tracers are excluded: they are always dropped by the chunk
     /// processor before reaching the backend, so tagging them would waste the
-    /// AppSec context and trigger a premature context deletion that would leave
+    /// `AppSec` context and trigger a premature context deletion that would leave
     /// the real, extension-built `aws.lambda` span untagged.
     ///
     /// # Returns
     /// The span on which security information will be attached.
     pub fn service_entry_span_mut(trace: &mut [Span]) -> Option<&mut Span> {
         trace.iter_mut().find(|span| {
-            span.name == "aws.lambda"
-                && span.resource != crate::traces::INVOCATION_SPAN_RESOURCE
+            span.name == "aws.lambda" && span.resource != crate::traces::INVOCATION_SPAN_RESOURCE
         })
     }
 

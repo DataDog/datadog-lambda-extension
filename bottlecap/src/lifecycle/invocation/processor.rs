@@ -2371,7 +2371,14 @@ mod tests {
         tokio::spawn(service.run());
         let propagator = Arc::new(DatadogCompositePropagator::new(Arc::clone(&config)));
         let (durable_context_tx, _) = tokio::sync::mpsc::channel(1);
-        Processor::new(tags_provider, config, aws_config, handle, propagator, durable_context_tx)
+        Processor::new(
+            tags_provider,
+            config,
+            aws_config,
+            handle,
+            propagator,
+            durable_context_tx,
+        )
     }
 
     #[tokio::test]
@@ -2404,7 +2411,9 @@ mod tests {
             .expect("context must be present");
 
         assert!(
-            ctx.invocation_span.metrics.get("_dd.appsec.enabled").is_none(),
+            !ctx.invocation_span
+                .metrics
+                .contains_key("_dd.appsec.enabled"),
             "_dd.appsec.enabled must not be set when AAP is disabled"
         );
     }
