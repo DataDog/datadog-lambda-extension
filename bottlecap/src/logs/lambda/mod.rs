@@ -9,6 +9,7 @@ pub struct DurableContextUpdate {
     pub execution_id: String,
     pub execution_name: String,
     pub first_invocation: Option<bool>,
+    pub execution_status: Option<String>,
 }
 
 /// Durable execution context stored per `request_id` in `LambdaProcessor::durable_context_map`.
@@ -17,6 +18,7 @@ pub struct DurableExecutionContext {
     pub execution_id: String,
     pub execution_name: String,
     pub first_invocation: Option<bool>,
+    pub execution_status: Option<String>,
 }
 
 ///
@@ -66,6 +68,11 @@ pub struct Lambda {
         skip_serializing_if = "Option::is_none"
     )]
     pub first_invocation: Option<bool>,
+    #[serde(
+        rename = "durable_function.execution_status",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub durable_execution_status: Option<String>,
 }
 
 impl Message {
