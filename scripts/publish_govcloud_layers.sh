@@ -9,7 +9,7 @@
 # Download button on the `layer bundle` job. This will be a zip file containing
 # all of the required layers. Run this script as follows:
 #
-# ENVIRONMENT=[us1-staging-fed or us1-fed] [PIPELINE_LAYER_SUFFIX=optional-layer-suffix] [REGIONS=us-gov-west-1] ./scripts/publish_govcloud_layers.sh <layer-bundle.zip>
+# ENVIRONMENT=[us1-staging-fed or us1-fed or fed-us2] [PIPELINE_LAYER_SUFFIX=optional-layer-suffix] [REGIONS=us-gov-west-1] ./scripts/publish_govcloud_layers.sh <layer-bundle.zip>
 #
 # protip: you can drag the zip file from finder into your terminal to insert
 # its path.
@@ -57,8 +57,24 @@ elif [ $ENVIRONMENT = "us1-fed" ]; then
         exit 1
     fi
 
+elif [ "$ENVIRONMENT" = "fed-us2" ]; then
+    AWS_VAULT_ROLE=sso-govcloud-fed-us2-lambda-layer-operator
+
+    export ADD_LAYER_VERSION_PERMISSIONS=1
+    export AUTOMATICALLY_BUMP_VERSION=0
+
+    if [[ -z "$VERSION" ]]; then
+        printf "[ERROR]: VERSION not specified\n"
+        exit 1
+    fi
+
+    if [[ ! "$PACKAGE_NAME" =~ ^datadog_extension-signed-bundle-[0-9]+$ ]]; then
+        echo "[ERROR]: Unexpected package name: $PACKAGE_NAME"
+        exit 1
+    fi
+
 else
-    printf "[ERROR]: ENVIRONMENT not supported, must be us1-staging-fed or us1-fed.\n"
+    printf "[ERROR]: ENVIRONMENT not supported, must be us1-staging-fed, us1-fed, or fed-us2.\n"
     exit 1
 fi
 

@@ -294,7 +294,6 @@ mod tests {
     use std::collections::HashMap;
     use std::fs::File;
     use std::io::Write;
-    use std::path::Path;
 
     #[test]
     fn test_new_from_config() {
@@ -368,8 +367,8 @@ mod tests {
 
     #[test]
     fn test_resolve_runtime() {
-        let proc_id_folder = Path::new("/tmp/test-bottlecap/proc_root/123");
-        fs::create_dir_all(proc_id_folder).unwrap();
+        let proc_id_folder = std::env::temp_dir().join("test-bottlecap/proc_root/123");
+        fs::create_dir_all(&proc_id_folder).unwrap();
         let path = proc_id_folder.join("environ");
         let content = "\0NAME =\"AmazonLinux\"\0V=\"2\0AWS_EXECUTION_ENV=\"AWS_Lambda_java123\"\0somethingelse=\"abd\0\"";
 
@@ -378,32 +377,33 @@ mod tests {
 
         let runtime =
             resolve_runtime_from_proc(proc_id_folder.parent().unwrap().to_str().unwrap(), "");
-        fs::remove_file(path).unwrap();
+        fs::remove_file(&path).unwrap();
+        fs::remove_dir_all(std::env::temp_dir().join("test-bottlecap")).unwrap();
         assert_eq!(runtime, "java123");
     }
 
     #[test]
     fn test_resolve_provided_al2() {
-        let path = "/tmp/test-os-release1";
+        let path = std::env::temp_dir().join("test-os-release1");
         let content = "NAME =\"Amazon Linux\"\nVERSION=\"2\nPRETTY_NAME=\"Amazon Linux 2\"";
-        let mut file = File::create(path).unwrap();
+        let mut file = File::create(&path).unwrap();
         file.write_all(content.as_bytes()).unwrap();
 
-        let runtime = resolve_runtime_from_proc("", path);
-        fs::remove_file(path).unwrap();
+        let runtime = resolve_runtime_from_proc("", &path.to_string_lossy());
+        fs::remove_file(&path).unwrap();
         assert_eq!(runtime, "provided.al2");
     }
 
     #[test]
     fn test_resolve_provided_al2023() {
-        let path = "/tmp/test-os-release2";
+        let path = std::env::temp_dir().join("test-os-release2");
         let content =
             "NAME=\"Amazon Linux\"\nVERSION=\"2\nPRETTY_NAME=\"Amazon Linux 2023.4.20240429\"";
-        let mut file = File::create(path).unwrap();
+        let mut file = File::create(&path).unwrap();
         file.write_all(content.as_bytes()).unwrap();
 
-        let runtime = resolve_runtime_from_proc("", path);
-        fs::remove_file(path).unwrap();
+        let runtime = resolve_runtime_from_proc("", &path.to_string_lossy());
+        fs::remove_file(&path).unwrap();
         assert_eq!(runtime, "provided.al2023");
     }
 
