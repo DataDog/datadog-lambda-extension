@@ -28,6 +28,7 @@ fi
 
 echo "Triggering DataDog/serverless-e2e-tests pipeline (ref: ${E2E_REF})..."
 echo "  EXTENSION_LAYER_ARN=${EXTENSION_LAYER_ARN}"
+echo "  ARCHITECTURE=${ARCHITECTURE:-}"
 
 TRIGGER_RESPONSE=$(curl --silent --request POST \
     --header "PRIVATE-TOKEN: ${GITLAB_TOKEN}" \
@@ -35,7 +36,8 @@ TRIGGER_RESPONSE=$(curl --silent --request POST \
     --data "$(jq -n \
         --arg ref "$E2E_REF" \
         --arg arn "$EXTENSION_LAYER_ARN" \
-        '{ref: $ref, variables: [{key: "EXTENSION_VERSION", value: $arn}]}')" \
+        --arg arch "${ARCHITECTURE:-}" \
+        '{ref: $ref, variables: [{key: "EXTENSION_VERSION", value: $arn}, {key: "ARCHITECTURE", value: $arch}]}')" \
     "${CI_API_V4_URL}/projects/${E2E_PROJECT_ENCODED}/pipeline")
 
 PIPELINE_ID=$(echo "$TRIGGER_RESPONSE" | jq -r '.id // empty')
