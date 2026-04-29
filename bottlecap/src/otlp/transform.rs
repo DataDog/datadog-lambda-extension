@@ -264,8 +264,13 @@ fn get_otel_operation_name_v2(otel_span: &OtelSpan, lib: &OtelInstrumentationSco
     let is_client = otel_span.kind() == SpanKind::Client;
     let is_server = otel_span.kind() == SpanKind::Server;
 
-    // AWS Lambda: Check if this is the root Lambda invocation span
-    // Only applies to Server spans from the AWS Lambda OTEL instrumentation
+    // AWS Lambda: rename the OTEL aws-lambda instrumentation's invocation span (always
+    // emitted with SpanKind::Server) to "aws.lambda" so it matches the Datadog Serverless
+    // page's LAMBDA_INVOCATION_SPAN_FILTER. The span may have a remote parent when the
+    // caller propagates trace context (e.g. API Gateway → Lambda) — that is still the
+    // Lambda invocation span we want to rename. Other spans the same instrumentation
+    // emits (e.g. SDK client spans inside the handler) are not Server kind and pass
+    // through to the existing fallback chain unchanged.
     if is_server && lib.name == AWS_LAMBDA_INSTRUMENTATION_SCOPE {
         return "aws.lambda".to_string();
     }
