@@ -12,12 +12,23 @@ BTI_RESPONSE=$(curl --silent --request GET \
 
 GITLAB_TOKEN=$(echo "$BTI_RESPONSE" | jq -r '.token // empty')
 
+if [ -z "$GITLAB_TOKEN" ]; then
+    echo "ERROR: Failed to obtain GitLab token. BTI HTTP status: $(echo "$BTI_RESPONSE" | jq -r '.status // "unknown"')"
+    exit 1
+fi
+
 URL="${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/pipelines/${CI_PIPELINE_ID}/bridges"
 
 echo "Fetching E2E job status from: $URL"
 
 while true; do
-    RESPONSE=$(curl -s --header "PRIVATE-TOKEN: ${GITLAB_TOKEN}" "$URL")
+    HTTP_STATUS=$(curl -s -o /tmp/e2e_response.json -w "%{http_code}" --header "PRIVATE-TOKEN: ${GITLAB_TOKEN}" "$URL")
+    if [ "$HTTP_STATUS" != "200" ]; then
+        echo "WARNING: GitLab API returned HTTP $HTTP_STATUS, retrying in 2 minutes..."
+        sleep 120
+        continue
+    fi
+    RESPONSE=$(cat /tmp/e2e_response.json)
     E2E_JOB_STATUS=$(echo "$RESPONSE" | jq -r '.[] | select(.name=="e2e-test (arm64)") | .downstream_pipeline.status')
     echo -n "E2E job status: $E2E_JOB_STATUS, "
     if [ "$E2E_JOB_STATUS" == "success" ]; then

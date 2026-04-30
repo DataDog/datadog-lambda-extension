@@ -290,7 +290,7 @@ e2e-test ({{ $f.name }}):
 e2e-test-status:
   stage: e2e
   image: registry.ddbuild.io/images/docker:20.10-py3
-  tags: ["arch:arm64"]
+  tags: ["arch:amd64"]
   timeout: 3h
   script:
     - .gitlab/scripts/poll_e2e.sh
