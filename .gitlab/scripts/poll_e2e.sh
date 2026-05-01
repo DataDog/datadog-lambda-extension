@@ -13,7 +13,7 @@ BTI_RESPONSE=$(curl --silent --request GET \
 GITLAB_TOKEN=$(echo "$BTI_RESPONSE" | jq -r '.token // empty')
 
 if [ -z "$GITLAB_TOKEN" ]; then
-    echo "ERROR: Failed to obtain GitLab token. BTI HTTP status: $(echo "$BTI_RESPONSE" | jq -r '.status // "unknown"')"
+    echo "ERROR: could not obtain GitLab token from BTI"
     exit 1
 fi
 
