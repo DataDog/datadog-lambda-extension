@@ -29,7 +29,7 @@ while true; do
         continue
     fi
     RESPONSE=$(cat /tmp/e2e_response.json)
-    E2E_JOB_STATUS=$(echo "$RESPONSE" | jq -r '.[] | select(.name=="e2e-test (arm64)") | .downstream_pipeline.status')
+    E2E_JOB_STATUS=$(echo "$RESPONSE" | jq -r --arg name "$E2E_JOB_NAME" '.[] | select(.name==$name) | .downstream_pipeline.status')
     echo -n "E2E job status: $E2E_JOB_STATUS, "
     if [ "$E2E_JOB_STATUS" == "success" ]; then
         echo "E2E tests completed successfully"

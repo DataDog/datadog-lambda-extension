@@ -231,7 +231,7 @@ publish layer [self-monitoring] ({{ $flavor.name }}):
 {{ end }}  # end flavors
 
 {{ range $f := (ds "flavors").flavors }}
-{{ if and $f.needs_layer_publish (eq $f.arch "arm64") (not $f.fips) }}
+{{ if and $f.needs_layer_publish (eq $f.arch "arm64") }}
 {{- $dotenvE2E := printf "%s_sandbox_e2e.env" $f.suffix }}
 {{ with $environment := (ds "environments").environments.sandbox }}
 
@@ -287,11 +287,13 @@ e2e-test ({{ $f.name }}):
     EXTENSION_VERSION: $EXTENSION_LAYER_ARN
     ARCHITECTURE: {{ $f.arch }}
 
-e2e-test-status:
+e2e-test-status ({{ $f.name }}):
   stage: e2e
   image: registry.ddbuild.io/images/docker:20.10-py3
   tags: ["arch:amd64"]
   timeout: 3h
+  variables:
+    E2E_JOB_NAME: "e2e-test ({{ $f.name }})"
   script:
     - .gitlab/scripts/poll_e2e.sh
 
