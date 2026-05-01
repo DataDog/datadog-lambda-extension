@@ -231,7 +231,7 @@ publish layer [self-monitoring] ({{ $flavor.name }}):
 {{ end }}  # end flavors
 
 {{ range $f := (ds "flavors").flavors }}
-{{ if $f.needs_layer_publish }}
+{{ if and $f.needs_layer_publish (eq $f.arch "arm64") }}
 {{- $dotenvE2E := printf "%s_sandbox_e2e.env" $f.suffix }}
 {{ with $environment := (ds "environments").environments.sandbox }}
 
@@ -270,13 +270,12 @@ publish layer e2e sandbox ({{ $f.name }}):
   script:
     - .gitlab/scripts/publish_layers.sh
 
-e2e-suite ({{ $f.name }}):
+e2e-test ({{ $f.name }}):
   stage: e2e
-  image: registry.ddbuild.io/images/docker:20.10-py3
-  tags: ["arch:amd64"]
-  timeout: 3h
+  trigger:
+    project: DataDog/serverless-e2e-tests
+    strategy: depend
   rules:
-    # Do not block on release, in case E2E is flaky
     - if: '$CI_COMMIT_TAG =~ /^v.*/'
       when: on_success
       allow_failure: true
@@ -284,6 +283,17 @@ e2e-suite ({{ $f.name }}):
   needs:
     - job: "publish layer e2e sandbox ({{ $f.name }})"
       artifacts: true
+  variables:
+    EXTENSION_VERSION: $EXTENSION_LAYER_ARN
+    ARCHITECTURE: {{ $f.arch }}
+
+e2e-test-status ({{ $f.name }}):
+  stage: e2e
+  image: registry.ddbuild.io/images/docker:20.10-py3
+  tags: ["arch:amd64"]
+  timeout: 3h
+  variables:
+    E2E_JOB_NAME: "e2e-test ({{ $f.name }})"
   script:
     - .gitlab/scripts/poll_e2e.sh
 
