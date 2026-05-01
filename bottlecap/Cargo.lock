@@ -781,8 +781,8 @@ dependencies = [
 
 [[package]]
 name = "datadog-opentelemetry"
-version = "0.3.0"
-source = "git+https://github.com/DataDog/dd-trace-rs?rev=f51cefc4ad24bec81b38fb2f36b1ed93f21ae913#f51cefc4ad24bec81b38fb2f36b1ed93f21ae913"
+version = "0.3.2"
+source = "git+https://github.com/DataDog/dd-trace-rs?rev=cf0b3b52cb1f2d1d99099759a6051ce5648796ce#cf0b3b52cb1f2d1d99099759a6051ce5648796ce"
 dependencies = [
  "anyhow",
  "arc-swap",
@@ -792,11 +792,13 @@ dependencies = [
  "http-body-util",
  "hyper 1.8.1",
  "hyper-util",
- "libdd-common 2.0.1",
+ "libc",
+ "libdd-common 3.0.2",
  "libdd-data-pipeline",
+ "libdd-library-config",
  "libdd-telemetry",
  "libdd-tinybytes 1.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "libdd-trace-utils 2.0.2",
+ "libdd-trace-utils 3.0.1",
  "lru",
  "opentelemetry",
  "opentelemetry-semantic-conventions 0.31.0",
@@ -1881,9 +1883,9 @@ dependencies = [
 
 [[package]]
 name = "libdd-common"
-version = "2.0.1"
+version = "3.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1e5593b91f61eee38cddc9fdcbc99c9fad697b5d925e226bd500d86b4295380b"
+checksum = "c779949577250487179d904508f18750070e9a01eb58dce378409ec5fa066f3b"
 dependencies = [
  "anyhow",
  "bytes",
@@ -1912,9 +1914,9 @@ dependencies = [
 
 [[package]]
 name = "libdd-data-pipeline"
-version = "2.0.1"
+version = "3.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fe2704d0fcc9281cc844a63d15188aecc84d45725b77e489cc04ad30959b2000"
+checksum = "358411451d99011f13c7628acee25dc144f2bbeade87acf10fa7d5ffce1053dc"
 dependencies = [
  "anyhow",
  "arc-swap",
@@ -1922,14 +1924,14 @@ dependencies = [
  "either",
  "http 1.4.0",
  "http-body-util",
- "libdd-common 2.0.1",
+ "libdd-common 3.0.2",
  "libdd-ddsketch 1.0.1",
  "libdd-dogstatsd-client",
  "libdd-telemetry",
  "libdd-tinybytes 1.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "libdd-trace-protobuf 2.0.0",
- "libdd-trace-stats 1.0.3",
- "libdd-trace-utils 2.0.2",
+ "libdd-trace-protobuf 3.0.1",
+ "libdd-trace-stats 2.0.0",
+ "libdd-trace-utils 3.0.1",
  "rmp-serde",
  "serde",
  "serde_json",
@@ -1959,23 +1961,41 @@ dependencies = [
 
 [[package]]
 name = "libdd-dogstatsd-client"
-version = "1.0.1"
+version = "2.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a457381568835e7c3646f3f2d44ff4f3ebcda44d87332e2fdaeb20e6a8365dcd"
+checksum = "e6f8eca39d1e2ef6267cf77fc51eb7ebc7d4f44827e150b4d317c29d8c33bf87"
 dependencies = [
  "anyhow",
  "cadence",
  "http 1.4.0",
- "libdd-common 2.0.1",
+ "libdd-common 3.0.2",
  "serde",
  "tracing",
 ]
 
 [[package]]
-name = "libdd-telemetry"
-version = "3.0.0"
+name = "libdd-library-config"
+version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3e7bb67a865fe7e8a16aacc7bc43a805fb3b907c713e0b212e7a7abe6e0735cb"
+checksum = "d33082726b20ce7cf364032f3f600f3c24db25928dcde5368f8e25e194c2bf47"
+dependencies = [
+ "anyhow",
+ "libdd-trace-protobuf 2.0.0",
+ "memfd",
+ "prost 0.14.3",
+ "rand 0.8.5",
+ "rmp",
+ "rmp-serde",
+ "rustix 1.1.4",
+ "serde",
+ "serde_yaml",
+]
+
+[[package]]
+name = "libdd-telemetry"
+version = "4.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "78774ffce79da677602829d7fe27468283e5349010e974257233edf4cd12b783"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -1984,7 +2004,7 @@ dependencies = [
  "http 1.4.0",
  "http-body-util",
  "libc",
- "libdd-common 2.0.1",
+ "libdd-common 3.0.2",
  "libdd-ddsketch 1.0.1",
  "serde",
  "serde_json",
@@ -2024,12 +2044,12 @@ dependencies = [
 
 [[package]]
 name = "libdd-trace-normalization"
-version = "1.0.2"
+version = "2.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a737b43f01d6a0cbd1399c5b89863a5d2663fe7b19bf1d3ea28048abab396353"
+checksum = "ab12e095f3589d02ceed76556e7aa8a1b5bc928a900e143b624e2331294e54b5"
 dependencies = [
  "anyhow",
- "libdd-trace-protobuf 2.0.0",
+ "libdd-trace-protobuf 3.0.1",
 ]
 
 [[package]]
@@ -2071,6 +2091,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "libdd-trace-protobuf"
+version = "3.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1809242895edc53ac51a21287829f42474e749dbc222ea7f414cb3f0d1f91d4e"
+dependencies = [
+ "prost 0.14.3",
+ "serde",
+ "serde_bytes",
+]
+
+[[package]]
 name = "libdd-trace-stats"
 version = "1.0.0"
 source = "git+https://github.com/DataDog/libdatadog?rev=c8121f422d2c8d219f8d421ff3cdb1fcbe9e8b09#c8121f422d2c8d219f8d421ff3cdb1fcbe9e8b09"
@@ -2083,14 +2114,14 @@ dependencies = [
 
 [[package]]
 name = "libdd-trace-stats"
-version = "1.0.3"
+version = "2.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ea447dc8a5d84c6b5eb6ea877c4fea4149fd29f6b45fcfc5cfd7edf82a18e056"
+checksum = "d92b882863f7c531d51e73f7bc5930c705e47829332128d9bdcad0fea3b2b942"
 dependencies = [
  "hashbrown 0.15.5",
  "libdd-ddsketch 1.0.1",
- "libdd-trace-protobuf 2.0.0",
- "libdd-trace-utils 2.0.2",
+ "libdd-trace-protobuf 3.0.1",
+ "libdd-trace-utils 3.0.1",
 ]
 
 [[package]]
@@ -2124,9 +2155,9 @@ dependencies = [
 
 [[package]]
 name = "libdd-trace-utils"
-version = "2.0.2"
+version = "3.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8a59e9a0a41bb17d06fb85a70db3be04e53ddfb8f61a593939bb9677729214db"
+checksum = "870506e9bb79c93ce5bbfe9d715c53c7ea393a177c7299f0bf43745c0adea0c7"
 dependencies = [
  "anyhow",
  "bytes",
@@ -2135,10 +2166,10 @@ dependencies = [
  "http-body 1.0.1",
  "http-body-util",
  "indexmap",
- "libdd-common 2.0.1",
+ "libdd-common 3.0.2",
  "libdd-tinybytes 1.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "libdd-trace-normalization 1.0.2",
- "libdd-trace-protobuf 2.0.0",
+ "libdd-trace-normalization 2.0.0",
+ "libdd-trace-protobuf 3.0.1",
  "prost 0.14.3",
  "rand 0.8.6",
  "rmp",
@@ -2267,6 +2298,15 @@ name = "memchr"
 version = "2.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f8ca58f447f06ed17d5fc4043ce1b10dd205e060fb3ce5b979b8ed8e59ff3f79"
+
+[[package]]
+name = "memfd"
+version = "0.6.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ad38eb12aea514a0466ea40a80fd8cc83637065948eb4a426e4aa46261175227"
+dependencies = [
+ "rustix 1.1.4",
+]
 
 [[package]]
 name = "mime"
