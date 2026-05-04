@@ -170,10 +170,15 @@ impl StatsFlusher {
     }
 }
 
+/// Maximum number of body bytes to surface in error messages.
+const ERROR_BODY_PREVIEW_BYTES: usize = 512;
+
 /// Posts a serialized stats payload using the supplied client.
 ///
 /// Equivalent to libdatadog's `stats_utils::send_stats_payload`, but uses the
-/// caller-provided client so bottlecap's proxy/TLS configuration is preserved.
+/// caller-provided client so bottlecap's proxy/TLS configuration is preserved,
+/// and enforces `target.timeout_ms` on each attempt so the surrounding retry
+/// loop stays bounded by configuration.
 async fn send_stats_payload(
     client: &HttpClient,
     target: &Endpoint,
@@ -188,14 +193,25 @@ async fn send_stats_payload(
         .header("DD-API-KEY", api_key)
         .body(Bytes::from(data))?;
 
-    let response = client
-        .request(req)
-        .await
-        .map_err(|e| anyhow::anyhow!("Failed to send trace stats: {e}"))?;
+    let response = tokio::time::timeout(
+        std::time::Duration::from_millis(target.timeout_ms),
+        client.request(req),
+    )
+    .await
+    .map_err(|_| anyhow::anyhow!("Stats request timed out after {} ms", target.timeout_ms))?
+    .map_err(|e| anyhow::anyhow!("Failed to send trace stats: {e}"))?;
 
-    if response.status() != http::StatusCode::ACCEPTED {
-        let response_body = String::from_utf8(response.into_body().to_vec()).unwrap_or_default();
-        anyhow::bail!("Server did not accept trace stats: {response_body}");
+    let status = response.status();
+    if status != http::StatusCode::ACCEPTED {
+        let body = response.into_body();
+        let preview_len = body.len().min(ERROR_BODY_PREVIEW_BYTES);
+        let preview = String::from_utf8_lossy(&body[..preview_len]);
+        let truncated = if body.len() > preview_len {
+            " (truncated)"
+        } else {
+            ""
+        };
+        anyhow::bail!("Server did not accept trace stats (status {status}): {preview}{truncated}");
     }
     Ok(())
 }

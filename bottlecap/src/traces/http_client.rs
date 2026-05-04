@@ -43,18 +43,15 @@ impl HttpClient {
 }
 
 impl HttpClientTrait for HttpClient {
+    #[allow(clippy::expect_used)]
     fn new_client() -> Self {
-        // Used by libdd APIs that construct a default client when no
-        // pre-configured one is supplied. Bottlecap's production code paths
-        // build the client via `create_client` so this fallback only matches
-        // libdatadog's `new_default_client` shape.
-        let connector = libdd_common::connector::Connector::default();
-        let proxy_connector = hyper_http_proxy::ProxyConnector::new(connector)
-            .expect("failed to build default proxy connector");
-        let inner = http_common::client_builder()
-            .pool_max_idle_per_host(0)
-            .build(proxy_connector);
-        HttpClient { inner }
+        // Required by `HttpClientTrait` but never invoked on bottlecap's code
+        // paths — production builds the client via
+        // `create_client(proxy, tls_cert, skip_ssl)`. Routing this fallback
+        // through the same constructor keeps the failure mode and error
+        // surface consistent with the rest of the module.
+        create_client(None, None, false)
+            .expect("building default proxy connector with default TLS should not fail")
     }
 
     fn request(
