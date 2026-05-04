@@ -546,10 +546,11 @@ impl LambdaProcessor {
     /// `request_id`.
     pub fn insert_to_durable_context_map(
         &mut self,
-        request_id: &str,               // key
-        execution_id: &str,             // value
-        execution_name: &str,           // value
-        first_invocation: Option<bool>, // value
+        request_id: &str,                 // key
+        execution_id: &str,               // value
+        execution_name: &str,             // value
+        first_invocation: Option<bool>,   // value
+        execution_status: Option<String>, // value
     ) {
         if self.durable_context_map.contains_key(request_id) {
             error!("LOGS | insert_to_durable_context_map: request_id={request_id} already in map");
@@ -567,6 +568,7 @@ impl LambdaProcessor {
                 execution_id: execution_id.to_string(),
                 execution_name: execution_name.to_string(),
                 first_invocation,
+                execution_status,
             },
         );
         self.drain_held_logs_for_request_id(request_id);
@@ -659,6 +661,12 @@ impl LambdaProcessor {
         log.message.lambda.durable_execution_name = Some(ctx.execution_name.clone());
         if is_platform_log(&log.message.message) {
             log.message.lambda.first_invocation = ctx.first_invocation;
+        }
+        if log.message.message.starts_with("END RequestId:") {
+            log.message
+                .lambda
+                .durable_execution_status
+                .clone_from(&ctx.execution_status);
         }
         if let Ok(s) = serde_json::to_string(&log) {
             // explicitly drop log so we don't accidentally re-use it and push
@@ -2577,5 +2585,42 @@ mod tests {
         assert!(processor.held_logs.contains_key("req-123"));
         let batches = aggregator_handle.get_batches().await.unwrap();
         assert!(batches.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_execution_status_on_end_log() {
+        for (execution_status, expected) in [
+            (Some("SUCCEEDED"), serde_json::json!("SUCCEEDED")),
+            (None, serde_json::Value::Null),
+        ] {
+            let mut processor = make_processor_for_durable_arn_tests();
+            processor.is_durable_function = Some(true);
+            processor.invocation_context.request_id = "req-end".to_string();
+            processor.insert_to_durable_context_map(
+                "req-end",
+                "exec-id-123",
+                "exec-name-abc",
+                Some(false),
+                execution_status.map(str::to_string),
+            );
+            let event = TelemetryEvent {
+                time: Utc.with_ymd_and_hms(2023, 1, 7, 3, 23, 47).unwrap(),
+                record: TelemetryRecord::PlatformRuntimeDone {
+                    request_id: "req-end".to_string(),
+                    status: Status::Success,
+                    error_type: None,
+                    metrics: None,
+                },
+            };
+            let (aggregator_service, aggregator_handle) = AggregatorService::default();
+            tokio::spawn(async move { aggregator_service.run().await });
+            processor.process(event, &aggregator_handle).await;
+            let batches = aggregator_handle.get_batches().await.unwrap();
+            let logs: Vec<serde_json::Value> = serde_json::from_slice(&batches[0]).unwrap();
+            assert_eq!(
+                logs[0]["message"]["lambda"]["durable_function.execution_status"],
+                expected
+            );
+        }
     }
 }

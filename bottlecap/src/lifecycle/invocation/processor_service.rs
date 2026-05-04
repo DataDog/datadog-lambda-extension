@@ -115,6 +115,7 @@ pub enum ProcessorCommand {
         execution_id: String,
         execution_name: String,
         first_invocation: Option<bool>,
+        execution_status: Option<String>,
     },
     OnOutOfMemoryError {
         timestamp: i64,
@@ -391,6 +392,7 @@ impl InvocationProcessorHandle {
         execution_id: String,
         execution_name: String,
         first_invocation: Option<bool>,
+        execution_status: Option<String>,
     ) -> Result<(), mpsc::error::SendError<ProcessorCommand>> {
         self.sender
             .send(ProcessorCommand::ForwardDurableContext {
@@ -398,6 +400,7 @@ impl InvocationProcessorHandle {
                 execution_id,
                 execution_name,
                 first_invocation,
+                execution_status,
             })
             .await
     }
@@ -617,6 +620,7 @@ impl InvocationProcessorService {
                     execution_id,
                     execution_name,
                     first_invocation,
+                    execution_status,
                 } => {
                     self.processor
                         .forward_durable_context(
@@ -624,6 +628,7 @@ impl InvocationProcessorService {
                             &execution_id,
                             &execution_name,
                             first_invocation,
+                            execution_status,
                         )
                         .await;
                 }

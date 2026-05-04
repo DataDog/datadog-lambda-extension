@@ -151,10 +151,18 @@ impl Processor {
     /// Returns the first `aws.lambda` span from the provided trace, if one
     /// exists.
     ///
+    /// Placeholder spans (resource == `INVOCATION_SPAN_RESOURCE`) emitted by
+    /// Go and Java tracers are excluded: they are always dropped by the chunk
+    /// processor before reaching the backend, so tagging them would waste the
+    /// `AppSec` context and trigger a premature context deletion that would leave
+    /// the real, extension-built `aws.lambda` span untagged.
+    ///
     /// # Returns
     /// The span on which security information will be attached.
     pub fn service_entry_span_mut(trace: &mut [Span]) -> Option<&mut Span> {
-        trace.iter_mut().find(|span| span.name == "aws.lambda")
+        trace.iter_mut().find(|span| {
+            span.name == "aws.lambda" && span.resource != crate::traces::INVOCATION_SPAN_RESOURCE
+        })
     }
 
     /// Processes an intercepted [`Span`].
@@ -811,5 +819,42 @@ mod tests {
             ),
             result
         );
+    }
+
+    #[test]
+    fn service_entry_span_mut_skips_placeholder_lambda_span() {
+        let mut trace = vec![
+            Span {
+                name: "aws.lambda".into(),
+                resource: crate::traces::INVOCATION_SPAN_RESOURCE.into(),
+                span_id: 1,
+                ..Default::default()
+            },
+            Span {
+                name: "aws.lambda".into(),
+                resource: "real.lambda.invocation".into(),
+                span_id: 2,
+                ..Default::default()
+            },
+        ];
+
+        let selected = Processor::service_entry_span_mut(&mut trace)
+            .expect("expected non-placeholder aws.lambda span");
+
+        assert_eq!(selected.name, "aws.lambda");
+        assert_ne!(selected.resource, crate::traces::INVOCATION_SPAN_RESOURCE);
+        assert_eq!(selected.span_id, 2);
+    }
+
+    #[test]
+    fn service_entry_span_mut_returns_none_for_only_placeholder() {
+        let mut trace = vec![Span {
+            name: "aws.lambda".into(),
+            resource: crate::traces::INVOCATION_SPAN_RESOURCE.into(),
+            span_id: 1,
+            ..Default::default()
+        }];
+
+        assert!(Processor::service_entry_span_mut(&mut trace).is_none());
     }
 }
