@@ -11,7 +11,9 @@ use crate::config;
 use crate::lifecycle::invocation::processor::S_TO_MS;
 use crate::traces::http_client::HttpClient;
 use crate::traces::stats_aggregator::StatsAggregator;
+use bytes::Bytes;
 use dogstatsd::api_key::ApiKeyFactory;
+use libdd_capabilities::http::HttpClientTrait;
 use libdd_common::Endpoint;
 use libdd_trace_protobuf::pb;
 use libdd_trace_utils::{config_utils::trace_stats_url, stats_utils};
@@ -96,11 +98,11 @@ impl StatsFlusher {
 
         for attempt in 1..=FLUSH_RETRY_COUNT {
             let start = std::time::Instant::now();
-            let resp = stats_utils::send_stats_payload_with_client(
-                serialized_stats_payload.clone(),
+            let resp = send_stats_payload(
+                &self.http_client,
                 endpoint,
                 api_key.as_str(),
-                Some(&self.http_client),
+                serialized_stats_payload.clone(),
             )
             .await;
             let elapsed = start.elapsed();
@@ -166,4 +168,34 @@ impl StatsFlusher {
             Some(all_failed)
         }
     }
+}
+
+/// Posts a serialized stats payload using the supplied client.
+///
+/// Equivalent to libdatadog's `stats_utils::send_stats_payload`, but uses the
+/// caller-provided client so bottlecap's proxy/TLS configuration is preserved.
+async fn send_stats_payload(
+    client: &HttpClient,
+    target: &Endpoint,
+    api_key: &str,
+    data: Vec<u8>,
+) -> anyhow::Result<()> {
+    let req = http::Request::builder()
+        .method(http::Method::POST)
+        .uri(target.url.clone())
+        .header("Content-Type", "application/msgpack")
+        .header("Content-Encoding", "gzip")
+        .header("DD-API-KEY", api_key)
+        .body(Bytes::from(data))?;
+
+    let response = client
+        .request(req)
+        .await
+        .map_err(|e| anyhow::anyhow!("Failed to send trace stats: {e}"))?;
+
+    if response.status() != http::StatusCode::ACCEPTED {
+        let response_body = String::from_utf8(response.into_body().to_vec()).unwrap_or_default();
+        anyhow::bail!("Server did not accept trace stats: {response_body}");
+    }
+    Ok(())
 }

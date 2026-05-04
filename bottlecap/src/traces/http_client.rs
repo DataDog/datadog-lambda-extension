@@ -6,22 +6,78 @@
 //! This module provides the HTTP client type required by `libdd_trace_utils`
 //! for sending traces and stats to Datadog intake endpoints.
 
+use http_body_util::BodyExt;
 use hyper_http_proxy;
 use hyper_rustls::HttpsConnectorBuilder;
-use libdd_common::{GenericHttpClient, http_common};
+use libdd_capabilities::{
+    MaybeSend,
+    http::{HttpClientTrait, HttpError},
+};
+use libdd_common::http_common::{self, Body, GenericHttpClient};
 use rustls::RootCertStore;
 use rustls_pki_types::CertificateDer;
 use std::error::Error;
 use std::fs::File;
+use std::future::Future;
 use std::io::BufReader;
 use std::sync::{Arc, LazyLock};
 use tracing::debug;
 
-/// Type alias for the HTTP client used by trace and stats flushers.
-///
-/// This is the client type expected by `libdd_trace_utils::SendData::send()`.
-pub type HttpClient =
+type InnerClient =
     GenericHttpClient<hyper_http_proxy::ProxyConnector<libdd_common::connector::Connector>>;
+
+/// HTTP client used by trace and stats flushers.
+///
+/// Wraps a hyper client preconfigured with optional proxy and TLS settings, and
+/// implements [`HttpClientTrait`] so it can be passed to `libdd_trace_utils`
+/// senders such as `SendData::send`.
+#[derive(Clone, Debug)]
+pub struct HttpClient {
+    inner: InnerClient,
+}
+
+impl HttpClient {
+    fn new(inner: InnerClient) -> Self {
+        Self { inner }
+    }
+}
+
+impl HttpClientTrait for HttpClient {
+    fn new_client() -> Self {
+        // Used by libdd APIs that construct a default client when no
+        // pre-configured one is supplied. Bottlecap's production code paths
+        // build the client via `create_client` so this fallback only matches
+        // libdatadog's `new_default_client` shape.
+        let connector = libdd_common::connector::Connector::default();
+        let proxy_connector = hyper_http_proxy::ProxyConnector::new(connector)
+            .expect("failed to build default proxy connector");
+        let inner = http_common::client_builder()
+            .pool_max_idle_per_host(0)
+            .build(proxy_connector);
+        HttpClient { inner }
+    }
+
+    fn request(
+        &self,
+        req: http::Request<bytes::Bytes>,
+    ) -> impl Future<Output = Result<http::Response<bytes::Bytes>, HttpError>> + MaybeSend {
+        let client = self.inner.clone();
+        async move {
+            let hyper_req = req.map(Body::from_bytes);
+            let response = client
+                .request(hyper_req)
+                .await
+                .map_err(|e| HttpError::Network(e.into()))?;
+            let (parts, body) = response.into_parts();
+            let collected = body
+                .collect()
+                .await
+                .map_err(|e| HttpError::ResponseBody(e.into()))?
+                .to_bytes();
+            Ok(http::Response::from_parts(parts, collected))
+        }
+    }
+}
 
 /// Initialize the crypto provider needed for setting custom root certificates.
 fn ensure_crypto_provider_initialized() {
@@ -185,13 +241,15 @@ pub fn create_client(
             "HTTP_CLIENT | Proxy connector created with proxy: {:?}",
             proxy_https
         );
-        Ok(client)
+        Ok(HttpClient::new(client))
     } else {
         let proxy_connector = hyper_http_proxy::ProxyConnector::new(connector)?;
         // Disable connection pooling to avoid stale connections after Lambda freeze/resume.
         // See comment above for detailed explanation.
-        Ok(http_common::client_builder()
-            .pool_max_idle_per_host(0)
-            .build(proxy_connector))
+        Ok(HttpClient::new(
+            http_common::client_builder()
+                .pool_max_idle_per_host(0)
+                .build(proxy_connector),
+        ))
     }
 }
