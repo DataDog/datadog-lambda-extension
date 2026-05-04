@@ -294,6 +294,9 @@ e2e-test-status ({{ $f.name }}):
   timeout: 3h
   variables:
     E2E_JOB_NAME: "e2e-test ({{ $f.name }})"
+  needs:
+    - job: "publish layer e2e sandbox ({{ $f.name }})"
+      artifacts: false
   script:
     - .gitlab/scripts/poll_e2e.sh
 
