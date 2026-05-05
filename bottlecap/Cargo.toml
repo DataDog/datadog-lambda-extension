@@ -74,13 +74,13 @@ indexmap = {version = "2.11.0", default-features = false}
 # be found in the clippy.toml file adjacent to this Cargo.toml.
 datadog-protos = { version = "0.1.0", default-features = false, git = "https://github.com/DataDog/saluki/", rev = "f863626dbfe3c59bb390985fa6530b0621c2a0a2"}
 ddsketch-agent = { version = "0.1.0", default-features = false, git = "https://github.com/DataDog/saluki/", rev = "f863626dbfe3c59bb390985fa6530b0621c2a0a2"}
-libdd-capabilities = { git = "https://github.com/DataDog/libdatadog", rev = "0a70516d66314efdd7115644b0da4b3b3e0958e0" }
-libdd-common = { git = "https://github.com/DataDog/libdatadog", rev = "0a70516d66314efdd7115644b0da4b3b3e0958e0", default-features = false }
-libdd-trace-protobuf = { git = "https://github.com/DataDog/libdatadog", rev = "0a70516d66314efdd7115644b0da4b3b3e0958e0" }
-libdd-trace-utils = { git = "https://github.com/DataDog/libdatadog", rev = "0a70516d66314efdd7115644b0da4b3b3e0958e0", default-features = false, features = ["mini_agent"] }
-libdd-trace-normalization = { git = "https://github.com/DataDog/libdatadog", rev = "0a70516d66314efdd7115644b0da4b3b3e0958e0" }
-libdd-trace-obfuscation = { git = "https://github.com/DataDog/libdatadog", rev = "0a70516d66314efdd7115644b0da4b3b3e0958e0", default-features = false }
-libdd-trace-stats = { git = "https://github.com/DataDog/libdatadog", rev = "0a70516d66314efdd7115644b0da4b3b3e0958e0", default-features = false }
+libdd-capabilities = { git = "https://github.com/DataDog/libdatadog", rev = "db05e1f8408a76075efb37ecec544d2e74217e57" }
+libdd-common = { git = "https://github.com/DataDog/libdatadog", rev = "db05e1f8408a76075efb37ecec544d2e74217e57", default-features = false }
+libdd-trace-protobuf = { git = "https://github.com/DataDog/libdatadog", rev = "db05e1f8408a76075efb37ecec544d2e74217e57" }
+libdd-trace-utils = { git = "https://github.com/DataDog/libdatadog", rev = "db05e1f8408a76075efb37ecec544d2e74217e57", default-features = false, features = ["mini_agent"] }
+libdd-trace-normalization = { git = "https://github.com/DataDog/libdatadog", rev = "db05e1f8408a76075efb37ecec544d2e74217e57" }
+libdd-trace-obfuscation = { git = "https://github.com/DataDog/libdatadog", rev = "db05e1f8408a76075efb37ecec544d2e74217e57", default-features = false }
+libdd-trace-stats = { git = "https://github.com/DataDog/libdatadog", rev = "db05e1f8408a76075efb37ecec544d2e74217e57", default-features = false }
 datadog-opentelemetry = { git = "https://github.com/DataDog/dd-trace-rs", rev = "f51cefc4ad24bec81b38fb2f36b1ed93f21ae913", default-features = false }
 dogstatsd = { git = "https://github.com/DataDog/serverless-components", rev = "8817486d6ec7eb7101c4f349b3d2b75cae701740", default-features = false }
 datadog-fips = { git = "https://github.com/DataDog/serverless-components", rev = "8817486d6ec7eb7101c4f349b3d2b75cae701740", default-features = false }
@@ -136,6 +136,7 @@ fips = [
     "libdd-common/fips",
     "libdd-trace-utils/fips",
     "libdd-trace-obfuscation/fips",
+    "libdd-trace-stats/fips",
     "datadog-fips/fips",
     "libddwaf/fips",
     "reqwest/rustls-tls-native-roots-no-provider",
