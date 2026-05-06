@@ -7,7 +7,7 @@ environments:
     automatically_bump_version: 1
   serverless_testing:
     external_id: serverless-testing-publish-externalid
-    role_to_assume: lambda-extension-image-publisher
+    role_to_assume: layer-deployer
     account: 093468662994
   prod:
     external_id: prod-publish-externalid
