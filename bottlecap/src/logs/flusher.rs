@@ -120,7 +120,7 @@ impl Flusher {
             match resp {
                 Ok(resp) => {
                     let status = resp.status();
-                    _ = resp.text().await;
+                    let body = resp.text().await.unwrap_or_default();
                     if status == StatusCode::FORBIDDEN {
                         // Access denied. Stop retrying.
                         error!(
@@ -130,6 +130,22 @@ impl Flusher {
                     }
                     if status.is_success() {
                         return Ok(());
+                    }
+                    if attempts >= FLUSH_RETRY_COUNT {
+                        // Non-success HTTP response (e.g. 4xx/5xx from an OPW or
+                        // intake under load) — surface the request for later retry
+                        // instead of looping unbounded against a degraded endpoint.
+                        error!(
+                            "LOGS | Failed to send request after {} ms and {} attempts: status {status}, body: {body}",
+                            elapsed.as_millis(),
+                            attempts,
+                        );
+                        return Err(Box::new(FailedRequestError {
+                            request: req,
+                            message: format!(
+                                "LOGS | Failed after {attempts} attempts: status {status}"
+                            ),
+                        }));
                     }
                 }
                 Err(e) => {
@@ -307,5 +323,227 @@ impl LogsFlusher {
         let mut encoder = Encoder::new(Vec::new(), self.config.logs_config_compression_level)?;
         encoder.write_all(data)?;
         encoder.finish().map_err(|e| Box::new(e) as Box<dyn Error>)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use httpmock::prelude::*;
+    use std::sync::atomic::Ordering;
+    use std::time::Duration;
+
+    fn build_request(server: &MockServer, timeout: Duration) -> reqwest::RequestBuilder {
+        reqwest::Client::new()
+            .post(server.url("/api/v2/logs"))
+            .timeout(timeout)
+            .body("test")
+    }
+
+    #[tokio::test]
+    async fn send_returns_ok_on_success() {
+        let server = MockServer::start();
+        let mock = server.mock(|when, then| {
+            when.method(POST).path("/api/v2/logs");
+            then.status(200);
+        });
+
+        let result = Flusher::send(build_request(&server, Duration::from_secs(2))).await;
+
+        assert!(result.is_ok(), "2xx response should return Ok immediately");
+        mock.assert_hits(1);
+    }
+
+    #[tokio::test]
+    async fn send_returns_ok_on_forbidden_without_retry() {
+        let server = MockServer::start();
+        let mock = server.mock(|when, then| {
+            when.method(POST).path("/api/v2/logs");
+            then.status(403);
+        });
+
+        let result = Flusher::send(build_request(&server, Duration::from_secs(2))).await;
+
+        assert!(
+            result.is_ok(),
+            "403 is permanent (bad API key) — drop, do not retry"
+        );
+        mock.assert_hits(1);
+    }
+
+    /// Regression test for SLES-2843: a persistent non-success, non-403 status
+    /// (e.g. 500 from an OPW under load) must respect `FLUSH_RETRY_COUNT`
+    /// instead of looping unbounded and hammering the endpoint.
+    #[tokio::test]
+    async fn send_bounds_retries_on_non_success_status() {
+        let server = MockServer::start();
+        let mock = server.mock(|when, then| {
+            when.method(POST).path("/api/v2/logs");
+            then.status(500);
+        });
+
+        // Bound the test so the buggy (unbounded) implementation fails fast
+        // instead of hanging the suite.
+        let result = tokio::time::timeout(
+            Duration::from_secs(3),
+            Flusher::send(build_request(&server, Duration::from_secs(2))),
+        )
+        .await
+        .expect("send must respect FLUSH_RETRY_COUNT and not loop forever on non-success");
+
+        assert!(
+            result.is_err(),
+            "send should return Err after exhausting retries on persistent 5xx"
+        );
+        mock.assert_hits(FLUSH_RETRY_COUNT);
+    }
+
+    #[tokio::test]
+    async fn send_bounds_retries_on_4xx_status() {
+        let server = MockServer::start();
+        let mock = server.mock(|when, then| {
+            when.method(POST).path("/api/v2/logs");
+            then.status(404);
+        });
+
+        let result = tokio::time::timeout(
+            Duration::from_secs(3),
+            Flusher::send(build_request(&server, Duration::from_secs(2))),
+        )
+        .await
+        .expect("send must respect FLUSH_RETRY_COUNT on 4xx (e.g. misrouted OPW URL)");
+
+        assert!(
+            result.is_err(),
+            "persistent 4xx should bound at FLUSH_RETRY_COUNT"
+        );
+        mock.assert_hits(FLUSH_RETRY_COUNT);
+    }
+
+    #[tokio::test]
+    async fn send_bounds_retries_on_transport_error() {
+        let server = MockServer::start();
+        // Server holds the response longer than the client timeout so every
+        // attempt resolves to a reqwest timeout error (the `Err` branch).
+        let mock = server.mock(|when, then| {
+            when.method(POST).path("/api/v2/logs");
+            then.status(200).delay(Duration::from_secs(5));
+        });
+
+        let result = tokio::time::timeout(
+            Duration::from_secs(3),
+            Flusher::send(build_request(&server, Duration::from_millis(50))),
+        )
+        .await
+        .expect("send must respect FLUSH_RETRY_COUNT on transport errors");
+
+        assert!(
+            result.is_err(),
+            "send should return Err after exhausting retries on transport timeout"
+        );
+        mock.assert_hits(FLUSH_RETRY_COUNT);
+    }
+
+    /// Gap #2: when a transient failure clears, the loop must actually retry
+    /// and succeed — not treat the first non-2xx as a permanent failure.
+    /// Without this test, a refactor that early-returns on the first failed
+    /// status would still pass the bounded-retry tests above.
+    ///
+    /// Uses an axum-based stateful mock because httpmock 0.7 matchers cannot
+    /// capture state (their predicate type is `fn`, not `Fn`).
+    #[tokio::test]
+    async fn send_succeeds_on_retry_after_transient_failure() {
+        use axum::{Router, http::StatusCode, routing::post};
+        use std::sync::atomic::AtomicUsize;
+
+        let counter = Arc::new(AtomicUsize::new(0));
+        let app = Router::new().route(
+            "/api/v2/logs",
+            post({
+                let counter = Arc::clone(&counter);
+                move || {
+                    let counter = Arc::clone(&counter);
+                    async move {
+                        // First attempt → 500 (transient), all later attempts → 200.
+                        let n = counter.fetch_add(1, Ordering::SeqCst);
+                        if n == 0 {
+                            StatusCode::INTERNAL_SERVER_ERROR
+                        } else {
+                            StatusCode::OK
+                        }
+                    }
+                }
+            }),
+        );
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("test should be able to bind a local port");
+        let addr = listener
+            .local_addr()
+            .expect("bound listener should have a local addr");
+        tokio::spawn(async move {
+            axum::serve(listener, app)
+                .await
+                .expect("test server should run cleanly");
+        });
+
+        let req = reqwest::Client::new()
+            .post(format!("http://{addr}/api/v2/logs"))
+            .timeout(Duration::from_secs(2))
+            .body("test");
+
+        let result = Flusher::send(req).await;
+
+        assert!(
+            result.is_ok(),
+            "send must retry past a transient failure and succeed on a later attempt"
+        );
+        assert_eq!(
+            counter.load(Ordering::SeqCst),
+            2,
+            "expected exactly one failed attempt + one successful retry"
+        );
+    }
+
+    /// Gap #1: after retry exhaustion, the returned error must carry a
+    /// re-issuable request so `Flusher::flush` can re-queue it for the next
+    /// flush cycle. A refactor that loses or corrupts the request would
+    /// silently turn a transient failure into permanent data loss.
+    #[tokio::test]
+    async fn failed_request_error_carries_replayable_request() {
+        let server = MockServer::start();
+        let mock = server.mock(|when, then| {
+            when.method(POST).path("/api/v2/logs");
+            then.status(500);
+        });
+
+        let err = tokio::time::timeout(
+            Duration::from_secs(3),
+            Flusher::send(build_request(&server, Duration::from_secs(2))),
+        )
+        .await
+        .expect("send must terminate")
+        .expect_err("expected Err after retry exhaustion");
+
+        let failed = err
+            .downcast_ref::<FailedRequestError>()
+            .expect("error must be downcastable to FailedRequestError so flush() can re-queue it");
+
+        let cloned = failed
+            .request
+            .try_clone()
+            .expect("FailedRequestError.request must be cloneable for redrive");
+
+        // Re-issue the stashed request and confirm it actually reaches the
+        // server — proves the request is intact, not a corrupted shell.
+        let response = cloned
+            .send()
+            .await
+            .expect("re-issued request should be sendable");
+        assert_eq!(response.status().as_u16(), 500);
+
+        // FLUSH_RETRY_COUNT attempts during send + 1 from the re-issue above.
+        mock.assert_hits(FLUSH_RETRY_COUNT + 1);
     }
 }
