@@ -65,17 +65,14 @@ impl Flusher {
         }
 
         let mut failed_requests = Vec::new();
+        // `JoinSet::join_all` returns `Vec<T>` directly (not `Vec<Result<T, JoinError>>`),
+        // so each `result` is the `Result<(), Box<dyn Error + Send>>` returned by `send`.
+        // A non-`FailedRequestError` here means the task completed but reported an error
+        // it doesn't want redriven (e.g. could-not-clone); a `FailedRequestError` is a
+        // bounded retry exhaustion and the request must be re-queued for the next cycle.
         for result in set.join_all().await {
             if let Err(e) = result {
-                debug!("LOGS | Failed to join task: {}", e);
-                continue;
-            }
-
-            // At this point we know the task completed successfully,
-            // but the send operation itself may have failed
-            if let Err(e) = result {
                 if let Some(failed_req_err) = e.downcast_ref::<FailedRequestError>() {
-                    // Clone the request from our custom error
                     failed_requests.push(
                         failed_req_err
                             .request
@@ -120,7 +117,10 @@ impl Flusher {
             match resp {
                 Ok(resp) => {
                     let status = resp.status();
-                    let body = resp.text().await.unwrap_or_default();
+                    // Drain the body to allow connection reuse, but do not capture
+                    // or log it: log intakes can echo back the submitted log payload,
+                    // which may contain sensitive customer data.
+                    let _ = resp.text().await;
                     if status == StatusCode::FORBIDDEN {
                         // Access denied. Stop retrying.
                         error!(
@@ -136,7 +136,7 @@ impl Flusher {
                         // intake under load) — surface the request for later retry
                         // instead of looping unbounded against a degraded endpoint.
                         error!(
-                            "LOGS | Failed to send request after {} ms and {} attempts: status {status}, body: {body}",
+                            "LOGS | Failed to send request after {} ms and {} attempts: status {status}",
                             elapsed.as_millis(),
                             attempts,
                         );
@@ -510,11 +510,15 @@ mod tests {
     /// re-issuable request so `Flusher::flush` can re-queue it for the next
     /// flush cycle. A refactor that loses or corrupts the request would
     /// silently turn a transient failure into permanent data loss.
+    ///
+    /// The mock matches on the body too, so any corruption of the stashed
+    /// request's payload would cause the re-issue to miss the mock and fail
+    /// the status assertion below.
     #[tokio::test]
     async fn failed_request_error_carries_replayable_request() {
         let server = MockServer::start();
         let mock = server.mock(|when, then| {
-            when.method(POST).path("/api/v2/logs");
+            when.method(POST).path("/api/v2/logs").body_contains("test");
             then.status(500);
         });
 
@@ -536,14 +540,60 @@ mod tests {
             .expect("FailedRequestError.request must be cloneable for redrive");
 
         // Re-issue the stashed request and confirm it actually reaches the
-        // server — proves the request is intact, not a corrupted shell.
+        // server — proves the request is intact (URL, method, body), not a
+        // corrupted shell. If the body were lost, the body_contains matcher
+        // would miss and the response status would be 404 (httpmock default).
         let response = cloned
             .send()
             .await
             .expect("re-issued request should be sendable");
-        assert_eq!(response.status().as_u16(), 500);
+        assert_eq!(
+            response.status().as_u16(),
+            500,
+            "re-issued request must hit the same mock — proves URL, method, and body are intact"
+        );
 
         // FLUSH_RETRY_COUNT attempts during send + 1 from the re-issue above.
         mock.assert_hits(FLUSH_RETRY_COUNT + 1);
+    }
+
+    /// Codex P1 (PR #1220): verifies that `Flusher::flush` actually re-queues
+    /// failed requests for the next flush cycle. The earlier dead-code path
+    /// in `flush` swallowed every `FailedRequestError` so the bounded retries
+    /// in `send` would silently drop data on persistent endpoint failures.
+    #[tokio::test]
+    async fn flush_redrives_failed_requests_after_retry_exhaustion() {
+        use crate::config::Config;
+
+        let server = MockServer::start();
+        let mock = server.mock(|when, then| {
+            when.method(POST).path("/api/v2/logs");
+            then.status(500);
+        });
+
+        let api_key_factory = Arc::new(ApiKeyFactory::new("test-key"));
+        let config = Arc::new(Config {
+            logs_config_use_compression: false,
+            ..Config::default()
+        });
+        let flusher = Flusher::new(
+            api_key_factory,
+            server.url(""),
+            config,
+            reqwest::Client::new(),
+        );
+
+        let batches = Some(Arc::new(vec![b"test-batch".to_vec()]));
+
+        let failed = tokio::time::timeout(Duration::from_secs(5), flusher.flush(batches))
+            .await
+            .expect("flush must terminate within bounded retries");
+
+        assert_eq!(
+            failed.len(),
+            1,
+            "after retry exhaustion, the failed request must be returned for redrive on the next flush cycle"
+        );
+        mock.assert_hits(FLUSH_RETRY_COUNT);
     }
 }
