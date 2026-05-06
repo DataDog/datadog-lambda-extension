@@ -79,10 +79,16 @@ impl HttpClientTrait for HttpClient {
 /// Initialize the crypto provider needed for setting custom root certificates.
 fn ensure_crypto_provider_initialized() {
     static INIT_CRYPTO_PROVIDER: LazyLock<()> = LazyLock::new(|| {
+        // FIPS builds use the FIPS-validated aws-lc-rs provider, non-FIPS
+        // builds use ring (the libdatadog default). Pick based on the bottlecap
+        // `fips` feature so we never pull both crypto backends into the binary.
+        #[cfg(all(unix, feature = "fips"))]
+        let provider = rustls::crypto::aws_lc_rs::default_provider();
+        #[cfg(all(unix, not(feature = "fips")))]
+        let provider = rustls::crypto::ring::default_provider();
+
         #[cfg(unix)]
-        if let Err(_already_installed) =
-            rustls::crypto::aws_lc_rs::default_provider().install_default()
-        {
+        if let Err(_already_installed) = provider.install_default() {
             debug!(
                 "HTTP_CLIENT | Default CryptoProvider already installed, using existing provider"
             );
