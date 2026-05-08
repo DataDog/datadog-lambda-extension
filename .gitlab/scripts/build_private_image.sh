@@ -41,4 +41,4 @@ docker buildx build \
     --tag "$DOCKER_TARGET_IMAGE:${VERSION}${SUFFIX}" \
     --push .
 
-printf "Image built and pushed to $DOCKER_TARGET_IMAGE:${IMAGE_TAG}${SUFFIX}\n"
+printf "Image built and pushed to $DOCKER_TARGET_IMAGE:${IMAGE_TAG}${SUFFIX} for ${PLATFORM}\n"
