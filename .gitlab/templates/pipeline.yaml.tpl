@@ -200,7 +200,7 @@ publish layer [self-monitoring] ({{ $flavor.name }}):
     - layer ({{ $flavor.name }})
   dependencies:
     - layer ({{ $flavor.name }})
-  {{ with $environment := (ds "environments").environments.sandbox }}
+  {{ with $environment := (ds "environments").environments.serverless_testing }}
   variables:
     LAYER_NAME_BASE_SUFFIX: {{ $flavor.layer_name_base_suffix }}
     ARCHITECTURE: {{ $flavor.arch }}

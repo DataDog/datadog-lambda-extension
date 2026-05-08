@@ -27,10 +27,9 @@ else
 fi
 
 # Get the latest published layer version to derive the image tag.
-# Layers are published in the sandbox account (425362996713), so query there
-# regardless of which account we're pushing images to.
-SANDBOX_ACCOUNT="425362996713"
-latest_version=$(aws lambda list-layer-versions --region us-east-1 --layer-name "arn:aws:lambda:us-east-1:${SANDBOX_ACCOUNT}:layer:${LAYER_NAME}" --query 'LayerVersions[0].Version || `0`')
+# The "publish layer [self-monitoring]" job publishes to the same account we
+# push images to, so we query locally.
+latest_version=$(aws lambda list-layer-versions --region us-east-1 --layer-name "$LAYER_NAME" --query 'LayerVersions[0].Version || `0`')
 VERSION=$(($latest_version + 1))
 printf "Tagging container image with version: $VERSION and latest\n"
 
