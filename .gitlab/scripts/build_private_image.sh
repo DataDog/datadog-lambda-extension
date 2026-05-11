@@ -26,11 +26,9 @@ else
     LAYER_NAME="${LAYER_NAME}-${PIPELINE_LAYER_SUFFIX}"
 fi
 
-# Tag the image with the same version as the most recently published layer.
-# The image and the layer wrap the same .zip from the build job, so they
-# share a version number. Run 'publish layer [self-monitoring]' first to
-# bump the layer; this job will then tag the image to match.
-VERSION=$(aws lambda list-layer-versions --region us-east-1 --layer-name "$LAYER_NAME" --query 'LayerVersions[0].Version || `0`')
+# Increment last version
+latest_version=$(aws lambda list-layer-versions --region us-east-1 --layer-name "$LAYER_NAME" --query 'LayerVersions[0].Version || `0`')
+VERSION=$(($latest_version + 1))
 printf "Tagging container image with version: $VERSION and latest\n"
 
 docker buildx build \
