@@ -185,56 +185,46 @@ publish layer {{ $environment_name }} ({{ $flavor.name }}):
 
 {{ end }} # end environments
 
-# Self-monitoring layer publishing — split by region:
+# Self-monitoring layer publishing — split by region/account inside one matrix:
 #   us-east-1 → serverless-testing account (093468662994), used by LOD/LMI
 #   us-west-2 → sandbox account (425362996713), used by E2E tests
-publish layer us-east-1 [self-monitoring] ({{ $flavor.name }}):
+# Region-specific env values are injected per matrix row so the parallel jobs
+# still collapse into a single group in the GitLab UI.
+publish layer [self-monitoring] ({{ $flavor.name }}):
   stage: self-monitoring
   tags: ["arch:amd64"]
   image: ${CI_DOCKER_TARGET_IMAGE}:${CI_DOCKER_TARGET_VERSION}
   rules:
     - when: manual
       allow_failure: true
+  parallel:
+    matrix:
+      {{ with $environment := (ds "environments").environments.serverless_testing }}
+      - REGION: us-east-1
+        EXTERNAL_ID_NAME: {{ $environment.external_id }}
+        ROLE_TO_ASSUME: {{ $environment.role_to_assume }}
+        AWS_ACCOUNT: "{{ $environment.account }}"
+      {{ end }}
+      {{ with $environment := (ds "environments").environments.sandbox }}
+      - REGION: us-west-2
+        EXTERNAL_ID_NAME: {{ $environment.external_id }}
+        ROLE_TO_ASSUME: {{ $environment.role_to_assume }}
+        AWS_ACCOUNT: "{{ $environment.account }}"
+      {{ end }}
   needs:
     - layer ({{ $flavor.name }})
   dependencies:
     - layer ({{ $flavor.name }})
-  {{ with $environment := (ds "environments").environments.serverless_testing }}
   variables:
-    REGION: us-east-1
     LAYER_NAME_BASE_SUFFIX: {{ $flavor.layer_name_base_suffix }}
     ARCHITECTURE: {{ $flavor.arch }}
     LAYER_FILE: datadog_extension-{{ $flavor.suffix }}.zip
-    ADD_LAYER_VERSION_PERMISSIONS: {{ $environment.add_layer_version_permissions }}
-    AUTOMATICALLY_BUMP_VERSION: {{ $environment.automatically_bump_version }}
+    # Both target environments agree on these flags; if they ever diverge,
+    # move them into the matrix above alongside the account/role.
+    ADD_LAYER_VERSION_PERMISSIONS: 0
+    AUTOMATICALLY_BUMP_VERSION: 1
   before_script:
-    - EXTERNAL_ID_NAME={{ $environment.external_id }} ROLE_TO_ASSUME={{ $environment.role_to_assume }} AWS_ACCOUNT={{ $environment.account }} source .gitlab/scripts/get_secrets.sh
-  {{ end }}
-  script:
-    - .gitlab/scripts/publish_layers.sh
-
-publish layer us-west-2 [self-monitoring] ({{ $flavor.name }}):
-  stage: self-monitoring
-  tags: ["arch:amd64"]
-  image: ${CI_DOCKER_TARGET_IMAGE}:${CI_DOCKER_TARGET_VERSION}
-  rules:
-    - when: manual
-      allow_failure: true
-  needs:
-    - layer ({{ $flavor.name }})
-  dependencies:
-    - layer ({{ $flavor.name }})
-  {{ with $environment := (ds "environments").environments.sandbox }}
-  variables:
-    REGION: us-west-2
-    LAYER_NAME_BASE_SUFFIX: {{ $flavor.layer_name_base_suffix }}
-    ARCHITECTURE: {{ $flavor.arch }}
-    LAYER_FILE: datadog_extension-{{ $flavor.suffix }}.zip
-    ADD_LAYER_VERSION_PERMISSIONS: {{ $environment.add_layer_version_permissions }}
-    AUTOMATICALLY_BUMP_VERSION: {{ $environment.automatically_bump_version }}
-  before_script:
-    - EXTERNAL_ID_NAME={{ $environment.external_id }} ROLE_TO_ASSUME={{ $environment.role_to_assume }} AWS_ACCOUNT={{ $environment.account }} source .gitlab/scripts/get_secrets.sh
-  {{ end }}
+    - source .gitlab/scripts/get_secrets.sh
   script:
     - .gitlab/scripts/publish_layers.sh
 
