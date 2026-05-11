@@ -188,7 +188,7 @@ publish layer {{ $environment_name }} ({{ $flavor.name }}):
 # Self-monitoring layer publishing — split by region:
 #   us-east-1 → serverless-testing account (093468662994), used by LOD/LMI
 #   us-west-2 → sandbox account (425362996713), used by E2E tests
-publish layer [self-monitoring us-east-1] ({{ $flavor.name }}):
+publish layer us-east-1 [self-monitoring] ({{ $flavor.name }}):
   stage: self-monitoring
   tags: ["arch:amd64"]
   image: ${CI_DOCKER_TARGET_IMAGE}:${CI_DOCKER_TARGET_VERSION}
@@ -213,7 +213,7 @@ publish layer [self-monitoring us-east-1] ({{ $flavor.name }}):
   script:
     - .gitlab/scripts/publish_layers.sh
 
-publish layer [self-monitoring us-west-2] ({{ $flavor.name }}):
+publish layer us-west-2 [self-monitoring] ({{ $flavor.name }}):
   stage: self-monitoring
   tags: ["arch:amd64"]
   image: ${CI_DOCKER_TARGET_IMAGE}:${CI_DOCKER_TARGET_VERSION}
