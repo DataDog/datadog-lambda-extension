@@ -185,23 +185,48 @@ publish layer {{ $environment_name }} ({{ $flavor.name }}):
 
 {{ end }} # end environments
 
-publish layer [self-monitoring] ({{ $flavor.name }}):
+# Self-monitoring layer publishing — split by region:
+#   us-east-1 → serverless-testing account (093468662994), used by LOD/LMI
+#   us-west-2 → sandbox account (425362996713), used by E2E tests
+publish layer [self-monitoring us-east-1] ({{ $flavor.name }}):
   stage: self-monitoring
   tags: ["arch:amd64"]
   image: ${CI_DOCKER_TARGET_IMAGE}:${CI_DOCKER_TARGET_VERSION}
   rules:
     - when: manual
       allow_failure: true
-  parallel:
-    matrix:
-      - REGION: us-east-1 # Self Monitoring
-      - REGION: us-west-2 # E2E Testing
   needs:
     - layer ({{ $flavor.name }})
   dependencies:
     - layer ({{ $flavor.name }})
   {{ with $environment := (ds "environments").environments.serverless_testing }}
   variables:
+    REGION: us-east-1
+    LAYER_NAME_BASE_SUFFIX: {{ $flavor.layer_name_base_suffix }}
+    ARCHITECTURE: {{ $flavor.arch }}
+    LAYER_FILE: datadog_extension-{{ $flavor.suffix }}.zip
+    ADD_LAYER_VERSION_PERMISSIONS: {{ $environment.add_layer_version_permissions }}
+    AUTOMATICALLY_BUMP_VERSION: {{ $environment.automatically_bump_version }}
+  before_script:
+    - EXTERNAL_ID_NAME={{ $environment.external_id }} ROLE_TO_ASSUME={{ $environment.role_to_assume }} AWS_ACCOUNT={{ $environment.account }} source .gitlab/scripts/get_secrets.sh
+  {{ end }}
+  script:
+    - .gitlab/scripts/publish_layers.sh
+
+publish layer [self-monitoring us-west-2] ({{ $flavor.name }}):
+  stage: self-monitoring
+  tags: ["arch:amd64"]
+  image: ${CI_DOCKER_TARGET_IMAGE}:${CI_DOCKER_TARGET_VERSION}
+  rules:
+    - when: manual
+      allow_failure: true
+  needs:
+    - layer ({{ $flavor.name }})
+  dependencies:
+    - layer ({{ $flavor.name }})
+  {{ with $environment := (ds "environments").environments.sandbox }}
+  variables:
+    REGION: us-west-2
     LAYER_NAME_BASE_SUFFIX: {{ $flavor.layer_name_base_suffix }}
     ARCHITECTURE: {{ $flavor.arch }}
     LAYER_FILE: datadog_extension-{{ $flavor.suffix }}.zip
