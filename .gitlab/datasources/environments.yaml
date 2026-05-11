@@ -8,7 +8,10 @@ environments:
   serverless_testing:
     external_id: serverless-testing-publish-externalid
     role_to_assume: layer-deployer
-    account: 093468662994
+    # Quoted: account starts with leading zero. Without quotes the YAML/gomplate
+    # pipeline parses it as a float and substitutes "9.3468662994e+10", which
+    # then forms an invalid role ARN in get_secrets.sh.
+    account: "093468662994"
     add_layer_version_permissions: 0
     automatically_bump_version: 1
   prod:
