@@ -21,6 +21,8 @@ URL="${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/pipelines/${CI_PIPELINE_ID}/brid
 
 echo "Fetching E2E job status from: $URL"
 
+PRINTED_PIPELINE_URL=0
+
 while true; do
     HTTP_STATUS=$(curl -s -o /tmp/e2e_response.json -w "%{http_code}" --header "PRIVATE-TOKEN: ${GITLAB_TOKEN}" "$URL")
     if [ "$HTTP_STATUS" != "200" ]; then
@@ -30,6 +32,13 @@ while true; do
     fi
     RESPONSE=$(cat /tmp/e2e_response.json)
     E2E_JOB_STATUS=$(echo "$RESPONSE" | jq -r --arg name "$E2E_JOB_NAME" '.[] | select(.name==$name) | .downstream_pipeline.status')
+    if [ "$PRINTED_PIPELINE_URL" -eq 0 ]; then
+        E2E_PIPELINE_URL=$(echo "$RESPONSE" | jq -r --arg name "$E2E_JOB_NAME" '.[] | select(.name==$name) | .downstream_pipeline.web_url // empty')
+        if [ -n "$E2E_PIPELINE_URL" ]; then
+            echo "Polling downstream pipeline for \"$E2E_JOB_NAME\": $E2E_PIPELINE_URL"
+            PRINTED_PIPELINE_URL=1
+        fi
+    fi
     echo -n "E2E job status: $E2E_JOB_STATUS, "
     if [ "$E2E_JOB_STATUS" == "success" ]; then
         echo "E2E tests completed successfully"
