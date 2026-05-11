@@ -198,6 +198,11 @@ publish layer {{ $environment_name }} ({{ $flavor.name }}):
 
 {{ end }} # end environments
 
+# Self-monitoring layer publishing — split by region/account inside one matrix:
+#   us-east-1 → serverless-testing account (093468662994), used by LOD/LMI
+#   us-west-2 → sandbox account (425362996713), used by E2E tests
+# Region-specific env values are injected per matrix row so the parallel jobs
+# still collapse into a single group in the GitLab UI.
 publish layer [self-monitoring] ({{ $flavor.name }}):
   stage: self-monitoring
   tags: ["arch:amd64"]
@@ -207,22 +212,32 @@ publish layer [self-monitoring] ({{ $flavor.name }}):
       allow_failure: true
   parallel:
     matrix:
-      - REGION: us-east-1 # Self Monitoring
-      - REGION: us-west-2 # E2E Testing
+      {{ with $environment := (ds "environments").environments.serverless_testing }}
+      - REGION: us-east-1
+        EXTERNAL_ID_NAME: {{ $environment.external_id }}
+        ROLE_TO_ASSUME: {{ $environment.role_to_assume }}
+        AWS_ACCOUNT: "{{ $environment.account }}"
+      {{ end }}
+      {{ with $environment := (ds "environments").environments.sandbox }}
+      - REGION: us-west-2
+        EXTERNAL_ID_NAME: {{ $environment.external_id }}
+        ROLE_TO_ASSUME: {{ $environment.role_to_assume }}
+        AWS_ACCOUNT: "{{ $environment.account }}"
+      {{ end }}
   needs:
     - layer ({{ $flavor.name }})
   dependencies:
     - layer ({{ $flavor.name }})
-  {{ with $environment := (ds "environments").environments.sandbox }}
   variables:
     LAYER_NAME_BASE_SUFFIX: {{ $flavor.layer_name_base_suffix }}
     ARCHITECTURE: {{ $flavor.arch }}
     LAYER_FILE: datadog_extension-{{ $flavor.suffix }}.zip
-    ADD_LAYER_VERSION_PERMISSIONS: {{ $environment.add_layer_version_permissions }}
-    AUTOMATICALLY_BUMP_VERSION: {{ $environment.automatically_bump_version }}
+    # Both target environments agree on these flags; if they ever diverge,
+    # move them into the matrix above alongside the account/role.
+    ADD_LAYER_VERSION_PERMISSIONS: 0
+    AUTOMATICALLY_BUMP_VERSION: 1
   before_script:
-    - EXTERNAL_ID_NAME={{ $environment.external_id }} ROLE_TO_ASSUME={{ $environment.role_to_assume }} AWS_ACCOUNT={{ $environment.account }} source .gitlab/scripts/get_secrets.sh
-  {{ end }}
+    - source .gitlab/scripts/get_secrets.sh
   script:
     - .gitlab/scripts/publish_layers.sh
 
@@ -322,7 +337,7 @@ publish private images ({{ $multi_arch_image_flavor.name }}):
   variables:
     SUFFIX: {{ $multi_arch_image_flavor.suffix }}
   before_script:
-    {{ with $environment := (ds "environments").environments.sandbox }}
+    {{ with $environment := (ds "environments").environments.serverless_testing }}
     - EXTERNAL_ID_NAME={{ $environment.external_id }} ROLE_TO_ASSUME={{ $environment.role_to_assume }} AWS_ACCOUNT={{ $environment.account }} source .gitlab/scripts/get_secrets.sh
     {{ end }}
   script:
