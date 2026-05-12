@@ -548,18 +548,25 @@ impl Processor {
             }
         }
 
-        self.process_on_platform_runtime_done(request_id, status, tags_provider, trace_sender)
-            .await;
+        self.process_on_platform_runtime_done(
+            request_id,
+            status,
+            error_type.as_deref(),
+            tags_provider,
+            trace_sender,
+        )
+        .await;
     }
 
     async fn process_on_platform_runtime_done(
         &mut self,
         request_id: &String,
         status: Status,
+        error_type: Option<&str>,
         tags_provider: Arc<provider::Provider>,
         trace_sender: Arc<SendingTraceProcessor>,
     ) {
-        let context = self.enrich_ctx_at_platform_done(request_id, status);
+        let context = self.enrich_ctx_at_platform_done(request_id, status, error_type);
 
         if self.tracer_detected {
             if let Some(ctx) = context
@@ -579,6 +586,7 @@ impl Processor {
         &mut self,
         request_id: &String,
         status: Status,
+        error_type: Option<&str>,
     ) -> Option<Context> {
         let Some(context) = self.context_buffer.get_mut(request_id) else {
             debug!(
@@ -605,6 +613,29 @@ impl Processor {
                 .invocation_span
                 .meta
                 .insert("error.type".to_string(), "Timeout".to_string());
+        }
+
+        // Handle OOM error case. When Lambda SIGKILLs the function process for hitting
+        // the memory limit, the tracer dies before flushing end-of-invocation headers,
+        // leaving trace_id/span_id at 0 and dropping the span at the send guard in
+        // process_on_platform_runtime_done. Mirror the Timeout path so the invocation
+        // still gets a span.
+        if status == Status::Error && error_type == Some("Runtime.OutOfMemory") {
+            if context.invocation_span.trace_id == 0 {
+                context.invocation_span.trace_id = generate_span_id();
+            }
+            if context.invocation_span.span_id == 0 {
+                context.invocation_span.span_id = generate_span_id();
+            }
+            context.invocation_span.error = 1;
+            context.invocation_span.meta.insert(
+                "error.msg".to_string(),
+                "Datadog detected an Out of Memory error".to_string(),
+            );
+            context
+                .invocation_span
+                .meta
+                .insert("error.type".to_string(), "OutOfMemory".to_string());
         }
 
         // Process enhanced metrics if available
@@ -2391,7 +2422,7 @@ mod tests {
         p.on_platform_start(request_id.clone(), chrono::Utc::now());
 
         let ctx = p
-            .enrich_ctx_at_platform_done(&request_id, Status::Success)
+            .enrich_ctx_at_platform_done(&request_id, Status::Success, None)
             .expect("context must be present");
 
         assert_eq!(
@@ -2409,7 +2440,7 @@ mod tests {
         p.on_platform_start(request_id.clone(), chrono::Utc::now());
 
         let ctx = p
-            .enrich_ctx_at_platform_done(&request_id, Status::Success)
+            .enrich_ctx_at_platform_done(&request_id, Status::Success, None)
             .expect("context must be present");
 
         assert!(
@@ -2436,7 +2467,7 @@ mod tests {
             .insert("_dd.appsec.enabled".to_string(), 0.0);
 
         let ctx = p
-            .enrich_ctx_at_platform_done(&request_id, Status::Success)
+            .enrich_ctx_at_platform_done(&request_id, Status::Success, None)
             .expect("context must be present");
 
         assert_eq!(
@@ -2444,5 +2475,70 @@ mod tests {
             Some(&0.0),
             "pre-existing _dd.appsec.enabled value must not be overwritten"
         );
+    }
+
+    #[tokio::test]
+    async fn enrich_ctx_synthesizes_span_on_runtime_oom() {
+        let mut p = setup();
+        let request_id = String::from("req-oom");
+        p.on_invoke_event(request_id.clone());
+        p.on_platform_start(request_id.clone(), chrono::Utc::now());
+
+        // Simulate the tracer never having flushed: trace_id/span_id remain 0
+        // because the function process was SIGKILL'd before UniversalInstrumentationEnd.
+        let ctx = p
+            .enrich_ctx_at_platform_done(&request_id, Status::Error, Some("Runtime.OutOfMemory"))
+            .expect("context must be present");
+
+        assert_ne!(
+            ctx.invocation_span.trace_id, 0,
+            "trace_id must be synthesized for OOM"
+        );
+        assert_ne!(
+            ctx.invocation_span.span_id, 0,
+            "span_id must be synthesized for OOM"
+        );
+        assert_eq!(ctx.invocation_span.error, 1, "span must be marked error");
+        assert_eq!(
+            ctx.invocation_span
+                .meta
+                .get("error.type")
+                .map(String::as_str),
+            Some("OutOfMemory"),
+        );
+        assert_eq!(
+            ctx.invocation_span
+                .meta
+                .get("error.msg")
+                .map(String::as_str),
+            Some("Datadog detected an Out of Memory error"),
+        );
+    }
+
+    #[tokio::test]
+    async fn enrich_ctx_does_not_synthesize_span_for_non_oom_error() {
+        let mut p = setup();
+        let request_id = String::from("req-other-error");
+        p.on_invoke_event(request_id.clone());
+        p.on_platform_start(request_id.clone(), chrono::Utc::now());
+
+        let ctx = p
+            .enrich_ctx_at_platform_done(&request_id, Status::Error, Some("Runtime.UnknownReason"))
+            .expect("context must be present");
+
+        assert_eq!(
+            ctx.invocation_span.trace_id, 0,
+            "trace_id must not be synthesized for non-OOM error"
+        );
+        assert_eq!(
+            ctx.invocation_span.span_id, 0,
+            "span_id must not be synthesized for non-OOM error"
+        );
+        assert_eq!(
+            ctx.invocation_span.error, 0,
+            "non-OOM error must not be marked error here"
+        );
+        assert!(!ctx.invocation_span.meta.contains_key("error.type"));
+        assert!(!ctx.invocation_span.meta.contains_key("error.msg"));
     }
 }
