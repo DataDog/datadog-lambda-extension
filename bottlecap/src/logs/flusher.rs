@@ -1,5 +1,5 @@
 use crate::config;
-use crate::flushing::InvocationDeadline;
+use crate::flushing::{InvocationDeadline, compute_flush_cap_from};
 use crate::logs::aggregator_service::AggregatorHandle;
 use dogstatsd::api_key::ApiKeyFactory;
 use futures::future::join_all;
@@ -28,10 +28,9 @@ pub struct Flusher {
     api_key_factory: Arc<ApiKeyFactory>,
     headers: OnceCell<HeaderMap>,
     /// Shared current Lambda invocation deadline (epoch ms). Read by the
-    /// upcoming per-request timeout wrapper to compute an adaptive cap; the
+    /// per-request timeout wrapper to compute an adaptive cap; the
     /// underlying value of `0` means "no deadline known" and falls back to the
     /// static `flush_timeout` ceiling.
-    #[allow(dead_code)] // Consumed by the per-request timeout wrapper in a follow-up commit.
     invocation_deadline: InvocationDeadline,
 }
 
@@ -69,7 +68,9 @@ impl Flusher {
                     continue;
                 }
                 let req = self.create_request(batch.clone(), api_key.as_str()).await;
-                set.spawn(async move { Self::send(req, max_attempts).await });
+                let deadline = self.invocation_deadline.clone();
+                let config = self.config.clone();
+                set.spawn(async move { Self::send(req, max_attempts, deadline, config).await });
             }
         }
 
@@ -117,20 +118,44 @@ impl Flusher {
     async fn send(
         req: reqwest::RequestBuilder,
         max_attempts: u32,
+        invocation_deadline: InvocationDeadline,
+        config: Arc<config::Config>,
     ) -> Result<(), Box<dyn Error + Send>> {
         let mut attempts: u32 = 0;
 
         loop {
-            let time = Instant::now();
             attempts += 1;
+
+            // Compute the per-attempt cap *fresh* each iteration so retries
+            // tighten as the Lambda deadline approaches. When there's no budget
+            // left we bail immediately so the payload can be queued for retry
+            // on the next invocation instead of risking a Lambda timeout.
+            let cap = compute_flush_cap_from(
+                &invocation_deadline,
+                config.flush_timeout,
+                config.flush_deadline_margin_ms,
+            );
+            if cap.is_zero() {
+                debug!(
+                    "LOGS | Insufficient remaining invocation budget for attempt {attempts}; deferring for retry"
+                );
+                return Err(Box::new(FailedRequestError {
+                    request: req,
+                    message: format!(
+                        "LOGS | Deferred after {attempts} attempts: no remaining invocation budget"
+                    ),
+                }));
+            }
+
+            let time = Instant::now();
             let Some(cloned_req) = req.try_clone() else {
                 return Err(Box::new(std::io::Error::other("can't clone")));
             };
-            let resp = cloned_req.send().await;
+            let resp = tokio::time::timeout(cap, cloned_req.send()).await;
             let elapsed = time.elapsed();
 
             match resp {
-                Ok(resp) => {
+                Ok(Ok(resp)) => {
                     let status = resp.status();
                     _ = resp.text().await;
                     if status == StatusCode::FORBIDDEN {
@@ -144,7 +169,7 @@ impl Flusher {
                         return Ok(());
                     }
                 }
-                Err(e) => {
+                Ok(Err(e)) => {
                     if attempts >= max_attempts {
                         // After max_attempts failed attempts, return the original request for later retry.
                         // Create a custom error that can be downcast to get the RequestBuilder.
@@ -157,6 +182,25 @@ impl Flusher {
                         return Err(Box::new(FailedRequestError {
                             request: req,
                             message: format!("LOGS | Failed after {attempts} attempts: {e}"),
+                        }));
+                    }
+                }
+                Err(_elapsed) => {
+                    // Per-request deadline elapsed (tokio::time::timeout fired).
+                    if attempts >= max_attempts {
+                        error!(
+                            "LOGS | Request timed out after {} ms (cap {} ms) on attempt {} of {}",
+                            elapsed.as_millis(),
+                            cap.as_millis(),
+                            attempts,
+                            max_attempts
+                        );
+                        return Err(Box::new(FailedRequestError {
+                            request: req,
+                            message: format!(
+                                "LOGS | Timed out after {attempts} attempts (cap {} ms)",
+                                cap.as_millis()
+                            ),
                         }));
                     }
                 }
@@ -203,6 +247,7 @@ pub struct LogsFlusher {
     config: Arc<config::Config>,
     pub flushers: Vec<Flusher>,
     aggregator_handle: AggregatorHandle,
+    invocation_deadline: InvocationDeadline,
 }
 
 impl LogsFlusher {
@@ -251,6 +296,7 @@ impl LogsFlusher {
             config,
             flushers,
             aggregator_handle,
+            invocation_deadline,
         }
     }
 
@@ -263,7 +309,13 @@ impl LogsFlusher {
         // If retry_request is provided, only process that request
         if let Some(req) = retry_request {
             if let Some(req_clone) = req.try_clone()
-                && let Err(e) = Flusher::send(req_clone, self.config.flush_retry_attempts).await
+                && let Err(e) = Flusher::send(
+                    req_clone,
+                    self.config.flush_retry_attempts,
+                    self.invocation_deadline.clone(),
+                    self.config.clone(),
+                )
+                .await
                 && let Some(failed_req_err) = e.downcast_ref::<FailedRequestError>()
             {
                 failed_requests.push(

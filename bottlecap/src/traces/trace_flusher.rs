@@ -16,7 +16,7 @@ use tokio::task::JoinSet;
 use tracing::{debug, error};
 
 use crate::config::Config;
-use crate::flushing::InvocationDeadline;
+use crate::flushing::{InvocationDeadline, compute_flush_cap_from};
 use crate::lifecycle::invocation::processor::S_TO_MS;
 use crate::traces::http_client::HttpClient;
 use crate::traces::trace_aggregator_service::AggregatorHandle;
@@ -102,11 +102,30 @@ impl TraceFlusher {
 
         let http_client = &self.http_client;
 
+        // Compute the adaptive per-request cap from the current Lambda
+        // invocation deadline. When there's no budget left, bail and return
+        // everything for redrive on the next invocation instead of risking a
+        // Lambda timeout.
+        let cap = compute_flush_cap_from(
+            &self.invocation_deadline,
+            self.config.flush_timeout,
+            self.config.flush_deadline_margin_ms,
+        );
+        #[allow(clippy::cast_possible_truncation)]
+        let cap_ms = cap.as_millis().min(u64::MAX as u128) as u64;
+
         let mut failed_batch: Vec<SendData> = Vec::new();
 
         if let Some(traces) = failed_traces {
             // If we have traces from a previous failed attempt, try to send those first.
             if !traces.is_empty() {
+                if cap.is_zero() {
+                    debug!(
+                        "TRACES | Insufficient remaining invocation budget; deferring {} failed batches for redrive",
+                        traces.len()
+                    );
+                    return Some(traces);
+                }
                 debug!(
                     "TRACES | Retrying to send {} previously failed batches",
                     traces.len()
@@ -127,6 +146,34 @@ impl TraceFlusher {
             }
         };
 
+        if cap.is_zero() && !all_batches.is_empty() {
+            // Re-build the SendData objects from the freshly drained batches
+            // and return them for redrive — they're the same payloads we would
+            // have sent, just deferred to the next invocation. Note: the
+            // primary endpoint's `timeout_ms` is set at trace-process time and
+            // still uses `config.flush_timeout` (a follow-up will add an
+            // upstream `SendDataBuilder::with_timeout_ms` so this can be made
+            // adaptive too).
+            debug!(
+                "TRACES | Insufficient remaining invocation budget; deferring fresh batches for redrive"
+            );
+            let mut deferred: Vec<SendData> = Vec::new();
+            for trace_builders in all_batches {
+                for info in trace_builders {
+                    deferred.push(
+                        info.builder
+                            .with_api_key(api_key.as_str())
+                            .with_retry_strategy(trace_retry_strategy(&self.config))
+                            .build(),
+                    );
+                }
+            }
+            if deferred.is_empty() {
+                return None;
+            }
+            return Some(deferred);
+        }
+
         let mut batch_tasks = JoinSet::new();
 
         for trace_builders in all_batches {
@@ -145,7 +192,10 @@ impl TraceFlusher {
             // Send to ADDITIONAL endpoints for dual-shipping.
             // Construct separate SendData objects per endpoint by cloning the inner
             // V07 payload data (TracerPayload is Clone, but SendData is not).
-            for endpoint in self.additional_endpoints.clone() {
+            for mut endpoint in self.additional_endpoints.clone() {
+                // Apply the adaptive per-request timeout to dual-shipping
+                // endpoints too.
+                endpoint.timeout_ms = cap_ms;
                 let additional_traces: Vec<_> = traces_with_tags
                     .iter()
                     .filter_map(|(trace, tags)| match trace.get_payloads() {
