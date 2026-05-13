@@ -9,6 +9,7 @@ use tracing::{debug, error, info};
 
 use crate::{
     config,
+    flushing::InvocationDeadline,
     tags::provider,
     traces::{
         DD_ADDITIONAL_TAGS_HEADER,
@@ -30,6 +31,10 @@ pub struct Flusher {
     tags_provider: Arc<provider::Provider>,
     api_key_factory: Arc<ApiKeyFactory>,
     headers: OnceCell<HeaderMap>,
+    /// Shared current Lambda invocation deadline (epoch ms). Read at send
+    /// time to derive an adaptive per-request timeout via `compute_flush_cap`.
+    #[allow(dead_code)] // Consumed by the per-request timeout wrapper in a follow-up commit.
+    invocation_deadline: InvocationDeadline,
 }
 
 impl Flusher {
@@ -39,6 +44,7 @@ impl Flusher {
         tags_provider: Arc<provider::Provider>,
         config: Arc<config::Config>,
         client: reqwest::Client,
+        invocation_deadline: InvocationDeadline,
     ) -> Self {
         Flusher {
             client,
@@ -47,6 +53,7 @@ impl Flusher {
             tags_provider,
             api_key_factory,
             headers: OnceCell::new(),
+            invocation_deadline,
         }
     }
 

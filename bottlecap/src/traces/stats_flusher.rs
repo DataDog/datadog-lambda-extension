@@ -7,6 +7,7 @@ use tokio::sync::Mutex;
 use tokio::sync::OnceCell;
 
 use crate::config;
+use crate::flushing::InvocationDeadline;
 use crate::lifecycle::invocation::processor::S_TO_MS;
 use crate::traces::http_client::HttpClient;
 use crate::traces::stats_aggregator::StatsAggregator;
@@ -22,6 +23,9 @@ pub struct StatsFlusher {
     api_key_factory: Arc<ApiKeyFactory>,
     endpoint: OnceCell<Endpoint>,
     http_client: HttpClient,
+    /// Shared current Lambda invocation deadline (epoch ms). Read at send
+    /// time to derive an adaptive per-request timeout via `compute_flush_cap`.
+    pub invocation_deadline: InvocationDeadline,
 }
 
 impl StatsFlusher {
@@ -31,6 +35,7 @@ impl StatsFlusher {
         aggregator: Arc<Mutex<StatsAggregator>>,
         config: Arc<config::Config>,
         http_client: HttpClient,
+        invocation_deadline: InvocationDeadline,
     ) -> Self {
         StatsFlusher {
             aggregator,
@@ -38,6 +43,7 @@ impl StatsFlusher {
             api_key_factory,
             endpoint: OnceCell::new(),
             http_client,
+            invocation_deadline,
         }
     }
 

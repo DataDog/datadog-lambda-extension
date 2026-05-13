@@ -38,7 +38,7 @@ use bottlecap::{
         },
     },
     fips::{log_fips_status, prepare_client_provider},
-    flushing::FlushingService,
+    flushing::{FlushingService, InvocationDeadline, new_invocation_deadline},
     lifecycle::{
         flush_control::{DEFAULT_CONTINUOUS_FLUSH_INTERVAL, FlushControl, FlushDecision},
         invocation::processor_service::{InvocationProcessorHandle, InvocationProcessorService},
@@ -114,6 +114,15 @@ async fn main() -> anyhow::Result<()> {
     log_fips_status(&aws_config.region);
     let version_without_next = EXTENSION_VERSION.split('-').next().unwrap_or("NA");
     debug!("Starting Datadog Extension v{version_without_next}");
+
+    // tokio::spawn(async {
+    //     let mut tick: u64 = 0;
+    //     loop {
+    //         debug!("HEARTBEAT tick={}", tick);
+    //         tick = tick.wrapping_add(1);
+    //         tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
+    //     }
+    // });
 
     // Debug: Wait for debugger to attach if DD_DEBUG_WAIT_FOR_ATTACH is set
     if let Ok(wait_secs) = env::var("DD_DEBUG_WAIT_FOR_ATTACH")
@@ -306,6 +315,13 @@ async fn extension_loop_active(
     let account_id = r.account_id.as_ref().unwrap_or(&"none".to_string()).clone();
     let tags_provider = setup_tag_provider(&Arc::clone(&aws_config), config, &account_id);
 
+    // Shared mutable cell holding the current Lambda invocation deadline (epoch ms).
+    // Updated on every INVOKE event in `handle_next_invocation`; flushers read it at
+    // send time to derive an adaptive per-request timeout. `0` means "no deadline known"
+    // (e.g. before the first INVOKE), in which case flushers fall back to the static
+    // `flush_timeout` ceiling.
+    let invocation_deadline = new_invocation_deadline();
+
     let (
         logs_agent_channel,
         logs_flusher,
@@ -319,6 +335,7 @@ async fn extension_loop_active(
         event_bus_tx.clone(),
         aws_config.is_managed_instance_mode(),
         &shared_client,
+        invocation_deadline.clone(),
     );
 
     let (metrics_flushers, metrics_aggregator_handle, dogstatsd_cancel_token) = start_dogstatsd(
@@ -372,6 +389,7 @@ async fn extension_loop_active(
         invocation_processor_handle.clone(),
         appsec_processor.clone(),
         &shared_client,
+        invocation_deadline.clone(),
     );
 
     let api_runtime_proxy_shutdown_signal = start_api_runtime_proxy(
@@ -634,7 +652,7 @@ async fn extension_loop_active(
         Arc::clone(&metrics_flushers),
         metrics_aggregator_handle.clone(),
     );
-    handle_next_invocation(next_lambda_response, &invocation_processor_handle).await;
+    handle_next_invocation(next_lambda_response, &invocation_processor_handle, &invocation_deadline).await;
     loop {
         let maybe_shutdown_event;
 
@@ -666,7 +684,7 @@ async fn extension_loop_active(
                 let next_response =
                     extension::next_event(client, &aws_config.runtime_api, &r.extension_id).await;
                 maybe_shutdown_event =
-                    handle_next_invocation(next_response, &invocation_processor_handle).await;
+                    handle_next_invocation(next_response, &invocation_processor_handle, &invocation_deadline).await;
             }
             FlushDecision::Continuous | FlushDecision::Periodic | FlushDecision::Dont => {
                 match current_flush_decision {
@@ -697,7 +715,7 @@ async fn extension_loop_active(
                     tokio::select! {
                     biased;
                         next_response = &mut next_lambda_response => {
-                            maybe_shutdown_event = handle_next_invocation(next_response, &invocation_processor_handle).await;
+                            maybe_shutdown_event = handle_next_invocation(next_response, &invocation_processor_handle, &invocation_deadline).await;
                             // Need to break here to re-call next
                             break 'next_invocation;
                         }
@@ -983,6 +1001,7 @@ async fn handle_event_bus_event(
 async fn handle_next_invocation(
     next_response: Result<NextEventResponse, ExtensionError>,
     invocation_processor_handle: &InvocationProcessorHandle,
+    invocation_deadline: &InvocationDeadline,
 ) -> NextEventResponse {
     match next_response {
         Ok(NextEventResponse::Invoke {
@@ -990,6 +1009,9 @@ async fn handle_next_invocation(
             deadline_ms,
             ref invoked_function_arn,
         }) => {
+            // Publish the new deadline so flushers can derive their adaptive
+            // per-request timeout from `deadline_ms - now - margin`.
+            invocation_deadline.store(deadline_ms, std::sync::atomic::Ordering::Relaxed);
             debug!(
                 "Invoke event {}; deadline: {}, invoked_function_arn: {}",
                 request_id.clone(),
@@ -1007,6 +1029,9 @@ async fn handle_next_invocation(
             ref shutdown_reason,
             deadline_ms,
         }) => {
+            // Clear the deadline so any post-shutdown sends fall back to the
+            // static ceiling instead of using a now-stale invocation deadline.
+            invocation_deadline.store(0, std::sync::atomic::Ordering::Relaxed);
             if let Err(e) = invocation_processor_handle.on_shutdown_event().await {
                 error!("Failed to send shutdown event to processor: {}", e);
             }
@@ -1048,6 +1073,7 @@ fn start_logs_agent(
     event_bus: Sender<Event>,
     is_managed_instance_mode: bool,
     client: &Client,
+    invocation_deadline: InvocationDeadline,
 ) -> (
     Sender<TelemetryEvent>,
     LogsFlusher,
@@ -1082,6 +1108,7 @@ fn start_logs_agent(
         aggregator_handle.clone(),
         config.clone(),
         client.clone(),
+        invocation_deadline,
     );
     (
         tx,
@@ -1100,6 +1127,7 @@ fn start_trace_agent(
     invocation_processor_handle: InvocationProcessorHandle,
     appsec_processor: Option<Arc<TokioMutex<AppSecProcessor>>>,
     client: &Client,
+    invocation_deadline: InvocationDeadline,
 ) -> (
     Sender<SendDataBuilderInfo>,
     Arc<trace_flusher::TraceFlusher>,
@@ -1131,6 +1159,7 @@ fn start_trace_agent(
         stats_aggregator.clone(),
         Arc::clone(config),
         trace_http_client.clone(),
+        invocation_deadline.clone(),
     ));
 
     let stats_processor = Arc::new(stats_processor::ServerlessStatsProcessor {});
@@ -1144,6 +1173,7 @@ fn start_trace_agent(
         config.clone(),
         api_key_factory.clone(),
         trace_http_client,
+        invocation_deadline.clone(),
     ));
 
     let obfuscation_config = obfuscation_config::ObfuscationConfig {
@@ -1170,6 +1200,7 @@ fn start_trace_agent(
         Arc::clone(tags_provider),
         Arc::clone(config),
         client.clone(),
+        invocation_deadline,
     ));
 
     let trace_agent = trace_agent::TraceAgent::new(
