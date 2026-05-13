@@ -8,6 +8,7 @@ use dogstatsd::{
     aggregator::AggregatorHandle as MetricsAggregatorHandle, flusher::Flusher as MetricsFlusher,
 };
 
+use crate::flushing::dlq::Dlq;
 use crate::flushing::handles::{FlushHandles, MetricsRetryBatch};
 use crate::logs::flusher::LogsFlusher;
 use crate::traces::{
@@ -34,6 +35,16 @@ pub struct FlushingService {
 
     // Pending flush handles
     handles: FlushHandles,
+
+    /// In-memory dead letter queue holding payloads that exhausted both the
+    /// per-flusher retry loop and the cross-flusher redrive. Drained at the
+    /// start of every subsequent `flush_blocking()` call; what remains at
+    /// SHUTDOWN is logged as dropped.
+    ///
+    /// Behind `Arc` + interior mutability so spawned redrive tasks (which
+    /// hold `&self` clones, not `&mut self`) can push without restructuring
+    /// the existing flush flow.
+    pub(crate) dlq: Arc<Dlq>,
 }
 
 impl FlushingService {
@@ -46,6 +57,7 @@ impl FlushingService {
         proxy_flusher: Arc<ProxyFlusher>,
         metrics_flushers: Arc<Vec<MetricsFlusher>>,
         metrics_aggr_handle: MetricsAggregatorHandle,
+        dlq_max_bytes: u64,
     ) -> Self {
         Self {
             logs_flusher,
@@ -55,7 +67,14 @@ impl FlushingService {
             metrics_flushers,
             metrics_aggr_handle,
             handles: FlushHandles::new(),
+            dlq: Dlq::new(dlq_max_bytes),
         }
+    }
+
+    /// Test/inspection accessor for the shared DLQ.
+    #[must_use]
+    pub fn dlq(&self) -> Arc<Dlq> {
+        Arc::clone(&self.dlq)
     }
 
     /// Returns `true` if any flush operation is still pending.
@@ -307,11 +326,15 @@ impl FlushingService {
     ///
     /// Fetches metrics from the aggregator and flushes all data types in parallel.
     async fn flush_blocking_inner(&self, force_stats: bool) {
+        let total_start = std::time::Instant::now();
+
+        let aggr_start = std::time::Instant::now();
         let flush_response = self
             .metrics_aggr_handle
             .flush()
             .await
             .expect("can't flush metrics aggr handle");
+        let aggr_ms = aggr_start.elapsed().as_millis();
 
         let metrics_futures: Vec<_> = self
             .metrics_flushers
@@ -324,12 +347,45 @@ impl FlushingService {
             })
             .collect();
 
-        tokio::join!(
-            self.logs_flusher.flush(None),
-            futures::future::join_all(metrics_futures),
-            self.trace_flusher.flush(None),
-            self.stats_flusher.flush(force_stats, None),
-            self.proxy_flusher.flush(None),
+        let logs_fut = async {
+            let s = std::time::Instant::now();
+            self.logs_flusher.flush(None).await;
+            s.elapsed().as_millis()
+        };
+        let metrics_fut = async {
+            let s = std::time::Instant::now();
+            futures::future::join_all(metrics_futures).await;
+            s.elapsed().as_millis()
+        };
+        let trace_fut = async {
+            let s = std::time::Instant::now();
+            self.trace_flusher.flush(None).await;
+            s.elapsed().as_millis()
+        };
+        let stats_fut = async {
+            let s = std::time::Instant::now();
+            self.stats_flusher.flush(force_stats, None).await;
+            s.elapsed().as_millis()
+        };
+        let proxy_fut = async {
+            let s = std::time::Instant::now();
+            self.proxy_flusher.flush(None).await;
+            s.elapsed().as_millis()
+        };
+
+        let (logs_ms, metrics_ms, trace_ms, stats_ms, proxy_ms) =
+            tokio::join!(logs_fut, metrics_fut, trace_fut, stats_fut, proxy_fut);
+
+        debug!(
+            "FLUSH_TIMING total={}ms aggr={}ms logs={}ms metrics={}ms trace={}ms stats={}ms proxy={}ms force_stats={}",
+            total_start.elapsed().as_millis(),
+            aggr_ms,
+            logs_ms,
+            metrics_ms,
+            trace_ms,
+            stats_ms,
+            proxy_ms,
+            force_stats
         );
     }
 }
