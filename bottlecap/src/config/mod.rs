@@ -247,6 +247,21 @@ pub struct Config {
     // Timeout for the request to flush data to Datadog endpoint
     pub flush_timeout: u64,
 
+    /// Safety margin (ms) reserved at the tail of the Lambda budget so the
+    /// extension can finish its `/extension/event/next` call after flushing.
+    /// The per-request flush deadline is `min(flush_timeout, deadline_ms - now_ms - flush_deadline_margin_ms)`.
+    pub flush_deadline_margin_ms: u64,
+
+    /// Maximum combined size of the in-memory dead letter queue across all
+    /// telemetry types. When pushing a still-failed payload would exceed this
+    /// cap, the incoming payload is dropped (matching dd-trace-py's policy).
+    pub flush_dlq_max_bytes: u64,
+
+    /// Maximum number of attempts each flusher will make per `flush()` call
+    /// before returning the payload for redrive / DLQ. Previously the
+    /// `FLUSH_RETRY_COUNT` constant; now runtime-configurable.
+    pub flush_retry_attempts: u32,
+
     // Global config of compression levels.
     // It would be overridden by the setup for the individual component
     pub compression_level: i32,
@@ -380,6 +395,9 @@ impl Default for Config {
             api_key: String::default(),
             log_level: LogLevel::default(),
             flush_timeout: 30,
+            flush_deadline_margin_ms: 100,
+            flush_dlq_max_bytes: 52_428_800, // 50 MiB
+            flush_retry_attempts: 3,
 
             // Proxy
             proxy_https: None,

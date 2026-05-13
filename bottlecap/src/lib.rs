@@ -40,8 +40,5 @@ pub mod traces;
 
 pub const LAMBDA_RUNTIME_SLUG: &str = "lambda";
 
-// todo: consider making this configurable
-pub const FLUSH_RETRY_COUNT: usize = 3;
-
 // todo: make sure we can override those with environment variables
 pub const DOGSTATSD_PORT: u16 = 8125;

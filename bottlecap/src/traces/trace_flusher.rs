@@ -15,19 +15,18 @@ use std::sync::Arc;
 use tokio::task::JoinSet;
 use tracing::{debug, error};
 
-use crate::FLUSH_RETRY_COUNT;
 use crate::config::Config;
 use crate::lifecycle::invocation::processor::S_TO_MS;
 use crate::traces::http_client::HttpClient;
 use crate::traces::trace_aggregator_service::AggregatorHandle;
 
-/// Retry strategy for trace flushing using the shared `FLUSH_RETRY_COUNT`
+/// Retry strategy for trace flushing using the configured retry attempts
 /// with no delay between attempts. In Lambda, every millisecond of wall-clock
 /// time matters, and the per-attempt request timeout already bounds how long
 /// each retry can take.
-fn trace_retry_strategy() -> RetryStrategy {
+fn trace_retry_strategy(config: &Config) -> RetryStrategy {
     RetryStrategy::new(
-        u32::try_from(FLUSH_RETRY_COUNT).unwrap_or(3),
+        config.flush_retry_attempts,
         0,
         RetryBackoffType::Constant,
         None,
@@ -131,7 +130,7 @@ impl TraceFlusher {
                     let trace = info
                         .builder
                         .with_api_key(api_key.as_str())
-                        .with_retry_strategy(trace_retry_strategy())
+                        .with_retry_strategy(trace_retry_strategy(&self.config))
                         .build();
                     (trace, info.header_tags)
                 })
@@ -151,7 +150,7 @@ impl TraceFlusher {
                                 tags.to_tracer_header_tags(),
                                 &endpoint,
                             );
-                            send_data.set_retry_strategy(trace_retry_strategy());
+                            send_data.set_retry_strategy(trace_retry_strategy(&self.config));
                             Some(send_data)
                         }
                         // All payloads in the extension are V07 (produced by

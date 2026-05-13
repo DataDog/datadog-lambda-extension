@@ -43,6 +43,15 @@ pub struct YamlConfig {
     pub flush_timeout: Option<u64>,
 
     #[serde(deserialize_with = "deserialize_option_lossless")]
+    pub flush_deadline_margin_ms: Option<u64>,
+
+    #[serde(deserialize_with = "deserialize_option_lossless")]
+    pub flush_dlq_max_bytes: Option<u64>,
+
+    #[serde(deserialize_with = "deserialize_option_lossless")]
+    pub flush_retry_attempts: Option<u32>,
+
+    #[serde(deserialize_with = "deserialize_option_lossless")]
     pub compression_level: Option<i32>,
 
     // Proxy
@@ -419,6 +428,9 @@ fn merge_config(config: &mut Config, yaml_config: &YamlConfig) {
     merge_string!(config, yaml_config, api_key);
     merge_option_to_value!(config, yaml_config, log_level);
     merge_option_to_value!(config, yaml_config, flush_timeout);
+    merge_option_to_value!(config, yaml_config, flush_deadline_margin_ms);
+    merge_option_to_value!(config, yaml_config, flush_dlq_max_bytes);
+    merge_option_to_value!(config, yaml_config, flush_retry_attempts);
 
     // Unified Service Tagging
     merge_option!(config, yaml_config, env);
@@ -761,6 +773,9 @@ site: "test-site"
 api_key: "test-api-key"
 log_level: "debug"
 flush_timeout: 42
+flush_deadline_margin_ms: 250
+flush_dlq_max_bytes: 1048576
+flush_retry_attempts: 5
 compression_level: 4
 # Proxy
 proxy:
@@ -905,6 +920,9 @@ api_security_sample_delay: 60 # Seconds
                 api_key: "test-api-key".to_string(),
                 log_level: LogLevel::Debug,
                 flush_timeout: 42,
+                flush_deadline_margin_ms: 250,
+                flush_dlq_max_bytes: 1_048_576,
+                flush_retry_attempts: 5,
                 compression_level: 4,
                 proxy_https: Some("https://proxy.example.com".to_string()),
                 proxy_no_proxy: vec!["localhost".to_string(), "127.0.0.1".to_string()],

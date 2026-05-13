@@ -8,7 +8,7 @@ use tokio::{sync::Mutex, task::JoinSet};
 use tracing::{debug, error, info};
 
 use crate::{
-    FLUSH_RETRY_COUNT, config,
+    config,
     tags::provider,
     traces::{
         DD_ADDITIONAL_TAGS_HEADER,
@@ -105,8 +105,9 @@ impl Flusher {
             }
         }
 
+        let max_attempts = self.config.flush_retry_attempts;
         for request in requests {
-            join_set.spawn(async move { Self::send(request).await });
+            join_set.spawn(async move { Self::send(request, max_attempts).await });
         }
 
         let send_results = join_set.join_all().await;
@@ -134,9 +135,12 @@ impl Flusher {
             .body(request.body)
     }
 
-    async fn send(request: reqwest::RequestBuilder) -> Result<(), Box<dyn Error + Send>> {
+    async fn send(
+        request: reqwest::RequestBuilder,
+        max_attempts: u32,
+    ) -> Result<(), Box<dyn Error + Send>> {
         debug!("PROXY_FLUSHER | Attempting to send request");
-        let mut attempts = 0;
+        let mut attempts: u32 = 0;
 
         loop {
             attempts += 1;
@@ -160,7 +164,7 @@ impl Flusher {
                             elapsed.as_millis()
                         );
                         return Ok(());
-                    } else if attempts >= FLUSH_RETRY_COUNT {
+                    } else if attempts >= max_attempts {
                         // Final attempt. Log with error level and return error.
                         let body_string = body.unwrap_or_default();
                         error!(
@@ -173,11 +177,11 @@ impl Flusher {
                     }
                     // Not the final attempt. Log with info level and retry.
                     info!(
-                        "PROXY_FLUSHER | Request failed with status {status} to {url}: {body:?} (attempt {attempts}/{FLUSH_RETRY_COUNT})"
+                        "PROXY_FLUSHER | Request failed with status {status} to {url}: {body:?} (attempt {attempts}/{max_attempts})"
                     );
                 }
                 Err(e) => {
-                    if attempts >= FLUSH_RETRY_COUNT {
+                    if attempts >= max_attempts {
                         error!(
                             "PROXY_FLUSHER | Failed to send request after {} attempts: {:?}",
                             attempts, e

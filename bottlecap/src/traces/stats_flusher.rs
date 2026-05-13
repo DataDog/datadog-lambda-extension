@@ -6,7 +6,6 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 use tokio::sync::OnceCell;
 
-use crate::FLUSH_RETRY_COUNT;
 use crate::config;
 use crate::lifecycle::invocation::processor::S_TO_MS;
 use crate::traces::http_client::HttpClient;
@@ -93,8 +92,9 @@ impl StatsFlusher {
         };
 
         let stats_url = trace_stats_url(&self.config.site);
+        let max_attempts = self.config.flush_retry_attempts;
 
-        for attempt in 1..=FLUSH_RETRY_COUNT {
+        for attempt in 1..=max_attempts {
             let start = std::time::Instant::now();
             let resp = stats_utils::send_stats_payload_with_client(
                 serialized_stats_payload.clone(),
@@ -108,21 +108,21 @@ impl StatsFlusher {
             match resp {
                 Ok(()) => {
                     debug!(
-                        "STATS | Successfully flushed stats to {stats_url} in {} ms (attempt {attempt}/{FLUSH_RETRY_COUNT})",
+                        "STATS | Successfully flushed stats to {stats_url} in {} ms (attempt {attempt}/{max_attempts})",
                         elapsed.as_millis()
                     );
                     return None;
                 }
                 Err(e) => {
                     debug!(
-                        "STATS | Failed to send stats to {stats_url} in {} ms (attempt {attempt}/{FLUSH_RETRY_COUNT}): {e:?}",
+                        "STATS | Failed to send stats to {stats_url} in {} ms (attempt {attempt}/{max_attempts}): {e:?}",
                         elapsed.as_millis()
                     );
                 }
             }
         }
 
-        error!("STATS | Exhausted all {FLUSH_RETRY_COUNT} attempts, returning stats for redrive");
+        error!("STATS | Exhausted all {max_attempts} attempts, returning stats for redrive");
         Some(stats)
     }
 

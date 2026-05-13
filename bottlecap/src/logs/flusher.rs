@@ -1,4 +1,3 @@
-use crate::FLUSH_RETRY_COUNT;
 use crate::config;
 use crate::logs::aggregator_service::AggregatorHandle;
 use dogstatsd::api_key::ApiKeyFactory;
@@ -53,6 +52,7 @@ impl Flusher {
         };
 
         let mut set = JoinSet::new();
+        let max_attempts = self.config.flush_retry_attempts;
 
         if let Some(logs_batches) = batches {
             for batch in logs_batches.iter() {
@@ -60,7 +60,7 @@ impl Flusher {
                     continue;
                 }
                 let req = self.create_request(batch.clone(), api_key.as_str()).await;
-                set.spawn(async move { Self::send(req).await });
+                set.spawn(async move { Self::send(req, max_attempts).await });
             }
         }
 
@@ -105,8 +105,11 @@ impl Flusher {
             .body(data)
     }
 
-    async fn send(req: reqwest::RequestBuilder) -> Result<(), Box<dyn Error + Send>> {
-        let mut attempts = 0;
+    async fn send(
+        req: reqwest::RequestBuilder,
+        max_attempts: u32,
+    ) -> Result<(), Box<dyn Error + Send>> {
+        let mut attempts: u32 = 0;
 
         loop {
             let time = Instant::now();
@@ -133,9 +136,9 @@ impl Flusher {
                     }
                 }
                 Err(e) => {
-                    if attempts >= FLUSH_RETRY_COUNT {
-                        // After 3 failed attempts, return the original request for later retry
-                        // Create a custom error that can be downcast to get the RequestBuilder
+                    if attempts >= max_attempts {
+                        // After max_attempts failed attempts, return the original request for later retry.
+                        // Create a custom error that can be downcast to get the RequestBuilder.
                         error!(
                             "LOGS | Failed to send request after {} ms and {} attempts: {:?}",
                             elapsed.as_millis(),
@@ -248,7 +251,7 @@ impl LogsFlusher {
         // If retry_request is provided, only process that request
         if let Some(req) = retry_request {
             if let Some(req_clone) = req.try_clone()
-                && let Err(e) = Flusher::send(req_clone).await
+                && let Err(e) = Flusher::send(req_clone, self.config.flush_retry_attempts).await
                 && let Some(failed_req_err) = e.downcast_ref::<FailedRequestError>()
             {
                 failed_requests.push(

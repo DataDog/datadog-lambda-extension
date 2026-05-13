@@ -59,6 +59,29 @@ pub struct EnvConfig {
     #[serde(deserialize_with = "deserialize_option_lossless")]
     pub flush_timeout: Option<u64>,
 
+    /// @env `DD_FLUSH_DEADLINE_MARGIN_MS`
+    ///
+    /// Safety margin (ms) reserved at the tail of the Lambda budget so the
+    /// extension can finish `/extension/event/next` after flushing. Per-request
+    /// timeout = `min(flush_timeout, deadline_ms - now_ms - flush_deadline_margin_ms)`.
+    #[serde(deserialize_with = "deserialize_option_lossless")]
+    pub flush_deadline_margin_ms: Option<u64>,
+
+    /// @env `DD_FLUSH_DLQ_MAX_BYTES`
+    ///
+    /// Maximum combined size (bytes) of the in-memory dead letter queue across
+    /// all telemetry types. When pushing a still-failed payload would exceed
+    /// this cap, the incoming payload is dropped.
+    #[serde(deserialize_with = "deserialize_option_lossless")]
+    pub flush_dlq_max_bytes: Option<u64>,
+
+    /// @env `DD_FLUSH_RETRY_ATTEMPTS`
+    ///
+    /// Maximum number of attempts each flusher will make per `flush()` call
+    /// before returning the payload for redrive / DLQ.
+    #[serde(deserialize_with = "deserialize_option_lossless")]
+    pub flush_retry_attempts: Option<u32>,
+
     // Proxy
     /// @env `DD_PROXY_HTTPS`
     ///
@@ -497,6 +520,9 @@ fn merge_config(config: &mut Config, env_config: &EnvConfig) {
     merge_string!(config, env_config, api_key);
     merge_option_to_value!(config, env_config, log_level);
     merge_option_to_value!(config, env_config, flush_timeout);
+    merge_option_to_value!(config, env_config, flush_deadline_margin_ms);
+    merge_option_to_value!(config, env_config, flush_dlq_max_bytes);
+    merge_option_to_value!(config, env_config, flush_retry_attempts);
 
     // Unified Service Tagging
     merge_option!(config, env_config, env);
@@ -742,6 +768,9 @@ mod tests {
             jail.set_env("DD_API_KEY", "test-api-key");
             jail.set_env("DD_LOG_LEVEL", "debug");
             jail.set_env("DD_FLUSH_TIMEOUT", "42");
+            jail.set_env("DD_FLUSH_DEADLINE_MARGIN_MS", "250");
+            jail.set_env("DD_FLUSH_DLQ_MAX_BYTES", "1048576");
+            jail.set_env("DD_FLUSH_RETRY_ATTEMPTS", "5");
 
             // Proxy
             jail.set_env("DD_PROXY_HTTPS", "https://proxy.example.com");
@@ -907,6 +936,9 @@ mod tests {
                 log_level: LogLevel::Debug,
                 compression_level: 4,
                 flush_timeout: 42,
+                flush_deadline_margin_ms: 250,
+                flush_dlq_max_bytes: 1_048_576,
+                flush_retry_attempts: 5,
                 proxy_https: Some("https://proxy.example.com".to_string()),
                 proxy_no_proxy: vec!["localhost".to_string(), "127.0.0.1".to_string()],
                 http_protocol: Some("http1".to_string()),
