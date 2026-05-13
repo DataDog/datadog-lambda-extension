@@ -9,7 +9,7 @@ use tracing::{debug, error, info};
 
 use crate::{
     config,
-    flushing::InvocationDeadline,
+    flushing::{InvocationDeadline, compute_flush_cap_from},
     tags::provider,
     traces::{
         DD_ADDITIONAL_TAGS_HEADER,
@@ -33,7 +33,6 @@ pub struct Flusher {
     headers: OnceCell<HeaderMap>,
     /// Shared current Lambda invocation deadline (epoch ms). Read at send
     /// time to derive an adaptive per-request timeout via `compute_flush_cap`.
-    #[allow(dead_code)] // Consumed by the per-request timeout wrapper in a follow-up commit.
     invocation_deadline: InvocationDeadline,
 }
 
@@ -114,7 +113,11 @@ impl Flusher {
 
         let max_attempts = self.config.flush_retry_attempts;
         for request in requests {
-            join_set.spawn(async move { Self::send(request, max_attempts).await });
+            let deadline = self.invocation_deadline.clone();
+            let config = self.config.clone();
+            join_set.spawn(
+                async move { Self::send(request, max_attempts, deadline, config).await },
+            );
         }
 
         let send_results = join_set.join_all().await;
@@ -145,6 +148,8 @@ impl Flusher {
     async fn send(
         request: reqwest::RequestBuilder,
         max_attempts: u32,
+        invocation_deadline: InvocationDeadline,
+        config: Arc<config::Config>,
     ) -> Result<(), Box<dyn Error + Send>> {
         debug!("PROXY_FLUSHER | Attempting to send request");
         let mut attempts: u32 = 0;
@@ -152,16 +157,37 @@ impl Flusher {
         loop {
             attempts += 1;
 
+            // Compute the per-attempt cap *fresh* each iteration so retries
+            // tighten as the Lambda deadline approaches. When there's no budget
+            // left we bail immediately so the payload can be queued for retry
+            // on the next invocation instead of risking a Lambda timeout.
+            let cap = compute_flush_cap_from(
+                &invocation_deadline,
+                config.flush_timeout,
+                config.flush_deadline_margin_ms,
+            );
+            if cap.is_zero() {
+                debug!(
+                    "PROXY_FLUSHER | Insufficient remaining invocation budget for attempt {attempts}; deferring for retry"
+                );
+                return Err(Box::new(FailedProxyRequestError {
+                    request,
+                    message: format!(
+                        "Deferred after {attempts} attempts: no remaining invocation budget"
+                    ),
+                }));
+            }
+
             let Some(cloned_request) = request.try_clone() else {
                 return Err(Box::new(std::io::Error::other("can't clone proxy request")));
             };
 
             let time = std::time::Instant::now();
-            let response = cloned_request.send().await;
+            let response = tokio::time::timeout(cap, cloned_request.send()).await;
             let elapsed = time.elapsed();
 
             match response {
-                Ok(r) => {
+                Ok(Ok(r)) => {
                     let url = r.url().to_string();
                     let status = r.status();
                     let body = r.text().await;
@@ -187,7 +213,7 @@ impl Flusher {
                         "PROXY_FLUSHER | Request failed with status {status} to {url}: {body:?} (attempt {attempts}/{max_attempts})"
                     );
                 }
-                Err(e) => {
+                Ok(Err(e)) => {
                     if attempts >= max_attempts {
                         error!(
                             "PROXY_FLUSHER | Failed to send request after {} attempts: {:?}",
@@ -197,6 +223,25 @@ impl Flusher {
                         return Err(Box::new(FailedProxyRequestError {
                             request,
                             message: e.to_string(),
+                        }));
+                    }
+                }
+                Err(_elapsed) => {
+                    // Per-request deadline elapsed (tokio::time::timeout fired).
+                    if attempts >= max_attempts {
+                        error!(
+                            "PROXY_FLUSHER | Request timed out after {} ms (cap {} ms) on attempt {} of {}",
+                            elapsed.as_millis(),
+                            cap.as_millis(),
+                            attempts,
+                            max_attempts
+                        );
+                        return Err(Box::new(FailedProxyRequestError {
+                            request,
+                            message: format!(
+                                "Timed out after {attempts} attempts (cap {} ms)",
+                                cap.as_millis()
+                            ),
                         }));
                     }
                 }

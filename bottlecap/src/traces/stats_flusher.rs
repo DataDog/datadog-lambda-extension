@@ -7,8 +7,7 @@ use tokio::sync::Mutex;
 use tokio::sync::OnceCell;
 
 use crate::config;
-use crate::flushing::InvocationDeadline;
-use crate::lifecycle::invocation::processor::S_TO_MS;
+use crate::flushing::{InvocationDeadline, compute_flush_cap_from};
 use crate::traces::http_client::HttpClient;
 use crate::traces::stats_aggregator::StatsAggregator;
 use dogstatsd::api_key::ApiKeyFactory;
@@ -21,7 +20,10 @@ pub struct StatsFlusher {
     aggregator: Arc<Mutex<StatsAggregator>>,
     config: Arc<config::Config>,
     api_key_factory: Arc<ApiKeyFactory>,
-    endpoint: OnceCell<Endpoint>,
+    /// Cached parsed stats-intake URL. Computed once because `Uri::from_str`
+    /// allocates and validates; rebuilt into a fresh `Endpoint` per send so
+    /// `timeout_ms` can reflect the *current* invocation budget.
+    endpoint_url: OnceCell<hyper::Uri>,
     http_client: HttpClient,
     /// Shared current Lambda invocation deadline (epoch ms). Read at send
     /// time to derive an adaptive per-request timeout via `compute_flush_cap`.
@@ -41,7 +43,7 @@ impl StatsFlusher {
             aggregator,
             config,
             api_key_factory,
-            endpoint: OnceCell::new(),
+            endpoint_url: OnceCell::new(),
             http_client,
             invocation_deadline,
         }
@@ -64,20 +66,13 @@ impl StatsFlusher {
             return None;
         };
 
-        let api_key_clone = api_key.clone();
-        let endpoint = self
-            .endpoint
+        let endpoint_url = self
+            .endpoint_url
             .get_or_init({
-                move || async move {
+                || async move {
                     let stats_url = trace_stats_url(&self.config.site);
-                    Endpoint {
-                        url: hyper::Uri::from_str(&stats_url)
-                            .expect("can't make URI from stats url, exiting"),
-                        api_key: Some(api_key_clone.into()),
-                        timeout_ms: self.config.flush_timeout * S_TO_MS,
-                        test_token: None,
-                        use_system_resolver: false,
-                    }
+                    hyper::Uri::from_str(&stats_url)
+                        .expect("can't make URI from stats url, exiting")
                 }
             })
             .await;
@@ -101,10 +96,38 @@ impl StatsFlusher {
         let max_attempts = self.config.flush_retry_attempts;
 
         for attempt in 1..=max_attempts {
+            // Compute the per-attempt cap *fresh* so retries tighten as the
+            // Lambda deadline approaches. When there's no budget left we bail
+            // immediately so the payload can be redriven on the next
+            // invocation instead of risking a Lambda timeout.
+            let cap = compute_flush_cap_from(
+                &self.invocation_deadline,
+                self.config.flush_timeout,
+                self.config.flush_deadline_margin_ms,
+            );
+            if cap.is_zero() {
+                debug!(
+                    "STATS | Insufficient remaining invocation budget on attempt {attempt}; deferring for redrive"
+                );
+                return Some(stats);
+            }
+
+            // Build a fresh Endpoint per attempt so its `timeout_ms` (consumed
+            // by `tokio::time::timeout` inside `send_with_retry`) reflects the
+            // current remaining budget.
+            #[allow(clippy::cast_possible_truncation)]
+            let endpoint = Endpoint {
+                url: endpoint_url.clone(),
+                api_key: Some(api_key.clone().into()),
+                timeout_ms: cap.as_millis().min(u64::MAX as u128) as u64,
+                test_token: None,
+                use_system_resolver: false,
+            };
+
             let start = std::time::Instant::now();
             let resp = stats_utils::send_stats_payload_with_client(
                 serialized_stats_payload.clone(),
-                endpoint,
+                &endpoint,
                 api_key.as_str(),
                 Some(&self.http_client),
             )
@@ -114,15 +137,17 @@ impl StatsFlusher {
             match resp {
                 Ok(()) => {
                     debug!(
-                        "STATS | Successfully flushed stats to {stats_url} in {} ms (attempt {attempt}/{max_attempts})",
-                        elapsed.as_millis()
+                        "STATS | Successfully flushed stats to {stats_url} in {} ms (attempt {attempt}/{max_attempts}, cap {} ms)",
+                        elapsed.as_millis(),
+                        cap.as_millis()
                     );
                     return None;
                 }
                 Err(e) => {
                     debug!(
-                        "STATS | Failed to send stats to {stats_url} in {} ms (attempt {attempt}/{max_attempts}): {e:?}",
-                        elapsed.as_millis()
+                        "STATS | Failed to send stats to {stats_url} in {} ms (attempt {attempt}/{max_attempts}, cap {} ms): {e:?}",
+                        elapsed.as_millis(),
+                        cap.as_millis()
                     );
                 }
             }
