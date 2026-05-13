@@ -1,4 +1,5 @@
 use crate::config;
+use crate::flushing::InvocationDeadline;
 use crate::logs::aggregator_service::AggregatorHandle;
 use dogstatsd::api_key::ApiKeyFactory;
 use futures::future::join_all;
@@ -26,6 +27,12 @@ pub struct Flusher {
     config: Arc<config::Config>,
     api_key_factory: Arc<ApiKeyFactory>,
     headers: OnceCell<HeaderMap>,
+    /// Shared current Lambda invocation deadline (epoch ms). Read by the
+    /// upcoming per-request timeout wrapper to compute an adaptive cap; the
+    /// underlying value of `0` means "no deadline known" and falls back to the
+    /// static `flush_timeout` ceiling.
+    #[allow(dead_code)] // Consumed by the per-request timeout wrapper in a follow-up commit.
+    invocation_deadline: InvocationDeadline,
 }
 
 impl Flusher {
@@ -35,6 +42,7 @@ impl Flusher {
         endpoint: String,
         config: Arc<config::Config>,
         client: reqwest::Client,
+        invocation_deadline: InvocationDeadline,
     ) -> Self {
         Flusher {
             client,
@@ -42,6 +50,7 @@ impl Flusher {
             config,
             api_key_factory,
             headers: OnceCell::new(),
+            invocation_deadline,
         }
     }
 
@@ -202,6 +211,7 @@ impl LogsFlusher {
         aggregator_handle: AggregatorHandle,
         config: Arc<config::Config>,
         client: reqwest::Client,
+        invocation_deadline: InvocationDeadline,
     ) -> Self {
         let mut flushers = Vec::new();
 
@@ -220,6 +230,7 @@ impl LogsFlusher {
             endpoint,
             config.clone(),
             client.clone(),
+            invocation_deadline.clone(),
         ));
 
         // Create flushers for additional endpoints
@@ -232,6 +243,7 @@ impl LogsFlusher {
                 endpoint_url,
                 config.clone(),
                 client.clone(),
+                invocation_deadline.clone(),
             ));
         }
 

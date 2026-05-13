@@ -16,6 +16,7 @@ use tokio::task::JoinSet;
 use tracing::{debug, error};
 
 use crate::config::Config;
+use crate::flushing::InvocationDeadline;
 use crate::lifecycle::invocation::processor::S_TO_MS;
 use crate::traces::http_client::HttpClient;
 use crate::traces::trace_aggregator_service::AggregatorHandle;
@@ -42,6 +43,9 @@ pub struct TraceFlusher {
     /// Each trace batch is sent to the primary endpoint AND all additional endpoints.
     pub additional_endpoints: Vec<Endpoint>,
     http_client: HttpClient,
+    /// Shared current Lambda invocation deadline (epoch ms). Read at flush
+    /// time to derive an adaptive per-request timeout via `compute_flush_cap`.
+    pub invocation_deadline: InvocationDeadline,
 }
 
 impl TraceFlusher {
@@ -51,6 +55,7 @@ impl TraceFlusher {
         config: Arc<Config>,
         api_key_factory: Arc<ApiKeyFactory>,
         http_client: HttpClient,
+        invocation_deadline: InvocationDeadline,
     ) -> Self {
         // Parse additional endpoints for dual-shipping from config.
         // Format: { "https://trace.agent.datadoghq.eu": ["api-key-1", "api-key-2"], ... }
@@ -77,6 +82,7 @@ impl TraceFlusher {
             api_key_factory,
             additional_endpoints,
             http_client,
+            invocation_deadline,
         }
     }
 
