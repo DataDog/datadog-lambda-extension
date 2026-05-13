@@ -469,6 +469,7 @@ async fn extension_loop_active(
         // data is sent to Datadog even while concurrent invocations are being processed.
         // The flushing happens independently of invocation lifecycle events.
         // This background task runs until shutdown is signaled via cancel_token_clone.
+        let flush_dlq_max_bytes = config.flush_dlq_max_bytes;
         let flush_task_handle = tokio::spawn(async move {
             let mut flushing_service = FlushingService::new(
                 logs_flusher_clone,
@@ -477,6 +478,7 @@ async fn extension_loop_active(
                 proxy_flusher_clone,
                 metrics_flushers_clone,
                 metrics_aggr_handle_clone,
+                flush_dlq_max_bytes,
             );
 
             loop {
@@ -651,6 +653,7 @@ async fn extension_loop_active(
         proxy_flusher.clone(),
         Arc::clone(&metrics_flushers),
         metrics_aggregator_handle.clone(),
+        config.flush_dlq_max_bytes,
     );
     handle_next_invocation(next_lambda_response, &invocation_processor_handle, &invocation_deadline).await;
     loop {

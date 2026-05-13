@@ -7,9 +7,11 @@
 //! - Metrics (via `MetricsFlusher`)
 //! - Proxy requests (via `ProxyFlusher`)
 
+mod dlq;
 mod handles;
 mod service;
 
+pub use dlq::{Dlq, DlqItem, DropReason, TelemetryType, estimate_metrics_batch_size, estimate_stats_size};
 pub use handles::{FlushHandles, MetricsRetryBatch};
 pub use service::FlushingService;
 
