@@ -6,6 +6,7 @@ import {Otlp} from '../lib/stacks/otlp';
 import {Snapstart} from '../lib/stacks/snapstart';
 import {LambdaManagedInstancesStack} from '../lib/stacks/lmi';
 import {AuthStack} from '../lib/stacks/auth';
+import {Svls8583Stack} from '../lib/stacks/svls-8583';
 import {AuthRoleStack} from '../lib/auth-role';
 import {ACCOUNT, getIdentifier, REGION} from '../config';
 import {CapacityProviderStack} from "../lib/capacity-provider";
@@ -38,6 +39,9 @@ const stacks = [
         env,
     }),
     new AuthStack(app, `integ-${identifier}-auth`, {
+        env,
+    }),
+    new Svls8583Stack(app, `integ-${identifier}-svls-8583`, {
         env,
     }),
 ]

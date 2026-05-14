@@ -1,0 +1,6 @@
+{
+  "name": "svls-8583-test-lambda",
+  "version": "1.0.0",
+  "description": "Lambda handler for SVLS-8583 durable function execution status integration tests",
+  "main": "index.js"
+}
