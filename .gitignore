@@ -27,5 +27,4 @@ bottlecap/proptest-regressions
 integration-tests/cdk.context.json
 
 .gitlab/pipeline*
-/CLAUDE.md
-/AGENTS.md
+/CLAUDE_PERSONAL.md
