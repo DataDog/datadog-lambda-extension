@@ -18,8 +18,14 @@ pub fn get_client(config: &Arc<config::Config>) -> reqwest::Client {
             "Unable to parse proxy configuration: {}, no proxy will be used",
             e
         );
-        //TODO this fallback doesn't respect the flush timeout
-        reqwest::Client::new()
+        create_reqwest_client_builder()
+            .ok()
+            .and_then(|b| {
+                b.timeout(Duration::from_secs(config.flush_timeout))
+                    .build()
+                    .ok()
+            })
+            .unwrap_or_else(reqwest::Client::new)
     })
 }
 
@@ -144,4 +150,20 @@ pub fn headers_to_map(headers: &HeaderMap) -> HashMap<String, String> {
             )
         })
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn get_client_fallback_with_bad_proxy_does_not_panic() {
+        let config = Arc::new(config::Config {
+            proxy_https: Some("://unparseable-proxy".to_string()),
+            flush_timeout: 5,
+            ..config::Config::default()
+        });
+        // Should not panic; fallback path must return a usable client.
+        let _client = get_client(&config);
+    }
 }
