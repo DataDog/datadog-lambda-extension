@@ -4,9 +4,9 @@ import { forceColdStart, publishVersion, waitForSnapStartReady } from './utils/l
 import { getIdentifier } from '../config';
 
 const identifier = getIdentifier();
-const stackName = `integ-${identifier}-auth`;
+const stackName = `integ-${identifier}-api-key`;
 
-describe('Auth Integration Tests', () => {
+describe('API Key Resolution Integration Tests', () => {
   let telemetry: Record<string, DatadogTelemetry>;
 
   const getFirstInvocation = (runtime: string) => telemetry[runtime]?.threads[0]?.[0];
@@ -14,8 +14,12 @@ describe('Auth Integration Tests', () => {
   beforeAll(async () => {
     const nodeFunctionName = `${stackName}-node`;
     const javaFunctionName = `${stackName}-java`;
+    const ssmNodeFunctionName = `${stackName}-ssm-node`;
 
-    await forceColdStart(nodeFunctionName);
+    await Promise.all([
+      forceColdStart(nodeFunctionName),
+      forceColdStart(ssmNodeFunctionName),
+    ]);
 
     const javaVersion = await publishVersion(javaFunctionName);
     await waitForSnapStartReady(javaFunctionName, javaVersion);
@@ -23,6 +27,7 @@ describe('Auth Integration Tests', () => {
     const functions: FunctionConfig[] = [
       { functionName: nodeFunctionName, runtime: 'node' },
       { functionName: `${javaFunctionName}:${javaVersion}`, runtime: 'java' },
+      { functionName: ssmNodeFunctionName, runtime: 'ssm-node' },
     ];
 
     telemetry = await invokeAndCollectTelemetry(functions, 1);
@@ -30,7 +35,7 @@ describe('Auth Integration Tests', () => {
     console.log('All invocations and data fetching completed');
   }, 600000);
 
-  describe('on-demand (node)', () => {
+  describe('delegated auth (node)', () => {
     it('should invoke Lambda successfully', () => {
       const result = getFirstInvocation('node');
       expect(result).toBeDefined();
@@ -44,7 +49,7 @@ describe('Auth Integration Tests', () => {
     });
   });
 
-  describe('snapstart (java)', () => {
+  describe('delegated auth (java, snapstart)', () => {
     it('should invoke Lambda successfully', () => {
       const result = getFirstInvocation('java');
       expect(result).toBeDefined();
@@ -55,6 +60,28 @@ describe('Auth Integration Tests', () => {
       const result = getFirstInvocation('java');
       expect(result).toBeDefined();
       expect(result.logs!.length).toBeGreaterThan(0);
+    });
+  });
+
+  describe('SSM Parameter Store API key (node)', () => {
+    const getInvocation = () => getFirstInvocation('ssm-node');
+
+    it('should invoke Lambda successfully when API key is sourced from SSM', () => {
+      const result = getInvocation();
+      expect(result).toBeDefined();
+      expect(result.statusCode).toBe(200);
+    });
+
+    it('should send logs to Datadog using API key fetched from SSM', () => {
+      const result = getInvocation();
+      expect(result).toBeDefined();
+      expect(result.logs!.length).toBeGreaterThan(0);
+    });
+
+    it('should send traces to Datadog using API key fetched from SSM', () => {
+      const result = getInvocation();
+      expect(result).toBeDefined();
+      expect(result.traces?.length).toBeGreaterThan(0);
     });
   });
 });

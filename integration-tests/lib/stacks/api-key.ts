@@ -4,27 +4,35 @@ import * as lambda from 'aws-cdk-lib/aws-lambda';
 import { Construct } from 'constructs';
 import {
   createLogGroup,
+  datadogSsmParameterArn,
+  defaultDatadogSsmPolicy,
   getExtensionLayer,
   getDefaultJavaLayer,
+  getDefaultNodeLayer,
   defaultNodeRuntime,
   defaultJavaRuntime,
 } from '../util';
 import { AUTH_ROLE_NAME } from '../auth-role';
 
 /**
- * CDK Stack for Authentication Integration Tests
+ * CDK Stack for API Key Resolution Integration Tests
  *
- * Tests delegated authentication - Lambda uses IAM role to obtain API key.
- * Includes on-demand (Node) and SnapStart (Java) functions.
+ * Exercises each path the extension can use to authenticate to Datadog:
+ *   - Delegated auth (on-demand Node + SnapStart Java) - no API key; uses a
+ *     shared IAM role from AuthRoleStack so the intake mapping is stable.
+ *   - API key sourced from SSM Parameter Store (on-demand Node) - uses its own
+ *     default role with ssm:GetParameter on the integration-tests parameter.
  *
- * Uses a shared IAM role (from AuthRoleStack) so the intake mapping is stable.
+ * Additional sources (Secrets Manager, KMS-encrypted env var) can be added
+ * here as further Lambda functions.
  */
-export class AuthStack extends cdk.Stack {
+export class ApiKeyStack extends cdk.Stack {
   constructor(scope: Construct, id: string, props: cdk.StackProps) {
     super(scope, id, props);
 
     const extensionLayer = getExtensionLayer(this);
     const javaLayer = getDefaultJavaLayer(this);
+    const nodeLayer = getDefaultNodeLayer(this);
 
     const role = iam.Role.fromRoleName(this, 'AuthRole', AUTH_ROLE_NAME);
 
@@ -85,5 +93,37 @@ export class AuthStack extends cdk.Stack {
       aliasName: 'snapstart',
       version: javaVersion,
     });
+
+    const ssmAuthEnv = {
+      DD_API_KEY_SSM_ARN: datadogSsmParameterArn,
+      DD_SITE: 'datadoghq.com',
+      DD_ENV: 'integration',
+      DD_VERSION: '1.0.0',
+      DD_SERVERLESS_FLUSH_STRATEGY: 'end',
+      DD_SERVERLESS_LOGS_ENABLED: 'true',
+      DD_LOG_LEVEL: 'debug',
+      TS: Date.now().toString(),
+    };
+
+    const ssmNodeFunctionName = `${id}-ssm-node`;
+    const ssmNodeFn = new lambda.Function(this, ssmNodeFunctionName, {
+      runtime: defaultNodeRuntime,
+      architecture: lambda.Architecture.ARM_64,
+      handler: '/opt/nodejs/node_modules/datadog-lambda-js/handler.handler',
+      code: lambda.Code.fromAsset('./lambda/default-node'),
+      functionName: ssmNodeFunctionName,
+      timeout: cdk.Duration.seconds(30),
+      memorySize: 256,
+      environment: {
+        ...ssmAuthEnv,
+        DD_SERVICE: ssmNodeFunctionName,
+        DD_TRACE_ENABLED: 'true',
+        DD_LAMBDA_HANDLER: 'index.handler',
+      },
+      logGroup: createLogGroup(this, ssmNodeFunctionName),
+    });
+    ssmNodeFn.addToRolePolicy(defaultDatadogSsmPolicy);
+    ssmNodeFn.addLayers(extensionLayer);
+    ssmNodeFn.addLayers(nodeLayer);
   }
 }

@@ -7,6 +7,8 @@ import { LayerVersion } from "aws-cdk-lib/aws-lambda";
 import {ACCOUNT, REGION} from "../config";
 
 export const datadogSecretArn = 'arn:aws:secretsmanager:us-east-1:425362996713:secret:extension-integration-tests-api-key-PnEPHz';
+export const datadogSsmParameterArn = process.env.DATADOG_API_SSM_PARAMETER_ARN
+  || 'arn:aws:ssm:us-east-1:425362996713:parameter/extension-integration-tests/api-key';
 export const extensionLayerArn = process.env.EXTENSION_LAYER_ARN!;
 
 export const defaultNodeRuntime = lambda.Runtime.NODEJS_24_X;
@@ -37,6 +39,15 @@ export const defaultDatadogSecretPolicy = new iam.PolicyStatement({
     'secretsmanager:DescribeSecret',
   ],
   resources: [datadogSecretArn],
+});
+
+export const defaultDatadogSsmPolicy = new iam.PolicyStatement({
+  effect: iam.Effect.ALLOW,
+  actions: [
+    'ssm:GetParameter',
+    'ssm:GetParameters',
+  ],
+  resources: [datadogSsmParameterArn],
 });
 
 export const createLogGroup = (scope: Construct, functionName: string) => {

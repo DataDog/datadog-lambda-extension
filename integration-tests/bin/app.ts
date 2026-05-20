@@ -5,7 +5,7 @@ import {OnDemand} from '../lib/stacks/on-demand';
 import {Otlp} from '../lib/stacks/otlp';
 import {Snapstart} from '../lib/stacks/snapstart';
 import {LambdaManagedInstancesStack} from '../lib/stacks/lmi';
-import {AuthStack} from '../lib/stacks/auth';
+import {ApiKeyStack} from '../lib/stacks/api-key';
 import {AuthRoleStack} from '../lib/auth-role';
 import {ACCOUNT, getIdentifier, REGION} from '../config';
 import {CapacityProviderStack} from "../lib/capacity-provider";
@@ -37,7 +37,7 @@ const stacks = [
     new LambdaManagedInstancesStack(app, `integ-${identifier}-lmi`, {
         env,
     }),
-    new AuthStack(app, `integ-${identifier}-auth`, {
+    new ApiKeyStack(app, `integ-${identifier}-api-key`, {
         env,
     }),
 ]
