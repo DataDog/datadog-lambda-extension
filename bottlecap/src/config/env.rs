@@ -283,6 +283,14 @@ pub struct EnvConfig {
     #[serde(deserialize_with = "deserialize_optional_string")]
     pub statsd_metric_namespace: Option<String>,
 
+    /// @env `DD_CUSTOMER_METRICS_EXCLUDE_TAGS`
+    ///
+    /// Comma-separated list of tag keys to exclude from customer DogStatsD metrics
+    /// enrichment. Use this to drop auto-injected tags (e.g. `function_arn,region`)
+    /// from custom metrics to reduce billing.
+    #[serde(deserialize_with = "deserialize_array_from_comma_separated_string")]
+    pub customer_metrics_exclude_tags: Vec<String>,
+
     /// @env `DD_DOGSTATSD_SO_RCVBUF`
     /// Size of the receive buffer for `DogStatsD` UDP packets, in bytes (`SO_RCVBUF`).
     /// Increase to reduce packet loss under high-throughput metric bursts.
@@ -585,6 +593,8 @@ fn merge_config(config: &mut Config, env_config: &EnvConfig) {
         config.statsd_metric_namespace = parse_metric_namespace(namespace);
     }
 
+    merge_vec!(config, env_config, customer_metrics_exclude_tags);
+
     // DogStatsD
     merge_option!(config, env_config, dogstatsd_so_rcvbuf);
     merge_option!(config, env_config, dogstatsd_buffer_size);
@@ -869,6 +879,8 @@ mod tests {
             );
             jail.set_env("DD_OTLP_CONFIG_LOGS_ENABLED", "true");
 
+            jail.set_env("DD_CUSTOMER_METRICS_EXCLUDE_TAGS", "function_arn,region");
+
             // DogStatsD
             jail.set_env("DD_DOGSTATSD_SO_RCVBUF", "1048576");
             jail.set_env("DD_DOGSTATSD_BUFFER_SIZE", "65507");
@@ -1029,6 +1041,10 @@ mod tests {
                 otlp_config_traces_probabilistic_sampler_sampling_percentage: Some(50),
                 otlp_config_logs_enabled: true,
                 statsd_metric_namespace: None,
+                customer_metrics_exclude_tags: vec![
+                    "function_arn".to_string(),
+                    "region".to_string(),
+                ],
                 dogstatsd_so_rcvbuf: Some(1_048_576),
                 dogstatsd_buffer_size: Some(65507),
                 dogstatsd_queue_size: Some(2048),
@@ -1238,6 +1254,49 @@ mod tests {
             assert_eq!(config.dogstatsd_so_rcvbuf, Some(1_048_576));
             assert_eq!(config.dogstatsd_buffer_size, Some(65507));
             assert_eq!(config.dogstatsd_queue_size, Some(2048));
+            Ok(())
+        });
+    }
+
+    #[test]
+    fn test_customer_metrics_exclude_tags_from_env() {
+        figment::Jail::expect_with(|jail| {
+            jail.clear_env();
+            jail.set_env(
+                "DD_CUSTOMER_METRICS_EXCLUDE_TAGS",
+                "function_arn,region,account_id",
+            );
+
+            let mut config = Config::default();
+            let env_config_source = EnvConfigSource;
+            env_config_source
+                .load(&mut config)
+                .expect("Failed to load config");
+
+            assert_eq!(
+                config.customer_metrics_exclude_tags,
+                vec![
+                    "function_arn".to_string(),
+                    "region".to_string(),
+                    "account_id".to_string()
+                ]
+            );
+            Ok(())
+        });
+    }
+
+    #[test]
+    fn test_customer_metrics_exclude_tags_defaults_to_empty() {
+        figment::Jail::expect_with(|jail| {
+            jail.clear_env();
+
+            let mut config = Config::default();
+            let env_config_source = EnvConfigSource;
+            env_config_source
+                .load(&mut config)
+                .expect("Failed to load config");
+
+            assert!(config.customer_metrics_exclude_tags.is_empty());
             Ok(())
         });
     }

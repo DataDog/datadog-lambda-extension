@@ -1219,8 +1219,25 @@ async fn start_dogstatsd(
 ) {
     // Start aggregator service and handle
     let start_time = Instant::now();
+    let enrichment_tags = if config.customer_metrics_exclude_tags.is_empty() {
+        tags_provider.get_tags_string()
+    } else {
+        debug!(
+            "Excluding tags from customer metrics: {:?}",
+            config.customer_metrics_exclude_tags
+        );
+        tags_provider
+            .get_tags_vec()
+            .into_iter()
+            .filter(|tag| {
+                let key = tag.split(':').next().unwrap_or("");
+                !config.customer_metrics_exclude_tags.iter().any(|e| e == key)
+            })
+            .collect::<Vec<_>>()
+            .join(",")
+    };
     let (aggregator_service, aggregator_handle) = MetricsAggregatorService::new(
-        SortedTags::parse(&tags_provider.get_tags_string()).unwrap_or(EMPTY_TAGS),
+        SortedTags::parse(&enrichment_tags).unwrap_or(EMPTY_TAGS),
         CONTEXTS,
     )
     .expect("can't create metrics service");

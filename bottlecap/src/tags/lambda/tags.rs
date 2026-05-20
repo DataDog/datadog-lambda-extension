@@ -62,23 +62,6 @@ pub const DURABLE_FUNCTION_EXECUTION_STATUS_KEY: &str =
 const AWS_ACCOUNT_KEY: &str = "aws_account";
 const RESOURCE_KEY: &str = "resource";
 
-const ENRICHMENT_TAG_KEYS: &[&str] = &[
-    FUNCTION_ARN_KEY,
-    FUNCTION_NAME_KEY,
-    REGION_KEY,
-    ACCOUNT_ID_KEY,
-    AWS_ACCOUNT_KEY,
-    RESOURCE_KEY,
-    EXECUTED_VERSION_KEY,
-    RUNTIME_KEY,
-    RUNTIME_FAMILY_KEY,
-    MEMORY_SIZE_KEY,
-    ARCHITECTURE_KEY,
-    EXTENSION_VERSION_KEY,
-    INIT_TYPE_KEY,
-    COMPUTE_STATS_KEY,
-];
-
 #[derive(Debug, Clone)]
 pub struct Lambda {
     tags_map: HashMap<String, String>,
@@ -258,15 +241,6 @@ impl Lambda {
     }
 
     #[must_use]
-    pub fn get_log_tags_vec(&self) -> Vec<String> {
-        self.tags_map
-            .iter()
-            .filter(|(k, _)| !ENRICHMENT_TAG_KEYS.contains(&k.as_str()))
-            .map(|(k, v)| format!("{k}:{v}"))
-            .collect()
-    }
-
-    #[must_use]
     pub fn get_function_arn(&self) -> Option<&String> {
         self.tags_map.get(FUNCTION_ARN_KEY)
     }
@@ -433,44 +407,6 @@ mod tests {
         let runtime = resolve_runtime_from_proc("", &path.to_string_lossy());
         fs::remove_file(&path).unwrap();
         assert_eq!(runtime, "provided.al2023");
-    }
-
-    #[test]
-    fn test_get_log_tags_vec_excludes_enrichment_tags() {
-        let mut metadata = HashMap::new();
-        metadata.insert(
-            FUNCTION_ARN_KEY.to_string(),
-            "arn:aws:lambda:us-west-2:123456789012:function:my-function".to_string(),
-        );
-        let config = Arc::new(Config {
-            service: Some("my-service".to_string()),
-            tags: HashMap::from([
-                ("key1".to_string(), "value1".to_string()),
-                ("key2".to_string(), "value2".to_string()),
-            ]),
-            env: Some("test".to_string()),
-            version: Some("1.0.0".to_string()),
-            ..Config::default()
-        });
-        let tags = Lambda::new_from_config(config, &metadata);
-        let log_tags = tags.get_log_tags_vec();
-        let log_tags_str = log_tags.join(",");
-
-        assert!(log_tags_str.contains("env:test"));
-        assert!(log_tags_str.contains("service:my-service"));
-        assert!(log_tags_str.contains("version:1.0.0"));
-        assert!(log_tags_str.contains("key1:value1"));
-        assert!(log_tags_str.contains("key2:value2"));
-
-        assert!(!log_tags_str.contains("function_arn:"));
-        assert!(!log_tags_str.contains("functionname:"));
-        assert!(!log_tags_str.contains("region:"));
-        assert!(!log_tags_str.contains("account_id:"));
-        assert!(!log_tags_str.contains("aws_account:"));
-        assert!(!log_tags_str.contains("resource:"));
-        assert!(!log_tags_str.contains("architecture:"));
-        assert!(!log_tags_str.contains("dd_extension_version:"));
-        assert!(!log_tags_str.contains("_dd.compute_stats:"));
     }
 
     #[test]
