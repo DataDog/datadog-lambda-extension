@@ -138,7 +138,7 @@ impl LambdaProcessor {
             .clone()
             .unwrap_or_default()
             .to_lowercase();
-        let tags = tags_provider.get_tags_string();
+        let tags = tags_provider.get_log_tags_string();
         let function_arn = tags_provider.get_canonical_id().unwrap_or_default();
 
         let processing_rules = &datadog_config.logs_config_processing_rules;
@@ -1318,7 +1318,7 @@ mod tests {
         assert_eq!(intake_log.hostname, "test-arn".to_string());
         assert_eq!(intake_log.service, "test-service".to_string());
         assert_eq!(intake_log.message.message, "test-function".to_string());
-        assert_eq!(intake_log.tags, tags_provider.get_tags_string());
+        assert_eq!(intake_log.tags, tags_provider.get_log_tags_string());
     }
 
     // process
@@ -1378,7 +1378,7 @@ mod tests {
             hostname: "test-arn".to_string(),
             source: LAMBDA_RUNTIME_SLUG.to_string(),
             service: "test-service".to_string(),
-            tags: tags_provider.get_tags_string(),
+            tags: tags_provider.get_log_tags_string(),
         };
         let serialized_log = format!("[{}]", serde_json::to_string(&log).unwrap());
         assert_eq!(batches[0], serialized_log.as_bytes());
@@ -1554,7 +1554,7 @@ mod tests {
             hostname: "test-arn".to_string(),
             source: LAMBDA_RUNTIME_SLUG.to_string(),
             service: "test-service".to_string(),
-            tags: tags_provider.get_tags_string(),
+            tags: tags_provider.get_log_tags_string(),
         };
         let function_log = IntakeLog {
             message: Message {
@@ -1570,7 +1570,7 @@ mod tests {
             hostname: "test-arn".to_string(),
             source: LAMBDA_RUNTIME_SLUG.to_string(),
             service: "test-service".to_string(),
-            tags: tags_provider.get_tags_string(),
+            tags: tags_provider.get_log_tags_string(),
         };
         let serialized_log = format!(
             "[{},{}]",
@@ -1645,7 +1645,7 @@ mod tests {
             hostname: "test-arn".to_string(),
             source: LAMBDA_RUNTIME_SLUG.to_string(),
             service: "test-service".to_string(),
-            tags: tags_provider.get_tags_string()
+            tags: tags_provider.get_log_tags_string()
                 + ",added_tag1:added_value1,added_tag2:added_value2",
         };
         assert_eq!(intake_log, function_log);
@@ -1707,7 +1707,7 @@ mod tests {
             hostname: "test-arn".to_string(),
             source: LAMBDA_RUNTIME_SLUG.to_string(),
             service: "test-service".to_string(),
-            tags: tags_provider.get_tags_string(),
+            tags: tags_provider.get_log_tags_string(),
         };
         assert_eq!(intake_log, function_log);
     }
