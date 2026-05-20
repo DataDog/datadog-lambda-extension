@@ -4,8 +4,6 @@ import * as lambda from 'aws-cdk-lib/aws-lambda';
 import { Construct } from 'constructs';
 import {
   createLogGroup,
-  datadogSsmParameterArn,
-  defaultDatadogSsmPolicy,
   getExtensionLayer,
   getDefaultJavaLayer,
   getDefaultNodeLayer,
@@ -13,6 +11,18 @@ import {
   defaultJavaRuntime,
 } from '../util';
 import { AUTH_ROLE_NAME } from '../auth-role';
+
+const datadogSsmParameterArn = process.env.DATADOG_API_SSM_PARAMETER_ARN
+  || 'arn:aws:ssm:us-east-1:425362996713:parameter/extension-integration-tests/api-key';
+
+const datadogSsmPolicy = new iam.PolicyStatement({
+  effect: iam.Effect.ALLOW,
+  actions: [
+    'ssm:GetParameter',
+    'ssm:GetParameters',
+  ],
+  resources: [datadogSsmParameterArn],
+});
 
 /**
  * CDK Stack for API Key Resolution Integration Tests
@@ -122,7 +132,7 @@ export class ApiKeyStack extends cdk.Stack {
       },
       logGroup: createLogGroup(this, ssmNodeFunctionName),
     });
-    ssmNodeFn.addToRolePolicy(defaultDatadogSsmPolicy);
+    ssmNodeFn.addToRolePolicy(datadogSsmPolicy);
     ssmNodeFn.addLayers(extensionLayer);
     ssmNodeFn.addLayers(nodeLayer);
   }
