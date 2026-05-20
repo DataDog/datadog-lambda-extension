@@ -320,3 +320,33 @@ async function getMetrics(
     value: p[1],
   }));
 }
+
+/**
+ * Query a custom metric filtered by function name and an additional tag filter.
+ * Use tagFilter like "function_arn:*" to check if a tag exists on the metric.
+ * Returns true if the query returns data points, false otherwise.
+ */
+export async function hasMetricWithTag(
+  metricName: string,
+  functionName: string,
+  tagFilter: string,
+  fromTime: number,
+  toTime: number,
+): Promise<boolean> {
+  const baseFunctionName = getServiceName(functionName).toLowerCase();
+  const query = `avg:${metricName}{functionname:${baseFunctionName},${tagFilter}}`;
+
+  console.log(`Querying metric with tag filter: ${query}`);
+
+  const response = await datadogClient.get('/api/v1/query', {
+    params: {
+      query,
+      from: Math.floor(fromTime / 1000),
+      to: Math.floor(toTime / 1000),
+    },
+  });
+
+  const series = response.data.series || [];
+  console.log(`Tag filter query returned ${series.length} series`);
+  return series.length > 0;
+}
