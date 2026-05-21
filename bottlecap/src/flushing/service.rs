@@ -10,11 +10,16 @@ use dogstatsd::{
 
 use crate::flushing::dlq::Dlq;
 use crate::flushing::handles::{FlushHandles, MetricsRetryBatch};
+use crate::flushing::{estimate_metrics_batch_size, estimate_stats_size};
 use crate::logs::flusher::LogsFlusher;
 use crate::traces::{
     proxy_flusher::Flusher as ProxyFlusher, stats_flusher::StatsFlusher,
     trace_flusher::TraceFlusher,
 };
+
+const DLQ_BYTES_PER_LOG_REQUEST: u64 = 4_096;
+const DLQ_BYTES_PER_PROXY_REQUEST: u64 = 8_192;
+const DLQ_BYTES_PER_TRACE: u64 = 1_024;
 
 /// Service for coordinating flush operations across all flusher types.
 ///
@@ -177,8 +182,14 @@ impl FlushingService {
                             "FLUSHING_SERVICE | redriving {:?} stats payloads",
                             retry.len()
                         );
+                        let dlq = Arc::clone(&self.dlq);
                         joinset.spawn(async move {
-                            sf.flush(false, Some(retry)).await;
+                            if let Some(still_failed) = sf.flush(false, Some(retry)).await {
+                                for payload in still_failed {
+                                    let size = estimate_stats_size(&payload);
+                                    dlq.try_push_stats(payload, size).await;
+                                }
+                            }
                         });
                     }
                 }
@@ -199,8 +210,15 @@ impl FlushingService {
                             "FLUSHING_SERVICE | redriving {:?} trace payloads",
                             retry.len()
                         );
+                        let dlq = Arc::clone(&self.dlq);
                         joinset.spawn(async move {
-                            tf.flush(Some(retry)).await;
+                            if let Some(still_failed) = tf.flush(Some(retry)).await {
+                                for payload in still_failed {
+                                    let size = (payload.len() as u64)
+                                        .saturating_mul(DLQ_BYTES_PER_TRACE);
+                                    dlq.try_push_traces(payload, size).await;
+                                }
+                            }
                         });
                     }
                 }
@@ -222,10 +240,14 @@ impl FlushingService {
                     }
                     for item in retry {
                         let lf = self.logs_flusher.clone();
+                        let dlq = Arc::clone(&self.dlq);
                         match item.try_clone() {
                             Some(item_clone) => {
                                 joinset.spawn(async move {
-                                    lf.flush(Some(item_clone)).await;
+                                    let still_failed = lf.flush(Some(item_clone)).await;
+                                    for rb in still_failed {
+                                        dlq.try_push_logs(rb, DLQ_BYTES_PER_LOG_REQUEST).await;
+                                    }
                                 });
                             }
                             None => {
@@ -251,11 +273,25 @@ impl FlushingService {
                             retry_batch.series.len(),
                             retry_batch.sketches.len()
                         );
+                        let dlq = Arc::clone(&self.dlq);
                         joinset.spawn(async move {
                             if let Some(flusher) = mf.get(retry_batch.flusher_id) {
-                                flusher
+                                let flusher_id = retry_batch.flusher_id;
+                                let (still_series, still_sketches) = flusher
                                     .flush_metrics(retry_batch.series, retry_batch.sketches)
-                                    .await;
+                                    .await
+                                    .unwrap_or_default();
+                                let still_batch = MetricsRetryBatch {
+                                    flusher_id,
+                                    series: still_series,
+                                    sketches: still_sketches,
+                                };
+                                if !still_batch.series.is_empty()
+                                    || !still_batch.sketches.is_empty()
+                                {
+                                    let size = estimate_metrics_batch_size(&still_batch);
+                                    dlq.try_push_metrics(still_batch, size).await;
+                                }
                             }
                         });
                     }
@@ -278,8 +314,13 @@ impl FlushingService {
                     }
 
                     let pf = self.proxy_flusher.clone();
+                    let dlq = Arc::clone(&self.dlq);
                     joinset.spawn(async move {
-                        pf.flush(Some(batch)).await;
+                        if let Some(still_failed) = pf.flush(Some(batch)).await {
+                            for rb in still_failed {
+                                dlq.try_push_proxy(rb, DLQ_BYTES_PER_PROXY_REQUEST).await;
+                            }
+                        }
                     });
                 }
                 Err(e) => {
@@ -322,10 +363,90 @@ impl FlushingService {
         self.flush_blocking_inner(true).await;
     }
 
+    /// Drains every DLQ queue and re-flushes the payloads. Items that still fail
+    /// are pushed back into the DLQ (subject to the byte cap). Called at the top
+    /// of every `flush_blocking_inner` so the next invocation's flush always
+    /// attempts any previously deferred payloads before pulling new data.
+    async fn drain_dlq(&self) {
+        // ── Logs ──────────────────────────────────────────────────────────────
+        let log_items: Vec<_> = { self.dlq.logs.lock().await.drain(..).collect() };
+        for item in log_items {
+            self.dlq.release(item.size_bytes);
+            for rb in self.logs_flusher.flush(Some(item.payload)).await {
+                self.dlq.try_push_logs(rb, DLQ_BYTES_PER_LOG_REQUEST).await;
+            }
+        }
+
+        // ── Traces ────────────────────────────────────────────────────────────
+        let trace_items: Vec<_> = { self.dlq.traces.lock().await.drain(..).collect() };
+        if !trace_items.is_empty() {
+            let total_bytes: u64 = trace_items.iter().map(|i| i.size_bytes).sum();
+            self.dlq.release(total_bytes);
+            let payloads = trace_items.into_iter().map(|i| i.payload).collect::<Vec<_>>();
+            if let Some(still_failed) = self.trace_flusher.flush(Some(payloads)).await {
+                for payload in still_failed {
+                    let size = (payload.len() as u64).saturating_mul(DLQ_BYTES_PER_TRACE);
+                    self.dlq.try_push_traces(payload, size).await;
+                }
+            }
+        }
+
+        // ── Stats ─────────────────────────────────────────────────────────────
+        let stats_items: Vec<_> = { self.dlq.stats.lock().await.drain(..).collect() };
+        if !stats_items.is_empty() {
+            let total_bytes: u64 = stats_items.iter().map(|i| i.size_bytes).sum();
+            self.dlq.release(total_bytes);
+            let payloads = stats_items.into_iter().map(|i| i.payload).collect::<Vec<_>>();
+            if let Some(still_failed) = self.stats_flusher.flush(false, Some(payloads)).await {
+                for payload in still_failed {
+                    let size = estimate_stats_size(&payload);
+                    self.dlq.try_push_stats(payload, size).await;
+                }
+            }
+        }
+
+        // ── Proxy ─────────────────────────────────────────────────────────────
+        let proxy_items: Vec<_> = { self.dlq.proxy.lock().await.drain(..).collect() };
+        if !proxy_items.is_empty() {
+            let total_bytes: u64 = proxy_items.iter().map(|i| i.size_bytes).sum();
+            self.dlq.release(total_bytes);
+            let payloads = proxy_items.into_iter().map(|i| i.payload).collect::<Vec<_>>();
+            if let Some(still_failed) = self.proxy_flusher.flush(Some(payloads)).await {
+                for rb in still_failed {
+                    self.dlq.try_push_proxy(rb, DLQ_BYTES_PER_PROXY_REQUEST).await;
+                }
+            }
+        }
+
+        // ── Metrics ───────────────────────────────────────────────────────────
+        let metrics_items: Vec<_> = { self.dlq.metrics.lock().await.drain(..).collect() };
+        for item in metrics_items {
+            self.dlq.release(item.size_bytes);
+            let MetricsRetryBatch { flusher_id, series, sketches } = item.payload;
+            if let Some(flusher) = self.metrics_flushers.get(flusher_id) {
+                let (still_series, still_sketches) = flusher
+                    .flush_metrics(series, sketches)
+                    .await
+                    .unwrap_or_default();
+                let still_batch = MetricsRetryBatch {
+                    flusher_id,
+                    series: still_series,
+                    sketches: still_sketches,
+                };
+                if !still_batch.series.is_empty() || !still_batch.sketches.is_empty() {
+                    let size = estimate_metrics_batch_size(&still_batch);
+                    self.dlq.try_push_metrics(still_batch, size).await;
+                }
+            }
+        }
+    }
+
     /// Internal implementation for blocking flush operations.
     ///
     /// Fetches metrics from the aggregator and flushes all data types in parallel.
     async fn flush_blocking_inner(&self, force_stats: bool) {
+        self.drain_dlq().await;
+
         let total_start = std::time::Instant::now();
 
         let aggr_start = std::time::Instant::now();
