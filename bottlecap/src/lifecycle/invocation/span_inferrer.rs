@@ -250,7 +250,7 @@ impl SpanInferrer {
 
             if let Some(dd_resource_key) = t.get_dd_resource_key(&aws_config.region) {
                 inferred_span
-                    .meta
+                    .tags
                     .insert("dd_resource_key".to_string(), dd_resource_key);
             }
 
