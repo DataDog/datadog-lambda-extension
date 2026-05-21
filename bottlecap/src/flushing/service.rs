@@ -16,6 +16,11 @@ use crate::traces::{
     trace_flusher::TraceFlusher,
 };
 
+/// How far before the Lambda deadline to emit the pre-cancellation warning.
+const FLUSH_WARN_GAP: Duration = Duration::from_millis(50);
+/// How far before the Lambda deadline to cancel all in-flight flush requests.
+const FLUSH_CANCEL_GAP: Duration = Duration::from_millis(0);
+
 /// Service for coordinating flush operations across all flusher types.
 ///
 /// This service provides a unified interface for:
@@ -342,8 +347,8 @@ impl FlushingService {
         };
         tokio::pin!(flush);
 
-        let warn_at = tokio::time::sleep(remaining.saturating_sub(Duration::from_millis(50)));
-        let cancel_at = tokio::time::sleep(remaining);
+        let warn_at = tokio::time::sleep(remaining.saturating_sub(FLUSH_WARN_GAP));
+        let cancel_at = tokio::time::sleep(remaining.saturating_sub(FLUSH_CANCEL_GAP));
         tokio::pin!(warn_at);
         tokio::pin!(cancel_at);
 
