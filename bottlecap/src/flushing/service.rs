@@ -348,7 +348,9 @@ impl FlushingService {
             .await
             .is_err()
         {
-            error!("FLUSHING_SERVICE | flush canceled: Lambda deadline exceeded, in-flight requests dropped");
+            error!(
+                "FLUSHING_SERVICE | flush canceled: Lambda deadline exceeded, in-flight requests dropped"
+            );
         }
     }
 }
