@@ -1,7 +1,7 @@
 //! `FlushingService` for coordinating flush operations across multiple flusher types.
 
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use tracing::{debug, error};
 
@@ -35,8 +35,6 @@ pub struct FlushingService {
 
     // Pending flush handles
     handles: FlushHandles,
-
-    flush_timeout: Duration,
 }
 
 impl FlushingService {
@@ -49,7 +47,6 @@ impl FlushingService {
         proxy_flusher: Arc<ProxyFlusher>,
         metrics_flushers: Arc<Vec<MetricsFlusher>>,
         metrics_aggr_handle: MetricsAggregatorHandle,
-        flush_timeout: Duration,
     ) -> Self {
         Self {
             logs_flusher,
@@ -59,7 +56,6 @@ impl FlushingService {
             metrics_flushers,
             metrics_aggr_handle,
             handles: FlushHandles::new(),
-            flush_timeout,
         }
     }
 
@@ -293,8 +289,8 @@ impl FlushingService {
     ///
     /// The stats flusher respects its normal timing constraints (time-based bucketing),
     /// which may result in some stats being held back until the next flush cycle.
-    pub async fn flush_blocking(&self) {
-        self.flush_blocking_inner(false).await;
+    pub async fn flush_blocking(&self, deadline_ms: u64) {
+        self.flush_blocking_inner(false, deadline_ms).await;
     }
 
     /// Performs a final blocking flush of all telemetry data before shutdown.
@@ -304,14 +300,14 @@ impl FlushingService {
     /// flush immediately regardless of its normal timing constraints.
     ///
     /// Use this during shutdown when this is the last opportunity to send data.
-    pub async fn flush_blocking_final(&self) {
-        self.flush_blocking_inner(true).await;
+    pub async fn flush_blocking_final(&self, deadline_ms: u64) {
+        self.flush_blocking_inner(true, deadline_ms).await;
     }
 
     /// Internal implementation for blocking flush operations.
     ///
     /// Fetches metrics from the aggregator and flushes all data types in parallel.
-    async fn flush_blocking_inner(&self, force_stats: bool) {
+    async fn flush_blocking_inner(&self, force_stats: bool, deadline_ms: u64) {
         let flush_response = self
             .metrics_aggr_handle
             .flush()
@@ -329,6 +325,12 @@ impl FlushingService {
             })
             .collect();
 
+        let now_ms = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis() as u64;
+        let remaining = Duration::from_millis(deadline_ms.saturating_sub(now_ms));
+
         let flush = async {
             tokio::join!(
                 self.logs_flusher.flush(None),
@@ -340,9 +342,8 @@ impl FlushingService {
         };
         tokio::pin!(flush);
 
-        let timeout = self.flush_timeout;
-        let warn_at = tokio::time::sleep(timeout.saturating_sub(Duration::from_millis(50)));
-        let cancel_at = tokio::time::sleep(timeout);
+        let warn_at = tokio::time::sleep(remaining.saturating_sub(Duration::from_millis(50)));
+        let cancel_at = tokio::time::sleep(remaining);
         tokio::pin!(warn_at);
         tokio::pin!(cancel_at);
 
@@ -355,7 +356,7 @@ impl FlushingService {
                     error!("FLUSHING_SERVICE | flush approaching timeout, canceling in 50ms, data will be dropped");
                 }
                 _ = &mut cancel_at => {
-                    error!("FLUSHING_SERVICE | flush timed out after {:?}, canceling all in-flight requests", timeout);
+                    error!("FLUSHING_SERVICE | flush timed out, canceling all in-flight requests");
                     break;
                 }
             }
