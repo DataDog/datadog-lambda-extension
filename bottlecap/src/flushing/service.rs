@@ -16,10 +16,8 @@ use crate::traces::{
     trace_flusher::TraceFlusher,
 };
 
-/// How far before the Lambda deadline to emit the pre-cancellation warning.
-const FLUSH_WARN_GAP: Duration = Duration::from_millis(50);
 /// How far before the Lambda deadline to cancel all in-flight flush requests.
-const FLUSH_CANCEL_GAP: Duration = Duration::from_millis(0);
+const FLUSH_CANCEL_GAP: Duration = Duration::from_millis(100);
 
 /// Service for coordinating flush operations across all flusher types.
 ///
@@ -345,26 +343,12 @@ impl FlushingService {
                 self.proxy_flusher.flush(None),
             );
         };
-        tokio::pin!(flush);
 
-        let warn_at = tokio::time::sleep(remaining.saturating_sub(FLUSH_WARN_GAP));
-        let cancel_at = tokio::time::sleep(remaining.saturating_sub(FLUSH_CANCEL_GAP));
-        tokio::pin!(warn_at);
-        tokio::pin!(cancel_at);
-
-        let mut warned = false;
-        loop {
-            tokio::select! {
-                _ = &mut flush => break,
-                _ = &mut warn_at, if !warned => {
-                    warned = true;
-                    error!("FLUSHING_SERVICE | flush approaching timeout, canceling in 50ms, data will be dropped");
-                }
-                _ = &mut cancel_at => {
-                    error!("FLUSHING_SERVICE | flush timed out, canceling all in-flight requests");
-                    break;
-                }
-            }
+        if tokio::time::timeout(remaining.saturating_sub(FLUSH_CANCEL_GAP), flush)
+            .await
+            .is_err()
+        {
+            error!("FLUSHING_SERVICE | flush canceled: Lambda deadline exceeded, in-flight requests dropped");
         }
     }
 }
