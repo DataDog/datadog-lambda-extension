@@ -361,6 +361,35 @@ impl FlushingService {
     /// Use this during shutdown when this is the last opportunity to send data.
     pub async fn flush_blocking_final(&self) {
         self.flush_blocking_inner(true).await;
+        self.shutdown_drop_dlq().await;
+    }
+
+    /// Logs and discards any items remaining in the DLQ at SHUTDOWN. Called
+    /// after the final blocking flush so any last-attempt survivors are counted
+    /// before the process exits. Does NOT attempt another flush — by this point
+    /// the Lambda runtime has already signalled shutdown.
+    async fn shutdown_drop_dlq(&self) {
+        let log_count = self.dlq.logs.lock().await.len();
+        let trace_count = self.dlq.traces.lock().await.len();
+        let stats_count = self.dlq.stats.lock().await.len();
+        let proxy_count = self.dlq.proxy.lock().await.len();
+        let metrics_count = self.dlq.metrics.lock().await.len();
+        let total = log_count + trace_count + stats_count + proxy_count + metrics_count;
+        if total == 0 {
+            return;
+        }
+        let total_bytes = self.dlq.total_bytes();
+        error!(
+            "SHUTDOWN | dropping {total} payloads ({total_bytes} bytes) by type \
+             logs={log_count} traces={trace_count} stats={stats_count} \
+             proxy={proxy_count} metrics={metrics_count}"
+        );
+        // Drain and release budget so totals reach zero on exit.
+        { self.dlq.logs.lock().await.drain(..).for_each(|i| self.dlq.release(i.size_bytes)); }
+        { self.dlq.traces.lock().await.drain(..).for_each(|i| self.dlq.release(i.size_bytes)); }
+        { self.dlq.stats.lock().await.drain(..).for_each(|i| self.dlq.release(i.size_bytes)); }
+        { self.dlq.proxy.lock().await.drain(..).for_each(|i| self.dlq.release(i.size_bytes)); }
+        { self.dlq.metrics.lock().await.drain(..).for_each(|i| self.dlq.release(i.size_bytes)); }
     }
 
     /// Drains every DLQ queue and re-flushes the payloads. Items that still fail
