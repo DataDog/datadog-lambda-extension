@@ -429,6 +429,7 @@ async fn extension_loop_active(
         let stats_flusher_clone = Arc::clone(&stats_flusher);
         let proxy_flusher_clone = proxy_flusher.clone();
         let metrics_aggr_handle_clone = metrics_aggregator_handle.clone();
+        let flush_timeout_clone = std::time::Duration::from_secs(config.flush_timeout);
 
         // In Managed Instance mode, create a separate interval for the background flusher task.
         // We don't reuse race_flush_interval because we need to configure the missed tick
@@ -459,6 +460,7 @@ async fn extension_loop_active(
                 proxy_flusher_clone,
                 metrics_flushers_clone,
                 metrics_aggr_handle_clone,
+                flush_timeout_clone,
             );
 
             loop {
@@ -633,6 +635,7 @@ async fn extension_loop_active(
         proxy_flusher.clone(),
         Arc::clone(&metrics_flushers),
         metrics_aggregator_handle.clone(),
+        std::time::Duration::from_secs(config.flush_timeout),
     );
     handle_next_invocation(next_lambda_response, &invocation_processor_handle).await;
     loop {

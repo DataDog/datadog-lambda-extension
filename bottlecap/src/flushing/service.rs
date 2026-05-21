@@ -1,6 +1,7 @@
 //! `FlushingService` for coordinating flush operations across multiple flusher types.
 
 use std::sync::Arc;
+use std::time::Duration;
 
 use tracing::{debug, error};
 
@@ -34,6 +35,8 @@ pub struct FlushingService {
 
     // Pending flush handles
     handles: FlushHandles,
+
+    flush_timeout: Duration,
 }
 
 impl FlushingService {
@@ -46,6 +49,7 @@ impl FlushingService {
         proxy_flusher: Arc<ProxyFlusher>,
         metrics_flushers: Arc<Vec<MetricsFlusher>>,
         metrics_aggr_handle: MetricsAggregatorHandle,
+        flush_timeout: Duration,
     ) -> Self {
         Self {
             logs_flusher,
@@ -55,6 +59,7 @@ impl FlushingService {
             metrics_flushers,
             metrics_aggr_handle,
             handles: FlushHandles::new(),
+            flush_timeout,
         }
     }
 
@@ -324,13 +329,37 @@ impl FlushingService {
             })
             .collect();
 
-        tokio::join!(
-            self.logs_flusher.flush(None),
-            futures::future::join_all(metrics_futures),
-            self.trace_flusher.flush(None),
-            self.stats_flusher.flush(force_stats, None),
-            self.proxy_flusher.flush(None),
-        );
+        let flush = async {
+            tokio::join!(
+                self.logs_flusher.flush(None),
+                futures::future::join_all(metrics_futures),
+                self.trace_flusher.flush(None),
+                self.stats_flusher.flush(force_stats, None),
+                self.proxy_flusher.flush(None),
+            );
+        };
+        tokio::pin!(flush);
+
+        let timeout = self.flush_timeout;
+        let warn_at = tokio::time::sleep(timeout.saturating_sub(Duration::from_millis(50)));
+        let cancel_at = tokio::time::sleep(timeout);
+        tokio::pin!(warn_at);
+        tokio::pin!(cancel_at);
+
+        let mut warned = false;
+        loop {
+            tokio::select! {
+                _ = &mut flush => break,
+                _ = &mut warn_at, if !warned => {
+                    warned = true;
+                    error!("FLUSHING_SERVICE | flush approaching timeout, canceling in 50ms, data will be dropped");
+                }
+                _ = &mut cancel_at => {
+                    error!("FLUSHING_SERVICE | flush timed out after {:?}, canceling all in-flight requests", timeout);
+                    break;
+                }
+            }
+        }
     }
 }
 
