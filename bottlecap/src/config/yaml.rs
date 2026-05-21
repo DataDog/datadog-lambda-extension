@@ -1033,6 +1033,7 @@ api_security_sample_delay: 60 # Seconds
                 apm_filter_tags_regex_require: None,
                 apm_filter_tags_regex_reject: None,
                 statsd_metric_namespace: None,
+                customer_metrics_exclude_tags: vec![],
                 dogstatsd_so_rcvbuf: Some(1_048_576),
                 dogstatsd_buffer_size: Some(65507),
                 dogstatsd_queue_size: Some(2048),

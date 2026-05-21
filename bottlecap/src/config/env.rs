@@ -285,7 +285,7 @@ pub struct EnvConfig {
 
     /// @env `DD_CUSTOMER_METRICS_EXCLUDE_TAGS`
     ///
-    /// Comma-separated list of tag keys to exclude from customer DogStatsD metrics
+    /// Comma-separated list of tag keys to exclude from customer `DogStatsD` metrics
     /// enrichment. Use this to drop auto-injected tags (e.g. `function_arn,region`)
     /// from custom metrics to reduce billing.
     #[serde(deserialize_with = "deserialize_array_from_comma_separated_string")]

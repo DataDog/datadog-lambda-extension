@@ -1231,7 +1231,10 @@ async fn start_dogstatsd(
             .into_iter()
             .filter(|tag| {
                 let key = tag.split(':').next().unwrap_or("");
-                !config.customer_metrics_exclude_tags.iter().any(|e| e == key)
+                !config
+                    .customer_metrics_exclude_tags
+                    .iter()
+                    .any(|e| e == key)
             })
             .collect::<Vec<_>>()
             .join(",")
