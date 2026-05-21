@@ -347,6 +347,7 @@ export async function hasMetricWithTag(
   });
 
   const series = response.data.series || [];
-  console.log(`Tag filter query returned ${series.length} series`);
-  return series.length > 0;
+  const hasData = series.some((s: any) => Array.isArray(s.pointlist) && s.pointlist.length > 0);
+  console.log(`Tag filter query returned ${series.length} series, hasData=${hasData}`);
+  return hasData;
 }

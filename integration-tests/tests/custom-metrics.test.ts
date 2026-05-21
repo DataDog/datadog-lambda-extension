@@ -1,7 +1,6 @@
-import { invokeAndCollectTelemetry, FunctionConfig } from "./utils/default";
 import { hasMetricWithTag } from "./utils/datadog";
-import { forceColdStart } from "./utils/lambda";
-import { getIdentifier } from "../config";
+import { forceColdStart, invokeLambda } from "./utils/lambda";
+import { getIdentifier, DEFAULT_DATADOG_INDEXING_WAIT_MS } from "../config";
 
 const identifier = getIdentifier();
 const stackName = `integ-${identifier}-custom-metrics`;
@@ -18,21 +17,25 @@ describe("Customer Metrics Exclude Tags Integration Tests", () => {
   const filteredFunctionName = `${stackName}-filtered-lambda`;
 
   beforeAll(async () => {
-    const functions: FunctionConfig[] = [
-      { functionName: unfilteredFunctionName, runtime: "unfiltered" },
-      { functionName: filteredFunctionName, runtime: "filtered" },
-    ];
+    const functionNames = [unfilteredFunctionName, filteredFunctionName];
 
-    await Promise.all(functions.map((fn) => forceColdStart(fn.functionName)));
+    await Promise.all(functionNames.map((fn) => forceColdStart(fn)));
 
-    invocationStartTime = Date.now();
+    // Back up the query window by 60s so the metric bucket (which Datadog
+    // aligns to the rollup interval boundary, often before the invocation)
+    // falls inside the range we pass to /api/v1/query.
+    invocationStartTime = Date.now() - 60_000;
 
-    await invokeAndCollectTelemetry(functions, 1, 1, 0);
+    await Promise.all(functionNames.map((fn) => invokeLambda(fn)));
+
+    await new Promise((resolve) =>
+      setTimeout(resolve, DEFAULT_DATADOG_INDEXING_WAIT_MS),
+    );
 
     metricsEndTime = Date.now();
 
-    console.log("All invocations and data fetching completed");
-  }, 600000);
+    console.log("Lambdas invoked and indexing wait complete");
+  }, 900000);
 
   describe("unfiltered function (no DD_CUSTOMER_METRICS_EXCLUDE_TAGS)", () => {
     it.each(EXCLUDED_TAGS)(
