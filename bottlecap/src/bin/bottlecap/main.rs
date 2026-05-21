@@ -438,8 +438,8 @@ async fn extension_loop_active(
         let stats_flusher_clone = Arc::clone(&stats_flusher);
         let proxy_flusher_clone = proxy_flusher.clone();
         let metrics_aggr_handle_clone = metrics_aggregator_handle.clone();
-        let shutdown_deadline_ms = Arc::new(AtomicU64::new(0));
-        let shutdown_deadline_ms_flush = Arc::clone(&shutdown_deadline_ms);
+        let shutdown_deadline_ms_flush = Arc::new(AtomicU64::new(0));
+        let shutdown_deadline_ms_shutdown = Arc::clone(&shutdown_deadline_ms_flush);
 
         // In Managed Instance mode, create a separate interval for the background flusher task.
         // We don't reuse race_flush_interval because we need to configure the missed tick
@@ -503,7 +503,7 @@ async fn extension_loop_active(
         let runtime_api_clone = aws_config.runtime_api.clone();
         let extension_id_clone = r.extension_id.clone();
         let client_clone = client.clone();
-        let shutdown_deadline_ms_clone = Arc::clone(&shutdown_deadline_ms);
+        let shutdown_deadline_ms_clone = shutdown_deadline_ms_shutdown;
 
         // Main event loop for Managed Instance mode: process telemetry events until shutdown
         //
