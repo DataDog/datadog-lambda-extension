@@ -283,13 +283,13 @@ pub struct EnvConfig {
     #[serde(deserialize_with = "deserialize_optional_string")]
     pub statsd_metric_namespace: Option<String>,
 
-    /// @env `DD_CUSTOMER_METRICS_EXCLUDE_TAGS`
+    /// @env `DD_CUSTOM_METRICS_EXCLUDE_TAGS`
     ///
-    /// Comma-separated list of tag keys to exclude from customer `DogStatsD` metrics
+    /// Comma-separated list of tag keys to exclude from custom `DogStatsD` metrics
     /// enrichment. Use this to drop auto-injected tags (e.g. `function_arn,region`)
     /// from custom metrics to reduce billing.
     #[serde(deserialize_with = "deserialize_array_from_comma_separated_string")]
-    pub customer_metrics_exclude_tags: Vec<String>,
+    pub custom_metrics_exclude_tags: Vec<String>,
 
     /// @env `DD_DOGSTATSD_SO_RCVBUF`
     /// Size of the receive buffer for `DogStatsD` UDP packets, in bytes (`SO_RCVBUF`).
@@ -593,7 +593,7 @@ fn merge_config(config: &mut Config, env_config: &EnvConfig) {
         config.statsd_metric_namespace = parse_metric_namespace(namespace);
     }
 
-    merge_vec!(config, env_config, customer_metrics_exclude_tags);
+    merge_vec!(config, env_config, custom_metrics_exclude_tags);
 
     // DogStatsD
     merge_option!(config, env_config, dogstatsd_so_rcvbuf);
@@ -879,7 +879,7 @@ mod tests {
             );
             jail.set_env("DD_OTLP_CONFIG_LOGS_ENABLED", "true");
 
-            jail.set_env("DD_CUSTOMER_METRICS_EXCLUDE_TAGS", "function_arn,region");
+            jail.set_env("DD_CUSTOM_METRICS_EXCLUDE_TAGS", "function_arn,region");
 
             // DogStatsD
             jail.set_env("DD_DOGSTATSD_SO_RCVBUF", "1048576");
@@ -1041,10 +1041,7 @@ mod tests {
                 otlp_config_traces_probabilistic_sampler_sampling_percentage: Some(50),
                 otlp_config_logs_enabled: true,
                 statsd_metric_namespace: None,
-                customer_metrics_exclude_tags: vec![
-                    "function_arn".to_string(),
-                    "region".to_string(),
-                ],
+                custom_metrics_exclude_tags: vec!["function_arn".to_string(), "region".to_string()],
                 dogstatsd_so_rcvbuf: Some(1_048_576),
                 dogstatsd_buffer_size: Some(65507),
                 dogstatsd_queue_size: Some(2048),
@@ -1259,11 +1256,11 @@ mod tests {
     }
 
     #[test]
-    fn test_customer_metrics_exclude_tags_from_env() {
+    fn test_custom_metrics_exclude_tags_from_env() {
         figment::Jail::expect_with(|jail| {
             jail.clear_env();
             jail.set_env(
-                "DD_CUSTOMER_METRICS_EXCLUDE_TAGS",
+                "DD_CUSTOM_METRICS_EXCLUDE_TAGS",
                 "function_arn,region,account_id",
             );
 
@@ -1274,7 +1271,7 @@ mod tests {
                 .expect("Failed to load config");
 
             assert_eq!(
-                config.customer_metrics_exclude_tags,
+                config.custom_metrics_exclude_tags,
                 vec![
                     "function_arn".to_string(),
                     "region".to_string(),
@@ -1286,7 +1283,7 @@ mod tests {
     }
 
     #[test]
-    fn test_customer_metrics_exclude_tags_defaults_to_empty() {
+    fn test_custom_metrics_exclude_tags_defaults_to_empty() {
         figment::Jail::expect_with(|jail| {
             jail.clear_env();
 
@@ -1296,7 +1293,7 @@ mod tests {
                 .load(&mut config)
                 .expect("Failed to load config");
 
-            assert!(config.customer_metrics_exclude_tags.is_empty());
+            assert!(config.custom_metrics_exclude_tags.is_empty());
             Ok(())
         });
     }

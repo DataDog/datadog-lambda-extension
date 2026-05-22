@@ -304,7 +304,7 @@ pub struct Config {
     // Metrics
     pub metrics_config_compression_level: i32,
     pub statsd_metric_namespace: Option<String>,
-    pub customer_metrics_exclude_tags: Vec<String>,
+    pub custom_metrics_exclude_tags: Vec<String>,
     /// Size of the receive buffer for `DogStatsD` UDP packets, in bytes (`SO_RCVBUF`).
     /// Increase to reduce packet loss under high-throughput metric bursts.
     /// If None, uses the OS default.
@@ -437,7 +437,7 @@ impl Default for Config {
             metrics_config_compression_level: 3,
             statsd_metric_namespace: None,
 
-            customer_metrics_exclude_tags: vec![],
+            custom_metrics_exclude_tags: vec![],
 
             // DogStatsD
             // Defaults to None, which uses the OS default.
