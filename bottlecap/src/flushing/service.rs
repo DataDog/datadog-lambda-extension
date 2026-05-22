@@ -328,10 +328,13 @@ impl FlushingService {
             })
             .collect();
 
-        let now_ms = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_millis() as u64;
+        let now_ms = u64::try_from(
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_millis(),
+        )
+        .unwrap_or(u64::MAX);
         let remaining = Duration::from_millis(deadline_ms.saturating_sub(now_ms));
 
         let flush = async {
