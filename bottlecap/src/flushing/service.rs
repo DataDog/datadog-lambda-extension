@@ -335,8 +335,6 @@ impl FlushingService {
                 .as_millis(),
         )
         .unwrap_or(u64::MAX);
-        let remaining = Duration::from_millis(deadline_ms.saturating_sub(now_ms));
-
         let flush = async {
             tokio::join!(
                 self.logs_flusher.flush(None),
@@ -347,6 +345,12 @@ impl FlushingService {
             );
         };
 
+        if now_ms >= deadline_ms {
+            flush.await;
+            return;
+        }
+
+        let remaining = Duration::from_millis(deadline_ms - now_ms);
         if tokio::time::timeout(remaining.saturating_sub(FLUSH_CANCEL_GAP), flush)
             .await
             .is_err()
