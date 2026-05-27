@@ -1038,6 +1038,7 @@ api_security_sample_delay: 60 # Seconds
                 dogstatsd_queue_size: Some(2048),
 
                 dd_org_uuid: String::default(),
+                durable_function_log_buffer_size: 50,
             };
 
             // Assert that
