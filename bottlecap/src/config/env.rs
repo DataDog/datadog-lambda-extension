@@ -494,7 +494,7 @@ pub struct EnvConfig {
     /// Maximum number of request IDs whose logs are held waiting for durable execution
     /// context. Set to 0 to disable log holding; logs will be sent immediately without
     /// durable execution context enrichment. Useful when the tracer is not installed.
-    /// Default is `50`.
+    /// Default is `0`.
     #[serde(deserialize_with = "deserialize_option_lossless")]
     pub durable_function_log_buffer_size: Option<usize>,
 }
@@ -1064,7 +1064,7 @@ mod tests {
                 api_security_sample_delay: Duration::from_secs(60),
 
                 dd_org_uuid: String::default(),
-                durable_function_log_buffer_size: 50,
+                durable_function_log_buffer_size: 0,
             };
 
             assert_eq!(config, expected_config);

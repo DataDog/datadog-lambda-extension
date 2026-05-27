@@ -2579,6 +2579,7 @@ mod tests {
     #[tokio::test]
     async fn test_function_log_without_execution_arn_is_held_in_durable_mode() {
         let mut processor = make_processor_for_durable_arn_tests();
+        processor.held_logs_max_keys = 50;
         processor.is_durable_function = Some(true);
         // Simulate a known request_id with no durable context yet
         processor.invocation_context.request_id = "req-123".to_string();
@@ -2604,6 +2605,7 @@ mod tests {
             (None, serde_json::Value::Null),
         ] {
             let mut processor = make_processor_for_durable_arn_tests();
+            processor.held_logs_max_keys = 50;
             processor.is_durable_function = Some(true);
             processor.invocation_context.request_id = "req-end".to_string();
             processor.insert_to_durable_context_map(
