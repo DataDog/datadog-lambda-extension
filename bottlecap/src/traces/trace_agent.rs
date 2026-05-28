@@ -479,8 +479,8 @@ impl TraceAgent {
         let (parts, body) = match extract_request_body(request).await {
             Ok(r) => r,
             Err(e) => {
-                // Usually the tracer connection closing mid-transfer when the
-                // sandbox freezes — external, not an extension fault. See #1232.
+                // Using DEBUG level because this is usually the tracer connection closing mid-transfer when the
+                // sandbox freezes, which is not actionable.
                 return debug_response(
                     StatusCode::INTERNAL_SERVER_ERROR,
                     format!("TRACE_AGENT | handle_traces | Error extracting request body: {e}"),
