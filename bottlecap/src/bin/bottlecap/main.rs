@@ -841,9 +841,12 @@ async fn handle_event_bus_event(
     stats_concentrator: StatsConcentratorHandle,
 ) -> Option<TelemetryEvent> {
     match event {
-        Event::OutOfMemory(event_timestamp) => {
+        Event::OutOfMemory {
+            request_id,
+            timestamp,
+        } => {
             if let Err(e) = invocation_processor_handle
-                .on_out_of_memory_error(event_timestamp)
+                .on_out_of_memory_error(request_id, timestamp)
                 .await
             {
                 error!("Failed to send out of memory error to processor: {}", e);

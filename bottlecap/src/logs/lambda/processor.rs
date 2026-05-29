@@ -163,6 +163,32 @@ impl LambdaProcessor {
         }
     }
 
+    /// Returns the `request_id` of the currently-active invocation, if known.
+    /// Set by `PlatformStart`, cleared by `PlatformRuntimeDone` / `PlatformReport`.
+    ///
+    /// Returns `None` when:
+    /// - **Managed Instance mode**: extensions cannot subscribe to the `INVOKE` event,
+    ///   so `platform.start` is not delivered and this slot is never populated. OOM logs
+    ///   parsed in MI mode are therefore always tagged `None`. The synthesized
+    ///   `PlatformRuntimeDone` produced by `handle_managed_instance_report` does carry a
+    ///   real `request_id`, so dedup still works for that path. Worst case is a thin
+    ///   double-count window if a runtime emits both an OOM log line and
+    ///   `error_type = Runtime.OutOfMemory` for the same invocation — not observed in
+    ///   practice today.
+    /// - **Pre-`PlatformStart` init crash**: a FATAL OOM log emitted by init code can
+    ///   arrive before `PlatformStart` (or with no `PlatformStart` at all, if init
+    ///   fails outright). In the no-`PlatformStart` case no other detection path fires,
+    ///   so no double-count.
+    /// - **Late log race**: a FATAL log parsed after `PlatformRuntimeDone` clears the
+    ///   slot. By then the context has been removed, so no double-count.
+    fn current_request_id(&self) -> Option<String> {
+        if self.invocation_context.request_id.is_empty() {
+            None
+        } else {
+            Some(self.invocation_context.request_id.clone())
+        }
+    }
+
     #[allow(clippy::too_many_lines)]
     async fn get_message(&mut self, event: TelemetryEvent) -> Result<Message, Box<dyn Error>> {
         let copy = event.clone();
@@ -194,7 +220,10 @@ impl LambdaProcessor {
                 if let Some(message) = message {
                     if is_oom_error(&message) {
                         debug!("LOGS | Got a runtime-specific OOM error. Incrementing OOM metric.");
-                        if let Err(e) = self.event_bus.send(Event::OutOfMemory(event.time.timestamp())).await {
+                        if let Err(e) = self.event_bus.send(Event::OutOfMemory {
+                            request_id: self.current_request_id(),
+                            timestamp: event.time.timestamp(),
+                        }).await {
                             error!("LOGS | Failed to send OOM event to the main event bus: {e}");
                         }
                     }
@@ -206,7 +235,7 @@ impl LambdaProcessor {
                         event.time.timestamp_millis(),
                         None,
                     );
-                    // If the message is logged from the durable execution SDK, 
+                    // If the message is logged from the durable execution SDK,
                     // set durable execution id and name as log attributes.
                     if let Some((exec_id, exec_name)) = durable_ctx {
                         msg.lambda.durable_execution_id = Some(exec_id);
@@ -227,7 +256,10 @@ impl LambdaProcessor {
                 if let Some(message) = message {
                     if is_oom_error(&message) {
                         debug!("LOGS | Got a runtime-specific OOM error. Incrementing OOM metric.");
-                        if let Err(e) = self.event_bus.send(Event::OutOfMemory(event.time.timestamp())).await {
+                        if let Err(e) = self.event_bus.send(Event::OutOfMemory {
+                            request_id: self.current_request_id(),
+                            timestamp: event.time.timestamp(),
+                        }).await {
                             error!("LOGS | Failed to send OOM event to the main event bus: {e}");
                         }
                     }

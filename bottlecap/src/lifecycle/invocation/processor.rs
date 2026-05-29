@@ -508,7 +508,7 @@ impl Processor {
                 debug!(
                     "Invocation Processor | PlatformRuntimeDone | Got Runtime.OutOfMemory. Incrementing OOM metric."
                 );
-                self.enhanced_metrics.increment_oom_metric(timestamp);
+                self.try_increment_oom_metric(Some(request_id), timestamp);
             }
         }
 
@@ -909,25 +909,25 @@ impl Processor {
 
     /// Handles `OnDemand` mode platform report processing.
     ///
-    /// Processes OnDemand-specific metrics including OOM detection for provided.al runtimes
-    /// and post-runtime duration calculation.
+    /// Processes OnDemand-specific metrics including OOM detection by memory-size
+    /// equality and post-runtime duration calculation.
     fn handle_ondemand_report(
         &mut self,
         request_id: &String,
         metrics: OnDemandReportMetrics,
         timestamp: i64,
     ) {
-        // For provided.al runtimes, if the last invocation hit the memory limit, increment the OOM metric.
-        // We do this for provided.al runtimes because we didn't find another way to detect this under provided.al.
-        // We don't do this for other runtimes to avoid double counting.
-        if let Some(runtime) = &self.runtime
-            && runtime.starts_with("provided.al")
-            && metrics.max_memory_used_mb == metrics.memory_size_mb
-        {
+        // If the invocation hit the memory limit, increment the OOM metric. This catches
+        // OOM-induced failures that don't surface through a runtime-specific log line or a
+        // `Runtime.OutOfMemory` error_type — most notably the suppressed-init / timeout-at-cap
+        // pattern reported in datadog-lambda-extension#1237 (Node) and the historical
+        // provided.al case. Dedup against the other two detection paths is handled by
+        // `Context::oom_emitted`, which `try_increment_oom_metric` checks and sets.
+        if metrics.max_memory_used_mb == metrics.memory_size_mb {
             debug!(
                 "Invocation Processor | PlatformReport | Last invocation hit memory limit. Incrementing OOM metric."
             );
-            self.enhanced_metrics.increment_oom_metric(timestamp);
+            self.try_increment_oom_metric(Some(request_id), timestamp);
         }
 
         // Calculate and set post-runtime duration if context is available
@@ -1395,7 +1395,34 @@ impl Processor {
         Some(error_tags)
     }
 
-    pub fn on_out_of_memory_error(&mut self, timestamp: i64) {
+    pub fn on_out_of_memory_error(&mut self, request_id: Option<&String>, timestamp: i64) {
+        self.try_increment_oom_metric(request_id, timestamp);
+    }
+
+    /// Increments the OOM enhanced metric exactly once per `request_id`.
+    ///
+    /// Several detection paths can fire for the same invocation:
+    /// 1. A runtime-specific OOM log line (logs processor → `Event::OutOfMemory`)
+    /// 2. `error_type == "Runtime.OutOfMemory"` in `PlatformRuntimeDone`
+    /// 3. `max_memory_used_mb == memory_size_mb` in `PlatformReport`
+    ///
+    /// To avoid double-counting, the per-invocation `Context::oom_emitted` flag is
+    /// set on the first emission. Subsequent emissions for the same `request_id` are
+    /// skipped. If `request_id` is `None` (log path saw the OOM outside an active
+    /// invocation window) or no context is found, we emit best-effort without dedup.
+    fn try_increment_oom_metric(&mut self, request_id: Option<&String>, timestamp: i64) {
+        if let Some(rid) = request_id
+            && let Some(ctx) = self.context_buffer.get_mut(rid)
+        {
+            if ctx.oom_emitted {
+                debug!(
+                    "Invocation Processor | OOM metric already emitted for request_id {}, skipping",
+                    rid
+                );
+                return;
+            }
+            ctx.oom_emitted = true;
+        }
         self.enhanced_metrics.increment_oom_metric(timestamp);
     }
 
@@ -2443,6 +2470,140 @@ mod tests {
             ctx.invocation_span.metrics.get("_dd.appsec.enabled"),
             Some(&0.0),
             "pre-existing _dd.appsec.enabled value must not be overwritten"
+        );
+    }
+
+    /// Two OOM signals for the same `request_id` increment the metric exactly once.
+    /// Exercises the `Context::oom_emitted` dedup flag.
+    #[tokio::test]
+    async fn test_try_increment_oom_metric_dedupes_same_request_id() {
+        let mut p = setup();
+        // Insert the context directly so we don't go through `on_invoke_event`, which
+        // would populate dynamic tags (`cold_start:true`) and complicate the query.
+        let request_id = String::from("req-dedup");
+        p.context_buffer.start_context(&request_id, Span::default());
+
+        let now: i64 = std::time::UNIX_EPOCH
+            .elapsed()
+            .expect("clock")
+            .as_secs()
+            .try_into()
+            .unwrap_or_default();
+
+        p.on_out_of_memory_error(Some(&request_id), now);
+        p.on_out_of_memory_error(Some(&request_id), now);
+
+        let ts = (now / 10) * 10;
+        let entry = p
+            .enhanced_metrics
+            .aggr_handle
+            .get_entry_by_id(
+                crate::metrics::enhanced::constants::OUT_OF_MEMORY_METRIC.into(),
+                None,
+                ts,
+            )
+            .await
+            .unwrap()
+            .expect("OOM metric must be emitted at least once");
+
+        let sketch = entry.value.get_sketch().expect("distribution sketch");
+        let sum = sketch.sum().expect("sketch sum");
+        assert!(
+            (sum - 1.0).abs() < f64::EPSILON,
+            "OOM sum must be 1.0 (deduped), got {sum}"
+        );
+
+        // And the context flag should now reflect that we emitted.
+        assert!(
+            p.context_buffer
+                .get(&request_id)
+                .expect("context")
+                .oom_emitted,
+            "oom_emitted flag must be set after the first emission"
+        );
+    }
+
+    /// OOM signals for different `request_id`s each emit a metric — dedup is scoped
+    /// per request, not globally.
+    #[tokio::test]
+    async fn test_try_increment_oom_metric_distinct_request_ids_emit_separately() {
+        let mut p = setup();
+        let req1 = String::from("req-a");
+        let req2 = String::from("req-b");
+        p.context_buffer.start_context(&req1, Span::default());
+        p.context_buffer.start_context(&req2, Span::default());
+
+        let now: i64 = std::time::UNIX_EPOCH
+            .elapsed()
+            .expect("clock")
+            .as_secs()
+            .try_into()
+            .unwrap_or_default();
+
+        p.on_out_of_memory_error(Some(&req1), now);
+        p.on_out_of_memory_error(Some(&req2), now);
+
+        let ts = (now / 10) * 10;
+        let entry = p
+            .enhanced_metrics
+            .aggr_handle
+            .get_entry_by_id(
+                crate::metrics::enhanced::constants::OUT_OF_MEMORY_METRIC.into(),
+                None,
+                ts,
+            )
+            .await
+            .unwrap()
+            .expect("OOM metric must be emitted");
+
+        let sketch = entry.value.get_sketch().expect("distribution sketch");
+        let sum = sketch.sum().expect("sketch sum");
+        assert!(
+            (sum - 2.0).abs() < f64::EPSILON,
+            "OOM sum must be 2.0 (one per request_id), got {sum}"
+        );
+    }
+
+    /// Regression: the `max_memory_used_mb == memory_size_mb` path used to be gated
+    /// on `runtime.starts_with("provided.al")`. After generalising the rule to all
+    /// runtimes (with dedup via `Context::oom_emitted`), the equality case must
+    /// still emit OOM.
+    #[tokio::test]
+    async fn test_handle_ondemand_report_emits_oom_on_memory_equality() {
+        let mut p = setup();
+        let request_id = String::from("req-eq");
+        p.context_buffer.start_context(&request_id, Span::default());
+
+        let now: i64 = std::time::UNIX_EPOCH
+            .elapsed()
+            .expect("clock")
+            .as_secs()
+            .try_into()
+            .unwrap_or_default();
+
+        let metrics = OnDemandReportMetrics {
+            duration_ms: 100.0,
+            billed_duration_ms: 100,
+            memory_size_mb: 1024,
+            max_memory_used_mb: 1024,
+            init_duration_ms: None,
+            restore_duration_ms: None,
+        };
+        p.handle_ondemand_report(&request_id, metrics, now);
+
+        let ts = (now / 10) * 10;
+        assert!(
+            p.enhanced_metrics
+                .aggr_handle
+                .get_entry_by_id(
+                    crate::metrics::enhanced::constants::OUT_OF_MEMORY_METRIC.into(),
+                    None,
+                    ts
+                )
+                .await
+                .unwrap()
+                .is_some(),
+            "OOM must be emitted when max_memory_used_mb == memory_size_mb"
         );
     }
 }
