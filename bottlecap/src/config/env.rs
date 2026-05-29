@@ -300,6 +300,10 @@ pub struct EnvConfig {
     /// Defaults to 1024. Increase if the processor can't keep up with burst traffic.
     #[serde(deserialize_with = "deserialize_option_lossless")]
     pub dogstatsd_queue_size: Option<usize>,
+    /// @env `DD_CUSTOM_METRICS_TAGS_DROP`
+    /// Comma-separated list of tag keys to remove from custom metrics emitted by the extension.
+    #[serde(deserialize_with = "deserialize_array_from_comma_separated_string")]
+    pub custom_metrics_tags_drop: Vec<String>,
 
     // OTLP
     //
@@ -589,6 +593,7 @@ fn merge_config(config: &mut Config, env_config: &EnvConfig) {
     merge_option!(config, env_config, dogstatsd_so_rcvbuf);
     merge_option!(config, env_config, dogstatsd_buffer_size);
     merge_option!(config, env_config, dogstatsd_queue_size);
+    merge_vec!(config, env_config, custom_metrics_tags_drop);
 
     // OTLP
     merge_option_to_value!(config, env_config, otlp_config_traces_enabled);
@@ -873,6 +878,10 @@ mod tests {
             jail.set_env("DD_DOGSTATSD_SO_RCVBUF", "1048576");
             jail.set_env("DD_DOGSTATSD_BUFFER_SIZE", "65507");
             jail.set_env("DD_DOGSTATSD_QUEUE_SIZE", "2048");
+            jail.set_env(
+                "DD_CUSTOM_METRICS_TAGS_DROP",
+                "function_arn,executedversion,cold_start",
+            );
 
             // AWS Lambda
             jail.set_env(
@@ -1032,6 +1041,11 @@ mod tests {
                 dogstatsd_so_rcvbuf: Some(1_048_576),
                 dogstatsd_buffer_size: Some(65507),
                 dogstatsd_queue_size: Some(2048),
+                custom_metrics_tags_drop: vec![
+                    "function_arn".to_string(),
+                    "executedversion".to_string(),
+                    "cold_start".to_string(),
+                ],
                 api_key_secret_arn: "arn:aws:secretsmanager:region:account:secret:datadog-api-key"
                     .to_string(),
                 kms_api_key: "test-kms-key".to_string(),

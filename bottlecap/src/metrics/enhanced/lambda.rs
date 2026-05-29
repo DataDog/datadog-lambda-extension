@@ -71,6 +71,9 @@ impl Lambda {
         let vec_tags: Vec<String> = self
             .dynamic_value_tags
             .iter()
+            .filter(|(k, _)| {
+                !crate::tags::tag_should_be_dropped(k, &self.config.custom_metrics_tags_drop)
+            })
             .map(|(k, v)| format!("{k}:{v}"))
             .collect();
 
@@ -869,6 +872,47 @@ mod tests {
         assert!(
             entry.is_some(),
             "Expected metric with durable_function:true tag"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_custom_metrics_tags_drop_filters_dynamic_tags() {
+        let (metrics_aggr, config) = setup();
+        let config = Arc::new(config::Config {
+            custom_metrics_tags_drop: vec!["cold_start".to_string()],
+            ..config.as_ref().clone()
+        });
+        let mut lambda = Lambda::new(metrics_aggr.clone(), config);
+
+        let now: i64 = std::time::UNIX_EPOCH
+            .elapsed()
+            .unwrap_or_default()
+            .as_secs()
+            .try_into()
+            .unwrap_or_default();
+        lambda.set_init_tags(false, true);
+        lambda.set_runtime_tag("nodejs");
+        lambda.increment_invocation_metric(now);
+
+        let ts = (now / 10) * 10;
+        let kept_tags = SortedTags::parse("runtime:nodejs").ok();
+        let dropped_tags = SortedTags::parse("cold_start:true,runtime:nodejs").ok();
+
+        assert!(
+            metrics_aggr
+                .get_entry_by_id(constants::INVOCATIONS_METRIC.into(), kept_tags, ts)
+                .await
+                .unwrap()
+                .is_some(),
+            "expected metric without cold_start tag"
+        );
+        assert!(
+            metrics_aggr
+                .get_entry_by_id(constants::INVOCATIONS_METRIC.into(), dropped_tags, ts)
+                .await
+                .unwrap()
+                .is_none(),
+            "expected cold_start tag to be dropped"
         );
     }
 

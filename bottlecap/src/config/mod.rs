@@ -315,6 +315,7 @@ pub struct Config {
     /// Internal queue capacity between the socket reader and metric processor.
     /// Defaults to 1024. Increase if the processor can't keep up with burst traffic.
     pub dogstatsd_queue_size: Option<usize>,
+    pub custom_metrics_tags_drop: Vec<String>,
 
     // OTLP
     //
@@ -443,6 +444,7 @@ impl Default for Config {
             dogstatsd_buffer_size: None,
             // Defaults to 1024 internally.
             dogstatsd_queue_size: None,
+            custom_metrics_tags_drop: vec![],
 
             // OTLP
             otlp_config_traces_enabled: true,

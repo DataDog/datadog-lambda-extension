@@ -43,6 +43,15 @@ impl Provider {
     }
 
     #[must_use]
+    pub fn get_tags_vec_excluding(&self, tags_to_drop: &[String]) -> Vec<String> {
+        self.get_tags_map()
+            .iter()
+            .filter(|(key, _)| !crate::tags::tag_should_be_dropped(key, tags_to_drop))
+            .map(|(key, value)| format!("{key}:{value}"))
+            .collect()
+    }
+
+    #[must_use]
     pub fn get_canonical_id(&self) -> Option<String> {
         self.tag_provider.get_canonical_id()
     }
@@ -127,5 +136,28 @@ mod tests {
         );
         let provider = Provider::new(config, LAMBDA_RUNTIME_SLUG.to_string(), &metadata);
         assert!(provider.get_tags_string().contains("service:test-service"));
+    }
+
+    #[test]
+    fn test_get_tags_vec_excluding() {
+        let config = Arc::new(Config {
+            service: Some("test-service".to_string()),
+            tags: HashMap::from([("test".to_string(), "tag".to_string())]),
+            ..config::Config::default()
+        });
+        let mut metadata = HashMap::new();
+        metadata.insert(
+            "function_arn".to_string(),
+            "arn:aws:lambda:us-west-2:123456789012:function:my-function".to_string(),
+        );
+        let provider = Provider::new(config, LAMBDA_RUNTIME_SLUG.to_string(), &metadata);
+        let tags = provider.get_tags_vec_excluding(&[
+            "service".to_string(),
+            "function_arn:ignored-value".to_string(),
+        ]);
+
+        assert!(tags.iter().any(|tag| tag == "test:tag"));
+        assert!(!tags.iter().any(|tag| tag.starts_with("service:")));
+        assert!(!tags.iter().any(|tag| tag.starts_with("function_arn:")));
     }
 }

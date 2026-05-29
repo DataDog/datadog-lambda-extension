@@ -1219,8 +1219,11 @@ async fn start_dogstatsd(
 ) {
     // Start aggregator service and handle
     let start_time = Instant::now();
+    let metric_tags = tags_provider
+        .get_tags_vec_excluding(&config.custom_metrics_tags_drop)
+        .join(",");
     let (aggregator_service, aggregator_handle) = MetricsAggregatorService::new(
-        SortedTags::parse(&tags_provider.get_tags_string()).unwrap_or(EMPTY_TAGS),
+        SortedTags::parse(&metric_tags).unwrap_or(EMPTY_TAGS),
         CONTEXTS,
     )
     .expect("can't create metrics service");
