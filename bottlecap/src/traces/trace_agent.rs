@@ -479,7 +479,9 @@ impl TraceAgent {
         let (parts, body) = match extract_request_body(request).await {
             Ok(r) => r,
             Err(e) => {
-                return error_response(
+                // Using DEBUG level because this is usually the tracer connection closing mid-transfer when the
+                // sandbox freezes, which is not actionable.
+                return debug_response(
                     StatusCode::INTERNAL_SERVER_ERROR,
                     format!("TRACE_AGENT | handle_traces | Error extracting request body: {e}"),
                 );
@@ -758,6 +760,13 @@ fn error_response<E: std::fmt::Display>(status: StatusCode, error: E) -> Respons
 /// external event (e.g. client disconnected) rather than a bug in the extension itself.
 fn warn_response<E: std::fmt::Display>(status: StatusCode, error: E) -> Response {
     warn!("{}", error);
+    (status, error.to_string()).into_response()
+}
+
+/// Like [`error_response`], but logs at DEBUG level. Use for expected external events
+/// (e.g. client disconnected mid-request) that are too noisy even at WARN.
+fn debug_response<E: std::fmt::Display>(status: StatusCode, error: E) -> Response {
+    debug!("{}", error);
     (status, error.to_string()).into_response()
 }
 
