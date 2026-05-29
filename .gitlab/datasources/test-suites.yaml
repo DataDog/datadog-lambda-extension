@@ -4,3 +4,4 @@ test_suites:
   - name: snapstart
   - name: lmi
   - name: auth
+  - name: oom

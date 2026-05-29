@@ -91,6 +91,8 @@ export const DURATION_METRICS = [
   'aws.lambda.enhanced.init_duration',
 ];
 
+export const OUT_OF_MEMORY_METRIC = 'aws.lambda.enhanced.out_of_memory';
+
 export type EnhancedMetrics = Record<string, MetricPoint[]>;
 
 export interface MetricPoint {
@@ -287,6 +289,41 @@ export async function getEnhancedMetrics(
   }
 
   return metrics;
+}
+
+/**
+ * Returns the total emission count of a counter / distribution enhanced metric
+ * for a single function over the given window, by summing all data-point
+ * values returned by Datadog. Used by oom.test.ts to assert that
+ * `aws.lambda.enhanced.out_of_memory` increments exactly once per invocation —
+ * verifying the per-Context `oom_emitted` dedup flag introduced for #1237.
+ */
+export async function getMetricCount(
+  metricName: string,
+  functionName: string,
+  fromTime: number,
+  toTime: number,
+): Promise<number> {
+  const baseFunctionName = getServiceName(functionName).toLowerCase();
+  const query = `sum:${metricName}{functionname:${baseFunctionName}}.as_count()`;
+
+  console.log(`Querying metric count: ${query}`);
+
+  const response = await datadogClient.get('/api/v1/query', {
+    params: {
+      query,
+      from: Math.floor(fromTime / 1000),
+      to: Math.floor(toTime / 1000),
+    },
+  });
+
+  const series = response.data.series || [];
+  if (series.length === 0) {
+    return 0;
+  }
+
+  const pointlist: [number, number][] = series[0].pointlist || [];
+  return pointlist.reduce((acc, [, value]) => acc + (value || 0), 0);
 }
 
 async function getMetrics(
