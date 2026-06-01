@@ -55,6 +55,19 @@ export class Oom extends cdk.Stack {
     const oomMemorySize = 192;
     const oomTimeout = cdk.Duration.seconds(30);
 
+    // The integration-test framework defaults DD_SERVERLESS_FLUSH_STRATEGY to
+    // `end` (flush only at end of invocation). For OOM tests that's a tight
+    // race: the function process dies, then Lambda sends PlatformRuntimeDone,
+    // then the extension increments the OOM metric, then Shutdown comes and
+    // the sandbox is reaped. If the metric flush can't finish in the narrow
+    // window between the OOM and the sandbox teardown, the data point is
+    // lost and the test sees count=0.
+    //
+    // `default` (`flushStrategyDefault`) flushes every ~1s in addition to
+    // invocation-end, giving the OOM metric a much wider window to reach
+    // Datadog. Override per-function below.
+    const flushStrategyDefault = 'default';
+
     // Node case A — V8 heap exhaustion (log-line path).
     const nodeV8FunctionName = `${id}-node-v8-heap-lambda`;
     const nodeV8Function = new lambda.Function(this, nodeV8FunctionName, {
@@ -68,6 +81,7 @@ export class Oom extends cdk.Stack {
       environment: {
         ...defaultDatadogEnvVariables,
         DD_SERVICE: nodeV8FunctionName,
+        DD_SERVERLESS_FLUSH_STRATEGY: flushStrategyDefault,
         DD_TRACE_ENABLED: 'true',
         DD_LAMBDA_HANDLER: 'index.handler',
         // Cap V8 heap below the Lambda memory cap so V8 throws its OOM error
@@ -93,6 +107,7 @@ export class Oom extends cdk.Stack {
       environment: {
         ...defaultDatadogEnvVariables,
         DD_SERVICE: nodeSigkillFunctionName,
+        DD_SERVERLESS_FLUSH_STRATEGY: flushStrategyDefault,
         DD_TRACE_ENABLED: 'true',
         DD_LAMBDA_HANDLER: 'index.handler',
       },
@@ -115,6 +130,7 @@ export class Oom extends cdk.Stack {
       environment: {
         ...defaultDatadogEnvVariables,
         DD_SERVICE: pythonFunctionName,
+        DD_SERVERLESS_FLUSH_STRATEGY: flushStrategyDefault,
         DD_TRACE_ENABLED: 'true',
         DD_LAMBDA_HANDLER: 'lambda_function.handler',
       },
@@ -140,6 +156,7 @@ export class Oom extends cdk.Stack {
       environment: {
         ...defaultDatadogEnvVariables,
         DD_SERVICE: rubyFunctionName,
+        DD_SERVERLESS_FLUSH_STRATEGY: flushStrategyDefault,
         DD_TRACE_ENABLED: 'true',
       },
       logGroup: createLogGroup(this, rubyFunctionName),
@@ -161,6 +178,7 @@ export class Oom extends cdk.Stack {
       environment: {
         ...defaultDatadogEnvVariables,
         DD_SERVICE: javaFunctionName,
+        DD_SERVERLESS_FLUSH_STRATEGY: flushStrategyDefault,
         AWS_LAMBDA_EXEC_WRAPPER: '/opt/datadog_wrapper',
         DD_TRACE_ENABLED: 'true',
       },
@@ -183,6 +201,7 @@ export class Oom extends cdk.Stack {
       environment: {
         ...defaultDatadogEnvVariables,
         DD_SERVICE: dotnetFunctionName,
+        DD_SERVERLESS_FLUSH_STRATEGY: flushStrategyDefault,
         AWS_LAMBDA_EXEC_WRAPPER: '/opt/datadog_wrapper',
       },
       logGroup: createLogGroup(this, dotnetFunctionName),
@@ -207,6 +226,7 @@ export class Oom extends cdk.Stack {
       environment: {
         ...defaultDatadogEnvVariables,
         DD_SERVICE: goFunctionName,
+        DD_SERVERLESS_FLUSH_STRATEGY: flushStrategyDefault,
       },
       logGroup: createLogGroup(this, goFunctionName),
     });
