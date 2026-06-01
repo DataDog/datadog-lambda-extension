@@ -125,11 +125,14 @@ export class Oom extends cdk.Stack {
     pythonFunction.addLayers(pythonLayer);
 
     // Ruby — NoMemoryError; log path and PlatformRuntimeDone path both fire.
+    // Datadog's Ruby tracer is a regular gem (no handler shim like Python's
+    // `datadog_lambda.handler.handler`), so the Lambda handler is the user's
+    // own `lambda_function.handler` and `DD_LAMBDA_HANDLER` is not used.
     const rubyFunctionName = `${id}-ruby-lambda`;
     const rubyFunction = new lambda.Function(this, rubyFunctionName, {
       runtime: defaultRubyRuntime,
       architecture: lambda.Architecture.ARM_64,
-      handler: 'datadog_lambda_rb.handler',
+      handler: 'lambda_function.handler',
       code: lambda.Code.fromAsset('./lambda/oom-ruby'),
       functionName: rubyFunctionName,
       timeout: oomTimeout,
@@ -138,7 +141,6 @@ export class Oom extends cdk.Stack {
         ...defaultDatadogEnvVariables,
         DD_SERVICE: rubyFunctionName,
         DD_TRACE_ENABLED: 'true',
-        DD_LAMBDA_HANDLER: 'lambda_function.handler',
       },
       logGroup: createLogGroup(this, rubyFunctionName),
     });
@@ -189,8 +191,10 @@ export class Oom extends cdk.Stack {
     dotnetFunction.addLayers(extensionLayer);
     dotnetFunction.addLayers(dotnetLayer);
 
-    // Go — runtime fatal error + PlatformReport memory equality (dedup).
-    // Go runs on the custom runtime, so the binary itself is the handler.
+    // Go — runtime fatal error (log-line path).
+    // The Go binary itself is the handler. We don't set
+    // AWS_LAMBDA_EXEC_WRAPPER: that wrapper sets language-specific env vars
+    // for tracer auto-instrumentation, which Go doesn't use.
     const goFunctionName = `${id}-go-lambda`;
     const goFunction = new lambda.Function(this, goFunctionName, {
       runtime: defaultGoRuntime,
@@ -203,7 +207,6 @@ export class Oom extends cdk.Stack {
       environment: {
         ...defaultDatadogEnvVariables,
         DD_SERVICE: goFunctionName,
-        AWS_LAMBDA_EXEC_WRAPPER: '/opt/datadog_wrapper',
       },
       logGroup: createLogGroup(this, goFunctionName),
     });
