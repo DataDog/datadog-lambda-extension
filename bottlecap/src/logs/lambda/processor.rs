@@ -61,7 +61,7 @@ pub struct LambdaProcessor {
     // Insertion order for FIFO eviction when map reaches capacity
     durable_context_order: VecDeque<String>,
     // Max number of request ID keys in held_logs. 0 disables holding entirely.
-    held_logs_max_keys: usize,
+    lambda_durable_function_log_buffer_size: usize,
 }
 
 // Matches `lifecycle::invocation::ContextBuffer` default capacity: sized to absorb async
@@ -141,7 +141,7 @@ impl LambdaProcessor {
 
         let processing_rules = &datadog_config.logs_config_processing_rules;
         let logs_enabled = datadog_config.serverless_logs_enabled;
-        let held_logs_max_keys = datadog_config.durable_function_log_buffer_size;
+        let lambda_durable_function_log_buffer_size = datadog_config.durable_function_log_buffer_size;
         let rules = LambdaProcessor::compile_rules(processing_rules);
         LambdaProcessor {
             function_arn,
@@ -159,7 +159,7 @@ impl LambdaProcessor {
             held_logs_order: VecDeque::new(),
             durable_context_map: HashMap::with_capacity(DURABLE_CONTEXT_MAP_CAPACITY),
             durable_context_order: VecDeque::with_capacity(DURABLE_CONTEXT_MAP_CAPACITY),
-            held_logs_max_keys,
+            lambda_durable_function_log_buffer_size,
         }
     }
 
@@ -684,7 +684,7 @@ impl LambdaProcessor {
     /// arrives.
     fn hold_log(&mut self, request_id: String, log: IntakeLog) {
         if !self.held_logs.contains_key(&request_id) {
-            while self.held_logs.len() >= self.held_logs_max_keys {
+            while self.held_logs.len() >= self.lambda_durable_function_log_buffer_size {
                 // Evict the oldest key to ready_logs (without durable context tags).
                 if let Some(oldest) = self.held_logs_order.pop_front()
                     && let Some(evicted) = self.held_logs.remove(&oldest)
@@ -725,7 +725,7 @@ impl LambdaProcessor {
 
         // When the buffer is disabled, skip holding and send logs immediately without
         // durable execution context enrichment.
-        if self.held_logs_max_keys == 0 {
+        if self.lambda_durable_function_log_buffer_size == 0 {
             if let Ok(serialized_log) = serde_json::to_string(&log) {
                 drop(log);
                 self.ready_logs.push(serialized_log);
@@ -2579,7 +2579,7 @@ mod tests {
     #[tokio::test]
     async fn test_function_log_without_execution_arn_is_held_in_durable_mode() {
         let mut processor = make_processor_for_durable_arn_tests();
-        processor.held_logs_max_keys = 50;
+        processor.lambda_durable_function_log_buffer_size = 50;
         processor.is_durable_function = Some(true);
         // Simulate a known request_id with no durable context yet
         processor.invocation_context.request_id = "req-123".to_string();
@@ -2605,7 +2605,7 @@ mod tests {
             (None, serde_json::Value::Null),
         ] {
             let mut processor = make_processor_for_durable_arn_tests();
-            processor.held_logs_max_keys = 50;
+            processor.lambda_durable_function_log_buffer_size = 50;
             processor.is_durable_function = Some(true);
             processor.invocation_context.request_id = "req-end".to_string();
             processor.insert_to_durable_context_map(
