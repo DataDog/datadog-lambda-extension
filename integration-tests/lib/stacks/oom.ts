@@ -38,8 +38,9 @@ import {
  *   - oom-go           : log line `fatal error: runtime: out of memory`
  *                        + PlatformReport memory equality (dedup)
  *
- * Each function is configured with low memory (192 MB) and a short timeout
- * (30 s) so the OOM fires quickly during the integration-test run.
+ * Each function is configured with low memory (256 MB) and a short timeout
+ * (30 s) so the OOM fires quickly during the integration-test run. See the
+ * `oomMemorySize` comment for why 256 MB rather than the customer's 192 MB.
  */
 export class Oom extends cdk.Stack {
   constructor(scope: Construct, id: string, props: cdk.StackProps) {
@@ -52,27 +53,18 @@ export class Oom extends cdk.Stack {
     const dotnetLayer = getDefaultDotnetLayer(this);
     const rubyLayer = getDefaultRubyLayer(this);
 
-    const oomMemorySize = 192;
+    // 256 MB (not the customer's 192 MB from #1237) so the bottlecap
+    // extension has memory headroom to survive when the function process
+    // OOMs. At 192 MB the kernel OOM-killer often picks the extension
+    // instead of the function runtime (Lambda surfaces this as the
+    // `Extension.Crash` error type), and a dead extension can't emit the
+    // OOM metric. With 256 MB the function runtime's RSS dominates and
+    // kernel reliably kills it; the extension survives to detect/flush.
+    // The detection paths under test are unchanged — the functions still
+    // hit `max_memory_used == memory_size` in PlatformReport and still
+    // emit runtime-specific OOM error log lines.
+    const oomMemorySize = 256;
     const oomTimeout = cdk.Duration.seconds(30);
-
-    // The integration-test framework defaults DD_SERVERLESS_FLUSH_STRATEGY to
-    // `end` (flush only at end of invocation). For OOM tests that's a tight
-    // race: the function process dies, then Lambda sends PlatformRuntimeDone,
-    // then the extension increments the OOM metric, then Shutdown comes and
-    // the sandbox is reaped. If the metric flush can't finish in the narrow
-    // window between the OOM and the sandbox teardown, the data point is
-    // lost and the test sees count=0.
-    //
-    // `default` is a no-op in this scenario: it falls back to End strategy
-    // until the bottlecap invocation-times buffer is full (~20 invocations),
-    // so on our single-shot cold-start OOM it behaves identically to End.
-    //
-    // `continuously,1000` schedules an unconditional 1-second periodic flush
-    // regardless of invocation count, so the OOM metric reaches Datadog
-    // within ~1s of being emitted by bottlecap — well before the sandbox is
-    // reaped. This is a test-only knob; real customer Lambdas eventually
-    // flush via the next invocation or Shutdown path.
-    const flushStrategy = 'continuously,1000';
 
     // Node case A — V8 heap exhaustion (log-line path).
     const nodeV8FunctionName = `${id}-node-v8-heap-lambda`;
@@ -87,7 +79,6 @@ export class Oom extends cdk.Stack {
       environment: {
         ...defaultDatadogEnvVariables,
         DD_SERVICE: nodeV8FunctionName,
-        DD_SERVERLESS_FLUSH_STRATEGY: flushStrategy,
         DD_TRACE_ENABLED: 'true',
         DD_LAMBDA_HANDLER: 'index.handler',
         // Cap V8 heap below the Lambda memory cap so V8 throws its OOM error
@@ -113,7 +104,6 @@ export class Oom extends cdk.Stack {
       environment: {
         ...defaultDatadogEnvVariables,
         DD_SERVICE: nodeSigkillFunctionName,
-        DD_SERVERLESS_FLUSH_STRATEGY: flushStrategy,
         DD_TRACE_ENABLED: 'true',
         DD_LAMBDA_HANDLER: 'index.handler',
       },
@@ -136,7 +126,6 @@ export class Oom extends cdk.Stack {
       environment: {
         ...defaultDatadogEnvVariables,
         DD_SERVICE: pythonFunctionName,
-        DD_SERVERLESS_FLUSH_STRATEGY: flushStrategy,
         DD_TRACE_ENABLED: 'true',
         DD_LAMBDA_HANDLER: 'lambda_function.handler',
       },
@@ -162,7 +151,6 @@ export class Oom extends cdk.Stack {
       environment: {
         ...defaultDatadogEnvVariables,
         DD_SERVICE: rubyFunctionName,
-        DD_SERVERLESS_FLUSH_STRATEGY: flushStrategy,
         DD_TRACE_ENABLED: 'true',
       },
       logGroup: createLogGroup(this, rubyFunctionName),
@@ -184,7 +172,6 @@ export class Oom extends cdk.Stack {
       environment: {
         ...defaultDatadogEnvVariables,
         DD_SERVICE: javaFunctionName,
-        DD_SERVERLESS_FLUSH_STRATEGY: flushStrategy,
         AWS_LAMBDA_EXEC_WRAPPER: '/opt/datadog_wrapper',
         DD_TRACE_ENABLED: 'true',
       },
@@ -207,7 +194,6 @@ export class Oom extends cdk.Stack {
       environment: {
         ...defaultDatadogEnvVariables,
         DD_SERVICE: dotnetFunctionName,
-        DD_SERVERLESS_FLUSH_STRATEGY: flushStrategy,
         AWS_LAMBDA_EXEC_WRAPPER: '/opt/datadog_wrapper',
       },
       logGroup: createLogGroup(this, dotnetFunctionName),
@@ -232,7 +218,6 @@ export class Oom extends cdk.Stack {
       environment: {
         ...defaultDatadogEnvVariables,
         DD_SERVICE: goFunctionName,
-        DD_SERVERLESS_FLUSH_STRATEGY: flushStrategy,
       },
       logGroup: createLogGroup(this, goFunctionName),
     });
