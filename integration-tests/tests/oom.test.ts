@@ -1,6 +1,5 @@
 import { invokeLambda } from './utils/lambda';
 import { getMetricCount, OUT_OF_MEMORY_METRIC } from './utils/datadog';
-import { DEFAULT_DATADOG_INDEXING_WAIT_MS } from '../config';
 import { getIdentifier } from '../config';
 
 /**
@@ -16,6 +15,15 @@ import { getIdentifier } from '../config';
  * The Python/Ruby/Go cases are particularly meaningful regressions because
  * they trigger more than one detection path naturally — if dedup is broken,
  * those counts go to 2.
+ *
+ * Ingestion timing: empirical observation in CI is that the
+ * `aws.lambda.enhanced.out_of_memory` metric data point is durably ingested
+ * within ~30s of the OOM, but Datadog's `/api/v1/query` endpoint sometimes
+ * returns no results for very-recently-ingested points (the query engine's
+ * snapshot lags the ingest path). The single-shot 5-minute wait used by the
+ * other suites is therefore too brittle for this assertion. Instead we poll:
+ * after an initial wait we re-query every 30s until every runtime reports
+ * count>=1 or the overall budget is exhausted.
  */
 const identifier = getIdentifier();
 const stackName = `integ-${identifier}-oom`;
@@ -35,51 +43,60 @@ const cases: OomCase[] = [
   { runtime: 'go',            functionName: `${stackName}-go-lambda` },
 ];
 
+const INITIAL_WAIT_MS = 90 * 1000;   // wait before first query
+const POLL_INTERVAL_MS = 30 * 1000;  // re-query cadence
+const TOTAL_BUDGET_MS = 12 * 60 * 1000; // overall ceiling
+
 async function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+async function fetchCounts(start: number, end: number): Promise<Record<string, number>> {
+  const results = await Promise.all(
+    cases.map(async (c) => ({
+      runtime: c.runtime,
+      count: await getMetricCount(OUT_OF_MEMORY_METRIC, c.functionName, start, end),
+    })),
+  );
+  return Object.fromEntries(results.map((r) => [r.runtime, r.count]));
+}
+
 describe('OOM Integration Tests', () => {
   let countsByRuntime: Record<string, number>;
-  let windowStart: number;
-  let windowEnd: number;
 
-  // Invoke every function once, wait for Datadog to ingest, then query once
-  // for each. Keeping invocations and the query inside `beforeAll` lets each
-  // per-runtime test below assert against the same data set.
   beforeAll(async () => {
-    windowStart = Date.now();
+    const windowStart = Date.now();
 
     await Promise.all(
       cases.map((c) =>
         invokeLambda(c.functionName).catch((err) => {
           // OOM functions usually succeed at the Invoke API layer (the function
           // is run, just crashes), so a thrown error here is unexpected
-          // infrastructure failure rather than the OOM itself. Re-throw so the
-          // test surfaces it.
+          // infrastructure failure rather than the OOM itself.
           throw new Error(`Invoke failed for ${c.functionName}: ${err}`);
         }),
       ),
     );
 
-    await sleep(DEFAULT_DATADOG_INDEXING_WAIT_MS);
-    windowEnd = Date.now();
+    await sleep(INITIAL_WAIT_MS);
 
-    const results = await Promise.all(
-      cases.map(async (c) => ({
-        runtime: c.runtime,
-        count: await getMetricCount(
-          OUT_OF_MEMORY_METRIC,
-          c.functionName,
-          windowStart,
-          windowEnd,
-        ),
-      })),
-    );
+    const deadline = windowStart + TOTAL_BUDGET_MS;
+    let counts: Record<string, number> = {};
+    let attempt = 0;
+    while (Date.now() < deadline) {
+      attempt++;
+      counts = await fetchCounts(windowStart, Date.now());
+      const missing = cases.filter((c) => (counts[c.runtime] ?? 0) < 1).map((c) => c.runtime);
+      console.log(`OOM poll #${attempt}:`, counts, missing.length ? `(still missing: ${missing.join(', ')})` : '(all runtimes >=1)');
+      if (missing.length === 0) {
+        break;
+      }
+      await sleep(POLL_INTERVAL_MS);
+    }
 
-    countsByRuntime = Object.fromEntries(results.map((r) => [r.runtime, r.count]));
-    console.log('OOM counts by runtime:', countsByRuntime);
-  }, 10 * 60 * 1000);
+    countsByRuntime = counts;
+    console.log('OOM counts by runtime (final):', countsByRuntime);
+  }, TOTAL_BUDGET_MS + 60 * 1000);
 
   describe.each(cases)('$runtime runtime', ({ runtime }) => {
     it('should emit exactly one out_of_memory metric for one OOM invocation', () => {
