@@ -58,7 +58,7 @@ export class CustomMetrics extends cdk.Stack {
         DD_SERVICE: filteredFunctionName,
         DD_TRACE_ENABLED: "true",
         DD_LAMBDA_HANDLER: "index.handler",
-        DD_CUSTOM_METRICS_EXCLUDE_TAGS: "function_arn,region",
+        DD_LAMBDA_CUSTOMER_METRICS_EXCLUDE_TAGS: "function_arn,region",
       },
       logGroup: createLogGroup(this, filteredFunctionName),
     });

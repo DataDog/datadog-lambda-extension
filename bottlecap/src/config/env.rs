@@ -283,7 +283,7 @@ pub struct EnvConfig {
     #[serde(deserialize_with = "deserialize_optional_string")]
     pub statsd_metric_namespace: Option<String>,
 
-    /// @env `DD_CUSTOM_METRICS_EXCLUDE_TAGS`
+    /// @env `DD_LAMBDA_CUSTOMER_METRICS_EXCLUDE_TAGS`
     ///
     /// Comma-separated list of tag keys to exclude from custom `DogStatsD` metrics
     /// enrichment. Use this to drop auto-injected tags (e.g. `function_arn,region`)
@@ -879,7 +879,7 @@ mod tests {
             );
             jail.set_env("DD_OTLP_CONFIG_LOGS_ENABLED", "true");
 
-            jail.set_env("DD_CUSTOM_METRICS_EXCLUDE_TAGS", "function_arn,region");
+            jail.set_env("DD_LAMBDA_CUSTOMER_METRICS_EXCLUDE_TAGS", "function_arn,region");
 
             // DogStatsD
             jail.set_env("DD_DOGSTATSD_SO_RCVBUF", "1048576");
@@ -1260,7 +1260,7 @@ mod tests {
         figment::Jail::expect_with(|jail| {
             jail.clear_env();
             jail.set_env(
-                "DD_CUSTOM_METRICS_EXCLUDE_TAGS",
+                "DD_LAMBDA_CUSTOMER_METRICS_EXCLUDE_TAGS",
                 "function_arn,region,account_id",
             );
 

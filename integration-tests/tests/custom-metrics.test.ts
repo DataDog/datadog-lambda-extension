@@ -37,7 +37,7 @@ describe("Customer Metrics Exclude Tags Integration Tests", () => {
     console.log("Lambdas invoked and indexing wait complete");
   }, 900000);
 
-  describe("unfiltered function (no DD_CUSTOM_METRICS_EXCLUDE_TAGS)", () => {
+  describe("unfiltered function (no DD_LAMBDA_CUSTOMER_METRICS_EXCLUDE_TAGS)", () => {
     it.each(EXCLUDED_TAGS)(
       "should have %s tag on custom metric",
       async (tag) => {
@@ -64,7 +64,7 @@ describe("Customer Metrics Exclude Tags Integration Tests", () => {
     });
   });
 
-  describe("filtered function (DD_CUSTOM_METRICS_EXCLUDE_TAGS=function_arn,region)", () => {
+  describe("filtered function (DD_LAMBDA_CUSTOMER_METRICS_EXCLUDE_TAGS=function_arn,region)", () => {
     it.each(EXCLUDED_TAGS)(
       "should NOT have %s tag on custom metric",
       async (tag) => {
