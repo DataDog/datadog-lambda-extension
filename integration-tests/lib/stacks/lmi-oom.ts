@@ -15,12 +15,10 @@ import {
  * LMI OOM test stack.
  *
  * Exercises bottlecap OOM detection on a Lambda Managed Instance (LMI) function.
- * Verified empirically (PR #1241): when a Python `MemoryError` fires
- * immediately on first allocation, the function's OOM log line is processed
- * by `LambdaProcessor` before its `PlatformStart` handler sets
- * `invocation_context.request_id`, so `current_request_id()` returns `None`
- * and the OOM metric flows through the no-dedup branch of
- * `Processor::try_increment_oom_metric`.
+ * In LMI mode the function-log JSON payload carries a `requestId` field that
+ * the OOM detector reads directly (see `LambdaProcessor::get_message`), so
+ * dedup against the other OOM detection paths works reliably even when an
+ * OOM fires fast enough that the log line beats `PlatformStart`.
  */
 export class LmiOom extends cdk.Stack {
   constructor(scope: Construct, id: string, props: cdk.StackProps) {

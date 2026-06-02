@@ -164,16 +164,19 @@ impl LambdaProcessor {
     }
 
     /// Returns the `request_id` of the currently-active invocation, if known.
-    /// Used by the OOM log-line detector to tag `Event::OutOfMemory` so that
-    /// `Processor::try_increment_oom_metric` can dedup against the other two
-    /// detection paths (`Runtime.OutOfMemory` and `PlatformReport` equality).
+    /// Used by the OOM log-line detector as a fallback to tag `Event::OutOfMemory`
+    /// so that `Processor::try_increment_oom_metric` can dedup against the other
+    /// two detection paths (`Runtime.OutOfMemory` and `PlatformReport` equality).
+    /// In LMI mode, the OOM detector prefers the `requestId` field parsed from
+    /// the function-log JSON payload — it doesn't race with `PlatformStart` and
+    /// matches this log line exactly. Use `current_request_id()` only when that
+    /// field isn't available (on-demand mode, or non-JSON log payloads).
     ///
     /// `invocation_context.request_id` is set when this processor handles
     /// `PlatformStart` and cleared on `PlatformRuntimeDone` / `PlatformReport`.
     /// Returns `None` when an OOM log line is processed outside that window —
     /// most commonly when an OOM fires so quickly at the start of the invocation
-    /// that the log line beats `PlatformStart` to this processor. Empirically
-    /// observed with a Python `MemoryError` on an LMI function (PR #1241).
+    /// that the log line beats `PlatformStart` to this processor.
     fn current_request_id(&self) -> Option<String> {
         if self.invocation_context.request_id.is_empty() {
             None
@@ -213,8 +216,17 @@ impl LambdaProcessor {
                 if let Some(message) = message {
                     if is_oom_error(&message) {
                         debug!("LOGS | Got a runtime-specific OOM error. Incrementing OOM metric.");
+                        // Prefer the `requestId` parsed from the log payload above
+                        // (populated in LMI mode where the runtime stamps every JSON
+                        // log with the in-flight request id). It is guaranteed to be
+                        // correct for this log line, whereas `current_request_id()`
+                        // depends on `PlatformStart` having already updated
+                        // `invocation_context`, which races with fast OOM logs. Fall
+                        // back to `current_request_id()` in OnDemand mode where
+                        // `request_id` from the log payload is not extracted.
+                        let oom_request_id = request_id.clone().or_else(|| self.current_request_id());
                         if let Err(e) = self.event_bus.send(Event::OutOfMemory {
-                            request_id: self.current_request_id(),
+                            request_id: oom_request_id,
                             timestamp: event.time.timestamp(),
                         }).await {
                             error!("LOGS | Failed to send OOM event to the main event bus: {e}");
