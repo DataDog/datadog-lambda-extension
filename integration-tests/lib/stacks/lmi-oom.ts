@@ -32,12 +32,16 @@ export class LmiOom extends cdk.Stack {
       runtime: defaultPythonRuntime,
       architecture: lambda.Architecture.ARM_64,
       handler: 'datadog_lambda.handler.handler',
-      code: lambda.Code.fromAsset('./lambda/oom-python'),
+      // LMI uses a different Python OOM source than `oom.ts`: at 2 GB the
+      // 10 MB-loop allocator either runs past the test budget or gets
+      // SIGKILL'd silently. A single 100 GB `bytearray` allocation request
+      // makes CPython's allocator refuse immediately and raise a clean
+      // `MemoryError`, which we need so Path 1 of the OOM detector fires.
+      code: lambda.Code.fromAsset('./lambda/oom-python-lmi'),
       functionName: functionName,
       timeout: cdk.Duration.seconds(30),
-      // 256 MB — see `oom.ts` for why we don't use the customer's 192 MB
-      // (kernel OOM-kills the extension itself otherwise).
-      memorySize: 256,
+      // LMI requires memorySize >= 2048 (Lambda service validation).
+      memorySize: 2048,
       environment: {
         ...defaultDatadogEnvVariables,
         DD_SERVICE: functionName,
