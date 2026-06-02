@@ -15,13 +15,10 @@ import {
  * LMI OOM test stack.
  *
  * Exercises bottlecap OOM detection on a Lambda Managed Instance (LMI) function.
- * The OOM detector tags `Event::OutOfMemory` with the `requestId` parsed from
- * the function-log JSON payload (see `LambdaProcessor::get_message`), which
- * the LMI Python runtime always stamps on its OOM error log. The other two
- * detection paths (`Runtime.OutOfMemory`, `PlatformReport` equality) carry
- * the same request id directly from their event payloads, so dedup via
- * `Context::oom_emitted` works end-to-end and the metric increments exactly
- * once per OOM invocation.
+ * In LMI mode the function-log JSON payload carries a `requestId` field that
+ * the OOM detector reads directly (see `LambdaProcessor::get_message`), so
+ * dedup against the other OOM detection paths works reliably even when an
+ * OOM fires fast enough that the log line beats `PlatformStart`.
  */
 export class LmiOom extends cdk.Stack {
   constructor(scope: Construct, id: string, props: cdk.StackProps) {

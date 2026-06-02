@@ -163,6 +163,28 @@ impl LambdaProcessor {
         }
     }
 
+    /// Returns the `request_id` of the currently-active invocation, if known.
+    /// Used by the OOM log-line detector as a fallback to tag `Event::OutOfMemory`
+    /// so that `Processor::try_increment_oom_metric` can dedup against the other
+    /// two detection paths (`Runtime.OutOfMemory` and `PlatformReport` equality).
+    /// In LMI mode, the OOM detector prefers the `requestId` field parsed from
+    /// the function-log JSON payload — it doesn't race with `PlatformStart` and
+    /// matches this log line exactly. Use `current_request_id()` only when that
+    /// field isn't available (on-demand mode, or non-JSON log payloads).
+    ///
+    /// `invocation_context.request_id` is set when this processor handles
+    /// `PlatformStart` and cleared on `PlatformRuntimeDone` / `PlatformReport`.
+    /// Returns `None` when an OOM log line is processed outside that window —
+    /// most commonly when an OOM fires so quickly at the start of the invocation
+    /// that the log line beats `PlatformStart` to this processor.
+    fn current_request_id(&self) -> Option<String> {
+        if self.invocation_context.request_id.is_empty() {
+            None
+        } else {
+            Some(self.invocation_context.request_id.clone())
+        }
+    }
+
     #[allow(clippy::too_many_lines)]
     async fn get_message(&mut self, event: TelemetryEvent) -> Result<Message, Box<dyn Error>> {
         let copy = event.clone();
@@ -170,18 +192,14 @@ impl LambdaProcessor {
             TelemetryRecord::Function(v) => {
                 let (request_id, message, durable_ctx) = match v {
                     serde_json::Value::Object(obj) => {
-                        // The Lambda runtimes that emit structured JSON logs (Python,
-                        // and Node/Ruby/Java/.NET when JSON log format is configured)
-                        // stamp every log with the in-flight `requestId`. Extract it
-                        // here so the OOM detector below can tag `Event::OutOfMemory`
-                        // with the request id of the log line that actually matched.
-                        // This is the only reliable way to dedup against the other
-                        // OOM detection paths when a fast OOM beats `PlatformStart`
-                        // through this processor.
-                        let request_id = obj.get("requestId")
-                            .or_else(|| obj.get("AWSRequestId"))
-                            .and_then(|v| v.as_str())
-                            .map(ToString::to_string);
+                        let request_id = if self.is_managed_instance_mode {
+                            obj.get("requestId")
+                                .or_else(|| obj.get("AWSRequestId"))
+                                .and_then(|v| v.as_str())
+                                .map(ToString::to_string)
+                        } else {
+                            None
+                        };
                         // When a message is logged from the durable execution SDK, it contains an `executionArn` field.
                         // In this case, extract the durable execution context from the `executionArn` field, and later
                         // set durable execution id and name as log attributes.
@@ -198,8 +216,17 @@ impl LambdaProcessor {
                 if let Some(message) = message {
                     if is_oom_error(&message) {
                         debug!("LOGS | Got a runtime-specific OOM error. Incrementing OOM metric.");
+                        // Prefer the `requestId` parsed from the log payload above
+                        // (populated in LMI mode where the runtime stamps every JSON
+                        // log with the in-flight request id). It is guaranteed to be
+                        // correct for this log line, whereas `current_request_id()`
+                        // depends on `PlatformStart` having already updated
+                        // `invocation_context`, which races with fast OOM logs. Fall
+                        // back to `current_request_id()` in OnDemand mode where
+                        // `request_id` from the log payload is not extracted.
+                        let oom_request_id = request_id.clone().or_else(|| self.current_request_id());
                         if let Err(e) = self.event_bus.send(Event::OutOfMemory {
-                            request_id: request_id.clone(),
+                            request_id: oom_request_id,
                             timestamp: event.time.timestamp(),
                         }).await {
                             error!("LOGS | Failed to send OOM event to the main event bus: {e}");
@@ -234,11 +261,8 @@ impl LambdaProcessor {
                 if let Some(message) = message {
                     if is_oom_error(&message) {
                         debug!("LOGS | Got a runtime-specific OOM error. Incrementing OOM metric.");
-                        // Extension log payloads do not carry a function `requestId`,
-                        // so this path can't dedup. `try_increment_oom_metric` will
-                        // fall through to its no-dedup branch.
                         if let Err(e) = self.event_bus.send(Event::OutOfMemory {
-                            request_id: None,
+                            request_id: self.current_request_id(),
                             timestamp: event.time.timestamp(),
                         }).await {
                             error!("LOGS | Failed to send OOM event to the main event bus: {e}");
@@ -1947,7 +1971,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_regular_lambda_extracts_request_id_from_payload() {
+    async fn test_regular_lambda_does_not_extract_request_id() {
         let tags = HashMap::from([("test".to_string(), "tags".to_string())]);
         let config = Arc::new(config::Config {
             service: Some("test-service".to_string()),
@@ -1974,10 +1998,7 @@ mod tests {
             false, // Regular Lambda mode (not LMI)
         );
 
-        // The payload `requestId` is extracted in both regular and LMI mode
-        // so that the OOM detector can dedup against the other detection paths
-        // by tagging `Event::OutOfMemory` with the request id of the exact log
-        // line that matched.
+        // Test that requestId is NOT extracted in regular Lambda mode
         let mut obj = serde_json::Map::new();
         obj.insert(
             "requestId".to_string(),
@@ -1994,10 +2015,8 @@ mod tests {
         };
 
         let result = processor.get_message(event).await.unwrap();
-        assert_eq!(
-            result.lambda.request_id,
-            Some("test-request-789".to_string())
-        );
+        // Should be None because we're not in LMI mode
+        assert_eq!(result.lambda.request_id, None);
     }
 
     #[test]
