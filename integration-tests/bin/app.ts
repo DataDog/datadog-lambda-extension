@@ -7,6 +7,7 @@ import {Snapstart} from '../lib/stacks/snapstart';
 import {LambdaManagedInstancesStack} from '../lib/stacks/lmi';
 import {AuthStack} from '../lib/stacks/auth';
 import {Oom} from '../lib/stacks/oom';
+import {LmiOom} from '../lib/stacks/lmi-oom';
 import {AuthRoleStack} from '../lib/auth-role';
 import {ACCOUNT, getIdentifier, REGION} from '../config';
 import {CapacityProviderStack} from "../lib/capacity-provider";
@@ -42,6 +43,9 @@ const stacks = [
         env,
     }),
     new Oom(app, `integ-${identifier}-oom`, {
+        env,
+    }),
+    new LmiOom(app, `integ-${identifier}-lmi-oom`, {
         env,
     }),
 ]

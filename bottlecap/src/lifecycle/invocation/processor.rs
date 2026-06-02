@@ -1422,22 +1422,12 @@ impl Processor {
                 }
                 ctx.oom_emitted = true;
             } else {
-                // request_id was supplied but its context isn't in the buffer.
-                // This is rare: the buffer has fixed capacity (MAX_CONTEXT_BUFFER_SIZE),
-                // so under high concurrency an entry can be evicted between
-                // PlatformStart and the OOM event. Without a context we cannot dedup
-                // against other paths for this request_id — emit and accept the risk
-                // of double-counting if a second detection path also fires.
                 debug!(
                     "Invocation Processor | Emitting OOM metric without dedup: context not found for request_id {} (likely evicted from context buffer)",
                     rid
                 );
             }
         } else {
-            // No request_id available. Only the OOM-log path can supply None,
-            // and it does so when LambdaProcessor::invocation_context.request_id is
-            // empty — which in practice means LMI mode (extensions can't subscribe
-            // to INVOKE, so platform.start never arrives to populate the slot).
             debug!(
                 "Invocation Processor | Emitting OOM metric without dedup: no request_id available (likely LMI mode)"
             );

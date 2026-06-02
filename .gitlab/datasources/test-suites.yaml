@@ -5,3 +5,4 @@ test_suites:
   - name: lmi
   - name: auth
   - name: oom
+  - name: lmi-oom
