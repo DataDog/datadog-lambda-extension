@@ -6,17 +6,14 @@ import { getIdentifier } from '../config';
  * LMI OOM test.
  *
  * Validates that the `aws.lambda.enhanced.out_of_memory` metric is emitted
- * when an LMI-mode function OOMs. The interesting path is the log-line
- * detector — in LMI mode it tags `Event::OutOfMemory` with `request_id=None`
- * because `platform.start` never fires there, so the metric flows through the
- * no-dedup branch of `Processor::try_increment_oom_metric`.
+ * when an LMI-mode Python function hits `MemoryError`. The interesting case
+ * (verified locally — see PR #1241 thread): the log line is processed before
+ * `LambdaProcessor` handles `PlatformStart`, so the OOM event is tagged
+ * `request_id=None` and the metric flows through the no-dedup branch.
  *
- * Known dedup gap: in LMI mode the `Runtime.OutOfMemory` path can also fire
- * (via the synthesized runtime-done from `handle_managed_instance_report`),
- * and because it carries `request_id=Some(rid)` it cannot dedup against the
- * log path's `None`. A single OOM may therefore increment the metric more
- * than once. The assertion below is `>= 1` to reflect that — tighten when
- * LMI dedup is addressed.
+ * Asserts `>= 1` rather than `== 1` to stay robust against other paths firing
+ * (e.g. a future change where `handle_managed_instance_report` surfaces
+ * `Runtime.OutOfMemory` in the synthesized runtime-done).
  */
 const identifier = getIdentifier();
 const stackName = `integ-${identifier}-lmi-oom`;

@@ -168,10 +168,12 @@ impl LambdaProcessor {
     /// `Processor::try_increment_oom_metric` can dedup against the other two
     /// detection paths (`Runtime.OutOfMemory` and `PlatformReport` equality).
     ///
-    /// `invocation_context.request_id` is set on `PlatformStart` and cleared on
-    /// `PlatformRuntimeDone` / `PlatformReport`. Returns `None` in LMI mode,
-    /// where extensions cannot subscribe to the `INVOKE` event so
-    /// `platform.start` is never delivered.
+    /// `invocation_context.request_id` is set when this processor handles
+    /// `PlatformStart` and cleared on `PlatformRuntimeDone` / `PlatformReport`.
+    /// Returns `None` when an OOM log line is processed outside that window —
+    /// most commonly when an OOM fires so quickly at the start of the invocation
+    /// that the log line beats `PlatformStart` to this processor. Empirically
+    /// observed with a Python `MemoryError` on an LMI function (PR #1241).
     fn current_request_id(&self) -> Option<String> {
         if self.invocation_context.request_id.is_empty() {
             None

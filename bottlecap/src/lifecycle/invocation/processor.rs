@@ -1429,7 +1429,7 @@ impl Processor {
             }
         } else {
             debug!(
-                "Invocation Processor | Emitting OOM metric without dedup: no request_id available (likely LMI mode)"
+                "Invocation Processor | Emitting OOM metric without dedup: no request_id available (OOM log processed before PlatformStart or after PlatformRuntimeDone)"
             );
         }
         self.enhanced_metrics.increment_oom_metric(timestamp);

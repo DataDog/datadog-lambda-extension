@@ -15,15 +15,12 @@ import {
  * LMI OOM test stack.
  *
  * Exercises bottlecap OOM detection on a Lambda Managed Instance (LMI) function.
- * The interesting LMI-specific path: extensions cannot subscribe to `INVOKE` in
- * LMI mode, so `platform.start` is never delivered and
- * `LambdaProcessor::invocation_context.request_id` stays empty. The OOM
- * log-line detector therefore tags `Event::OutOfMemory` with `request_id=None`
- * and `Processor::try_increment_oom_metric` falls into the no-dedup branch.
- *
- * One Python function is enough to exercise this path — `MemoryError` triggers
- * both the runtime-specific log line (path 1) and `Runtime.OutOfMemory` in the
- * synthesized runtime-done event from `handle_managed_instance_report` (path 2).
+ * Verified empirically (PR #1241): when a Python `MemoryError` fires
+ * immediately on first allocation, the function's OOM log line is processed
+ * by `LambdaProcessor` before its `PlatformStart` handler sets
+ * `invocation_context.request_id`, so `current_request_id()` returns `None`
+ * and the OOM metric flows through the no-dedup branch of
+ * `Processor::try_increment_oom_metric`.
  */
 export class LmiOom extends cdk.Stack {
   constructor(scope: Construct, id: string, props: cdk.StackProps) {
