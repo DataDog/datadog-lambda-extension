@@ -65,7 +65,16 @@ describe('OOM Integration Tests', () => {
   let countsByRuntime: Record<string, number>;
 
   beforeAll(async () => {
-    const windowStart = Date.now();
+    const invokeTime = Date.now();
+    // Subtract 60s from the query window's lower bound. Datadog rolls OOM
+    // metric data points into 10-second buckets aligned to wall-clock
+    // multiples and the API only returns buckets whose start timestamp is
+    // >= the `from` parameter. If the function OOMs in the same bucket as
+    // `invokeTime`, the bucket start (e.g. 19:32:10 for an invoke at
+    // 19:32:11.5) is excluded. The `[lmi-oom]` suite hit this on a fast
+    // LMI cold start; defensive in this suite too since the timing is
+    // workload-dependent.
+    const windowStart = invokeTime - 60 * 1000;
 
     await Promise.all(
       cases.map((c) =>
@@ -80,7 +89,7 @@ describe('OOM Integration Tests', () => {
 
     await sleep(INITIAL_WAIT_MS);
 
-    const deadline = windowStart + TOTAL_BUDGET_MS;
+    const deadline = invokeTime + TOTAL_BUDGET_MS;
     let counts: Record<string, number> = {};
     let attempt = 0;
     while (Date.now() < deadline) {

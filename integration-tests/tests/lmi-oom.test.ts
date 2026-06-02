@@ -31,14 +31,22 @@ describe('LMI OOM Integration Test', () => {
   let count = 0;
 
   beforeAll(async () => {
-    const windowStart = Date.now();
+    const invokeTime = Date.now();
+    // Subtract 60s from the query window's lower bound. Datadog rolls OOM
+    // metric data points into 10-second buckets aligned to wall-clock
+    // multiples; the bucket containing the OOM event is timestamped at the
+    // bucket *start*, and the query API only returns buckets whose start
+    // is >= the `from` parameter. If `windowStart == invokeTime` and the
+    // function OOMs in the same 10-second bucket (e.g. invoke 19:32:11.5,
+    // OOM 19:32:18 → bucket 19:32:10), the bucket would be excluded.
+    const windowStart = invokeTime - 60 * 1000;
     await invokeLambda(functionName).catch((err) => {
       throw new Error(`Invoke failed for ${functionName}: ${err}`);
     });
 
     await sleep(INITIAL_WAIT_MS);
 
-    const deadline = windowStart + TOTAL_BUDGET_MS;
+    const deadline = invokeTime + TOTAL_BUDGET_MS;
     let attempt = 0;
     while (Date.now() < deadline) {
       attempt++;
