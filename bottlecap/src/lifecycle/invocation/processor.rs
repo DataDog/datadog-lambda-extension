@@ -920,9 +920,9 @@ impl Processor {
         // If the invocation hit the memory limit, increment the OOM metric. This catches
         // OOM-induced failures that don't surface through a runtime-specific log line or a
         // `Runtime.OutOfMemory` error_type — most notably the suppressed-init / timeout-at-cap
-        // pattern reported in datadog-lambda-extension#1237 (Node). Dedup against the other
-        // two detection paths is handled by `Context::oom_emitted`, which
-        // `try_increment_oom_metric` checks and sets.
+        // pattern reported in datadog-lambda-extension#1237 (Node). Best-effort dedup
+        // against the other two detection paths is handled by `try_increment_oom_metric`
+        // (it can still double-count in edge cases — see that function's doc).
         if metrics.max_memory_used_mb == metrics.memory_size_mb {
             debug!(
                 "Invocation Processor | PlatformReport | Last invocation hit memory limit. Incrementing OOM metric."
@@ -1399,17 +1399,26 @@ impl Processor {
         self.try_increment_oom_metric(request_id, timestamp);
     }
 
-    /// Increments the OOM enhanced metric exactly once per `request_id`.
+    /// Best-effort dedup wrapper around `enhanced_metrics.increment_oom_metric`.
+    /// The metric MAY be double-counted in edge cases — see below.
     ///
     /// Several detection paths can fire for the same invocation:
     /// 1. A runtime-specific OOM log line (logs processor → `Event::OutOfMemory`)
     /// 2. `error_type == "Runtime.OutOfMemory"` in `PlatformRuntimeDone`
     /// 3. `max_memory_used_mb == memory_size_mb` in `PlatformReport`
     ///
-    /// To avoid double-counting, the per-invocation `Context::oom_emitted` flag is
-    /// set on the first emission. Subsequent emissions for the same `request_id` are
-    /// skipped. If `request_id` is `None` (log path saw the OOM outside an active
-    /// invocation window) or no context is found, we emit best-effort without dedup.
+    /// When `request_id` is supplied AND the matching context is still in the
+    /// buffer, the per-invocation `Context::oom_emitted` flag guarantees one
+    /// emission per `request_id`. The metric is double-counted when either:
+    ///   - `request_id` is `None` (log line beat `PlatformStart` to
+    ///     `LambdaProcessor`, or it landed after `PlatformRuntimeDone` cleared
+    ///     the slot) and another path subsequently emits with `Some(rid)`; or
+    ///   - the context has been evicted from the buffer (capacity is fixed —
+    ///     see `MAX_CONTEXT_BUFFER_SIZE`) between `PlatformStart` and this
+    ///     call, so the flag has nowhere to live.
+    ///
+    /// Both branches still emit (so OOMs are never under-counted) and log a
+    /// `debug!` line.
     fn try_increment_oom_metric(&mut self, request_id: Option<&String>, timestamp: i64) {
         if let Some(rid) = request_id {
             if let Some(ctx) = self.context_buffer.get_mut(rid) {

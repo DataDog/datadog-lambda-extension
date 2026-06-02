@@ -91,9 +91,9 @@ impl Lambda {
         self.increment_metric(constants::TIMEOUTS_METRIC, timestamp);
     }
 
-    // Callers should generally go through `Processor::try_increment_oom_metric`, which
-    // dedupes by `request_id` so the same invocation isn't counted multiple times when
-    // more than one detection path fires. The three paths are:
+    // Callers should generally go through `Processor::try_increment_oom_metric`,
+    // which provides best-effort dedup by `request_id` (see its doc for the
+    // edge cases that can still double-count). The three detection paths are:
     // 1. Runtime-specific OOM log line (.NET, Node, Java, Go, Ruby, Python)
     // 2. PlatformRuntimeDone with error_type == "Runtime.OutOfMemory" (Node, Ruby, Python)
     // 3. PlatformReport with max_memory_used_mb == memory_size_mb (all runtimes)
