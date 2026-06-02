@@ -164,23 +164,14 @@ impl LambdaProcessor {
     }
 
     /// Returns the `request_id` of the currently-active invocation, if known.
-    /// Set by `PlatformStart`, cleared by `PlatformRuntimeDone` / `PlatformReport`.
+    /// Used by the OOM log-line detector to tag `Event::OutOfMemory` so that
+    /// `Processor::try_increment_oom_metric` can dedup against the other two
+    /// detection paths (`Runtime.OutOfMemory` and `PlatformReport` equality).
     ///
-    /// Returns `None` when:
-    /// - **Managed Instance mode**: extensions cannot subscribe to the `INVOKE` event,
-    ///   so `platform.start` is not delivered and this slot is never populated. OOM logs
-    ///   parsed in MI mode are therefore always tagged `None`. The synthesized
-    ///   `PlatformRuntimeDone` produced by `handle_managed_instance_report` does carry a
-    ///   real `request_id`, so dedup still works for that path. Worst case is a thin
-    ///   double-count window if a runtime emits both an OOM log line and
-    ///   `error_type = Runtime.OutOfMemory` for the same invocation — not observed in
-    ///   practice today.
-    /// - **Pre-`PlatformStart` init crash**: a FATAL OOM log emitted by init code can
-    ///   arrive before `PlatformStart` (or with no `PlatformStart` at all, if init
-    ///   fails outright). In the no-`PlatformStart` case no other detection path fires,
-    ///   so no double-count.
-    /// - **Late log race**: a FATAL log parsed after `PlatformRuntimeDone` clears the
-    ///   slot. By then the context has been removed, so no double-count.
+    /// `invocation_context.request_id` is set on `PlatformStart` and cleared on
+    /// `PlatformRuntimeDone` / `PlatformReport`. Returns `None` in LMI mode,
+    /// where extensions cannot subscribe to the `INVOKE` event so
+    /// `platform.start` is never delivered.
     fn current_request_id(&self) -> Option<String> {
         if self.invocation_context.request_id.is_empty() {
             None

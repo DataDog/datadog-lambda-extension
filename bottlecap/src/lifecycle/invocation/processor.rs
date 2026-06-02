@@ -920,9 +920,9 @@ impl Processor {
         // If the invocation hit the memory limit, increment the OOM metric. This catches
         // OOM-induced failures that don't surface through a runtime-specific log line or a
         // `Runtime.OutOfMemory` error_type — most notably the suppressed-init / timeout-at-cap
-        // pattern reported in datadog-lambda-extension#1237 (Node) and the historical
-        // provided.al case. Dedup against the other two detection paths is handled by
-        // `Context::oom_emitted`, which `try_increment_oom_metric` checks and sets.
+        // pattern reported in datadog-lambda-extension#1237 (Node). Dedup against the other
+        // two detection paths is handled by `Context::oom_emitted`, which
+        // `try_increment_oom_metric` checks and sets.
         if metrics.max_memory_used_mb == metrics.memory_size_mb {
             debug!(
                 "Invocation Processor | PlatformReport | Last invocation hit memory limit. Incrementing OOM metric."
@@ -2564,10 +2564,8 @@ mod tests {
         );
     }
 
-    /// Regression: the `max_memory_used_mb == memory_size_mb` path used to be gated
-    /// on `runtime.starts_with("provided.al")`. After generalising the rule to all
-    /// runtimes (with dedup via `Context::oom_emitted`), the equality case must
-    /// still emit OOM.
+    /// In `handle_ondemand_report`, when `max_memory_used_mb == memory_size_mb`,
+    /// the OOM metric should be incremented exactly once for that invocation.
     #[tokio::test]
     async fn test_handle_ondemand_report_emits_oom_on_memory_equality() {
         let mut p = setup();
