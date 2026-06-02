@@ -289,7 +289,7 @@ pub struct EnvConfig {
     /// enrichment. Use this to drop auto-injected tags (e.g. `function_arn,region`)
     /// from custom metrics to reduce billing.
     #[serde(deserialize_with = "deserialize_array_from_comma_separated_string")]
-    pub custom_metrics_exclude_tags: Vec<String>,
+    pub lambda_customer_metrics_exclude_tags: Vec<String>,
 
     /// @env `DD_DOGSTATSD_SO_RCVBUF`
     /// Size of the receive buffer for `DogStatsD` UDP packets, in bytes (`SO_RCVBUF`).
@@ -593,7 +593,12 @@ fn merge_config(config: &mut Config, env_config: &EnvConfig) {
         config.statsd_metric_namespace = parse_metric_namespace(namespace);
     }
 
-    merge_vec!(config, env_config, custom_metrics_exclude_tags);
+    merge_vec!(
+        config,
+        custom_metrics_exclude_tags,
+        env_config,
+        lambda_customer_metrics_exclude_tags
+    );
 
     // DogStatsD
     merge_option!(config, env_config, dogstatsd_so_rcvbuf);
@@ -879,7 +884,10 @@ mod tests {
             );
             jail.set_env("DD_OTLP_CONFIG_LOGS_ENABLED", "true");
 
-            jail.set_env("DD_LAMBDA_CUSTOMER_METRICS_EXCLUDE_TAGS", "function_arn,region");
+            jail.set_env(
+                "DD_LAMBDA_CUSTOMER_METRICS_EXCLUDE_TAGS",
+                "function_arn,region",
+            );
 
             // DogStatsD
             jail.set_env("DD_DOGSTATSD_SO_RCVBUF", "1048576");
