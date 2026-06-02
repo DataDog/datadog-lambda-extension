@@ -1411,17 +1411,36 @@ impl Processor {
     /// skipped. If `request_id` is `None` (log path saw the OOM outside an active
     /// invocation window) or no context is found, we emit best-effort without dedup.
     fn try_increment_oom_metric(&mut self, request_id: Option<&String>, timestamp: i64) {
-        if let Some(rid) = request_id
-            && let Some(ctx) = self.context_buffer.get_mut(rid)
-        {
-            if ctx.oom_emitted {
+        if let Some(rid) = request_id {
+            if let Some(ctx) = self.context_buffer.get_mut(rid) {
+                if ctx.oom_emitted {
+                    debug!(
+                        "Invocation Processor | OOM metric already emitted for request_id {}, skipping",
+                        rid
+                    );
+                    return;
+                }
+                ctx.oom_emitted = true;
+            } else {
+                // request_id was supplied but its context isn't in the buffer.
+                // This is rare: the buffer has fixed capacity (MAX_CONTEXT_BUFFER_SIZE),
+                // so under high concurrency an entry can be evicted between
+                // PlatformStart and the OOM event. Without a context we cannot dedup
+                // against other paths for this request_id — emit and accept the risk
+                // of double-counting if a second detection path also fires.
                 debug!(
-                    "Invocation Processor | OOM metric already emitted for request_id {}, skipping",
+                    "Invocation Processor | Emitting OOM metric without dedup: context not found for request_id {} (likely evicted from context buffer)",
                     rid
                 );
-                return;
             }
-            ctx.oom_emitted = true;
+        } else {
+            // No request_id available. Only the OOM-log path can supply None,
+            // and it does so when LambdaProcessor::invocation_context.request_id is
+            // empty — which in practice means LMI mode (extensions can't subscribe
+            // to INVOKE, so platform.start never arrives to populate the slot).
+            debug!(
+                "Invocation Processor | Emitting OOM metric without dedup: no request_id available (likely LMI mode)"
+            );
         }
         self.enhanced_metrics.increment_oom_metric(timestamp);
     }
