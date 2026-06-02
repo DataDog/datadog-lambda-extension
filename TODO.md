@@ -42,13 +42,34 @@ bottlecap consumes the **already-parsed** `client_computed_stats` bool from
 All three values are non-empty → all map to `true` → **the fix triggers on every runtime.**
 No production change needed here; we just consume the bool.
 
-### Latent divergence (NOT in scope — follow-up)
+### Latent divergence vs the Go agent (NOT in scope — follow-up)
 
-- bottlecap: any non-empty value → `true` (incl. `"0"`/`"false"`).
-- agent `isHeaderTrue` (`pkg/trace/api/api.go:1065`): `ParseBool`, so `"0"`/`"false"` → `false`.
-- No tracer sends falsey values today (they omit the header), so the divergence is latent.
-- [ ] **Follow-up libdatadog PR**: make `From<&HeaderMap>` honor `"0"`/`"false"` as falsey to
-  match the agent. Lives in shared libdatadog, separate from this ticket.
+The Go agent applies one uniform rule to both `client_computed_stats` and
+`client_computed_top_level` via `isHeaderTrue` (`pkg/trace/api/api.go:1065`, used at
+`:947`/`:1055`): empty → `false`; `strconv.ParseBool` success → that bool (so
+`"0"`/`"false"`/`"f"` → `false`); ParseBool failure (e.g. `"yes"`) → `true`.
+
+libdatadog (`tracer_header_tags.rs:133-138`) parses the two headers **differently from
+the agent and from each other**:
+- `client_computed_stats` (`:136-137`): `!value.is_empty()` — non-empty → `true`.
+- `client_computed_top_level` (`:133-135`): `headers.get(...).is_some()` — **presence-only**;
+  value ignored, so even an empty value → `true`.
+
+| Header value | libdd stats | libdd top_level | Go agent (both) |
+|---|---|---|---|
+| absent | false | false | false |
+| `""` (present, empty) | false | **true** | false |
+| `"true"`/`"yes"`/`"t"`/`"1"` | true | true | true |
+| `"0"`/`"false"`/`"f"` | **true** | **true** | false |
+
+So `top_level` is the looser of the two (diverges on empty-present **and** falsey strings);
+`stats` diverges only on falsey strings. Both are latent: tracers signal by sending a
+truthy/present header and omit it otherwise, so the divergent rows don't occur in real traffic.
+
+- [ ] **Follow-up libdatadog PR**: make `From<&HeaderMap>` use `isHeaderTrue`/`ParseBool`
+  semantics for **both** `client_computed_stats` and `client_computed_top_level` to match the
+  agent (also collapses libdatadog's internal stats-vs-top_level inconsistency). Shared
+  libdatadog, separate from this ticket. (This ticket only consumes `client_computed_stats`.)
 
 ## Implementation (production code)
 
