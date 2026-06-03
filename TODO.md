@@ -135,10 +135,21 @@ touched module after each tier.
   - Fixed integration tests that asserted the old leak: removed `_dd.compute_stats:1` from
     `logs_integration_test` body assertions; corrected the `metrics_integration_test` comment.
   - All 548 workspace tests pass; fmt + clippy clean.
-- [ ] **Tier 2 — `processor.rs` Path B**
-  - `Context.client_computed_stats=true` → `aws.lambda` span meta absent.
-  - `"1"` only when `!compute_on_extension && !client_computed_stats`.
-  - `ContextBuffer::add_tracer_span` sets the flag (true/false).
+- [x] **Tier 2 — `processor.rs` Path B** ✅
+  - `context.rs`: added `pub client_computed_stats: bool` to `Context` (+ doc, `Default` init false);
+    `ContextBuffer::add_tracer_span` takes a `client_computed_stats` param and records it on the context.
+  - `processor.rs`: `add_tracer_span` threads the param through; `send_ctx_spans` reads
+    `context.client_computed_stats` before `get_ctx_spans` consumes it; `send_spans` takes the param and
+    sets it on its `TracerHeaderTags` so Path B reuses the Tier-1 `ChunkProcessor` logic (single source of
+    truth); `send_cold_start_span` passes `false`.
+  - `processor_service.rs`: `ProcessorCommand::AddTracerSpan` + handle method + command handler carry
+    `client_computed_stats`.
+  - `trace_agent.rs`: annotated `tracer_header_tags: trace_utils::TracerHeaderTags<'_>` and passes
+    `tracer_header_tags.client_computed_stats` to `add_tracer_span` at the placeholder-span branch.
+  - Tests: `test_add_tracer_span_sets_client_computed_stats` (context.rs) and
+    `test_send_ctx_spans_stamps_compute_stats` (processor.rs — drives Path B end-to-end through the
+    `trace_tx` channel and asserts on the `aws.lambda` span's `_dd.compute_stats` for all 4 truth-table rows).
+  - All 550 workspace tests pass; fmt + clippy clean.
 - [ ] **Tier 3 — full fake-intake E2E** (`bottlecap/tests/apm_integration_test.rs`, harness from PR #1194)
   - ⚠️ The existing `trace_payload_roundtrip_through_fake_intake` flushes a hand-built
     `pb::TracerPayload` and **never runs `process_traces`**, so it can't observe `_dd.compute_stats`.

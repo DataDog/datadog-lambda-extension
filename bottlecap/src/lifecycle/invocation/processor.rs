@@ -665,9 +665,17 @@ impl Processor {
         trace_sender: &Arc<SendingTraceProcessor>,
         context: Context,
     ) {
+        // Capture before `get_ctx_spans` consumes `context`.
+        let client_computed_stats = context.client_computed_stats;
         let (traces, body_size) = self.get_ctx_spans(context);
-        self.send_spans(traces, body_size, tags_provider, trace_sender)
-            .await;
+        self.send_spans(
+            traces,
+            body_size,
+            tags_provider,
+            trace_sender,
+            client_computed_stats,
+        )
+        .await;
     }
 
     fn get_ctx_spans(&mut self, context: Context) -> (Vec<Span>, usize) {
@@ -732,7 +740,9 @@ impl Processor {
             let traces = vec![cold_start_span.clone()];
             let body_size = size_of_val(cold_start_span);
 
-            self.send_spans(traces, body_size, tags_provider, trace_sender)
+            // The cold start span is extension-generated and not tied to a tracer's stats
+            // signal, so the backend should compute its stats unless the extension does.
+            self.send_spans(traces, body_size, tags_provider, trace_sender, false)
                 .await;
         }
     }
@@ -746,8 +756,12 @@ impl Processor {
         body_size: usize,
         tags_provider: &Arc<provider::Provider>,
         trace_sender: &Arc<SendingTraceProcessor>,
+        client_computed_stats: bool,
     ) {
         // todo: figure out what to do here
+        // `client_computed_stats` is propagated from the tracer's placeholder span so the
+        // downstream `ChunkProcessor` (reused via `send_processed_traces` -> `process_traces`)
+        // stamps `_dd.compute_stats` on these extension-generated spans consistently with Path A.
         let header_tags = tracer_header_tags::TracerHeaderTags {
             lang: "",
             lang_version: "",
@@ -756,7 +770,7 @@ impl Processor {
             tracer_version: "",
             container_id: "",
             client_computed_top_level: false,
-            client_computed_stats: false,
+            client_computed_stats,
             dropped_p0_traces: 0,
             dropped_p0_spans: 0,
         };
@@ -1448,9 +1462,10 @@ impl Processor {
     ///
     /// This is used to enrich the invocation span with additional metadata from the tracers
     /// top level span, since we discard the tracer span when we create the invocation span.
-    pub fn add_tracer_span(&mut self, span: &Span) {
+    pub fn add_tracer_span(&mut self, span: &Span, client_computed_stats: bool) {
         if let Some(request_id) = span.meta.get("request_id") {
-            self.context_buffer.add_tracer_span(request_id, span);
+            self.context_buffer
+                .add_tracer_span(request_id, span, client_computed_stats);
         }
     }
 
@@ -2621,5 +2636,138 @@ mod tests {
                 .is_some(),
             "OOM must be emitted when max_memory_used_mb == memory_size_mb"
         );
+    }
+
+    /// Build a [`Processor`] with a caller-supplied config (for toggling
+    /// `compute_trace_stats_on_extension`).
+    fn setup_with_config(config: Arc<config::Config>) -> Processor {
+        let aws_config = Arc::new(AwsConfig {
+            region: "us-east-1".into(),
+            aws_lwa_proxy_lambda_runtime_api: Some("***".into()),
+            function_name: "test-function".into(),
+            sandbox_init_time: Instant::now(),
+            runtime_api: "***".into(),
+            exec_wrapper: None,
+            initialization_type: "on-demand".into(),
+        });
+        let tags_provider = Arc::new(provider::Provider::new(
+            Arc::clone(&config),
+            LAMBDA_RUNTIME_SLUG.to_string(),
+            &HashMap::from([("function_arn".to_string(), "test-arn".to_string())]),
+        ));
+        let (service, handle) =
+            AggregatorService::new(EMPTY_TAGS, 1024).expect("failed to create aggregator service");
+        tokio::spawn(service.run());
+        let propagator = Arc::new(DatadogCompositePropagator::new(Arc::clone(&config)));
+        let (durable_context_tx, _) = tokio::sync::mpsc::channel(1);
+        Processor::new(
+            tags_provider,
+            config,
+            aws_config,
+            handle,
+            propagator,
+            durable_context_tx,
+        )
+    }
+
+    /// Like [`make_trace_sender`], but returns the receiver so the test can inspect the
+    /// processed payload that Path B sends downstream.
+    fn make_trace_sender_with_rx(
+        config: Arc<config::Config>,
+    ) -> (
+        Arc<SendingTraceProcessor>,
+        tokio::sync::mpsc::Receiver<crate::traces::trace_aggregator::SendDataBuilderInfo>,
+    ) {
+        use libdd_trace_obfuscation::obfuscation_config::ObfuscationConfig;
+        let (stats_concentrator_service, stats_concentrator_handle) =
+            StatsConcentratorService::new(Arc::clone(&config));
+        tokio::spawn(stats_concentrator_service.run());
+        let (trace_tx, trace_rx) = tokio::sync::mpsc::channel(8);
+        let sender = Arc::new(SendingTraceProcessor {
+            appsec: None,
+            processor: Arc::new(trace_processor::ServerlessTraceProcessor {
+                obfuscation_config: Arc::new(
+                    ObfuscationConfig::new().expect("Failed to create ObfuscationConfig"),
+                ),
+            }),
+            trace_tx,
+            stats_generator: Arc::new(StatsGenerator::new(stats_concentrator_handle)),
+        });
+        (sender, trace_rx)
+    }
+
+    /// APMSVLS-487 Tier 2: the extension-generated `aws.lambda` span (Path B) stamps
+    /// `_dd.compute_stats="1"` only when neither the extension nor the tracer computes stats;
+    /// otherwise the key is absent. `client_computed_stats` is propagated from the context.
+    #[tokio::test]
+    #[allow(clippy::unwrap_used)]
+    async fn test_send_ctx_spans_stamps_compute_stats() {
+        use crate::tags::lambda::tags::COMPUTE_STATS_KEY;
+        use libdd_trace_utils::tracer_payload::TracerPayloadCollection;
+
+        #[cfg(feature = "fips")]
+        let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+        #[cfg(not(feature = "fips"))]
+        let _ = rustls::crypto::ring::default_provider().install_default();
+
+        // (compute_on_extension, client_computed_stats) -> expected meta value on aws.lambda span
+        let cases = [
+            (false, false, Some("1")),
+            (false, true, None),
+            (true, false, None),
+            (true, true, None),
+        ];
+
+        for (compute_on_extension, client_computed_stats, expected) in cases {
+            let config = Arc::new(config::Config {
+                apm_dd_url: "https://trace.agent.datadoghq.com".to_string(),
+                service: Some("test-service".to_string()),
+                compute_trace_stats_on_extension: compute_on_extension,
+                ..config::Config::default()
+            });
+            let mut processor = setup_with_config(Arc::clone(&config));
+            let (trace_sender, mut trace_rx) = make_trace_sender_with_rx(Arc::clone(&config));
+
+            let mut context = Context::from_request_id("req-1");
+            context.client_computed_stats = client_computed_stats;
+            context.invocation_span = Span {
+                name: "aws.lambda".to_string(),
+                resource: "test-resource".to_string(),
+                service: "test-service".to_string(),
+                span_id: 1,
+                trace_id: 100,
+                ..Default::default()
+            };
+
+            let tags_provider = Arc::new(provider::Provider::new(
+                Arc::clone(&config),
+                LAMBDA_RUNTIME_SLUG.to_string(),
+                &HashMap::from([("function_arn".to_string(), "test-arn".to_string())]),
+            ));
+            processor
+                .send_ctx_spans(&tags_provider, &trace_sender, context)
+                .await;
+
+            let info = trace_rx.recv().await.expect("expected a sent payload");
+            let send_data = info.builder.build();
+            let TracerPayloadCollection::V07(payloads) = send_data.get_payloads() else {
+                panic!("expected V07 payload");
+            };
+            let aws_lambda_span = payloads
+                .iter()
+                .flat_map(|p| &p.chunks)
+                .flat_map(|c| &c.spans)
+                .find(|s| s.name == "aws.lambda")
+                .expect("aws.lambda span should be present");
+
+            assert_eq!(
+                aws_lambda_span
+                    .meta
+                    .get(COMPUTE_STATS_KEY)
+                    .map(String::as_str),
+                expected,
+                "compute_on_extension={compute_on_extension}, client_computed_stats={client_computed_stats}"
+            );
+        }
     }
 }

@@ -109,6 +109,7 @@ pub enum ProcessorCommand {
     },
     AddTracerSpan {
         span: Box<Span>,
+        client_computed_stats: bool,
     },
     ForwardDurableContext {
         request_id: String,
@@ -379,10 +380,12 @@ impl InvocationProcessorHandle {
     pub async fn add_tracer_span(
         &self,
         span: Span,
+        client_computed_stats: bool,
     ) -> Result<(), mpsc::error::SendError<ProcessorCommand>> {
         self.sender
             .send(ProcessorCommand::AddTracerSpan {
                 span: Box::new(span),
+                client_computed_stats,
             })
             .await
     }
@@ -617,8 +620,11 @@ impl InvocationProcessorService {
                     let result = Ok(self.processor.set_cold_start_span_trace_id(trace_id));
                     let _ = response.send(result);
                 }
-                ProcessorCommand::AddTracerSpan { span } => {
-                    self.processor.add_tracer_span(&span);
+                ProcessorCommand::AddTracerSpan {
+                    span,
+                    client_computed_stats,
+                } => {
+                    self.processor.add_tracer_span(&span, client_computed_stats);
                 }
                 ProcessorCommand::ForwardDurableContext {
                     request_id,
