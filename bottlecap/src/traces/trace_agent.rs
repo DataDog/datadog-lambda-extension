@@ -780,8 +780,10 @@ mod tests {
     //! Behavioral coverage for the `libdatadog` bump (`db05e1f` -> `48da0d8`), which pulls in
     //! [`DataDog/libdatadog#2071`](https://github.com/DataDog/libdatadog/pull/2071). That PR makes
     //! `From<&HeaderMap> for TracerHeaderTags` parse the `datadog-client-computed-stats` and
-    //! `datadog-client-computed-top-level` headers with the Go trace-agent's
-    //! `isHeaderTrue`/`ParseBool` semantics. These tests pin that parsing at the
+    //! `datadog-client-computed-top-level` headers with the Go trace-agent's `isHeaderTrue` rule:
+    //! empty -> false; the false-like values `strconv.ParseBool` recognizes
+    //! (`0`, `f`, `F`, `FALSE`, `False`, `false`) -> false; every other non-empty value
+    //! (including unparseable ones like `"yes"`) -> true. These tests pin that parsing at the
     //! `(&headers).into()` boundary `handle_traces` uses (see `trace_agent.rs:506`); on the
     //! pre-bump rev they would fail (falsey strings used to resolve to `true`, and presence alone
     //! set `top_level`), so they give the dep bump its missing behavioral coverage.
