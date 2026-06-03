@@ -774,3 +774,97 @@ fn success_response(message: &str) -> Response {
     debug!("{}", message);
     (StatusCode::OK, json!({"rate_by_service": {}}).to_string()).into_response()
 }
+
+#[cfg(test)]
+mod tests {
+    //! Behavioral coverage for the `libdatadog` bump (`db05e1f` -> `48da0d8`), which pulls in
+    //! [`DataDog/libdatadog#2071`](https://github.com/DataDog/libdatadog/pull/2071). That PR makes
+    //! `From<&HeaderMap> for TracerHeaderTags` parse the `datadog-client-computed-stats` and
+    //! `datadog-client-computed-top-level` headers with the Go trace-agent's
+    //! `isHeaderTrue`/`ParseBool` semantics. These tests pin that parsing at the
+    //! `(&headers).into()` boundary `handle_traces` uses (see `trace_agent.rs:506`); on the
+    //! pre-bump rev they would fail (falsey strings used to resolve to `true`, and presence alone
+    //! set `top_level`), so they give the dep bump its missing behavioral coverage.
+    //!
+    //! The `client_computed_stats` bool pinned here is what APMSVLS-487
+    //! (`lpimentel/respect-client-computed-stats`) consumes.
+
+    use axum::http::{HeaderMap, HeaderName, HeaderValue};
+    use libdd_trace_utils::trace_utils::TracerHeaderTags;
+
+    /// Build a `HeaderMap` with `name: value` (or no header when `value` is `None`), convert it the
+    /// same way `handle_traces` does, and return `(client_computed_stats, client_computed_top_level)`.
+    fn parse(name: &str, value: Option<&str>) -> (bool, bool) {
+        let mut headers = HeaderMap::new();
+        if let Some(v) = value {
+            headers.insert(
+                HeaderName::from_bytes(name.as_bytes()).expect("valid header name"),
+                HeaderValue::from_str(v).expect("valid header value"),
+            );
+        }
+        let tags: TracerHeaderTags<'_> = (&headers).into();
+        (tags.client_computed_stats, tags.client_computed_top_level)
+    }
+
+    fn parse_stats(value: Option<&str>) -> bool {
+        parse("datadog-client-computed-stats", value).0
+    }
+
+    fn parse_top_level(value: Option<&str>) -> bool {
+        parse("datadog-client-computed-top-level", value).1
+    }
+
+    #[test]
+    fn truthy_values_trigger_the_fix_on_every_runtime() {
+        // Cross-runtime header values: ".NET/Java/PHP/Python" -> "true", "JS/Ruby/C++" -> "yes",
+        // "Go" -> "t", plus a canonical "1". All non-empty/non-falsey -> the fix must trigger.
+        for value in ["true", "yes", "t", "1"] {
+            assert!(
+                parse_stats(Some(value)),
+                "expected client_computed_stats == true for {value:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn absent_or_empty_does_not_trigger_the_fix() {
+        assert!(!parse_stats(None), "absent header must be false");
+        assert!(!parse_stats(Some("")), "empty-present header must be false");
+    }
+
+    #[test]
+    fn falsey_strings_parse_as_false_go_agent_aligned() {
+        // Post-bump (libdatadog#2071): `client_computed_stats` follows the Go trace-agent's
+        // `isHeaderTrue`/`ParseBool` rule, so the false-like literals resolve to `false`.
+        // (Pre-bump rev db05e1f parsed these as `!value.is_empty()` -> `true`; this test would
+        // have failed there, which is exactly the behavior change the bump introduces.)
+        for value in ["false", "0", "f", "F", "FALSE", "False"] {
+            assert!(
+                !parse_stats(Some(value)),
+                "expected client_computed_stats == false for {value:?} (libdatadog#2071)"
+            );
+        }
+    }
+
+    #[test]
+    fn top_level_no_longer_set_by_presence_alone() {
+        // libdatadog#2071 also fixes `client_computed_top_level`, which previously was `true`
+        // whenever the header was merely *present* (even empty or falsey). Now it follows the
+        // same Go-agent rule as `stats`.
+        assert!(!parse_top_level(None), "absent must be false");
+        assert!(
+            !parse_top_level(Some("")),
+            "empty-present must be false (was true pre-bump)"
+        );
+        assert!(
+            !parse_top_level(Some("false")),
+            "\"false\" must be false (was true pre-bump)"
+        );
+        for value in ["true", "yes", "t", "1"] {
+            assert!(
+                parse_top_level(Some(value)),
+                "expected client_computed_top_level == true for {value:?}"
+            );
+        }
+    }
+}
