@@ -119,12 +119,22 @@ touched module after each tier.
   - **Included (documenting test):** `"false"`/`"0"` → currently `true`; assert-and-comment to
     surface the known libdatadog divergence intentionally and point at the follow-up.
   - Green on existing code (no production change) — locks the contract the rest relies on.
-- [ ] **Tier 1 — `trace_processor.rs` unit**
-  - Parameterized truth-table helper: assert `!span.meta.contains_key("_dd.compute_stats")` for the
-    three absent rows, `== "1"` for `(false,false)`. **Assert on `Span.meta`, not `TracerPayload.tags`** (#1118 guard).
-  - Stats-skip guard test via `send_processed_traces` + `concentrator.flush(true)`:
-    `Some` only for `(compute_on_extension=true, client_computed_stats=false)`, else `None`.
-  - `tags_from_env` no longer emits the key — assert absence on `get_tags_map()`.
+- [x] **Tier 1 — `trace_processor.rs` unit** ✅
+  - `tags.rs`: `COMPUTE_STATS_KEY` now `pub(crate)`; removed unconditional insert in `tags_from_env`
+    (no longer leaks into `_dd.tags.function`). Updated `test_new_from_config` (3→2 + absence assert)
+    and both `test_get_function_tags_map*` (14→13 + absence assert).
+  - `trace_processor.rs`: imported `COMPUTE_STATS_KEY`; added `client_computed_stats: bool` to
+    `ChunkProcessor`; stamp `_dd.compute_stats="1"` in `process` only when
+    `!compute_trace_stats_on_extension && !client_computed_stats`; wired field from
+    `header_tags.client_computed_stats` in `process_traces`; added `&& !client_computed_stats` to the
+    stats-gen guard in `send_processed_traces` (captured before `header_tags` is moved). Updated the
+    4 in-test `ChunkProcessor` literals + `test_process_trace` expected span.
+  - New tests: `test_compute_stats_truth_table` (asserts on `Span.meta`, #1118 guard) and
+    `test_stats_skip_guard_via_send_processed_traces` (drives real `StatsConcentratorService`,
+    asserts flushed payload Some only for `(compute_on_extension=true, client_computed_stats=false)`).
+  - Fixed integration tests that asserted the old leak: removed `_dd.compute_stats:1` from
+    `logs_integration_test` body assertions; corrected the `metrics_integration_test` comment.
+  - All 548 workspace tests pass; fmt + clippy clean.
 - [ ] **Tier 2 — `processor.rs` Path B**
   - `Context.client_computed_stats=true` → `aws.lambda` span meta absent.
   - `"1"` only when `!compute_on_extension && !client_computed_stats`.
