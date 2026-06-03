@@ -150,7 +150,15 @@ touched module after each tier.
     `test_send_ctx_spans_stamps_compute_stats` (processor.rs — drives Path B end-to-end through the
     `trace_tx` channel and asserts on the `aws.lambda` span's `_dd.compute_stats` for all 4 truth-table rows).
   - All 550 workspace tests pass; fmt + clippy clean.
-- [ ] **Tier 3 — full fake-intake E2E** (`bottlecap/tests/apm_integration_test.rs`, harness from PR #1194)
+- [x] **Tier 3 — full fake-intake E2E** (`bottlecap/tests/apm_integration_test.rs`, harness from PR #1194) ✅
+  - Added `run_processor_pipeline(compute_on_extension, client_computed_stats)` which routes a trace
+    through `SendingTraceProcessor::send_processed_traces`, drains the `trace_tx` channel into
+    `AggregatorService` (synchronously, post-send, to avoid a flush race), flushes via `TraceFlusher`,
+    and flushes stats via `StatsConcentratorService` → `StatsAggregator` → `StatsFlusher`. Parameterized
+    `header_tags_with(client_computed_stats)`. Tests: T3.1 (`e2e_client_computed_stats_leaves_compute_stats_absent`),
+    T3.2 (`e2e_compute_stats_truth_table_on_captured_span`), T3.3 (`e2e_stats_suppressed_unless_extension_computes`),
+    T3.4 (`e2e_client_computed_stats_absent_meta_and_no_stats`). All assert on the captured `AgentPayload`
+    span meta and `stats_payloads()`. 554/554 workspace tests pass; fmt + clippy clean.
   - ⚠️ The existing `trace_payload_roundtrip_through_fake_intake` flushes a hand-built
     `pb::TracerPayload` and **never runs `process_traces`**, so it can't observe `_dd.compute_stats`.
     New cases MUST route a trace **through `SendingTraceProcessor::send_processed_traces`** before flushing.
