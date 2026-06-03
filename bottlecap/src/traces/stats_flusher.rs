@@ -13,7 +13,7 @@ use crate::traces::http_client::HttpClient;
 use crate::traces::stats_aggregator::StatsAggregator;
 use bytes::Bytes;
 use dogstatsd::api_key::ApiKeyFactory;
-use libdd_capabilities::http::HttpClientTrait;
+use libdd_capabilities::http::HttpClientCapability;
 use libdd_common::Endpoint;
 use libdd_trace_protobuf::pb;
 use libdd_trace_utils::stats_utils;
