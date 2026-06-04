@@ -19,6 +19,7 @@ use std::sync::Arc;
 
 use bottlecap::LAMBDA_RUNTIME_SLUG;
 use bottlecap::config::Config;
+use bottlecap::tags::lambda::tags::COMPUTE_STATS_KEY;
 use bottlecap::tags::provider::Provider;
 use bottlecap::traces::http_client::create_client;
 use bottlecap::traces::stats_aggregator::StatsAggregator;
@@ -282,8 +283,6 @@ async fn trace_payload_roundtrip_through_fake_intake() {
 // `process_traces`/`ChunkProcessor` stamping of `_dd.compute_stats` and the
 // extension-side stats-generation guard.
 // ---------------------------------------------------------------------------
-
-const COMPUTE_STATS_KEY: &str = "_dd.compute_stats";
 
 fn header_tags_with(client_computed_stats: bool) -> TracerHeaderTags<'static> {
     TracerHeaderTags {
