@@ -189,12 +189,6 @@ impl LambdaProcessor {
             TelemetryRecord::Function(v) => {
                 let (request_id, message, durable_ctx) = match v {
                     serde_json::Value::Object(obj) => {
-                        // Extract `requestId` (or `AWSRequestId`) from the log payload
-                        // when present. Lambda runtimes that emit structured JSON
-                        // logs (Python; Node/Ruby/Java/.NET when JSON log format is
-                        // configured) stamp every log line with the in-flight
-                        // request id, which is the most accurate source — it doesn't
-                        // race with the in-processor `PlatformStart` handler.
                         let request_id = obj.get("requestId")
                             .or_else(|| obj.get("AWSRequestId"))
                             .and_then(|v| v.as_str())
@@ -215,11 +209,10 @@ impl LambdaProcessor {
                 if let Some(message) = message {
                     if is_oom_error(&message) {
                         debug!("LOGS | Got a runtime-specific OOM error. Incrementing OOM metric.");
-                        // Prefer the `requestId` from the log payload (most accurate
-                        // for this exact log line, no race with `PlatformStart`). Fall
-                        // back to `current_request_id()` only when the payload
-                        // doesn't carry it — i.e. text payloads, or JSON without a
-                        // `requestId` field.
+                        // Prefer the `requestId` from the log payload (most accurate for this exact log line).
+                        // Fall back to `current_request_id()` only when the payload doesn't carry it —
+                        // i.e., for text payloads, or JSON without a `requestId` field.
+
                         let oom_request_id = request_id.clone().or_else(|| self.current_request_id());
                         if let Err(e) = self.event_bus.send(Event::OutOfMemory {
                             request_id: oom_request_id,
