@@ -58,6 +58,8 @@ impl TracePipeline {
         }
 
         let compute_trace_stats_on_extension = self.config.compute_trace_stats_on_extension;
+        // Capture before `tracer_header_tags` is moved into process_traces below.
+        let client_computed_stats = tracer_header_tags.client_computed_stats;
         let (send_data_builder, processed_traces) = self.trace_processor.process_traces(
             self.config.clone(),
             self.tags_provider.clone(),
@@ -78,7 +80,10 @@ impl TracePipeline {
 
         // This needs to be after process_traces() because process_traces()
         // performs obfuscation, and we need to compute stats on the obfuscated traces.
+        // Skip extension-side stats generation when the tracer already computed stats
+        // client-side (Datadog-Client-Computed-Stats), to avoid double-counting.
         if compute_trace_stats_on_extension
+            && !client_computed_stats
             && let Err(err) = self.stats_generator.send(&processed_traces)
         {
             // Just log the error. We don't think trace stats are critical, so we don't want to
