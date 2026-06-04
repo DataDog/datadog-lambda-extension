@@ -8,6 +8,7 @@ import {LambdaManagedInstancesStack} from '../lib/stacks/lmi';
 import {AuthStack} from '../lib/stacks/auth';
 import {Oom} from '../lib/stacks/oom';
 import {LmiOom} from '../lib/stacks/lmi-oom';
+import {CustomMetrics} from '../lib/stacks/custom-metrics';
 import {AuthRoleStack} from '../lib/auth-role';
 import {ACCOUNT, getIdentifier, REGION} from '../config';
 import {CapacityProviderStack} from "../lib/capacity-provider";
@@ -46,6 +47,9 @@ const stacks = [
         env,
     }),
     new LmiOom(app, `integ-${identifier}-lmi-oom`, {
+        env,
+    }),
+    new CustomMetrics(app, `integ-${identifier}-custom-metrics`, {
         env,
     }),
 ]
