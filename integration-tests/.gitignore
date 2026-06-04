@@ -38,6 +38,7 @@ Thumbs.db
 # Lambda artifacts
 response.json
 lambda-bundle.zip
+lambda/*/function.zip
 
 # Lambda build outputs
 lambda/*/target/
