@@ -376,7 +376,7 @@ pub struct Config {
     /// execution context. Set to 0 to disable log holding; logs will be flushed immediately
     /// without durable execution context enrichment. Defaults to 0 until the tracer-side
     /// durable execution support is released; set to 50 to re-enable enrichment.
-    pub durable_function_log_buffer_size: usize,
+    pub lambda_durable_function_log_buffer_size: usize,
 }
 
 impl Default for Config {
@@ -495,7 +495,7 @@ impl Default for Config {
             api_security_enabled: true,
             api_security_sample_delay: Duration::from_secs(30),
 
-            durable_function_log_buffer_size: 0,
+            lambda_durable_function_log_buffer_size: 0,
         }
     }
 }

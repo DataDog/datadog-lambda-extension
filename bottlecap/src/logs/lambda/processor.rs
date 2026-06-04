@@ -142,7 +142,7 @@ impl LambdaProcessor {
         let processing_rules = &datadog_config.logs_config_processing_rules;
         let logs_enabled = datadog_config.serverless_logs_enabled;
         let lambda_durable_function_log_buffer_size =
-            datadog_config.durable_function_log_buffer_size;
+            datadog_config.lambda_durable_function_log_buffer_size;
         let rules = LambdaProcessor::compile_rules(processing_rules);
         LambdaProcessor {
             function_arn,
