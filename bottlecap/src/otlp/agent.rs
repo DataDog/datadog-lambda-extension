@@ -117,6 +117,10 @@ impl TraceService for TracePipeline {
             }
         };
 
+        // Default tags mean client_computed_stats is always false for OTLP gRPC, so
+        // Datadog-Client-Computed-Stats metadata is ignored. Safe today: Datadog tracers
+        // that compute stats never export via OTLP. Revisit if that ever changes, to
+        // avoid double-counting stats.
         let tracer_header_tags = DatadogTracerHeaderTags::default();
 
         self.process_and_send_traces(tracer_header_tags, traces, body_size)
