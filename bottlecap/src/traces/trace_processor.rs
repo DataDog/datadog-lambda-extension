@@ -86,6 +86,14 @@ impl TraceChunkProcessor for ChunkProcessor {
         chunk
             .spans
             .retain(|span| !filter_span_from_lambda_library_or_runtime(span));
+
+        // The stats-routing decision depends only on config and the per-request
+        // client_computed_stats flag, so resolve it once instead of per span.
+        let stamp_compute_stats = StatsComputedBy::resolve(
+            self.config.compute_trace_stats_on_extension,
+            self.client_computed_stats,
+        ) == StatsComputedBy::Backend;
+
         for span in &mut chunk.spans {
             // Service name could be incorrectly set to 'aws.lambda'
             // in datadog lambda libraries
@@ -124,11 +132,7 @@ impl TraceChunkProcessor for ChunkProcessor {
             // nor the tracer (client_computed_stats). Otherwise leave the key absent, which the
             // backend treats as "do not compute" (matching the Go agent's tag.go semantics,
             // which only ever set "1" and never "0").
-            if StatsComputedBy::resolve(
-                self.config.compute_trace_stats_on_extension,
-                self.client_computed_stats,
-            ) == StatsComputedBy::Backend
-            {
+            if stamp_compute_stats {
                 span.meta
                     .insert(COMPUTE_STATS_KEY.to_string(), "1".to_string());
             }
