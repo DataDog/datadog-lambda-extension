@@ -41,7 +41,7 @@ const SERVICE_KEY: &str = "service";
 // ComputeStatsKey is the tag key indicating whether trace stats should be computed.
 // This is a per-span backend directive that is stamped on each span's meta by the trace
 // processor (see `trace_processor::ChunkProcessor`), NOT baked into the function tags here.
-pub const COMPUTE_STATS_KEY: &str = "_dd.compute_stats";
+pub(crate) const COMPUTE_STATS_KEY: &str = "_dd.compute_stats";
 // FunctionTagsKey is the tag key for a function's tags to be set on the top level tracepayload
 const FUNCTION_TAGS_KEY: &str = "_dd.tags.function";
 // TODO(astuyve) decide what to do with the version

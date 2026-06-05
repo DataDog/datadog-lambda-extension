@@ -19,7 +19,6 @@ use std::sync::Arc;
 
 use bottlecap::LAMBDA_RUNTIME_SLUG;
 use bottlecap::config::Config;
-use bottlecap::tags::lambda::tags::COMPUTE_STATS_KEY;
 use bottlecap::tags::provider::Provider;
 use bottlecap::traces::http_client::create_client;
 use bottlecap::traces::stats_aggregator::StatsAggregator;
@@ -417,6 +416,10 @@ async fn run_processor_pipeline(
 }
 
 /// Finds the single span in the captured trace payloads and returns its `_dd.compute_stats`.
+// Mirror of the crate-internal bottlecap::tags::lambda::tags::COMPUTE_STATS_KEY,
+// duplicated here to keep that constant pub(crate).
+const COMPUTE_STATS_KEY: &str = "_dd.compute_stats";
+
 fn captured_compute_stats(traces: &[pb::AgentPayload]) -> Option<String> {
     let span = traces
         .iter()
