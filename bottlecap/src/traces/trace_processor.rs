@@ -37,6 +37,27 @@ use crate::traces::stats_generator::StatsGenerator;
 use crate::traces::trace_aggregator::{OwnedTracerHeaderTags, SendDataBuilderInfo};
 use libdd_trace_normalization::normalizer::SamplerPriority;
 
+/// Which party is responsible for computing trace stats for a trace, derived from
+/// `compute_trace_stats_on_extension` and the tracer's `Datadog-Client-Computed-Stats`
+/// signal. Exactly one party computes, so the per-span `_dd.compute_stats` stamp and the
+/// extension-side stats-generation guards cannot disagree.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum StatsComputedBy {
+    Backend,
+    Extension,
+    Tracer,
+}
+
+impl StatsComputedBy {
+    pub(crate) fn resolve(compute_on_extension: bool, client_computed_stats: bool) -> Self {
+        match (compute_on_extension, client_computed_stats) {
+            (_, true) => Self::Tracer, // tracer already computed client-side
+            (true, false) => Self::Extension,
+            (false, false) => Self::Backend,
+        }
+    }
+}
+
 #[derive(Clone)]
 #[allow(clippy::module_name_repetitions)]
 pub struct ServerlessTraceProcessor {
@@ -103,7 +124,11 @@ impl TraceChunkProcessor for ChunkProcessor {
             // nor the tracer (client_computed_stats). Otherwise leave the key absent, which the
             // backend treats as "do not compute" (matching the Go agent's tag.go semantics,
             // which only ever set "1" and never "0").
-            if !self.config.compute_trace_stats_on_extension && !self.client_computed_stats {
+            if StatsComputedBy::resolve(
+                self.config.compute_trace_stats_on_extension,
+                self.client_computed_stats,
+            ) == StatsComputedBy::Backend
+            {
                 span.meta
                     .insert(COMPUTE_STATS_KEY.to_string(), "1".to_string());
             }
@@ -552,8 +577,10 @@ impl SendingTraceProcessor {
         // performs obfuscation, and we need to compute stats on the obfuscated traces.
         // Skip extension-side stats generation when the tracer already computed stats
         // client-side (Datadog-Client-Computed-Stats), to avoid double-counting.
-        if config.compute_trace_stats_on_extension
-            && !client_computed_stats
+        if StatsComputedBy::resolve(
+            config.compute_trace_stats_on_extension,
+            client_computed_stats,
+        ) == StatsComputedBy::Extension
             && let Err(err) = self.stats_generator.send(&processed_traces)
         {
             // Just log the error. We don't think trace stats are critical, so we don't want to

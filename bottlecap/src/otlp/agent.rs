@@ -25,8 +25,9 @@ use crate::{
     otlp::processor::{OtlpEncoding, Processor as OtlpProcessor},
     tags::provider,
     traces::{
-        stats_generator::StatsGenerator, trace_aggregator::SendDataBuilderInfo,
-        trace_processor::TraceProcessor,
+        stats_generator::StatsGenerator,
+        trace_aggregator::SendDataBuilderInfo,
+        trace_processor::{StatsComputedBy, TraceProcessor},
     },
 };
 
@@ -82,8 +83,8 @@ impl TracePipeline {
         // performs obfuscation, and we need to compute stats on the obfuscated traces.
         // Skip extension-side stats generation when the tracer already computed stats
         // client-side (Datadog-Client-Computed-Stats), to avoid double-counting.
-        if compute_trace_stats_on_extension
-            && !client_computed_stats
+        if StatsComputedBy::resolve(compute_trace_stats_on_extension, client_computed_stats)
+            == StatsComputedBy::Extension
             && let Err(err) = self.stats_generator.send(&processed_traces)
         {
             // Just log the error. We don't think trace stats are critical, so we don't want to
