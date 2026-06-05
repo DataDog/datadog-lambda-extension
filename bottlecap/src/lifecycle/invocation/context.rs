@@ -43,6 +43,12 @@ pub struct Context {
     /// tracing.
     ///
     pub extracted_span_context: Option<SpanContext>,
+    /// Whether the `aws.lambda.enhanced.out_of_memory` metric has already been
+    /// emitted for this invocation. Multiple detection paths can fire for the
+    /// same OOM (runtime log, `Runtime.OutOfMemory` `error_type` in
+    /// `PlatformRuntimeDone`, `max_memory_used == memory_size` in `PlatformReport`);
+    /// this flag dedupes them.
+    pub oom_emitted: bool,
 }
 
 /// Struct containing the information needed to reparent a span.
@@ -94,6 +100,7 @@ impl Default for Context {
             snapstart_restore_span: None,
             tracer_span: None,
             extracted_span_context: None,
+            oom_emitted: false,
         }
     }
 }

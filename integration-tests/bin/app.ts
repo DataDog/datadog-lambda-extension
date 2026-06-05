@@ -6,6 +6,8 @@ import {Otlp} from '../lib/stacks/otlp';
 import {Snapstart} from '../lib/stacks/snapstart';
 import {LambdaManagedInstancesStack} from '../lib/stacks/lmi';
 import {AuthStack} from '../lib/stacks/auth';
+import {Oom} from '../lib/stacks/oom';
+import {LmiOom} from '../lib/stacks/lmi-oom';
 import {CustomMetrics} from '../lib/stacks/custom-metrics';
 import {AuthRoleStack} from '../lib/auth-role';
 import {ACCOUNT, getIdentifier, REGION} from '../config';
@@ -39,6 +41,12 @@ const stacks = [
         env,
     }),
     new AuthStack(app, `integ-${identifier}-auth`, {
+        env,
+    }),
+    new Oom(app, `integ-${identifier}-oom`, {
+        env,
+    }),
+    new LmiOom(app, `integ-${identifier}-lmi-oom`, {
         env,
     }),
     new CustomMetrics(app, `integ-${identifier}-custom-metrics`, {

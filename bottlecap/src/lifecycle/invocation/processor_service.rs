@@ -118,6 +118,7 @@ pub enum ProcessorCommand {
         execution_status: Option<String>,
     },
     OnOutOfMemoryError {
+        request_id: Option<String>,
         timestamp: i64,
     },
     OnShutdownEvent,
@@ -407,10 +408,14 @@ impl InvocationProcessorHandle {
 
     pub async fn on_out_of_memory_error(
         &self,
+        request_id: Option<String>,
         timestamp: i64,
     ) -> Result<(), mpsc::error::SendError<ProcessorCommand>> {
         self.sender
-            .send(ProcessorCommand::OnOutOfMemoryError { timestamp })
+            .send(ProcessorCommand::OnOutOfMemoryError {
+                request_id,
+                timestamp,
+            })
             .await
     }
 
@@ -632,8 +637,12 @@ impl InvocationProcessorService {
                         )
                         .await;
                 }
-                ProcessorCommand::OnOutOfMemoryError { timestamp } => {
-                    self.processor.on_out_of_memory_error(timestamp);
+                ProcessorCommand::OnOutOfMemoryError {
+                    request_id,
+                    timestamp,
+                } => {
+                    self.processor
+                        .on_out_of_memory_error(request_id.as_ref(), timestamp);
                 }
                 ProcessorCommand::OnShutdownEvent => {
                     self.processor.on_shutdown_event();
