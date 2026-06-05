@@ -130,8 +130,8 @@ impl TraceChunkProcessor for ChunkProcessor {
             // Stamp `_dd.compute_stats="1"` to tell the backend to compute trace stats ONLY
             // when nobody else did: neither the extension (compute_trace_stats_on_extension)
             // nor the tracer (client_computed_stats). Otherwise leave the key absent, which the
-            // backend treats as "do not compute" (matching the Go agent's tag.go semantics,
-            // which only ever set "1" and never "0").
+            // backend treats as "do not compute" (matching the Go agent's
+            // pkg/serverless/tags/tags.go semantics, which only ever set "1" and never "0").
             if stamp_compute_stats {
                 span.meta
                     .insert(COMPUTE_STATS_KEY.to_string(), "1".to_string());
