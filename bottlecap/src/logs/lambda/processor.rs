@@ -683,7 +683,13 @@ impl LambdaProcessor {
     /// its logs are drained to `ready_logs` without durable context tags. This ensures logs are
     /// always eventually sent to Datadog even if the tracer is not installed and context never
     /// arrives.
+    ///
+    /// Callers must ensure `self.lambda_durable_function_log_buffer_size > 0` before invoking
+    /// this function. A safety net at the top returns early if the invariant is violated.
     fn hold_log(&mut self, request_id: String, log: IntakeLog) {
+        if self.lambda_durable_function_log_buffer_size == 0 {
+            return;
+        }
         if !self.held_logs.contains_key(&request_id) {
             while self.held_logs.len() >= self.lambda_durable_function_log_buffer_size {
                 // Evict the oldest key to ready_logs (without durable context tags).
