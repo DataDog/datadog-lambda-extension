@@ -11,7 +11,8 @@ use hyper_http_proxy;
 use hyper_rustls::HttpsConnectorBuilder;
 use libdd_capabilities::{
     MaybeSend,
-    http::{HttpClientTrait, HttpError},
+    http::{HttpClientCapability, HttpError},
+    sleep::SleepCapability,
 };
 use libdd_common::http_common::{self, Body, GenericHttpClient};
 use rustls::RootCertStore;
@@ -21,6 +22,7 @@ use std::fs::File;
 use std::future::Future;
 use std::io::BufReader;
 use std::sync::{Arc, LazyLock};
+use std::time::Duration;
 use tracing::debug;
 
 type InnerClient =
@@ -29,8 +31,8 @@ type InnerClient =
 /// HTTP client used by trace and stats flushers.
 ///
 /// Wraps a hyper client preconfigured with optional proxy and TLS settings, and
-/// implements [`HttpClientTrait`] so it can be passed to `libdd_trace_utils`
-/// senders such as `SendData::send`.
+/// implements [`HttpClientCapability`] and [`SleepCapability`] so it can be
+/// passed to `libdd_trace_utils` senders such as `SendData::send`.
 #[derive(Clone, Debug)]
 pub struct HttpClient {
     inner: InnerClient,
@@ -42,10 +44,10 @@ impl HttpClient {
     }
 }
 
-impl HttpClientTrait for HttpClient {
+impl HttpClientCapability for HttpClient {
     #[allow(clippy::expect_used)]
     fn new_client() -> Self {
-        // Required by `HttpClientTrait` but never invoked on bottlecap's code
+        // Required by `HttpClientCapability` but never invoked on bottlecap's code
         // paths — production builds the client via
         // `create_client(proxy, tls_cert, skip_ssl)`. Routing this fallback
         // through the same constructor keeps the failure mode and error
@@ -73,6 +75,20 @@ impl HttpClientTrait for HttpClient {
                 .to_bytes();
             Ok(http::Response::from_parts(parts, collected))
         }
+    }
+}
+
+impl SleepCapability for HttpClient {
+    fn new() -> Self {
+        // Required by `SleepCapability` but never invoked on bottlecap's code
+        // paths — production builds the client via
+        // `create_client(proxy, tls_cert, skip_ssl)`. Mirror `new_client()` so
+        // the failure mode stays consistent with the rest of the module.
+        <Self as HttpClientCapability>::new_client()
+    }
+
+    fn sleep(&self, duration: Duration) -> impl Future<Output = ()> + MaybeSend {
+        tokio::time::sleep(duration)
     }
 }
 
