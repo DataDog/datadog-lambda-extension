@@ -322,7 +322,7 @@ async fn test_processor() {
                 "http.request.headers.user-agent": "Arachni/v2",
                 "http.request.headers.x-amzn-trace-id": "Root=1-613a52fb-4c43cfc95e0241c1471bfa05",
                 "http.request.headers.x-forwarded-for": "38.122.226.210",
-                "http.route": "POST /httpapi/post",
+                "http.route": "/httpapi/post",
                 "http.url": "x02yirxc7a.execute-api.sa-east-1.amazonaws.com/httpapi/post",
                 "http.status_code": "200",
                 "network.client.ip": "38.122.226.210",

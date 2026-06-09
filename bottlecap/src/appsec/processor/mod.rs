@@ -455,23 +455,17 @@ impl InvocationPayload for IdentifiedTrigger {
     }
     fn route(&self) -> Option<String> {
         match self {
-            Self::APIGatewayHttpEvent(t) => Some(t.route_key.clone()),
-            Self::APIGatewayRestEvent(t) => Some(format!(
-                "{method} {resource}",
-                method = t.request_context.method,
-                resource = t.request_context.resource_path
-            )),
+            Self::APIGatewayHttpEvent(t) => Some(
+                t.route_key
+                    .split_whitespace()
+                    .last()
+                    .unwrap_or(t.route_key.as_str())
+                    .to_string(),
+            ),
+            Self::APIGatewayRestEvent(t) => Some(t.request_context.resource_path.clone()),
             Self::APIGatewayWebSocketEvent(t) => Some(t.request_context.route_key.clone()),
-            Self::ALBEvent(t) => Some(format!(
-                "{method} {path}",
-                method = t.http_method,
-                path = t.path.as_ref().map_or("", |s| s.as_str()),
-            )),
-            Self::LambdaFunctionUrlEvent(t) => Some(format!(
-                "{method} {path}",
-                method = t.request_context.http.method,
-                path = t.request_context.http.path
-            )),
+            Self::ALBEvent(t) => Some(t.path.as_ref().map_or("", |s| s.as_str()).to_string()),
+            Self::LambdaFunctionUrlEvent(t) => Some(t.request_context.http.path.clone()),
             // Events that are not relevant to App & API Protection
             Self::MSKEvent(_)
             | Self::SqsRecord(_)
