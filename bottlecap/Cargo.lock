@@ -782,10 +782,10 @@ dependencies = [
 [[package]]
 name = "datadog-agent-config"
 version = "0.1.0"
-source = "git+https://github.com/DataDog/serverless-components?rev=14520949fb15c1dbf80b02006a974f75b57ec376#14520949fb15c1dbf80b02006a974f75b57ec376"
+source = "git+https://github.com/DataDog/serverless-components?rev=aaac1a5d63faf664750a3bf51b50b79449a31625#aaac1a5d63faf664750a3bf51b50b79449a31625"
 dependencies = [
  "datadog-opentelemetry",
- "dogstatsd 0.1.0 (git+https://github.com/DataDog/serverless-components?rev=14520949fb15c1dbf80b02006a974f75b57ec376)",
+ "dogstatsd 0.1.0 (git+https://github.com/DataDog/serverless-components?rev=aaac1a5d63faf664750a3bf51b50b79449a31625)",
  "figment",
  "libdd-trace-obfuscation",
  "libdd-trace-utils 6.0.1",
@@ -942,7 +942,7 @@ dependencies = [
 [[package]]
 name = "dogstatsd"
 version = "0.1.0"
-source = "git+https://github.com/DataDog/serverless-components?rev=14520949fb15c1dbf80b02006a974f75b57ec376#14520949fb15c1dbf80b02006a974f75b57ec376"
+source = "git+https://github.com/DataDog/serverless-components?rev=5b68f50f49c9defbfed4d25bd621e2a86405a972#5b68f50f49c9defbfed4d25bd621e2a86405a972"
 dependencies = [
  "datadog-protos",
  "ddsketch-agent",
@@ -966,7 +966,7 @@ dependencies = [
 [[package]]
 name = "dogstatsd"
 version = "0.1.0"
-source = "git+https://github.com/DataDog/serverless-components?rev=5b68f50f49c9defbfed4d25bd621e2a86405a972#5b68f50f49c9defbfed4d25bd621e2a86405a972"
+source = "git+https://github.com/DataDog/serverless-components?rev=aaac1a5d63faf664750a3bf51b50b79449a31625#aaac1a5d63faf664750a3bf51b50b79449a31625"
 dependencies = [
  "datadog-protos",
  "ddsketch-agent",
