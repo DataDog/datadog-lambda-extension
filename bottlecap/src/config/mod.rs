@@ -1862,6 +1862,7 @@ impl DatadogConfigExtension for LambdaConfig {
     }
 }
 
+#[cfg_attr(coverage_nightly, coverage(off))] // Test modules skew coverage metrics
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
 mod lambda_config_tests {
