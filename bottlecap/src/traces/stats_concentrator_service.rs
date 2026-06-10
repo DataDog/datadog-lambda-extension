@@ -270,10 +270,13 @@ mod tests {
     /// The span is non-root (`parent_id=1`) and not measured, so it will only be
     /// eligible for stats if `span_kinds_stats_computed` includes its `span.kind`.
     fn create_span_kind_span(span_kind: &str, meta: Vec<(&str, &str)>) -> pb::Span {
-        let now_ns = SystemTime::now()
-            .duration_since(SystemTime::UNIX_EPOCH)
-            .unwrap()
-            .as_nanos() as i64;
+        let now_ns = i64::try_from(
+            SystemTime::now()
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos(),
+        )
+        .unwrap();
         let mut meta_map: HashMap<String, String> = meta
             .into_iter()
             .map(|(k, v)| (k.to_string(), v.to_string()))
