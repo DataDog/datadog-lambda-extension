@@ -314,7 +314,10 @@ async fn run_processor_pipeline_with_traces(
         // process_traces builds its trace endpoint directly from apm_dd_url.
         apm_dd_url: fake_intake.traces_url(),
         service: Some("fake-intake-trace-service".to_string()),
-        compute_trace_stats_on_extension: compute_on_extension,
+        ext: bottlecap::config::LambdaConfig {
+            compute_trace_stats_on_extension: compute_on_extension,
+            ..Default::default()
+        },
         ..Config::default()
     });
 

@@ -259,7 +259,7 @@ fn create_api_key_factory(
     let config = Arc::clone(config);
     let aws_config = Arc::clone(aws_config);
     let client = client.clone();
-    let api_key_secret_reload_interval = config.api_key_secret_reload_interval;
+    let api_key_secret_reload_interval = config.ext.api_key_secret_reload_interval;
 
     Arc::new(ApiKeyFactory::new_from_resolver(
         Arc::new(move || {
@@ -398,7 +398,7 @@ async fn extension_loop_active(
         &aws_config.runtime_api,
         logs_agent_channel,
         event_bus_tx.clone(),
-        config.serverless_logs_enabled,
+        config.ext.serverless_logs_enabled,
         aws_config.is_managed_instance_mode(),
     )
     .await?;
@@ -412,7 +412,8 @@ async fn extension_loop_active(
     );
 
     // Validate and get the appropriate flush strategy for the current mode
-    let flush_strategy = get_flush_strategy_for_mode(&aws_config, config.serverless_flush_strategy);
+    let flush_strategy =
+        get_flush_strategy_for_mode(&aws_config, config.ext.serverless_flush_strategy);
     debug!("Flush strategy: {:?}", flush_strategy);
     let mut flush_control = FlushControl::new(flush_strategy, config.flush_timeout);
 
@@ -1222,19 +1223,23 @@ async fn start_dogstatsd(
 ) {
     // Start aggregator service and handle
     let start_time = Instant::now();
-    let enrichment_tags = if config.custom_metrics_exclude_tags.is_empty() {
+    let enrichment_tags = if config.ext.custom_metrics_exclude_tags.is_empty() {
         tags_provider.get_tags_string()
     } else {
         debug!(
             "Excluding tags from custom metrics: {:?}",
-            config.custom_metrics_exclude_tags
+            config.ext.custom_metrics_exclude_tags
         );
         tags_provider
             .get_tags_vec()
             .into_iter()
             .filter(|tag| {
                 let key = tag.split(':').next().unwrap_or("");
-                !config.custom_metrics_exclude_tags.iter().any(|e| e == key)
+                !config
+                    .ext
+                    .custom_metrics_exclude_tags
+                    .iter()
+                    .any(|e| e == key)
             })
             .collect::<Vec<_>>()
             .join(",")

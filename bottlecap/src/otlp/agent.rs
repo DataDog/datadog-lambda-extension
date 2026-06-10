@@ -58,7 +58,7 @@ impl TracePipeline {
             return Err("Not sending traces, processor returned empty data".to_string());
         }
 
-        let compute_trace_stats_on_extension = self.config.compute_trace_stats_on_extension;
+        let compute_trace_stats_on_extension = self.config.ext.compute_trace_stats_on_extension;
         // Capture before `tracer_header_tags` is moved into process_traces below.
         let client_computed_stats = tracer_header_tags.client_computed_stats;
         let (send_data_builder, processed_traces) = self.trace_processor.process_traces(

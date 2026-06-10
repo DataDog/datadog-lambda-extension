@@ -90,7 +90,7 @@ impl TraceChunkProcessor for ChunkProcessor {
         // The stats-routing decision depends only on config and the per-request
         // client_computed_stats flag, so resolve it once instead of per span.
         let stamp_compute_stats = StatsComputedBy::resolve(
-            self.config.compute_trace_stats_on_extension,
+            self.config.ext.compute_trace_stats_on_extension,
             self.client_computed_stats,
         ) == StatsComputedBy::Backend;
 
@@ -442,7 +442,7 @@ impl TraceProcessor for ServerlessTraceProcessor {
         // stats are still counted. SamplerPriority::None (-128) means no explicit priority
         // was set and the trace is kept; drop priorities are SamplerPriority::AutoDrop (0)
         // and UserDrop (-1, not represented in SamplerPriority).
-        if config.compute_trace_stats_on_extension
+        if config.ext.compute_trace_stats_on_extension
             && let TracerPayloadCollection::V07(ref mut tracer_payloads) = payload
         {
             for tp in tracer_payloads.iter_mut() {
@@ -581,7 +581,7 @@ impl SendingTraceProcessor {
         // Skip extension-side stats generation when the tracer already computed stats
         // client-side (Datadog-Client-Computed-Stats), to avoid double-counting.
         if StatsComputedBy::resolve(
-            config.compute_trace_stats_on_extension,
+            config.ext.compute_trace_stats_on_extension,
             client_computed_stats,
         ) == StatsComputedBy::Extension
             && let Err(err) = self.stats_generator.send(&processed_traces)
@@ -1182,7 +1182,10 @@ mod tests {
 
         let config = Arc::new(Config {
             apm_dd_url: "https://trace.agent.datadoghq.com".to_string(),
-            compute_trace_stats_on_extension: true,
+            ext: crate::config::LambdaConfig {
+                compute_trace_stats_on_extension: true,
+                ..Default::default()
+            },
             ..Config::default()
         });
         let tags_provider = Arc::new(Provider::new(
@@ -1276,7 +1279,10 @@ mod tests {
 
         let config = Arc::new(Config {
             apm_dd_url: "https://trace.agent.datadoghq.com".to_string(),
-            compute_trace_stats_on_extension: true,
+            ext: crate::config::LambdaConfig {
+                compute_trace_stats_on_extension: true,
+                ..Default::default()
+            },
             ..Config::default()
         });
         let tags_provider = Arc::new(Provider::new(
@@ -1354,7 +1360,10 @@ mod tests {
 
         let config = Arc::new(Config {
             apm_dd_url: "https://trace.agent.datadoghq.com".to_string(),
-            compute_trace_stats_on_extension: true,
+            ext: crate::config::LambdaConfig {
+                compute_trace_stats_on_extension: true,
+                ..Default::default()
+            },
             ..Config::default()
         });
         let tags_provider = Arc::new(Provider::new(
@@ -1755,7 +1764,10 @@ mod tests {
 
         for (compute_on_extension, client_computed_stats, expected) in cases {
             let config = Arc::new(Config {
-                compute_trace_stats_on_extension: compute_on_extension,
+                ext: crate::config::LambdaConfig {
+                    compute_trace_stats_on_extension: compute_on_extension,
+                    ..Default::default()
+                },
                 ..Config::default()
             });
             let mut processor = create_chunk_processor_with(config, client_computed_stats);
@@ -1824,7 +1836,10 @@ mod tests {
             let config = Arc::new(Config {
                 apm_dd_url: "https://trace.agent.datadoghq.com".to_string(),
                 service: Some("test-service".to_string()),
-                compute_trace_stats_on_extension: compute_on_extension,
+                ext: crate::config::LambdaConfig {
+                    compute_trace_stats_on_extension: compute_on_extension,
+                    ..Default::default()
+                },
                 ..Config::default()
             });
 

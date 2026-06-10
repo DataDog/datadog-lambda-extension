@@ -29,14 +29,18 @@ pub fn extract_propagation_tags(tags_str: &str) -> HashMap<String, String> {
 // Thin wrapper around dd-trace-rs's propagator to add `ot-baggage-*` header
 // extraction, which is not yet supported upstream in datadog-opentelemetry.
 pub struct DatadogCompositePropagator {
-    inner: dd_propagation::DatadogCompositePropagator<config::Config>,
+    inner:
+        dd_propagation::DatadogCompositePropagator<crate::config::propagation_wrapper::PropConfig>,
     config: Arc<config::Config>,
 }
 
 impl DatadogCompositePropagator {
     #[must_use]
     pub fn new(config: Arc<config::Config>) -> Self {
-        let inner = dd_propagation::DatadogCompositePropagator::new(Arc::clone(&config));
+        let prop_cfg = Arc::new(crate::config::propagation_wrapper::PropConfig::new(
+            Arc::clone(&config),
+        ));
+        let inner = dd_propagation::DatadogCompositePropagator::new(prop_cfg);
         Self { inner, config }
     }
 

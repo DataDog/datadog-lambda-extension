@@ -27,18 +27,21 @@ async fn test_processor() {
     }
 
     let cfg = Config {
-        serverless_appsec_enabled: true,
-        appsec_rules: Some(
-            PathBuf::from(file!())
-                .parent()
-                .expect("failed to get parent directory of this file")
-                .join("appsec")
-                .join("test-ruleset.json")
-                .to_string_lossy()
-                .to_string(),
-        ),
-        appsec_waf_timeout: Duration::from_secs(60), // Ample so it does not time out on slow CI hosts
-        api_security_sample_delay: Duration::ZERO,   // Sample all requests
+        ext: bottlecap::config::LambdaConfig {
+            serverless_appsec_enabled: true,
+            appsec_rules: Some(
+                PathBuf::from(file!())
+                    .parent()
+                    .expect("failed to get parent directory of this file")
+                    .join("appsec")
+                    .join("test-ruleset.json")
+                    .to_string_lossy()
+                    .to_string(),
+            ),
+            appsec_waf_timeout: Duration::from_secs(60), // Ample so it does not time out on slow CI hosts
+            api_security_sample_delay: Duration::ZERO,   // Sample all requests
+            ..Default::default()
+        },
         ..Config::default()
     };
 

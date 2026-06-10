@@ -23,10 +23,10 @@ pub async fn resolve_secrets(
     aws_config: Arc<AwsConfig>,
     shared_client: Client,
 ) -> Option<String> {
-    let api_key_candidate = if !config.api_key_secret_arn.is_empty()
-        || !config.kms_api_key.is_empty()
-        || !config.api_key_ssm_arn.is_empty()
-        || !config.dd_org_uuid.is_empty()
+    let api_key_candidate = if !config.ext.api_key_secret_arn.is_empty()
+        || !config.ext.kms_api_key.is_empty()
+        || !config.ext.api_key_ssm_arn.is_empty()
+        || !config.ext.dd_org_uuid.is_empty()
     {
         let before_decrypt = Instant::now();
 
@@ -48,7 +48,7 @@ pub async fn resolve_secrets(
 
         let aws_credentials = get_aws_credentials(&client).await?;
 
-        let decrypted_key = if !config.dd_org_uuid.is_empty() {
+        let decrypted_key = if !config.ext.dd_org_uuid.is_empty() {
             delegated_auth::get_delegated_api_key(
                 &config,
                 &aws_config,
@@ -56,18 +56,18 @@ pub async fn resolve_secrets(
                 &aws_credentials,
             )
             .await
-        } else if !config.kms_api_key.is_empty() {
+        } else if !config.ext.kms_api_key.is_empty() {
             decrypt_aws_kms(
                 &client,
-                config.kms_api_key.clone(),
+                config.ext.kms_api_key.clone(),
                 aws_config,
                 &aws_credentials,
             )
             .await
-        } else if !config.api_key_secret_arn.is_empty() {
+        } else if !config.ext.api_key_secret_arn.is_empty() {
             decrypt_aws_sm(
                 &client,
-                config.api_key_secret_arn.clone(),
+                config.ext.api_key_secret_arn.clone(),
                 aws_config,
                 &aws_credentials,
             )
@@ -75,7 +75,7 @@ pub async fn resolve_secrets(
         } else {
             decrypt_aws_ssm(
                 &client,
-                config.api_key_ssm_arn.clone(),
+                config.ext.api_key_ssm_arn.clone(),
                 aws_config,
                 &aws_credentials,
             )

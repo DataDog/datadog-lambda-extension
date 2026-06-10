@@ -107,7 +107,7 @@ impl Lambda {
         init_duration_ms: f64,
         timestamp: i64,
     ) {
-        if !self.config.enhanced_metrics {
+        if !self.config.ext.enhanced_metrics {
             return;
         }
         self.dynamic_value_tags
@@ -129,7 +129,7 @@ impl Lambda {
         restore_duration_ms: f64,
         timestamp: i64,
     ) {
-        if !self.config.enhanced_metrics {
+        if !self.config.ext.enhanced_metrics {
             return;
         }
         let metric = Metric::new(
@@ -149,7 +149,7 @@ impl Lambda {
     }
 
     fn increment_metric(&self, metric_name: &str, timestamp: i64) {
-        if !self.config.enhanced_metrics {
+        if !self.config.ext.enhanced_metrics {
             return;
         }
         let tags = self.get_dynamic_value_tags();
@@ -165,7 +165,7 @@ impl Lambda {
     }
 
     pub fn set_runtime_done_metrics(&self, metrics: &RuntimeDoneMetrics, timestamp: i64) {
-        if !self.config.enhanced_metrics {
+        if !self.config.ext.enhanced_metrics {
             return;
         }
         let metric = Metric::new(
@@ -194,7 +194,7 @@ impl Lambda {
     }
 
     pub fn set_shutdown_metric(&self, timestamp: i64) {
-        if !self.config.enhanced_metrics {
+        if !self.config.ext.enhanced_metrics {
             return;
         }
         self.increment_metric(constants::SHUTDOWNS_METRIC, timestamp);
@@ -207,7 +207,7 @@ impl Lambda {
     }
 
     pub fn set_post_runtime_duration_metric(&self, duration_ms: f64, timestamp: i64) {
-        if !self.config.enhanced_metrics {
+        if !self.config.ext.enhanced_metrics {
             return;
         }
         let metric = metric::Metric::new(
@@ -270,7 +270,7 @@ impl Lambda {
     }
 
     pub fn set_network_enhanced_metrics(&self, network_offset: Option<NetworkData>) {
-        if !self.config.enhanced_metrics {
+        if !self.config.ext.enhanced_metrics {
             return;
         }
 
@@ -343,7 +343,7 @@ impl Lambda {
     }
 
     pub fn set_cpu_time_enhanced_metrics(&self, cpu_offset: Option<CPUData>) {
-        if !self.config.enhanced_metrics {
+        if !self.config.ext.enhanced_metrics {
             return;
         }
 
@@ -473,7 +473,7 @@ impl Lambda {
         cpu_offset: Option<CPUData>,
         uptime_offset: Option<f64>,
     ) {
-        if !self.config.enhanced_metrics {
+        if !self.config.ext.enhanced_metrics {
             return;
         }
 
@@ -515,7 +515,7 @@ impl Lambda {
     }
 
     pub fn set_report_log_metrics(&self, metrics: &ReportMetrics, timestamp: i64) {
-        if !self.config.enhanced_metrics {
+        if !self.config.ext.enhanced_metrics {
             return;
         }
         let metric = metric::Metric::new(
@@ -585,7 +585,7 @@ impl Lambda {
     }
 
     pub fn start_usage_metrics_task(&self) {
-        if !self.config.enhanced_metrics {
+        if !self.config.ext.enhanced_metrics {
             return;
         }
 
@@ -625,7 +625,7 @@ impl Lambda {
 
     // Reset metrics and resume monitoring for the next invocation
     pub fn restart_usage_metrics_monitoring(&self) {
-        if !self.config.enhanced_metrics {
+        if !self.config.ext.enhanced_metrics {
             return;
         }
 
@@ -639,7 +639,7 @@ impl Lambda {
 
     /// Resume monitoring without resetting metrics. Used in managed instance mode to resume monitoring between invocations.
     pub fn resume_usage_metrics_monitoring(&self) {
-        if !self.config.enhanced_metrics {
+        if !self.config.ext.enhanced_metrics {
             return;
         }
 
@@ -649,7 +649,7 @@ impl Lambda {
 
     /// Pause monitoring without emitting metrics. Used in managed instance mode to pause between invocations.
     pub fn pause_usage_metrics_monitoring(&self) {
-        if !self.config.enhanced_metrics {
+        if !self.config.ext.enhanced_metrics {
             return;
         }
 
@@ -657,7 +657,7 @@ impl Lambda {
     }
 
     pub fn set_usage_enhanced_metrics(&self) {
-        if !self.config.enhanced_metrics {
+        if !self.config.ext.enhanced_metrics {
             return;
         }
 
@@ -747,7 +747,7 @@ impl Lambda {
     }
 
     pub fn set_max_enhanced_metrics(&self) {
-        if !self.config.enhanced_metrics {
+        if !self.config.ext.enhanced_metrics {
             return;
         }
 
@@ -919,7 +919,10 @@ mod tests {
     async fn test_disabled() {
         let (metrics_aggr, no_config) = setup();
         let my_config = Arc::new(config::Config {
-            enhanced_metrics: false,
+            ext: config::LambdaConfig {
+                enhanced_metrics: false,
+                ..no_config.ext.clone()
+            },
             ..no_config.as_ref().clone()
         });
         let mut lambda = Lambda::new(metrics_aggr.clone(), my_config);
@@ -1390,7 +1393,10 @@ mod tests {
     async fn test_snapstart_restore_duration_metric_disabled() {
         let (metrics_aggr, no_config) = setup();
         let my_config = Arc::new(config::Config {
-            enhanced_metrics: false,
+            ext: config::LambdaConfig {
+                enhanced_metrics: false,
+                ..no_config.ext.clone()
+            },
             ..no_config.as_ref().clone()
         });
         let mut lambda = Lambda::new(metrics_aggr.clone(), my_config);

@@ -119,7 +119,7 @@ fn tags_from_env(
         tags_map.insert(MEMORY_SIZE_KEY.to_string(), memory_size);
     }
     if let Ok(runtime) = std::env::var(RUNTIME_VAR) {
-        if config.serverless_appsec_enabled
+        if config.ext.serverless_appsec_enabled
             && let Some(runtime_family) = identify_runtime_family(&runtime)
         {
             tags_map.insert(RUNTIME_FAMILY_KEY.to_string(), runtime_family.to_string());
@@ -473,7 +473,10 @@ mod tests {
             ]),
             env: Some("test".to_string()),
             version: Some("1.0.0".to_string()),
-            serverless_appsec_enabled: true,
+            ext: crate::config::LambdaConfig {
+                serverless_appsec_enabled: true,
+                ..Default::default()
+            },
             ..Config::default()
         });
         let tags = Lambda::new_from_config(config, &metadata);
