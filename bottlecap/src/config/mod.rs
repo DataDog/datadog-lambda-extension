@@ -3,6 +3,7 @@ pub mod apm_replace_rule;
 pub mod aws;
 pub mod env;
 pub mod flush_strategy;
+pub mod lambda_extension;
 pub mod log_level;
 pub mod logs_additional_endpoints;
 pub mod processing_rule;
