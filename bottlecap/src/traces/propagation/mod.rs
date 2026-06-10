@@ -37,9 +37,7 @@ pub struct DatadogCompositePropagator {
 impl DatadogCompositePropagator {
     #[must_use]
     pub fn new(config: Arc<config::Config>) -> Self {
-        let prop_cfg = Arc::new(crate::config::propagation_wrapper::PropConfig::new(
-            Arc::clone(&config),
-        ));
+        let prop_cfg = crate::config::propagation_wrapper::PropConfig::new(Arc::clone(&config));
         let inner = dd_propagation::DatadogCompositePropagator::new(prop_cfg);
         Self { inner, config }
     }

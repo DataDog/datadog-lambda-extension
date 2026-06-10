@@ -10,12 +10,12 @@ use crate::config::{Config, TracePropagationStyle};
 /// wrapper is the local type the impl can attach to. Callers that need a
 /// propagator hand it an `Arc<PropConfig>` instead of an `Arc<Config>`.
 #[derive(Debug, Clone)]
-pub struct PropConfig(pub Arc<Config>);
+pub struct PropConfig(Arc<Config>);
 
 impl PropConfig {
     #[must_use]
-    pub fn new(config: Arc<Config>) -> Self {
-        Self(config)
+    pub fn new(config: Arc<Config>) -> Arc<Self> {
+        Arc::new(Self(config))
     }
 }
 
@@ -46,7 +46,8 @@ impl PropagationConfig for PropConfig {
     }
 
     fn datadog_tags_max_length(&self) -> usize {
-        // Default max length matching dd-trace-rs
+        // Bottlecap does not expose DD_TRACE_X_DATADOG_TAGS_MAX_LENGTH; 512 is
+        // upstream's default in dd-trace-rs.
         512
     }
 }
