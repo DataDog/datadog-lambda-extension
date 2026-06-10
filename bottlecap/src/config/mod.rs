@@ -1689,6 +1689,7 @@ pub mod tests {
 use datadog_agent_config::{
     ConfigExtension as DatadogConfigExtension,
     deserialize_array_from_comma_separated_string as deser_csv,
+    deserialize_option_lossless as deser_opt_lossless,
     deserialize_optional_bool_from_anything as deser_opt_bool,
     deserialize_optional_duration_from_microseconds as deser_dur_micros,
     deserialize_optional_duration_from_seconds as deser_dur_secs,
@@ -1783,6 +1784,7 @@ pub struct LambdaConfigSource {
     pub lambda_proc_enhanced_metrics: Option<bool>,
     #[serde(deserialize_with = "deser_opt_bool")]
     pub capture_lambda_payload: Option<bool>,
+    #[serde(deserialize_with = "deser_opt_lossless")]
     pub capture_lambda_payload_max_depth: Option<u32>,
     #[serde(deserialize_with = "deser_opt_bool")]
     pub compute_trace_stats_on_extension: Option<bool>,
@@ -2053,6 +2055,30 @@ mod lambda_config_tests {
         );
     }
 
+    #[test]
+    fn flush_strategy_end_periodically_from_env() {
+        let config = load(|jail| {
+            jail.set_env("DD_SERVERLESS_FLUSH_STRATEGY", "end,1000");
+            Ok(())
+        });
+        assert_eq!(
+            config.ext.serverless_flush_strategy,
+            UpstreamFlushStrategy::EndPeriodically(PeriodicStrategy { interval: 1000 })
+        );
+    }
+
+    #[test]
+    fn flush_strategy_continuously_from_env() {
+        let config = load(|jail| {
+            jail.set_env("DD_SERVERLESS_FLUSH_STRATEGY", "continuously,2000");
+            Ok(())
+        });
+        assert_eq!(
+            config.ext.serverless_flush_strategy,
+            UpstreamFlushStrategy::Continuously(PeriodicStrategy { interval: 2000 })
+        );
+    }
+
     // ---- bool fields ----
 
     #[test]
@@ -2205,12 +2231,46 @@ mod lambda_config_tests {
     }
 
     #[test]
+    fn org_uuid_yaml_maps_to_dd_org_uuid_field() {
+        // The yaml key matches the env-var name minus the DD_ prefix
+        // (`org_uuid:`), not the config field name (`dd_org_uuid:`).
+        let config = load(|jail| {
+            jail.create_file(
+                "datadog.yaml",
+                "org_uuid: 00000000-1111-2222-3333-444444444444\n",
+            )?;
+            Ok(())
+        });
+        assert_eq!(
+            config.ext.dd_org_uuid,
+            "00000000-1111-2222-3333-444444444444"
+        );
+    }
+
+    #[test]
     fn custom_metrics_exclude_tags_from_env() {
         let config = load(|jail| {
             jail.set_env(
                 "DD_LAMBDA_CUSTOMER_METRICS_EXCLUDE_TAGS",
                 "function_arn,region",
             );
+            Ok(())
+        });
+        assert_eq!(
+            config.ext.custom_metrics_exclude_tags,
+            vec!["function_arn".to_string(), "region".to_string()]
+        );
+    }
+
+    #[test]
+    fn custom_metrics_exclude_tags_from_yaml() {
+        // YAML key matches the env var name; merges into the
+        // `custom_metrics_exclude_tags` config field.
+        let config = load(|jail| {
+            jail.create_file(
+                "datadog.yaml",
+                "lambda_customer_metrics_exclude_tags: \"function_arn,region\"\n",
+            )?;
             Ok(())
         });
         assert_eq!(
