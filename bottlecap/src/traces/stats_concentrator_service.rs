@@ -16,16 +16,18 @@ const BUCKET_DURATION_NS: u64 = 10 * S_TO_NS; // 10 seconds
 /// `ComputeStatsBySpanKind: true` behavior.
 /// Reference: `datadog-agent/pkg/trace/stats/span_concentrator.go` (`KindsComputed`)
 ///
-/// TODO: Move to datadog-agent-config in serverless-components so both bottlecap and
-/// serverless-compat can share this list.
+/// TODO: The source of truth is the Go agent's `KindsComputed`; this list is hand-copied here
+/// and in other Rust repos. Refactor so they stay in sync with the Go agent instead of each
+/// keeping its own copy.
 const STATS_ELIGIBLE_SPAN_KINDS: [&str; 4] = ["client", "consumer", "producer", "server"];
 
 /// Default peer tag keys for stats aggregation, matching the Go agent's `basePeerTags`
 /// derived from pkg/trace/semantics/mappings.json via the 16 peer tag concepts.
 /// Reference: `datadog-agent/pkg/trace/config/peer_tags.go` (`peerTagConcepts` + `basePeerTags`)
 ///
-/// TODO: Move to datadog-agent-config in serverless-components so both bottlecap and
-/// serverless-compat can share this list.
+/// TODO: The source of truth is the Go agent's `basePeerTags` (derived from
+/// pkg/trace/semantics/mappings.json); this list is hand-copied here and in other Rust repos.
+/// Refactor so they stay in sync with the Go agent instead of each keeping its own copy.
 const DEFAULT_PEER_TAG_KEYS: [&str; 43] = [
     "_dd.base_service",
     "active_record.db.vendor",
