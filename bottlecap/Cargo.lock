@@ -484,11 +484,12 @@ dependencies = [
  "bytes",
  "chrono",
  "cookie",
+ "datadog-agent-config",
  "datadog-fips",
  "datadog-opentelemetry",
  "datadog-protos",
  "ddsketch-agent",
- "dogstatsd",
+ "dogstatsd 0.1.0 (git+https://github.com/DataDog/serverless-components?rev=5b68f50f49c9defbfed4d25bd621e2a86405a972)",
  "figment",
  "flate2",
  "fnv",
@@ -779,6 +780,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "datadog-agent-config"
+version = "0.1.0"
+source = "git+https://github.com/DataDog/serverless-components?rev=14520949fb15c1dbf80b02006a974f75b57ec376#14520949fb15c1dbf80b02006a974f75b57ec376"
+dependencies = [
+ "datadog-opentelemetry",
+ "dogstatsd 0.1.0 (git+https://github.com/DataDog/serverless-components?rev=14520949fb15c1dbf80b02006a974f75b57ec376)",
+ "figment",
+ "libdd-trace-obfuscation",
+ "libdd-trace-utils 6.0.1",
+ "log",
+ "serde",
+ "serde-aux",
+ "serde_json",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "datadog-fips"
 version = "0.1.0"
 source = "git+https://github.com/DataDog/serverless-components?rev=5b68f50f49c9defbfed4d25bd621e2a86405a972#5b68f50f49c9defbfed4d25bd621e2a86405a972"
@@ -918,6 +937,30 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.117",
+]
+
+[[package]]
+name = "dogstatsd"
+version = "0.1.0"
+source = "git+https://github.com/DataDog/serverless-components?rev=14520949fb15c1dbf80b02006a974f75b57ec376#14520949fb15c1dbf80b02006a974f75b57ec376"
+dependencies = [
+ "datadog-protos",
+ "ddsketch-agent",
+ "derive_more",
+ "fnv",
+ "hashbrown 0.15.5",
+ "protobuf",
+ "regex",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "socket2 0.6.3",
+ "thiserror 1.0.69",
+ "tokio",
+ "tokio-util",
+ "tracing",
+ "ustr",
+ "zstd",
 ]
 
 [[package]]
