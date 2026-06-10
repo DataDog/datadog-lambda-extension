@@ -85,7 +85,7 @@ datadog-opentelemetry = { git = "https://github.com/DataDog/dd-trace-rs", rev = 
 dogstatsd = { git = "https://github.com/DataDog/serverless-components", rev = "aaac1a5d63faf664750a3bf51b50b79449a31625", default-features = false }
 datadog-fips = { git = "https://github.com/DataDog/serverless-components", rev = "aaac1a5d63faf664750a3bf51b50b79449a31625", default-features = false }
 # TODO: re-pin to the merge SHA once DataDog/serverless-components#136 lands.
-datadog-agent-config = { git = "https://github.com/DataDog/serverless-components", rev = "d43efc37327e07a7fe6a6d434d3dc229d186da9b", default-features = false }
+datadog-agent-config = { git = "https://github.com/DataDog/serverless-components", rev = "429578db1c87d7304f368751c216db59dc8fd59a", default-features = false }
 libddwaf = { version = "1.28.1", git = "https://github.com/DataDog/libddwaf-rust", rev = "d1534a158d976bd4f747bf9fcc58e0712d2d17fc", default-features = false, features = ["serde"] }
 
 [dev-dependencies]
