@@ -336,8 +336,7 @@ mod tests {
     }
 
     /// A client span with peer tag meta keys (`db.instance`, `db.system`) should produce
-    /// stats with non-empty `peer_tags` when `peer_tag_keys` is configured. With the
-    /// current empty vec, `peer_tags` in the output will always be empty.
+    /// stats with non-empty `peer_tags` because `peer_tag_keys` is configured.
     #[tokio::test]
     async fn test_peer_tags_populated() {
         let config = Arc::new(Config::default());
