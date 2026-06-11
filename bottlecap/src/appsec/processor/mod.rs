@@ -470,7 +470,7 @@ impl InvocationPayload for IdentifiedTrigger {
             }
             Self::APIGatewayRestEvent(t) => Some(t.request_context.resource_path.clone()),
             Self::APIGatewayWebSocketEvent(t) => Some(t.request_context.route_key.clone()),
-            Self::ALBEvent(t) => Some(t.path.as_ref().map_or("", |s| s.as_str()).to_string()),
+            Self::ALBEvent(t) => t.path.clone().filter(|p| !p.is_empty()),
             Self::LambdaFunctionUrlEvent(t) => Some(t.request_context.http.path.clone()),
             // Events that are not relevant to App & API Protection
             Self::MSKEvent(_)
