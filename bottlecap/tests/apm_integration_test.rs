@@ -14,8 +14,10 @@
 //! This is what APMSVLS-496 phase 1 unblocks: regression coverage for
 //! payload-level changes that `body_contains`-style mocks can't catch.
 
+use std::collections::HashMap;
 use std::str::FromStr;
 use std::sync::Arc;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use bottlecap::LAMBDA_RUNTIME_SLUG;
 use bottlecap::config::Config;
@@ -693,4 +695,149 @@ async fn e2e_stats_groups_by_http_status_code() {
         .expect("500 group should be present");
     assert_eq!(ok.hits, 2);
     assert_eq!(err.hits, 1);
+}
+
+/// Build a non-root, non-measured span eligible for stats only via its `span.kind`.
+///
+/// `parent_id` is non-zero (non-root) and `metrics` is empty (no `_top_level` /
+/// `_dd.measured`), so the concentrator will only compute stats for it when its
+/// `span.kind` is in `span_kinds_stats_computed`. `start` is set to "now" so the
+/// span lands in the current bucket and a forced flush returns it.
+fn make_eligible_span(span_kind: &str, peer_meta: &[(&str, &str)]) -> pb::Span {
+    let now_ns = i64::try_from(
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system time before unix epoch")
+            .as_nanos(),
+    )
+    .expect("nanos since epoch must fit in i64");
+
+    let mut meta: HashMap<String, String> = peer_meta
+        .iter()
+        .map(|(k, v)| ((*k).to_string(), (*v).to_string()))
+        .collect();
+    meta.insert("span.kind".to_string(), span_kind.to_string());
+
+    pb::Span {
+        service: "fake-intake-stats-service".to_string(),
+        name: "test-op".to_string(),
+        resource: "test-resource".to_string(),
+        trace_id: 1,
+        span_id: 2,
+        parent_id: 1, // non-root
+        start: now_ns,
+        duration: 100,
+        error: 0,
+        r#type: "web".to_string(),
+        meta,
+        metrics: HashMap::new(), // no _top_level, no _dd.measured
+        ..pb::Span::default()
+    }
+}
+
+/// Wire concentrator -> aggregator -> flusher pointed at the fake intake, feed in
+/// `spans`, force a flush, and return the single captured `StatsPayload`.
+async fn flush_spans_to_fake_intake(
+    fake_intake: &FakeIntake,
+    spans: &[pb::Span],
+) -> pb::StatsPayload {
+    let config = test_config();
+    let http_client = create_client(None, None, false).expect("failed to create http client");
+
+    let (concentrator_service, concentrator_handle) =
+        StatsConcentratorService::new(Arc::clone(&config));
+    tokio::spawn(concentrator_service.run());
+
+    let aggregator = Arc::new(Mutex::new(StatsAggregator::new_with_concentrator(
+        concentrator_handle.clone(),
+    )));
+
+    for span in spans {
+        concentrator_handle
+            .add(span)
+            .expect("concentrator add must succeed");
+    }
+
+    let api_key_factory = Arc::new(ApiKeyFactory::new(DD_API_KEY));
+    let flusher = StatsFlusher::new(
+        api_key_factory,
+        aggregator,
+        config,
+        http_client,
+        fake_intake.stats_url(),
+    );
+
+    let failed = flusher.flush(true, None).await;
+    assert!(
+        failed.is_none(),
+        "stats flush reported a retry-able failure: {failed:?}",
+    );
+
+    let captured = fake_intake.stats_payloads();
+    assert_eq!(captured.len(), 1, "expected exactly one StatsPayload");
+    captured.into_iter().next().expect("captured payload")
+}
+
+/// End-to-end: a non-root, non-measured `span.kind="server"` span fed through the
+/// concentrator must survive aggregation + msgpack/gzip serialization and arrive
+/// at the intake as a grouped-stats entry with `span_kind="server"`. This closes
+/// the gap left by the in-memory concentrator unit tests, which never serialize.
+#[tokio::test]
+async fn stats_span_kind_through_fake_intake() {
+    let fake_intake = FakeIntake::start().await;
+    let span = make_eligible_span("server", &[]);
+
+    let payload = flush_spans_to_fake_intake(&fake_intake, &[span]).await;
+
+    let grouped: Vec<_> = payload
+        .stats
+        .iter()
+        .flat_map(|p| &p.stats)
+        .flat_map(|b| &b.stats)
+        .collect();
+    assert!(
+        !grouped.is_empty(),
+        "expected at least one grouped-stats entry for the server span",
+    );
+    assert!(
+        grouped.iter().any(|s| s.span_kind == "server"),
+        "expected a grouped-stats entry with span_kind='server', got: {:?}",
+        grouped.iter().map(|s| &s.span_kind).collect::<Vec<_>>(),
+    );
+}
+
+/// End-to-end: a `span.kind="client"` span carrying peer-tag meta keys
+/// (`db.instance`, `db.system`) must arrive at the intake with those keys
+/// populated in `peer_tags`, proving peer-tags survive serialization through
+/// the concentrator -> flusher -> intake path.
+#[tokio::test]
+async fn stats_peer_tags_through_fake_intake() {
+    let fake_intake = FakeIntake::start().await;
+    let span = make_eligible_span(
+        "client",
+        &[("db.instance", "i-1234"), ("db.system", "postgres")],
+    );
+
+    let payload = flush_spans_to_fake_intake(&fake_intake, &[span]).await;
+
+    let with_peer_tags: Vec<_> = payload
+        .stats
+        .iter()
+        .flat_map(|p| &p.stats)
+        .flat_map(|b| &b.stats)
+        .filter(|s| !s.peer_tags.is_empty())
+        .collect();
+    assert!(
+        !with_peer_tags.is_empty(),
+        "expected at least one grouped-stats entry with non-empty peer_tags",
+    );
+    let peer_tags = &with_peer_tags[0].peer_tags;
+    assert!(
+        peer_tags.iter().any(|t| t.starts_with("db.instance:")),
+        "expected peer_tags to contain db.instance, got: {peer_tags:?}",
+    );
+    assert!(
+        peer_tags.iter().any(|t| t.starts_with("db.system:")),
+        "expected peer_tags to contain db.system, got: {peer_tags:?}",
+    );
 }
