@@ -302,8 +302,7 @@ mod tests {
     }
 
     /// A non-root, non-measured span with `span.kind`="client" should produce stats
-    /// when `ComputeStatsBySpanKind` is enabled (i.e. `span_kinds_stats_computed` is
-    /// populated). With the current empty vec, this span is silently dropped.
+    /// because `span_kinds_stats_computed` is populated with the eligible span kinds.
     #[tokio::test]
     async fn test_span_kind_stats_computed() {
         let config = Arc::new(Config::default());
