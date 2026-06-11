@@ -6,6 +6,7 @@ use crate::appsec::processor::context::HoldArguments;
 use crate::config;
 use crate::lifecycle::invocation::processor::S_TO_MS;
 use crate::lifecycle::invocation::triggers::get_default_service_name;
+use crate::tags::lambda::tags::COMPUTE_STATS_KEY;
 use crate::tags::provider;
 use crate::traces::span_pointers::{SpanPointer, attach_span_pointers_to_meta};
 use crate::traces::{
@@ -36,6 +37,27 @@ use crate::traces::stats_generator::StatsGenerator;
 use crate::traces::trace_aggregator::{OwnedTracerHeaderTags, SendDataBuilderInfo};
 use libdd_trace_normalization::normalizer::SamplerPriority;
 
+/// Which party is responsible for computing trace stats for a trace, derived from
+/// `compute_trace_stats_on_extension` and the tracer's `Datadog-Client-Computed-Stats`
+/// signal. Exactly one party computes, so the per-span `_dd.compute_stats` stamp and the
+/// extension-side stats-generation guards cannot disagree.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum StatsComputedBy {
+    Backend,
+    Extension,
+    Tracer,
+}
+
+impl StatsComputedBy {
+    pub(crate) fn resolve(compute_on_extension: bool, client_computed_stats: bool) -> Self {
+        match (compute_on_extension, client_computed_stats) {
+            (_, true) => Self::Tracer, // tracer already computed client-side
+            (true, false) => Self::Extension,
+            (false, false) => Self::Backend,
+        }
+    }
+}
+
 #[derive(Clone)]
 #[allow(clippy::module_name_repetitions)]
 pub struct ServerlessTraceProcessor {
@@ -47,6 +69,9 @@ struct ChunkProcessor {
     obfuscation_config: Arc<obfuscation_config::ObfuscationConfig>,
     tags_provider: Arc<provider::Provider>,
     span_pointers: Option<Vec<SpanPointer>>,
+    /// Whether the tracer signaled (via `Datadog-Client-Computed-Stats`) that it already
+    /// computed trace stats client-side. Used to decide whether to stamp `_dd.compute_stats`.
+    client_computed_stats: bool,
 }
 
 impl TraceChunkProcessor for ChunkProcessor {
@@ -61,6 +86,14 @@ impl TraceChunkProcessor for ChunkProcessor {
         chunk
             .spans
             .retain(|span| !filter_span_from_lambda_library_or_runtime(span));
+
+        // The stats-routing decision depends only on config and the per-request
+        // client_computed_stats flag, so resolve it once instead of per span.
+        let stamp_compute_stats = StatsComputedBy::resolve(
+            self.config.compute_trace_stats_on_extension,
+            self.client_computed_stats,
+        ) == StatsComputedBy::Backend;
+
         for span in &mut chunk.spans {
             // Service name could be incorrectly set to 'aws.lambda'
             // in datadog lambda libraries
@@ -93,6 +126,17 @@ impl TraceChunkProcessor for ChunkProcessor {
             self.tags_provider.get_tags_map().iter().for_each(|(k, v)| {
                 span.meta.insert(k.clone(), v.clone());
             });
+
+            // Stamp `_dd.compute_stats="1"` to tell the backend to compute trace stats ONLY
+            // when nobody else did: neither the extension (compute_trace_stats_on_extension)
+            // nor the tracer (client_computed_stats). Otherwise leave the key absent, which the
+            // backend treats as "do not compute" (matching the Go agent's
+            // pkg/serverless/tags/tags.go semantics, which only ever set "1" and never "0").
+            if stamp_compute_stats {
+                span.meta
+                    .insert(COMPUTE_STATS_KEY.to_string(), "1".to_string());
+            }
+
             // TODO(astuyve) generalize this and delegate to an enum
             span.meta.insert("origin".to_string(), "lambda".to_string());
             span.meta
@@ -355,6 +399,7 @@ impl TraceProcessor for ServerlessTraceProcessor {
                 obfuscation_config: self.obfuscation_config.clone(),
                 tags_provider: tags_provider.clone(),
                 span_pointers,
+                client_computed_stats: header_tags.client_computed_stats,
             },
             true, // send agentless since we are the agent
         )
@@ -520,6 +565,9 @@ impl SendingTraceProcessor {
             return Ok(());
         }
 
+        // Capture before `header_tags` is moved into process_traces below.
+        let client_computed_stats = header_tags.client_computed_stats;
+
         let (payload, processed_traces) = self.processor.process_traces(
             config.clone(),
             tags_provider,
@@ -531,7 +579,12 @@ impl SendingTraceProcessor {
 
         // This needs to be after process_traces() because process_traces()
         // performs obfuscation, and we need to compute stats on the obfuscated traces.
-        if config.compute_trace_stats_on_extension
+        // Skip extension-side stats generation when the tracer already computed stats
+        // client-side (Datadog-Client-Computed-Stats), to avoid double-counting.
+        if StatsComputedBy::resolve(
+            config.compute_trace_stats_on_extension,
+            client_computed_stats,
+        ) == StatsComputedBy::Extension
             && let Err(err) = self.stats_generator.send(&processed_traces)
         {
             // Just log the error. We don't think trace stats are critical, so we don't want to
@@ -644,9 +697,15 @@ mod tests {
         let start = get_current_timestamp_nanos();
 
         let tags_provider = create_tags_provider(create_test_config());
-        let span = create_test_span(11, 222, 333, start, true, tags_provider);
+        let mut span = create_test_span(11, 222, 333, start, true, tags_provider);
 
         let traces: Vec<Vec<pb::Span>> = vec![vec![span.clone()]];
+
+        // The trace processor stamps `_dd.compute_stats="1"` on each span's meta when neither
+        // the extension nor the tracer computes stats (default test config: both false).
+        // Mirror that on the expected span (input `traces` was already cloned above).
+        span.meta
+            .insert(COMPUTE_STATS_KEY.to_string(), "1".to_string());
 
         let header_tags = tracer_header_tags::TracerHeaderTags {
             lang: "nodejs",
@@ -933,6 +992,7 @@ mod tests {
                 )]),
             )),
             span_pointers: None,
+            client_computed_stats: false,
         };
 
         processor.process(&mut chunk, 0);
@@ -1017,6 +1077,7 @@ mod tests {
                 )]),
             )),
             span_pointers: None,
+            client_computed_stats: false,
         };
 
         processor.process(&mut chunk, 0);
@@ -1100,6 +1161,7 @@ mod tests {
                 )]),
             )),
             span_pointers: None,
+            client_computed_stats: false,
         };
 
         processor.process(&mut chunk, 0);
@@ -1414,6 +1476,13 @@ mod tests {
     }
 
     fn create_chunk_processor(config: Arc<Config>) -> ChunkProcessor {
+        create_chunk_processor_with(config, false)
+    }
+
+    fn create_chunk_processor_with(
+        config: Arc<Config>,
+        client_computed_stats: bool,
+    ) -> ChunkProcessor {
         let tags_provider = create_tags_provider(config.clone());
         ChunkProcessor {
             config,
@@ -1422,6 +1491,7 @@ mod tests {
             ),
             tags_provider,
             span_pointers: None,
+            client_computed_stats,
         }
     }
 
@@ -1589,5 +1659,150 @@ mod tests {
             "tracer-set-value",
             "base_service should not be overwritten when already set by the tracer"
         );
+    }
+
+    /// APMSVLS-487 Tier 1: `ChunkProcessor::process` stamps `_dd.compute_stats="1"` on each
+    /// span's meta IFF neither the extension nor the tracer computes stats; otherwise the key
+    /// is absent. Assert directly on `Span.meta` (NOT `TracerPayload.tags`) — guards #1118.
+    #[test]
+    fn test_compute_stats_truth_table() {
+        // (compute_trace_stats_on_extension, client_computed_stats) -> expected meta value
+        let cases = [
+            (false, false, Some("1")), // nobody computed -> tell backend to compute
+            (false, true, None),       // tracer computed -> absent
+            (true, false, None),       // extension computes -> absent
+            (true, true, None),        // both -> absent
+        ];
+
+        for (compute_on_extension, client_computed_stats, expected) in cases {
+            let config = Arc::new(Config {
+                compute_trace_stats_on_extension: compute_on_extension,
+                ..Config::default()
+            });
+            let mut processor = create_chunk_processor_with(config, client_computed_stats);
+
+            let span = pb::Span {
+                name: "http.request".to_string(),
+                service: "my-service".to_string(),
+                resource: "GET /users".to_string(),
+                trace_id: 1,
+                span_id: 2,
+                parent_id: 0,
+                start: 1000,
+                duration: 500,
+                error: 0,
+                meta: HashMap::new(),
+                metrics: HashMap::new(),
+                r#type: "web".to_string(),
+                meta_struct: HashMap::new(),
+                span_links: vec![],
+                span_events: vec![],
+            };
+            let mut chunk = pb::TraceChunk {
+                priority: 1,
+                origin: "lambda".to_string(),
+                spans: vec![span],
+                tags: HashMap::new(),
+                dropped_trace: false,
+            };
+
+            processor.process(&mut chunk, 0);
+
+            let actual = chunk.spans[0]
+                .meta
+                .get(COMPUTE_STATS_KEY)
+                .map(String::as_str);
+            assert_eq!(
+                actual, expected,
+                "compute_on_extension={compute_on_extension}, client_computed_stats={client_computed_stats}"
+            );
+        }
+    }
+
+    /// APMSVLS-487 Tier 1: `send_processed_traces` only generates extension-side stats when
+    /// `compute_trace_stats_on_extension == true AND client_computed_stats == false`. Drive the
+    /// real concentrator and assert a flushed payload is present/absent accordingly.
+    #[tokio::test]
+    #[allow(clippy::unwrap_used)]
+    #[cfg_attr(miri, ignore)]
+    async fn test_stats_skip_guard_via_send_processed_traces() {
+        use crate::traces::stats_concentrator_service::StatsConcentratorService;
+
+        #[cfg(feature = "fips")]
+        let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+        #[cfg(not(feature = "fips"))]
+        let _ = rustls::crypto::ring::default_provider().install_default();
+
+        // (compute_on_extension, client_computed_stats) -> stats payload expected?
+        let cases = [
+            (true, false, true),   // extension computes, tracer didn't -> stats generated
+            (true, true, false),   // tracer computed -> skip
+            (false, false, false), // extension doesn't compute -> skip
+            (false, true, false),  // both off / tracer computed -> skip
+        ];
+
+        for (compute_on_extension, client_computed_stats, expect_stats) in cases {
+            let config = Arc::new(Config {
+                apm_dd_url: "https://trace.agent.datadoghq.com".to_string(),
+                service: Some("test-service".to_string()),
+                compute_trace_stats_on_extension: compute_on_extension,
+                ..Config::default()
+            });
+
+            let (concentrator_service, concentrator_handle) =
+                StatsConcentratorService::new(config.clone());
+            tokio::spawn(concentrator_service.run());
+
+            let (trace_tx, mut trace_rx) = tokio::sync::mpsc::channel(8);
+            // Drain the trace channel so send() never blocks.
+            tokio::spawn(async move { while trace_rx.recv().await.is_some() {} });
+
+            let sender = SendingTraceProcessor {
+                appsec: None,
+                processor: Arc::new(ServerlessTraceProcessor {
+                    obfuscation_config: Arc::new(
+                        ObfuscationConfig::new().expect("Failed to create ObfuscationConfig"),
+                    ),
+                }),
+                trace_tx,
+                stats_generator: Arc::new(StatsGenerator::new(concentrator_handle.clone())),
+            };
+
+            let start = get_current_timestamp_nanos();
+            let tags_provider = create_tags_provider(config.clone());
+            let span = create_test_span(1, 2, 0, start, true, tags_provider.clone());
+            let header_tags = tracer_header_tags::TracerHeaderTags {
+                lang: "nodejs",
+                lang_version: "v19.7.0",
+                lang_interpreter: "v8",
+                lang_vendor: "vendor",
+                tracer_version: "4.0.0",
+                container_id: "33",
+                client_computed_top_level: false,
+                client_computed_stats,
+                dropped_p0_traces: 0,
+                dropped_p0_spans: 0,
+            };
+
+            sender
+                .send_processed_traces(
+                    config,
+                    tags_provider,
+                    header_tags,
+                    vec![vec![span]],
+                    100,
+                    None,
+                )
+                .await
+                .expect("send_processed_traces failed");
+
+            let payload = concentrator_handle.flush(true).await.expect("flush failed");
+
+            assert_eq!(
+                payload.is_some(),
+                expect_stats,
+                "compute_on_extension={compute_on_extension}, client_computed_stats={client_computed_stats}"
+            );
+        }
     }
 }
