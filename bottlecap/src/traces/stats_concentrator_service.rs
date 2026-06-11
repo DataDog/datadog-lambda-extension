@@ -353,8 +353,7 @@ mod tests {
 
         assert!(
             result.is_some(),
-            "Expected stats for a client span with peer tags, but got None. \
-             span.kind-based eligibility is not working."
+            "Expected stats for a client span with peer tags, but got None."
         );
         let payload = result.unwrap();
         let all_stats: Vec<_> = payload.stats.iter().flat_map(|b| &b.stats).collect();
