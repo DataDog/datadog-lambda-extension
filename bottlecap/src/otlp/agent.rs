@@ -25,8 +25,9 @@ use crate::{
     otlp::processor::{OtlpEncoding, Processor as OtlpProcessor},
     tags::provider,
     traces::{
-        stats_generator::StatsGenerator, trace_aggregator::SendDataBuilderInfo,
-        trace_processor::TraceProcessor,
+        stats_generator::StatsGenerator,
+        trace_aggregator::SendDataBuilderInfo,
+        trace_processor::{StatsComputedBy, TraceProcessor},
     },
 };
 
@@ -58,6 +59,8 @@ impl TracePipeline {
         }
 
         let compute_trace_stats_on_extension = self.config.compute_trace_stats_on_extension;
+        // Capture before `tracer_header_tags` is moved into process_traces below.
+        let client_computed_stats = tracer_header_tags.client_computed_stats;
         let (send_data_builder, processed_traces) = self.trace_processor.process_traces(
             self.config.clone(),
             self.tags_provider.clone(),
@@ -78,7 +81,10 @@ impl TracePipeline {
 
         // This needs to be after process_traces() because process_traces()
         // performs obfuscation, and we need to compute stats on the obfuscated traces.
-        if compute_trace_stats_on_extension
+        // Skip extension-side stats generation when the tracer already computed stats
+        // client-side (Datadog-Client-Computed-Stats), to avoid double-counting.
+        if StatsComputedBy::resolve(compute_trace_stats_on_extension, client_computed_stats)
+            == StatsComputedBy::Extension
             && let Err(err) = self.stats_generator.send(&processed_traces)
         {
             // Just log the error. We don't think trace stats are critical, so we don't want to
@@ -111,6 +117,10 @@ impl TraceService for TracePipeline {
             }
         };
 
+        // Default tags mean client_computed_stats is always false for OTLP gRPC, so
+        // Datadog-Client-Computed-Stats metadata is ignored. Safe today: Datadog tracers
+        // that compute stats never export via OTLP. Revisit if that ever changes, to
+        // avoid double-counting stats.
         let tracer_header_tags = DatadogTracerHeaderTags::default();
 
         self.process_and_send_traces(tracer_header_tags, traces, body_size)

@@ -38,8 +38,10 @@ const VERSION_KEY: &str = "version";
 // ServiceKey is the tag key for a function's service environment variable
 const SERVICE_KEY: &str = "service";
 
-// ComputeStatsKey is the tag key indicating whether trace stats should be computed
-const COMPUTE_STATS_KEY: &str = "_dd.compute_stats";
+// ComputeStatsKey is the tag key indicating whether trace stats should be computed.
+// This is a per-span backend directive that is stamped on each span's meta by the trace
+// processor (see `trace_processor::ChunkProcessor`), NOT baked into the function tags here.
+pub(crate) const COMPUTE_STATS_KEY: &str = "_dd.compute_stats";
 // FunctionTagsKey is the tag key for a function's tags to be set on the top level tracepayload
 const FUNCTION_TAGS_KEY: &str = "_dd.tags.function";
 // TODO(astuyve) decide what to do with the version
@@ -135,11 +137,11 @@ fn tags_from_env(
         tags_map.extend(config.tags.clone());
     }
 
-    // The value of _dd.compute_stats is the opposite of config.compute_trace_stats_on_extension.
-    // "config.compute_trace_stats_on_extension == true" means computing stats on the extension side,
-    // so we set _dd.compute_stats to 0 so stats won't be computed on the backend side.
-    let compute_stats = i32::from(!config.compute_trace_stats_on_extension);
-    tags_map.insert(COMPUTE_STATS_KEY.to_string(), compute_stats.to_string());
+    // NOTE: `_dd.compute_stats` is intentionally NOT set here. It is a per-span backend
+    // directive (whether the backend should compute trace stats) that depends on both
+    // `compute_trace_stats_on_extension` AND the tracer's `Datadog-Client-Computed-Stats`
+    // header. The trace processor stamps it on each span's meta at processing time; baking
+    // it into the function tags would leak it into `_dd.tags.function` and ignore the header.
 
     tags_map
 }
@@ -299,8 +301,14 @@ mod tests {
     fn test_new_from_config() {
         let metadata = HashMap::new();
         let tags = Lambda::new_from_config(Arc::new(Config::default()), &metadata);
-        assert_eq!(tags.tags_map.len(), 3);
-        assert_eq!(tags.tags_map.get(COMPUTE_STATS_KEY).unwrap(), "1");
+        assert_eq!(tags.tags_map.len(), 2);
+        // _dd.compute_stats is a per-span backend directive stamped by the trace processor,
+        // not a function tag. It must NOT be present in the tags map.
+        assert!(!tags.tags_map.contains_key(COMPUTE_STATS_KEY));
+        assert!(
+            !tags.get_tags_map().contains_key(COMPUTE_STATS_KEY),
+            "_dd.compute_stats must not leak into the tags map"
+        );
         let arch = arch_to_platform();
         assert_eq!(
             tags.tags_map.get(ARCHITECTURE_KEY).unwrap(),
@@ -436,7 +444,9 @@ mod tests {
                 (parts[0].to_string(), parts[1].to_string())
             })
             .collect();
-        assert_eq!(fn_tags_map.len(), 14);
+        assert_eq!(fn_tags_map.len(), 13);
+        // _dd.compute_stats is a per-span backend directive, not a function tag.
+        assert!(!fn_tags_map.contains_key(COMPUTE_STATS_KEY));
         assert_eq!(fn_tags_map.get("key1").unwrap(), "value1");
         assert_eq!(fn_tags_map.get("key2").unwrap(), "value2");
         assert_eq!(fn_tags_map.get(ACCOUNT_ID_KEY).unwrap(), "123456789012");
@@ -478,7 +488,9 @@ mod tests {
                 (parts[0].to_string(), parts[1].to_string())
             })
             .collect();
-        assert_eq!(fn_tags_map.len(), 14);
+        assert_eq!(fn_tags_map.len(), 13);
+        // _dd.compute_stats is a per-span backend directive, not a function tag.
+        assert!(!fn_tags_map.contains_key(COMPUTE_STATS_KEY));
         assert_eq!(fn_tags_map.get("key1").unwrap(), "value1");
         assert_eq!(fn_tags_map.get("key2").unwrap(), "value2");
         assert_eq!(fn_tags_map.get(ACCOUNT_ID_KEY).unwrap(), "123456789012");

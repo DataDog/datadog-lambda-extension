@@ -841,9 +841,12 @@ async fn handle_event_bus_event(
     stats_concentrator: StatsConcentratorHandle,
 ) -> Option<TelemetryEvent> {
     match event {
-        Event::OutOfMemory(event_timestamp) => {
+        Event::OutOfMemory {
+            request_id,
+            timestamp,
+        } => {
             if let Err(e) = invocation_processor_handle
-                .on_out_of_memory_error(event_timestamp)
+                .on_out_of_memory_error(request_id, timestamp)
                 .await
             {
                 error!("Failed to send out of memory error to processor: {}", e);
@@ -1219,8 +1222,25 @@ async fn start_dogstatsd(
 ) {
     // Start aggregator service and handle
     let start_time = Instant::now();
+    let enrichment_tags = if config.custom_metrics_exclude_tags.is_empty() {
+        tags_provider.get_tags_string()
+    } else {
+        debug!(
+            "Excluding tags from custom metrics: {:?}",
+            config.custom_metrics_exclude_tags
+        );
+        tags_provider
+            .get_tags_vec()
+            .into_iter()
+            .filter(|tag| {
+                let key = tag.split(':').next().unwrap_or("");
+                !config.custom_metrics_exclude_tags.iter().any(|e| e == key)
+            })
+            .collect::<Vec<_>>()
+            .join(",")
+    };
     let (aggregator_service, aggregator_handle) = MetricsAggregatorService::new(
-        SortedTags::parse(&tags_provider.get_tags_string()).unwrap_or(EMPTY_TAGS),
+        SortedTags::parse(&enrichment_tags).unwrap_or(EMPTY_TAGS),
         CONTEXTS,
     )
     .expect("can't create metrics service");

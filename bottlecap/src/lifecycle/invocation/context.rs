@@ -43,6 +43,18 @@ pub struct Context {
     /// tracing.
     ///
     pub extracted_span_context: Option<SpanContext>,
+    /// Whether the `aws.lambda.enhanced.out_of_memory` metric has already been
+    /// emitted for this invocation. Multiple detection paths can fire for the
+    /// same OOM (runtime log, `Runtime.OutOfMemory` `error_type` in
+    /// `PlatformRuntimeDone`, `max_memory_used == memory_size` in `PlatformReport`);
+    /// this flag dedupes them.
+    pub oom_emitted: bool,
+    /// Whether the tracer signaled (via the `Datadog-Client-Computed-Stats` header) that it
+    /// already computed trace stats client-side, propagated from the tracer's placeholder span.
+    ///
+    /// Used when generating the extension-side `aws.lambda` span (Path B) so the backend
+    /// stats directive (`_dd.compute_stats`) is stamped consistently with Path A.
+    pub client_computed_stats: bool,
 }
 
 /// Struct containing the information needed to reparent a span.
@@ -94,6 +106,8 @@ impl Default for Context {
             snapstart_restore_span: None,
             tracer_span: None,
             extracted_span_context: None,
+            oom_emitted: false,
+            client_computed_stats: false,
         }
     }
 }
@@ -508,12 +522,20 @@ impl ContextBuffer {
 
     /// Adds the tracer span to a `Context` in the buffer.
     ///
-    pub fn add_tracer_span(&mut self, request_id: &String, tracer_span: &Span) {
+    /// `client_computed_stats` carries the tracer's `Datadog-Client-Computed-Stats` signal so
+    /// the extension-generated `aws.lambda` span can stamp `_dd.compute_stats` consistently.
+    pub fn add_tracer_span(
+        &mut self,
+        request_id: &String,
+        tracer_span: &Span,
+        client_computed_stats: bool,
+    ) {
         if let Some(context) = self
             .buffer
             .iter_mut()
             .find(|context| context.request_id == *request_id)
         {
+            context.client_computed_stats = client_computed_stats;
             context
                 .invocation_span
                 .meta
@@ -637,6 +659,34 @@ mod tests {
         // Get a context that doesn't exist
         let unexistent_request_id = String::from("unexistent");
         assert!(buffer.get(&unexistent_request_id).is_none());
+    }
+
+    /// APMSVLS-487 Tier 2: `add_tracer_span` records the tracer's `client_computed_stats`
+    /// signal onto the matching context (and is a no-op when no context matches).
+    #[test]
+    fn test_add_tracer_span_sets_client_computed_stats() {
+        for client_computed_stats in [true, false] {
+            let mut buffer = ContextBuffer::with_capacity(2);
+            let request_id = String::from("req-1");
+            buffer.insert(Context::from_request_id(&request_id));
+
+            let mut tracer_span = Span::default();
+            tracer_span
+                .meta
+                .insert("request_id".to_string(), request_id.clone());
+
+            buffer.add_tracer_span(&request_id, &tracer_span, client_computed_stats);
+
+            assert_eq!(
+                buffer.get(&request_id).unwrap().client_computed_stats,
+                client_computed_stats
+            );
+        }
+
+        // No matching context -> no panic, nothing recorded.
+        let mut buffer = ContextBuffer::with_capacity(2);
+        buffer.add_tracer_span(&String::from("missing"), &Span::default(), true);
+        assert!(buffer.get(&String::from("missing")).is_none());
     }
 
     #[test]

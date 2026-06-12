@@ -99,10 +99,6 @@ You can also open an issue for a feature request.
 
 If you find an issue with this package and have a fix, please feel free to open a pull request following the [procedures](https://github.com/DataDog/datadog-agent/blob/main/docs/public/guidelines/contributing.md).
 
-## Serverless-Init
-
-Serverless-Init CI/CD has been moved to its own repository. See [serverless-init-ci](https://gitlab.ddbuild.io/DataDog/serverless-init-ci) for building, testing, and releasing serverless-init images.
-
 ## Community
 
 For product feedback and questions, join the `#serverless` channel in the [Datadog community on Slack](https://chat.datadoghq.com/).

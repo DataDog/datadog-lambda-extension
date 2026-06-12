@@ -505,6 +505,40 @@ build node lambdas:
     - cd integration-tests
     - ./scripts/build-node.sh
 
+build ruby lambdas:
+  stage: integration-tests
+  image: registry.ddbuild.io/images/docker:27.3.1
+  tags: ["docker-in-docker:arm64"]
+  rules:
+    - when: on_success
+  needs: []
+  artifacts:
+    expire_in: 1 hour
+    paths:
+      - integration-tests/lambda/*/*.rb
+  script:
+    - cd integration-tests
+    - ./scripts/build-ruby.sh
+
+build go lambdas:
+  stage: integration-tests
+  image: registry.ddbuild.io/images/docker:27.3.1
+  tags: ["docker-in-docker:arm64"]
+  rules:
+    - when: on_success
+  needs: []
+  cache:
+    key: go-mod-cache-${CI_COMMIT_REF_SLUG}
+    paths:
+      - integration-tests/.cache/go-mod/
+  artifacts:
+    expire_in: 1 hour
+    paths:
+      - integration-tests/lambda/*/bin/bootstrap
+  script:
+    - cd integration-tests
+    - ./scripts/build-go.sh
+
 # Integration Tests - Publish arm64 layer with integration test prefix
 publish integration layer (arm64):
   stage: integration-tests
@@ -581,12 +615,16 @@ integration-suite:
     - build dotnet lambdas
     - build python lambdas
     - build node lambdas
+    - build ruby lambdas
+    - build go lambdas
   dependencies:
     - publish integration layer (arm64)
     - build java lambdas
     - build dotnet lambdas
     - build python lambdas
     - build node lambdas
+    - build ruby lambdas
+    - build go lambdas
   variables:
     IDENTIFIER: ${CI_COMMIT_SHORT_SHA}
     AWS_DEFAULT_REGION: us-east-1

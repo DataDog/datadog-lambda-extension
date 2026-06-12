@@ -508,7 +508,7 @@ impl Processor {
                 debug!(
                     "Invocation Processor | PlatformRuntimeDone | Got Runtime.OutOfMemory. Incrementing OOM metric."
                 );
-                self.enhanced_metrics.increment_oom_metric(timestamp);
+                self.try_increment_oom_metric(Some(request_id), timestamp);
             }
         }
 
@@ -665,9 +665,17 @@ impl Processor {
         trace_sender: &Arc<SendingTraceProcessor>,
         context: Context,
     ) {
+        // Capture before `get_ctx_spans` consumes `context`.
+        let client_computed_stats = context.client_computed_stats;
         let (traces, body_size) = self.get_ctx_spans(context);
-        self.send_spans(traces, body_size, tags_provider, trace_sender)
-            .await;
+        self.send_spans(
+            traces,
+            body_size,
+            tags_provider,
+            trace_sender,
+            client_computed_stats,
+        )
+        .await;
     }
 
     fn get_ctx_spans(&mut self, context: Context) -> (Vec<Span>, usize) {
@@ -732,7 +740,9 @@ impl Processor {
             let traces = vec![cold_start_span.clone()];
             let body_size = size_of_val(cold_start_span);
 
-            self.send_spans(traces, body_size, tags_provider, trace_sender)
+            // The cold start span is extension-generated and not tied to a tracer's stats
+            // signal, so the backend should compute its stats unless the extension does.
+            self.send_spans(traces, body_size, tags_provider, trace_sender, false)
                 .await;
         }
     }
@@ -746,8 +756,12 @@ impl Processor {
         body_size: usize,
         tags_provider: &Arc<provider::Provider>,
         trace_sender: &Arc<SendingTraceProcessor>,
+        client_computed_stats: bool,
     ) {
         // todo: figure out what to do here
+        // `client_computed_stats` is propagated from the tracer's placeholder span so the
+        // downstream `ChunkProcessor` (reused via `send_processed_traces` -> `process_traces`)
+        // stamps `_dd.compute_stats` on these extension-generated spans consistently with Path A.
         let header_tags = tracer_header_tags::TracerHeaderTags {
             lang: "",
             lang_version: "",
@@ -756,7 +770,7 @@ impl Processor {
             tracer_version: "",
             container_id: "",
             client_computed_top_level: false,
-            client_computed_stats: false,
+            client_computed_stats,
             dropped_p0_traces: 0,
             dropped_p0_spans: 0,
         };
@@ -909,25 +923,25 @@ impl Processor {
 
     /// Handles `OnDemand` mode platform report processing.
     ///
-    /// Processes OnDemand-specific metrics including OOM detection for provided.al runtimes
-    /// and post-runtime duration calculation.
+    /// Processes OnDemand-specific metrics including OOM detection by memory-size
+    /// equality and post-runtime duration calculation.
     fn handle_ondemand_report(
         &mut self,
         request_id: &String,
         metrics: OnDemandReportMetrics,
         timestamp: i64,
     ) {
-        // For provided.al runtimes, if the last invocation hit the memory limit, increment the OOM metric.
-        // We do this for provided.al runtimes because we didn't find another way to detect this under provided.al.
-        // We don't do this for other runtimes to avoid double counting.
-        if let Some(runtime) = &self.runtime
-            && runtime.starts_with("provided.al")
-            && metrics.max_memory_used_mb == metrics.memory_size_mb
-        {
+        // If the invocation hit the memory limit, increment the OOM metric. This catches
+        // OOM-induced failures that don't surface through a runtime-specific log line or a
+        // `Runtime.OutOfMemory` error_type — most notably the suppressed-init / timeout-at-cap
+        // pattern reported in datadog-lambda-extension#1237 (Node). Best-effort dedup
+        // against the other two detection paths is handled by `try_increment_oom_metric`
+        // (it can still double-count in edge cases — see that function's doc).
+        if metrics.max_memory_used_mb == metrics.memory_size_mb {
             debug!(
                 "Invocation Processor | PlatformReport | Last invocation hit memory limit. Incrementing OOM metric."
             );
-            self.enhanced_metrics.increment_oom_metric(timestamp);
+            self.try_increment_oom_metric(Some(request_id), timestamp);
         }
 
         // Calculate and set post-runtime duration if context is available
@@ -1395,7 +1409,52 @@ impl Processor {
         Some(error_tags)
     }
 
-    pub fn on_out_of_memory_error(&mut self, timestamp: i64) {
+    pub fn on_out_of_memory_error(&mut self, request_id: Option<&String>, timestamp: i64) {
+        self.try_increment_oom_metric(request_id, timestamp);
+    }
+
+    /// Best-effort dedup wrapper around `enhanced_metrics.increment_oom_metric`.
+    /// The metric MAY be double-counted in edge cases — see below.
+    ///
+    /// Several detection paths can fire for the same invocation:
+    /// 1. A runtime-specific OOM log line (logs processor → `Event::OutOfMemory`)
+    /// 2. `error_type == "Runtime.OutOfMemory"` in `PlatformRuntimeDone`
+    /// 3. `max_memory_used_mb == memory_size_mb` in `PlatformReport`
+    ///
+    /// When `request_id` is supplied AND the matching context is still in the
+    /// buffer, the per-invocation `Context::oom_emitted` flag guarantees one
+    /// emission per `request_id`. The metric is double-counted when either:
+    ///   - `request_id` is `None` (log line beat `PlatformStart` to
+    ///     `LambdaProcessor`, or it landed after `PlatformRuntimeDone` cleared
+    ///     the slot) and another path subsequently emits with `Some(rid)`; or
+    ///   - the context has been evicted from the buffer (capacity is fixed —
+    ///     see `MAX_CONTEXT_BUFFER_SIZE`) between `PlatformStart` and this
+    ///     call, so the flag has nowhere to live.
+    ///
+    /// Both branches still emit (so OOMs are never under-counted) and log a
+    /// `debug!` line.
+    fn try_increment_oom_metric(&mut self, request_id: Option<&String>, timestamp: i64) {
+        if let Some(rid) = request_id {
+            if let Some(ctx) = self.context_buffer.get_mut(rid) {
+                if ctx.oom_emitted {
+                    debug!(
+                        "Invocation Processor | OOM metric already emitted for request_id {}, skipping",
+                        rid
+                    );
+                    return;
+                }
+                ctx.oom_emitted = true;
+            } else {
+                debug!(
+                    "Invocation Processor | Emitting OOM metric without dedup: context not found for request_id {} (likely evicted from context buffer)",
+                    rid
+                );
+            }
+        } else {
+            debug!(
+                "Invocation Processor | Emitting OOM metric without dedup: no request_id available (OOM log processed before PlatformStart or after PlatformRuntimeDone)"
+            );
+        }
         self.enhanced_metrics.increment_oom_metric(timestamp);
     }
 
@@ -1403,9 +1462,10 @@ impl Processor {
     ///
     /// This is used to enrich the invocation span with additional metadata from the tracers
     /// top level span, since we discard the tracer span when we create the invocation span.
-    pub fn add_tracer_span(&mut self, span: &Span) {
+    pub fn add_tracer_span(&mut self, span: &Span, client_computed_stats: bool) {
         if let Some(request_id) = span.meta.get("request_id") {
-            self.context_buffer.add_tracer_span(request_id, span);
+            self.context_buffer
+                .add_tracer_span(request_id, span, client_computed_stats);
         }
     }
 
@@ -2444,5 +2504,270 @@ mod tests {
             Some(&0.0),
             "pre-existing _dd.appsec.enabled value must not be overwritten"
         );
+    }
+
+    /// Two OOM signals for the same `request_id` increment the metric exactly once.
+    /// Exercises the `Context::oom_emitted` dedup flag.
+    #[tokio::test]
+    async fn test_try_increment_oom_metric_dedupes_same_request_id() {
+        let mut p = setup();
+        // Insert the context directly so we don't go through `on_invoke_event`, which
+        // would populate dynamic tags (`cold_start:true`) and complicate the query.
+        let request_id = String::from("req-dedup");
+        p.context_buffer.start_context(&request_id, Span::default());
+
+        let now: i64 = std::time::UNIX_EPOCH
+            .elapsed()
+            .expect("clock")
+            .as_secs()
+            .try_into()
+            .unwrap_or_default();
+
+        p.on_out_of_memory_error(Some(&request_id), now);
+        p.on_out_of_memory_error(Some(&request_id), now);
+
+        let ts = (now / 10) * 10;
+        let entry = p
+            .enhanced_metrics
+            .aggr_handle
+            .get_entry_by_id(
+                crate::metrics::enhanced::constants::OUT_OF_MEMORY_METRIC.into(),
+                None,
+                ts,
+            )
+            .await
+            .unwrap()
+            .expect("OOM metric must be emitted at least once");
+
+        let sketch = entry.value.get_sketch().expect("distribution sketch");
+        let sum = sketch.sum().expect("sketch sum");
+        assert!(
+            (sum - 1.0).abs() < f64::EPSILON,
+            "OOM sum must be 1.0 (deduped), got {sum}"
+        );
+
+        // And the context flag should now reflect that we emitted.
+        assert!(
+            p.context_buffer
+                .get(&request_id)
+                .expect("context")
+                .oom_emitted,
+            "oom_emitted flag must be set after the first emission"
+        );
+    }
+
+    /// OOM signals for different `request_id`s each emit a metric — dedup is scoped
+    /// per request, not globally.
+    #[tokio::test]
+    async fn test_try_increment_oom_metric_distinct_request_ids_emit_separately() {
+        let mut p = setup();
+        let req1 = String::from("req-a");
+        let req2 = String::from("req-b");
+        p.context_buffer.start_context(&req1, Span::default());
+        p.context_buffer.start_context(&req2, Span::default());
+
+        let now: i64 = std::time::UNIX_EPOCH
+            .elapsed()
+            .expect("clock")
+            .as_secs()
+            .try_into()
+            .unwrap_or_default();
+
+        p.on_out_of_memory_error(Some(&req1), now);
+        p.on_out_of_memory_error(Some(&req2), now);
+
+        let ts = (now / 10) * 10;
+        let entry = p
+            .enhanced_metrics
+            .aggr_handle
+            .get_entry_by_id(
+                crate::metrics::enhanced::constants::OUT_OF_MEMORY_METRIC.into(),
+                None,
+                ts,
+            )
+            .await
+            .unwrap()
+            .expect("OOM metric must be emitted");
+
+        let sketch = entry.value.get_sketch().expect("distribution sketch");
+        let sum = sketch.sum().expect("sketch sum");
+        assert!(
+            (sum - 2.0).abs() < f64::EPSILON,
+            "OOM sum must be 2.0 (one per request_id), got {sum}"
+        );
+    }
+
+    /// In `handle_ondemand_report`, when `max_memory_used_mb == memory_size_mb`,
+    /// the OOM metric should be incremented exactly once for that invocation.
+    #[tokio::test]
+    async fn test_handle_ondemand_report_emits_oom_on_memory_equality() {
+        let mut p = setup();
+        let request_id = String::from("req-eq");
+        p.context_buffer.start_context(&request_id, Span::default());
+
+        let now: i64 = std::time::UNIX_EPOCH
+            .elapsed()
+            .expect("clock")
+            .as_secs()
+            .try_into()
+            .unwrap_or_default();
+
+        let metrics = OnDemandReportMetrics {
+            duration_ms: 100.0,
+            billed_duration_ms: 100,
+            memory_size_mb: 1024,
+            max_memory_used_mb: 1024,
+            init_duration_ms: None,
+            restore_duration_ms: None,
+        };
+        p.handle_ondemand_report(&request_id, metrics, now);
+
+        let ts = (now / 10) * 10;
+        assert!(
+            p.enhanced_metrics
+                .aggr_handle
+                .get_entry_by_id(
+                    crate::metrics::enhanced::constants::OUT_OF_MEMORY_METRIC.into(),
+                    None,
+                    ts
+                )
+                .await
+                .unwrap()
+                .is_some(),
+            "OOM must be emitted when max_memory_used_mb == memory_size_mb"
+        );
+    }
+
+    /// Build a [`Processor`] with a caller-supplied config (for toggling
+    /// `compute_trace_stats_on_extension`).
+    fn setup_with_config(config: Arc<config::Config>) -> Processor {
+        let aws_config = Arc::new(AwsConfig {
+            region: "us-east-1".into(),
+            aws_lwa_proxy_lambda_runtime_api: Some("***".into()),
+            function_name: "test-function".into(),
+            sandbox_init_time: Instant::now(),
+            runtime_api: "***".into(),
+            exec_wrapper: None,
+            initialization_type: "on-demand".into(),
+        });
+        let tags_provider = Arc::new(provider::Provider::new(
+            Arc::clone(&config),
+            LAMBDA_RUNTIME_SLUG.to_string(),
+            &HashMap::from([("function_arn".to_string(), "test-arn".to_string())]),
+        ));
+        let (service, handle) =
+            AggregatorService::new(EMPTY_TAGS, 1024).expect("failed to create aggregator service");
+        tokio::spawn(service.run());
+        let propagator = Arc::new(DatadogCompositePropagator::new(Arc::clone(&config)));
+        let (durable_context_tx, _) = tokio::sync::mpsc::channel(1);
+        Processor::new(
+            tags_provider,
+            config,
+            aws_config,
+            handle,
+            propagator,
+            durable_context_tx,
+        )
+    }
+
+    /// Like [`make_trace_sender`], but returns the receiver so the test can inspect the
+    /// processed payload that Path B sends downstream.
+    fn make_trace_sender_with_rx(
+        config: Arc<config::Config>,
+    ) -> (
+        Arc<SendingTraceProcessor>,
+        tokio::sync::mpsc::Receiver<crate::traces::trace_aggregator::SendDataBuilderInfo>,
+    ) {
+        use libdd_trace_obfuscation::obfuscation_config::ObfuscationConfig;
+        let (stats_concentrator_service, stats_concentrator_handle) =
+            StatsConcentratorService::new(Arc::clone(&config));
+        tokio::spawn(stats_concentrator_service.run());
+        let (trace_tx, trace_rx) = tokio::sync::mpsc::channel(8);
+        let sender = Arc::new(SendingTraceProcessor {
+            appsec: None,
+            processor: Arc::new(trace_processor::ServerlessTraceProcessor {
+                obfuscation_config: Arc::new(
+                    ObfuscationConfig::new().expect("Failed to create ObfuscationConfig"),
+                ),
+            }),
+            trace_tx,
+            stats_generator: Arc::new(StatsGenerator::new(stats_concentrator_handle)),
+        });
+        (sender, trace_rx)
+    }
+
+    /// APMSVLS-487 Tier 2: the extension-generated `aws.lambda` span (Path B) stamps
+    /// `_dd.compute_stats="1"` only when neither the extension nor the tracer computes stats;
+    /// otherwise the key is absent. `client_computed_stats` is propagated from the context.
+    #[tokio::test]
+    #[allow(clippy::unwrap_used)]
+    async fn test_send_ctx_spans_stamps_compute_stats() {
+        use crate::tags::lambda::tags::COMPUTE_STATS_KEY;
+        use libdd_trace_utils::tracer_payload::TracerPayloadCollection;
+
+        #[cfg(feature = "fips")]
+        let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+        #[cfg(not(feature = "fips"))]
+        let _ = rustls::crypto::ring::default_provider().install_default();
+
+        // (compute_on_extension, client_computed_stats) -> expected meta value on aws.lambda span
+        let cases = [
+            (false, false, Some("1")),
+            (false, true, None),
+            (true, false, None),
+            (true, true, None),
+        ];
+
+        for (compute_on_extension, client_computed_stats, expected) in cases {
+            let config = Arc::new(config::Config {
+                apm_dd_url: "https://trace.agent.datadoghq.com".to_string(),
+                service: Some("test-service".to_string()),
+                compute_trace_stats_on_extension: compute_on_extension,
+                ..config::Config::default()
+            });
+            let mut processor = setup_with_config(Arc::clone(&config));
+            let (trace_sender, mut trace_rx) = make_trace_sender_with_rx(Arc::clone(&config));
+
+            let mut context = Context::from_request_id("req-1");
+            context.client_computed_stats = client_computed_stats;
+            context.invocation_span = Span {
+                name: "aws.lambda".to_string(),
+                resource: "test-resource".to_string(),
+                service: "test-service".to_string(),
+                span_id: 1,
+                trace_id: 100,
+                ..Default::default()
+            };
+
+            let tags_provider = Arc::new(provider::Provider::new(
+                Arc::clone(&config),
+                LAMBDA_RUNTIME_SLUG.to_string(),
+                &HashMap::from([("function_arn".to_string(), "test-arn".to_string())]),
+            ));
+            processor
+                .send_ctx_spans(&tags_provider, &trace_sender, context)
+                .await;
+
+            let info = trace_rx.recv().await.expect("expected a sent payload");
+            let send_data = info.builder.build();
+            let TracerPayloadCollection::V07(payloads) = send_data.get_payloads() else {
+                panic!("expected V07 payload");
+            };
+            let aws_lambda_span = payloads
+                .iter()
+                .flat_map(|p| &p.chunks)
+                .flat_map(|c| &c.spans)
+                .find(|s| s.name == "aws.lambda")
+                .expect("aws.lambda span should be present");
+
+            assert_eq!(
+                aws_lambda_span
+                    .meta
+                    .get(COMPUTE_STATS_KEY)
+                    .map(String::as_str),
+                expected,
+                "compute_on_extension={compute_on_extension}, client_computed_stats={client_computed_stats}"
+            );
+        }
     }
 }

@@ -7,7 +7,13 @@ mod constants;
 #[derive(Debug)]
 pub enum Event {
     Telemetry(TelemetryEvent),
-    OutOfMemory(i64),
+    OutOfMemory {
+        /// Lambda `request_id` of the invocation the OOM belongs to, when known.
+        /// Used by the invocation processor to dedupe against other OOM detection
+        /// paths (`PlatformRuntimeDone` `error_type`, `PlatformReport` memory equality).
+        request_id: Option<String>,
+        timestamp: i64,
+    },
     Tombstone,
 }
 

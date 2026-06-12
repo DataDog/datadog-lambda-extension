@@ -43,6 +43,8 @@ echo "Building all Lambda functions in parallel..."
 "$SCRIPT_DIR/build-dotnet.sh" &
 "$SCRIPT_DIR/build-python.sh" &
 "$SCRIPT_DIR/build-node.sh" &
+"$SCRIPT_DIR/build-ruby.sh" &
+"$SCRIPT_DIR/build-go.sh" &
 wait
 echo "All Lambda builds complete"
 
