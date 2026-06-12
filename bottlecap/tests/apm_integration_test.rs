@@ -206,7 +206,7 @@ async fn trace_payload_roundtrip_through_fake_intake() {
         trace_id: 0x1111_1111_1111_1111,
         span_id: 0x2222_2222_2222_2222,
         parent_id: 0,
-        start: 1_700_000_000_000_000_000,
+        start: STATS_SPAN_START_NS,
         duration: 5_000_000,
         error: 0,
         r#type: "web".to_string(),
@@ -400,6 +400,11 @@ async fn run_processor_pipeline_with_traces(
     }
 }
 
+/// Fixed span start well in the past relative to the concentrator's clock, so all spans
+/// fold into the single oldest bucket and a `force_flush` returns exactly one bucket.
+/// That keeps the aggregation assertions deterministic without controlling time.
+const STATS_SPAN_START_NS: i64 = 1_700_000_000_000_000_000;
+
 /// Single-root-span convenience wrapper used by the `_dd.compute_stats` tests below.
 async fn run_processor_pipeline(
     compute_on_extension: bool,
@@ -413,7 +418,7 @@ async fn run_processor_pipeline(
         trace_id: 0x1111_1111_1111_1111,
         span_id: 0x2222_2222_2222_2222,
         parent_id: 0,
-        start: 1_700_000_000_000_000_000,
+        start: STATS_SPAN_START_NS,
         duration: 5_000_000,
         error: 0,
         r#type: "web".to_string(),
@@ -518,9 +523,7 @@ async fn e2e_client_computed_stats_absent_meta_and_no_stats() {
 // SpanConcentrator and assert on the *computed* aggregate values (hits, errors,
 // duration, grouping) that reach the intake, not just on stats presence.
 //
-// All spans use a `start` well in the past relative to the concentrator's clock,
-// so they fold into the single oldest bucket and a `force_flush` returns exactly
-// one bucket. That keeps these assertions deterministic without controlling time.
+// Determinism comes from `STATS_SPAN_START_NS` (see its doc comment).
 // ---------------------------------------------------------------------------
 
 /// Builds a single-span trace the concentrator will count toward stats.
@@ -535,7 +538,7 @@ fn stats_trace(id: u64, resource: &str, duration: i64, error: i32) -> Vec<pb::Sp
         trace_id: id,
         span_id: id,
         parent_id: 0,
-        start: 1_700_000_000_000_000_000,
+        start: STATS_SPAN_START_NS,
         duration,
         error,
         r#type: "web".to_string(),
