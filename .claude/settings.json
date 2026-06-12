@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "cd bottlecap && cargo clippy --workspace --all-targets --features default && cargo fmt --all -- --check || exit 2",
+            "command": "cd \"$CLAUDE_PROJECT_DIR/bottlecap\" && cargo clippy --workspace --all-targets --features default && cargo fmt --all -- --check || exit 2",
             "if": "Bash(git commit*)",
             "timeout": 60,
             "statusMessage": "Running cargo clippy + fmt"
