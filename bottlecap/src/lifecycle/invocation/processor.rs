@@ -2435,6 +2435,9 @@ mod tests {
             LAMBDA_RUNTIME_SLUG.to_string(),
             &HashMap::from([("function_arn".to_string(), "test-arn".to_string())]),
         ));
+        // Keep `trace_sender` owned by the test (pass a clone) so the channel stays
+        // connected through the assertion below; otherwise try_recv would report
+        // Disconnected instead of Empty.
         let (trace_sender, mut trace_rx) = make_trace_sender_with_rx(config);
 
         p.on_platform_runtime_done(
@@ -2446,7 +2449,7 @@ mod tests {
             Status::Timeout,
             None,
             tags_provider,
-            trace_sender,
+            Arc::clone(&trace_sender),
             chrono::Utc::now().timestamp(),
         )
         .await;
@@ -2475,6 +2478,7 @@ mod tests {
             ),
             "cold start span must not be sent when no tracer set its trace ID"
         );
+        drop(trace_sender);
     }
 
     #[tokio::test]
