@@ -2091,19 +2091,6 @@ mod tests {
         );
     }
 
-    // --- init duration metric: platform.report fallback when platform.initReport is late/missing ---
-
-    fn report_with_init(init_duration_ms: Option<f64>) -> OnDemandReportMetrics {
-        OnDemandReportMetrics {
-            duration_ms: 100.0,
-            billed_duration_ms: 100,
-            memory_size_mb: 128,
-            max_memory_used_mb: 50,
-            init_duration_ms,
-            restore_duration_ms: None,
-        }
-    }
-
     #[tokio::test]
     async fn test_init_duration_emitted_from_init_report() {
         let mut processor = setup();
