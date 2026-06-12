@@ -2477,8 +2477,8 @@ mod tests {
         );
     }
 
-    #[test]
-    fn enrich_ctx_keeps_tracer_set_cold_start_trace_id_without_tracer_detected() {
+    #[tokio::test]
+    async fn enrich_ctx_keeps_tracer_set_cold_start_trace_id_without_tracer_detected() {
         let mut p = setup();
         let request_id = String::from("node-python-cold-start");
         let mut cold_start_span = create_empty_span(
