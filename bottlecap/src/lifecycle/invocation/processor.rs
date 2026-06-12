@@ -580,6 +580,7 @@ impl Processor {
         request_id: &String,
         status: Status,
     ) -> Option<Context> {
+        let tracer_detected = self.tracer_detected;
         let Some(context) = self.context_buffer.get_mut(request_id) else {
             debug!(
                 "Cannot process on platform runtime done, no invocation context found for request_id: {request_id}"
@@ -641,9 +642,13 @@ impl Processor {
         self.inferrer
             .complete_inferred_spans(&context.invocation_span);
 
-        // Handle cold start span if present
+        // Handle cold start span if present. Timeout handling can synthesize an
+        // invocation trace ID even when no tracer is installed; that must not
+        // make the cold start span sendable. Node/Python load spans set the
+        // cold start trace ID directly via set_cold_start_span_trace_id.
         if let Some(cold_start_span) = &mut context.cold_start_span
             && context.invocation_span.trace_id != 0
+            && tracer_detected
         {
             cold_start_span.trace_id = context.invocation_span.trace_id;
             cold_start_span.parent_id = context.invocation_span.parent_id;
@@ -2404,6 +2409,108 @@ mod tests {
         assert!(
             ctx_to_send.is_empty(),
             "no contexts should be ready to send yet"
+        );
+    }
+
+    #[tokio::test]
+    async fn timeout_without_tracer_does_not_send_cold_start_span() {
+        let mut p = setup();
+        let request_id = String::from("timeout-no-tracer");
+        let mut cold_start_span = create_empty_span(
+            "aws.lambda.cold_start".to_string(),
+            "test-resource",
+            "test-service",
+        );
+        cold_start_span.span_id = 42;
+
+        p.context_buffer.start_context(&request_id, Span::default());
+        p.context_buffer
+            .get_mut(&request_id)
+            .expect("context must exist")
+            .cold_start_span = Some(cold_start_span);
+
+        let config = Arc::clone(&p.config);
+        let tags_provider = Arc::new(provider::Provider::new(
+            Arc::clone(&config),
+            LAMBDA_RUNTIME_SLUG.to_string(),
+            &HashMap::from([("function_arn".to_string(), "test-arn".to_string())]),
+        ));
+        let (trace_sender, mut trace_rx) = make_trace_sender_with_rx(config);
+
+        p.on_platform_runtime_done(
+            &request_id,
+            RuntimeDoneMetrics {
+                duration_ms: 100.0,
+                produced_bytes: None,
+            },
+            Status::Timeout,
+            None,
+            tags_provider,
+            trace_sender,
+            chrono::Utc::now().timestamp(),
+        )
+        .await;
+
+        let context = p
+            .context_buffer
+            .get(&request_id)
+            .expect("context must exist");
+        assert_ne!(
+            context.invocation_span.trace_id, 0,
+            "timeout handling should still give the invocation span a trace ID"
+        );
+        assert_eq!(
+            context
+                .cold_start_span
+                .as_ref()
+                .expect("cold start span must exist")
+                .trace_id,
+            0,
+            "timeout-generated trace IDs must not make cold start spans eligible to send"
+        );
+        assert!(
+            matches!(
+                trace_rx.try_recv(),
+                Err(tokio::sync::mpsc::error::TryRecvError::Empty)
+            ),
+            "cold start span must not be sent when no tracer set its trace ID"
+        );
+    }
+
+    #[test]
+    fn enrich_ctx_keeps_tracer_set_cold_start_trace_id_without_tracer_detected() {
+        let mut p = setup();
+        let request_id = String::from("node-python-cold-start");
+        let mut cold_start_span = create_empty_span(
+            "aws.lambda.cold_start".to_string(),
+            "test-resource",
+            "test-service",
+        );
+        cold_start_span.span_id = 42;
+        cold_start_span.trace_id = 123;
+
+        p.context_buffer.start_context(&request_id, Span::default());
+        p.context_buffer
+            .get_mut(&request_id)
+            .expect("context must exist")
+            .cold_start_span = Some(cold_start_span);
+
+        let context = p
+            .enrich_ctx_at_platform_done(&request_id, Status::Timeout)
+            .expect("context must be present");
+
+        assert_ne!(
+            context.invocation_span.trace_id, 0,
+            "timeout handling should still give the invocation span a trace ID"
+        );
+        assert_eq!(
+            context
+                .cold_start_span
+                .as_ref()
+                .expect("cold start span must exist")
+                .trace_id,
+            123,
+            "a trace ID already set from aws.lambda.load must be preserved"
         );
     }
 
