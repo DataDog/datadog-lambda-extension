@@ -629,3 +629,65 @@ async fn e2e_stats_groups_by_resource() {
     assert_eq!(a.hits, 2);
     assert_eq!(b.hits, 1);
 }
+
+/// Like `stats_trace` but stamps extra `meta` keys on the span (e.g. `span.kind`,
+/// `http.status_code`) that the concentrator folds into the aggregation key.
+fn stats_trace_with_meta(id: u64, resource: &str, meta: &[(&str, &str)]) -> Vec<pb::Span> {
+    let mut trace = stats_trace(id, resource, 1_000_000, 0);
+    for (key, value) in meta {
+        trace[0]
+            .meta
+            .insert((*key).to_string(), (*value).to_string());
+    }
+    trace
+}
+
+/// AGG-5: spans differing only in `span.kind` stay in separate groups.
+#[tokio::test]
+async fn e2e_stats_groups_by_span_kind() {
+    let traces = vec![
+        stats_trace_with_meta(1, "GET /fake", &[("span.kind", "server")]),
+        stats_trace_with_meta(2, "GET /fake", &[("span.kind", "server")]),
+        stats_trace_with_meta(3, "GET /fake", &[("span.kind", "internal")]),
+    ];
+    let outcome = run_processor_pipeline_with_traces(true, false, traces).await;
+    let grouped = captured_grouped_stats(&outcome.stats);
+    assert_eq!(grouped.len(), 2, "distinct span.kind must not be merged");
+    let server = grouped
+        .iter()
+        .find(|g| g.span_kind == "server")
+        .expect("server group should be present");
+    let internal = grouped
+        .iter()
+        .find(|g| g.span_kind == "internal")
+        .expect("internal group should be present");
+    assert_eq!(server.hits, 2);
+    assert_eq!(internal.hits, 1);
+}
+
+/// AGG-6: spans differing only in `http.status_code` stay in separate groups.
+#[tokio::test]
+async fn e2e_stats_groups_by_http_status_code() {
+    let traces = vec![
+        stats_trace_with_meta(1, "GET /fake", &[("http.status_code", "200")]),
+        stats_trace_with_meta(2, "GET /fake", &[("http.status_code", "200")]),
+        stats_trace_with_meta(3, "GET /fake", &[("http.status_code", "500")]),
+    ];
+    let outcome = run_processor_pipeline_with_traces(true, false, traces).await;
+    let grouped = captured_grouped_stats(&outcome.stats);
+    assert_eq!(
+        grouped.len(),
+        2,
+        "distinct http.status_code must not be merged"
+    );
+    let ok = grouped
+        .iter()
+        .find(|g| g.http_status_code == 200)
+        .expect("200 group should be present");
+    let err = grouped
+        .iter()
+        .find(|g| g.http_status_code == 500)
+        .expect("500 group should be present");
+    assert_eq!(ok.hits, 2);
+    assert_eq!(err.hits, 1);
+}
