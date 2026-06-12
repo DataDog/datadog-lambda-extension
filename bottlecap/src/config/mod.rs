@@ -372,6 +372,12 @@ pub struct Config {
     pub appsec_waf_timeout: Duration,
     pub api_security_enabled: bool,
     pub api_security_sample_delay: Duration,
+
+    /// Maximum number of request IDs whose logs are held in `held_logs` waiting for durable
+    /// execution context. Set to 0 to disable log holding; logs will be flushed immediately
+    /// without durable execution context enrichment. Defaults to 0 until the tracer-side
+    /// durable execution support is released; set to 50 to re-enable enrichment.
+    pub lambda_durable_function_log_buffer_size: usize,
 }
 
 impl Default for Config {
@@ -491,6 +497,8 @@ impl Default for Config {
             appsec_waf_timeout: Duration::from_millis(5),
             api_security_enabled: true,
             api_security_sample_delay: Duration::from_secs(30),
+
+            lambda_durable_function_log_buffer_size: 0,
         }
     }
 }

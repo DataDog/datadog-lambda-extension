@@ -496,6 +496,15 @@ pub struct EnvConfig {
     /// The Datadog organization UUID. When set, delegated auth is auto-enabled.
     #[serde(deserialize_with = "deserialize_string_or_int")]
     pub org_uuid: Option<String>,
+
+    /// @env `DD_LAMBDA_DURABLE_FUNCTION_LOG_BUFFER_SIZE`
+    ///
+    /// Maximum number of request IDs whose logs are held waiting for durable execution
+    /// context. Set to 0 to disable log holding; logs will be sent immediately without
+    /// durable execution context enrichment. Useful when the tracer is not installed.
+    /// Default is `0`.
+    #[serde(deserialize_with = "deserialize_option_lossless")]
+    pub lambda_durable_function_log_buffer_size: Option<usize>,
 }
 
 #[allow(clippy::too_many_lines)]
@@ -707,6 +716,7 @@ fn merge_config(config: &mut Config, env_config: &EnvConfig) {
     merge_option_to_value!(config, env_config, api_security_sample_delay);
 
     merge_string!(config, dd_org_uuid, env_config, org_uuid);
+    merge_option_to_value!(config, env_config, lambda_durable_function_log_buffer_size);
 }
 
 #[derive(Debug, PartialEq, Clone, Copy)]
@@ -1075,6 +1085,7 @@ mod tests {
                 api_security_sample_delay: Duration::from_secs(60),
 
                 dd_org_uuid: String::default(),
+                lambda_durable_function_log_buffer_size: 0,
             };
 
             assert_eq!(config, expected_config);

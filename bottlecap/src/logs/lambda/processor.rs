@@ -60,15 +60,13 @@ pub struct LambdaProcessor {
     durable_context_map: HashMap<String, DurableExecutionContext>,
     // Insertion order for FIFO eviction when map reaches capacity
     durable_context_order: VecDeque<String>,
+    // Max number of request ID keys in held_logs. 0 disables holding entirely.
+    lambda_durable_function_log_buffer_size: usize,
 }
 
 // Matches `lifecycle::invocation::ContextBuffer` default capacity: sized to absorb async
 // event backlog where invocation contexts may arrive out of order.
 const DURABLE_CONTEXT_MAP_CAPACITY: usize = 500;
-// Kept intentionally small: at shutdown, all held logs are flushed without durable context.
-// A large cap would mean a large batch sent in one shot, increasing the risk of the final
-// flush timing out when the tracer is not installed.
-const HELD_LOGS_MAX_KEYS: usize = 50;
 
 const OOM_ERRORS: [&str; 7] = [
     "fatal error: runtime: out of memory",       // Go
@@ -143,6 +141,8 @@ impl LambdaProcessor {
 
         let processing_rules = &datadog_config.logs_config_processing_rules;
         let logs_enabled = datadog_config.serverless_logs_enabled;
+        let lambda_durable_function_log_buffer_size =
+            datadog_config.lambda_durable_function_log_buffer_size;
         let rules = LambdaProcessor::compile_rules(processing_rules);
         LambdaProcessor {
             function_arn,
@@ -160,6 +160,7 @@ impl LambdaProcessor {
             held_logs_order: VecDeque::new(),
             durable_context_map: HashMap::with_capacity(DURABLE_CONTEXT_MAP_CAPACITY),
             durable_context_order: VecDeque::with_capacity(DURABLE_CONTEXT_MAP_CAPACITY),
+            lambda_durable_function_log_buffer_size,
         }
     }
 
@@ -708,9 +709,15 @@ impl LambdaProcessor {
     /// its logs are drained to `ready_logs` without durable context tags. This ensures logs are
     /// always eventually sent to Datadog even if the tracer is not installed and context never
     /// arrives.
+    ///
+    /// Callers must ensure `self.lambda_durable_function_log_buffer_size > 0` before invoking
+    /// this function. A safety net at the top returns early if the invariant is violated.
     fn hold_log(&mut self, request_id: String, log: IntakeLog) {
+        if self.lambda_durable_function_log_buffer_size == 0 {
+            return;
+        }
         if !self.held_logs.contains_key(&request_id) {
-            while self.held_logs.len() >= HELD_LOGS_MAX_KEYS {
+            while self.held_logs.len() >= self.lambda_durable_function_log_buffer_size {
                 // Evict the oldest key to ready_logs (without durable context tags).
                 if let Some(oldest) = self.held_logs_order.pop_front()
                     && let Some(evicted) = self.held_logs.remove(&oldest)
@@ -742,6 +749,16 @@ impl LambdaProcessor {
     fn queue_log_after_rules(&mut self, log: IntakeLog) {
         // Durable execution SDK logs already carry execution context extracted from executionArn.
         if log.message.lambda.durable_execution_id.is_some() {
+            if let Ok(serialized_log) = serde_json::to_string(&log) {
+                drop(log);
+                self.ready_logs.push(serialized_log);
+            }
+            return;
+        }
+
+        // When the buffer is disabled, skip holding and send logs immediately without
+        // durable execution context enrichment.
+        if self.lambda_durable_function_log_buffer_size == 0 {
             if let Ok(serialized_log) = serde_json::to_string(&log) {
                 drop(log);
                 self.ready_logs.push(serialized_log);
@@ -2600,6 +2617,7 @@ mod tests {
     #[tokio::test]
     async fn test_function_log_without_execution_arn_is_held_in_durable_mode() {
         let mut processor = make_processor_for_durable_arn_tests();
+        processor.lambda_durable_function_log_buffer_size = 50;
         processor.is_durable_function = Some(true);
         // Simulate a known request_id with no durable context yet
         processor.invocation_context.request_id = "req-123".to_string();
@@ -2625,6 +2643,7 @@ mod tests {
             (None, serde_json::Value::Null),
         ] {
             let mut processor = make_processor_for_durable_arn_tests();
+            processor.lambda_durable_function_log_buffer_size = 50;
             processor.is_durable_function = Some(true);
             processor.invocation_context.request_id = "req-end".to_string();
             processor.insert_to_durable_context_map(
