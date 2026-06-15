@@ -14,5 +14,16 @@
     "@opentelemetry/sdk-trace-base": "^1.28.0",
     "@opentelemetry/sdk-trace-node": "^1.28.0",
     "@opentelemetry/semantic-conventions": "^1.28.0"
+  },
+  "overrides": {
+    "@opentelemetry/exporter-trace-otlp-grpc": {
+      "@protobufjs/utf8": "^1.1.1"
+    },
+    "@opentelemetry/sdk-node": {
+      "@protobufjs/utf8": "^1.1.1"
+    },
+    "@opentelemetry/otlp-transformer": {
+      "@protobufjs/utf8": "^1.1.1"
+    }
   }
 }
