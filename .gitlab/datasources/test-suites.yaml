@@ -6,3 +6,4 @@ test_suites:
   - name: auth
   - name: oom
   - name: lmi-oom
+  - name: payload-size
