@@ -1,12 +1,11 @@
 use libdd_trace_utils::send_data::SendDataBuilder;
 use libdd_trace_utils::trace_utils::TracerHeaderTags;
 use std::collections::VecDeque;
+use tracing::debug;
 
-/// Maximum content size per payload uncompressed in bytes,
-/// that the Datadog Trace API accepts. The value is 3.2 MB.
-///
-/// <https://github.com/DataDog/datadog-agent/blob/9d57c10a9eeb3916e661d35dbd23c6e36395a99d/pkg/trace/writer/trace.go#L27-L31>
-pub const MAX_CONTENT_SIZE_BYTES: usize = 3_200_000;
+/// Maximum uncompressed bytes per outbound batch. Kept below the trace intake's
+/// ~15 MB limit so an enriched payload flushes in a single batch.
+pub const MAX_CONTENT_SIZE_BYTES: usize = 12_000_000;
 
 /// Owned version of `TracerHeaderTags<'a>` so it can be stored across async
 /// boundaries without lifetime issues.
@@ -130,6 +129,14 @@ impl TraceAggregator {
             } else {
                 break;
             }
+        }
+
+        if !self.buffer.is_empty() {
+            debug!(
+                "TRACES | batched {} payload(s) totaling {batch_size} bytes (cap {} bytes)",
+                self.buffer.len(),
+                self.max_content_size_bytes
+            );
         }
 
         std::mem::take(&mut self.buffer)

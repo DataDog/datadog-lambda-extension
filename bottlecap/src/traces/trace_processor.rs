@@ -464,6 +464,8 @@ impl TraceProcessor for ServerlessTraceProcessor {
             _ => body_size,
         };
 
+        debug!("TRACES | trace payload size after enrichment: {body_size} bytes");
+
         let owned_header_tags = OwnedTracerHeaderTags::from(header_tags.clone());
 
         // Move original payload into builder (no clone needed)
@@ -1458,7 +1460,6 @@ mod tests {
     #[test]
     fn test_process_traces_body_size_reflects_enriched_payload() {
         use libdd_trace_obfuscation::obfuscation_config::ObfuscationConfig;
-        use prost::Message as _;
 
         let config = Arc::new(Config {
             apm_dd_url: "https://trace.agent.datadoghq.com".to_string(),
@@ -1519,7 +1520,7 @@ mod tests {
         let TracerPayloadCollection::V07(ref payloads) = processed_payloads else {
             panic!("expected V07");
         };
-        let enriched_size: usize = payloads.iter().map(|tp| tp.encoded_len()).sum();
+        let enriched_size: usize = payloads.iter().map(prost::Message::encoded_len).sum();
 
         assert_eq!(
             info.size, enriched_size,
