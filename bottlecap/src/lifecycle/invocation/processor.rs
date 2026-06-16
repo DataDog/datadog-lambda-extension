@@ -397,7 +397,11 @@ impl Processor {
         // If the init duration metric has already been emitted, it means the init report event was received late /
         // the platform report event with init duration was received first.
         // In this case, we skip emitting the init duration metric from the platform init report event, to prevent double counting.
-        if !self.init_duration_metric_emitted {
+        if self.init_duration_metric_emitted {
+            debug!(
+                "Skipping init duration metric on PlatformInitReport, metric was already emitted on PlatformReport"
+            );
+        } else {
             self.enhanced_metrics
                 .set_init_duration_metric(init_type, duration_ms, timestamp);
             self.init_duration_metric_emitted = true;
