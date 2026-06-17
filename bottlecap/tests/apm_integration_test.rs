@@ -14,8 +14,10 @@
 //! This is what APMSVLS-496 phase 1 unblocks: regression coverage for
 //! payload-level changes that `body_contains`-style mocks can't catch.
 
+use std::collections::HashMap;
 use std::str::FromStr;
 use std::sync::Arc;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use bottlecap::LAMBDA_RUNTIME_SLUG;
 use bottlecap::config::Config;
@@ -206,7 +208,7 @@ async fn trace_payload_roundtrip_through_fake_intake() {
         trace_id: 0x1111_1111_1111_1111,
         span_id: 0x2222_2222_2222_2222,
         parent_id: 0,
-        start: 1_700_000_000_000_000_000,
+        start: STATS_SPAN_START_NS,
         duration: 5_000_000,
         error: 0,
         r#type: "web".to_string(),
@@ -296,12 +298,13 @@ struct PipelineOutcome {
     stats: Vec<pb::StatsPayload>,
 }
 
-/// Drives one trace through `SendingTraceProcessor::send_processed_traces` with the given
+/// Drives `traces` through `SendingTraceProcessor::send_processed_traces` with the given
 /// `compute_trace_stats_on_extension` / `client_computed_stats`, then flushes both the trace
 /// and stats pipelines into a fresh fake-intake and returns what it captured.
-async fn run_processor_pipeline(
+async fn run_processor_pipeline_with_traces(
     compute_on_extension: bool,
     client_computed_stats: bool,
+    traces: Vec<Vec<pb::Span>>,
 ) -> PipelineOutcome {
     let fake_intake = FakeIntake::start().await;
 
@@ -345,28 +348,12 @@ async fn run_processor_pipeline(
         )]),
     ));
 
-    // A top-level root span so the concentrator produces stats.
-    let mut span = pb::Span {
-        service: "fake-intake-trace-service".to_string(),
-        name: "web.request".to_string(),
-        resource: "GET /fake".to_string(),
-        trace_id: 0x1111_1111_1111_1111,
-        span_id: 0x2222_2222_2222_2222,
-        parent_id: 0,
-        start: 1_700_000_000_000_000_000,
-        duration: 5_000_000,
-        error: 0,
-        r#type: "web".to_string(),
-        ..pb::Span::default()
-    };
-    span.metrics.insert("_top_level".to_string(), 1.0);
-
     sender
         .send_processed_traces(
             Arc::clone(&config),
             tags_provider,
             header_tags_with(client_computed_stats),
-            vec![vec![span]],
+            traces,
             100,
             None,
         )
@@ -413,6 +400,40 @@ async fn run_processor_pipeline(
         traces: fake_intake.trace_payloads(),
         stats: fake_intake.stats_payloads(),
     }
+}
+
+/// Fixed span start well in the past relative to the concentrator's clock, so all spans
+/// fold into the single oldest bucket and a `force_flush` returns exactly one bucket.
+/// That keeps the aggregation assertions deterministic without controlling time.
+const STATS_SPAN_START_NS: i64 = 1_700_000_000_000_000_000;
+
+/// Single-root-span convenience wrapper used by the `_dd.compute_stats` tests below.
+async fn run_processor_pipeline(
+    compute_on_extension: bool,
+    client_computed_stats: bool,
+) -> PipelineOutcome {
+    // A top-level root span so the concentrator produces stats.
+    let mut span = pb::Span {
+        service: "fake-intake-trace-service".to_string(),
+        name: "web.request".to_string(),
+        resource: "GET /fake".to_string(),
+        trace_id: 0x1111_1111_1111_1111,
+        span_id: 0x2222_2222_2222_2222,
+        parent_id: 0,
+        start: STATS_SPAN_START_NS,
+        duration: 5_000_000,
+        error: 0,
+        r#type: "web".to_string(),
+        ..pb::Span::default()
+    };
+    span.metrics.insert("_top_level".to_string(), 1.0);
+
+    run_processor_pipeline_with_traces(
+        compute_on_extension,
+        client_computed_stats,
+        vec![vec![span]],
+    )
+    .await
 }
 
 /// Finds the single span in the captured trace payloads and returns its `_dd.compute_stats`.
@@ -497,4 +518,326 @@ async fn e2e_client_computed_stats_absent_meta_and_no_stats() {
         "_dd.compute_stats must be absent",
     );
     assert!(outcome.stats.is_empty(), "no stats payloads must be sent",);
+}
+
+// ---------------------------------------------------------------------------
+// Stats aggregation correctness: route concrete spans through the real
+// SpanConcentrator and assert on the *computed* aggregate values (hits, errors,
+// duration, grouping) that reach the intake, not just on stats presence.
+//
+// Determinism comes from `STATS_SPAN_START_NS` (see its doc comment).
+// ---------------------------------------------------------------------------
+
+/// Builds a single-span trace the concentrator will count toward stats.
+/// `parent_id: 0` makes it a trace root and the `_top_level` metric makes the
+/// concentrator include it (non-top-level, non-measured spans are otherwise skipped).
+/// Distinct `id` values keep trace/span ids unique across invocations.
+fn stats_trace(id: u64, resource: &str, duration: i64, error: i32) -> Vec<pb::Span> {
+    let mut span = pb::Span {
+        service: "fake-intake-trace-service".to_string(),
+        name: "web.request".to_string(),
+        resource: resource.to_string(),
+        trace_id: id,
+        span_id: id,
+        parent_id: 0,
+        start: STATS_SPAN_START_NS,
+        duration,
+        error,
+        r#type: "web".to_string(),
+        ..pb::Span::default()
+    };
+    span.metrics.insert("_top_level".to_string(), 1.0);
+    vec![span]
+}
+
+/// Flattens every `ClientGroupedStats` across all buckets of the single captured stats payload.
+fn captured_grouped_stats(stats: &[pb::StatsPayload]) -> Vec<pb::ClientGroupedStats> {
+    assert_eq!(stats.len(), 1, "expected exactly one stats payload");
+    stats[0]
+        .stats
+        .iter()
+        .flat_map(|csp| &csp.stats)
+        .flat_map(|bucket| &bucket.stats)
+        .cloned()
+        .collect()
+}
+
+/// AGG-1: N identical top-level spans collapse into one group with `hits == N`.
+#[tokio::test]
+async fn e2e_stats_count_aggregates_identical_spans() {
+    let traces = vec![
+        stats_trace(1, "GET /fake", 1_000_000, 0),
+        stats_trace(2, "GET /fake", 1_000_000, 0),
+        stats_trace(3, "GET /fake", 1_000_000, 0),
+    ];
+    let outcome = run_processor_pipeline_with_traces(true, false, traces).await;
+    let grouped = captured_grouped_stats(&outcome.stats);
+    assert_eq!(
+        grouped.len(),
+        1,
+        "identical spans must collapse to one group"
+    );
+    assert_eq!(grouped[0].hits, 3);
+    assert_eq!(grouped[0].top_level_hits, 3);
+    assert_eq!(grouped[0].errors, 0);
+}
+
+/// AGG-2: `errors` counts only spans with `error != 0`; `hits` counts all of them.
+#[tokio::test]
+async fn e2e_stats_counts_errors_separately_from_hits() {
+    let traces = vec![
+        stats_trace(1, "GET /fake", 1_000_000, 0),
+        stats_trace(2, "GET /fake", 1_000_000, 1),
+        stats_trace(3, "GET /fake", 1_000_000, 1),
+    ];
+    let outcome = run_processor_pipeline_with_traces(true, false, traces).await;
+    let grouped = captured_grouped_stats(&outcome.stats);
+    assert_eq!(grouped.len(), 1);
+    assert_eq!(grouped[0].hits, 3);
+    assert_eq!(grouped[0].errors, 2);
+}
+
+/// AGG-3: `duration` is the nanosecond sum of every aggregated span's duration.
+#[tokio::test]
+async fn e2e_stats_sums_span_durations() {
+    let traces = vec![
+        stats_trace(1, "GET /fake", 1_000_000, 0),
+        stats_trace(2, "GET /fake", 2_000_000, 0),
+        stats_trace(3, "GET /fake", 3_000_000, 0),
+    ];
+    let outcome = run_processor_pipeline_with_traces(true, false, traces).await;
+    let grouped = captured_grouped_stats(&outcome.stats);
+    assert_eq!(grouped.len(), 1);
+    assert_eq!(grouped[0].hits, 3);
+    assert_eq!(grouped[0].duration, 6_000_000);
+}
+
+/// AGG-4: spans with distinct resources stay in separate groups, each counted independently.
+#[tokio::test]
+async fn e2e_stats_groups_by_resource() {
+    let traces = vec![
+        stats_trace(1, "GET /a", 1_000_000, 0),
+        stats_trace(2, "GET /a", 1_000_000, 0),
+        stats_trace(3, "GET /b", 1_000_000, 0),
+    ];
+    let outcome = run_processor_pipeline_with_traces(true, false, traces).await;
+    let grouped = captured_grouped_stats(&outcome.stats);
+    assert_eq!(grouped.len(), 2, "distinct resources must not be merged");
+    let a = grouped
+        .iter()
+        .find(|g| g.resource == "GET /a")
+        .expect("GET /a group should be present");
+    let b = grouped
+        .iter()
+        .find(|g| g.resource == "GET /b")
+        .expect("GET /b group should be present");
+    assert_eq!(a.hits, 2);
+    assert_eq!(b.hits, 1);
+}
+
+/// Like `stats_trace` but stamps extra `meta` keys on the span (e.g. `span.kind`,
+/// `http.status_code`) that the concentrator folds into the aggregation key.
+fn stats_trace_with_meta(id: u64, resource: &str, meta: &[(&str, &str)]) -> Vec<pb::Span> {
+    let mut trace = stats_trace(id, resource, 1_000_000, 0);
+    for (key, value) in meta {
+        trace[0]
+            .meta
+            .insert((*key).to_string(), (*value).to_string());
+    }
+    trace
+}
+
+/// AGG-5: spans differing only in `span.kind` stay in separate groups.
+#[tokio::test]
+async fn e2e_stats_groups_by_span_kind() {
+    let traces = vec![
+        stats_trace_with_meta(1, "GET /fake", &[("span.kind", "server")]),
+        stats_trace_with_meta(2, "GET /fake", &[("span.kind", "server")]),
+        stats_trace_with_meta(3, "GET /fake", &[("span.kind", "internal")]),
+    ];
+    let outcome = run_processor_pipeline_with_traces(true, false, traces).await;
+    let grouped = captured_grouped_stats(&outcome.stats);
+    assert_eq!(grouped.len(), 2, "distinct span.kind must not be merged");
+    let server = grouped
+        .iter()
+        .find(|g| g.span_kind == "server")
+        .expect("server group should be present");
+    let internal = grouped
+        .iter()
+        .find(|g| g.span_kind == "internal")
+        .expect("internal group should be present");
+    assert_eq!(server.hits, 2);
+    assert_eq!(internal.hits, 1);
+}
+
+/// AGG-6: spans differing only in `http.status_code` stay in separate groups.
+#[tokio::test]
+async fn e2e_stats_groups_by_http_status_code() {
+    let traces = vec![
+        stats_trace_with_meta(1, "GET /fake", &[("http.status_code", "200")]),
+        stats_trace_with_meta(2, "GET /fake", &[("http.status_code", "200")]),
+        stats_trace_with_meta(3, "GET /fake", &[("http.status_code", "500")]),
+    ];
+    let outcome = run_processor_pipeline_with_traces(true, false, traces).await;
+    let grouped = captured_grouped_stats(&outcome.stats);
+    assert_eq!(
+        grouped.len(),
+        2,
+        "distinct http.status_code must not be merged"
+    );
+    let ok = grouped
+        .iter()
+        .find(|g| g.http_status_code == 200)
+        .expect("200 group should be present");
+    let err = grouped
+        .iter()
+        .find(|g| g.http_status_code == 500)
+        .expect("500 group should be present");
+    assert_eq!(ok.hits, 2);
+    assert_eq!(err.hits, 1);
+}
+
+/// Build a non-root, non-measured span eligible for stats only via its `span.kind`.
+///
+/// `parent_id` is non-zero (non-root) and `metrics` is empty (no `_top_level` /
+/// `_dd.measured`), so the concentrator will only compute stats for it when its
+/// `span.kind` is in `span_kinds_stats_computed`. `start` is set to "now" so the
+/// span lands in the current bucket and a forced flush returns it.
+fn make_eligible_span(span_kind: &str, peer_meta: &[(&str, &str)]) -> pb::Span {
+    let now_ns = i64::try_from(
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system time before unix epoch")
+            .as_nanos(),
+    )
+    .expect("nanos since epoch must fit in i64");
+
+    let mut meta: HashMap<String, String> = peer_meta
+        .iter()
+        .map(|(k, v)| ((*k).to_string(), (*v).to_string()))
+        .collect();
+    meta.insert("span.kind".to_string(), span_kind.to_string());
+
+    pb::Span {
+        service: "fake-intake-stats-service".to_string(),
+        name: "test-op".to_string(),
+        resource: "test-resource".to_string(),
+        trace_id: 1,
+        span_id: 2,
+        parent_id: 1, // non-root
+        start: now_ns,
+        duration: 100,
+        error: 0,
+        r#type: "web".to_string(),
+        meta,
+        metrics: HashMap::new(), // no _top_level, no _dd.measured
+        ..pb::Span::default()
+    }
+}
+
+/// Wire concentrator -> aggregator -> flusher pointed at the fake intake, feed in
+/// `spans`, force a flush, and return the single captured `StatsPayload`.
+async fn flush_spans_to_fake_intake(
+    fake_intake: &FakeIntake,
+    spans: &[pb::Span],
+) -> pb::StatsPayload {
+    let config = test_config();
+    let http_client = create_client(None, None, false).expect("failed to create http client");
+
+    let (concentrator_service, concentrator_handle) =
+        StatsConcentratorService::new(Arc::clone(&config));
+    tokio::spawn(concentrator_service.run());
+
+    let aggregator = Arc::new(Mutex::new(StatsAggregator::new_with_concentrator(
+        concentrator_handle.clone(),
+    )));
+
+    for span in spans {
+        concentrator_handle
+            .add(span)
+            .expect("concentrator add must succeed");
+    }
+
+    let api_key_factory = Arc::new(ApiKeyFactory::new(DD_API_KEY));
+    let flusher = StatsFlusher::new(
+        api_key_factory,
+        aggregator,
+        config,
+        http_client,
+        fake_intake.stats_url(),
+    );
+
+    let failed = flusher.flush(true, None).await;
+    assert!(
+        failed.is_none(),
+        "stats flush reported a retry-able failure: {failed:?}",
+    );
+
+    let captured = fake_intake.stats_payloads();
+    assert_eq!(captured.len(), 1, "expected exactly one StatsPayload");
+    captured.into_iter().next().expect("captured payload")
+}
+
+/// End-to-end: a non-root, non-measured `span.kind="server"` span fed through the
+/// concentrator must survive aggregation + msgpack/gzip serialization and arrive
+/// at the intake as a grouped-stats entry with `span_kind="server"`. This closes
+/// the gap left by the in-memory concentrator unit tests, which never serialize.
+#[tokio::test]
+async fn stats_span_kind_through_fake_intake() {
+    let fake_intake = FakeIntake::start().await;
+    let span = make_eligible_span("server", &[]);
+
+    let payload = flush_spans_to_fake_intake(&fake_intake, &[span]).await;
+
+    let grouped: Vec<_> = payload
+        .stats
+        .iter()
+        .flat_map(|p| &p.stats)
+        .flat_map(|b| &b.stats)
+        .collect();
+    assert!(
+        !grouped.is_empty(),
+        "expected at least one grouped-stats entry for the server span",
+    );
+    assert!(
+        grouped.iter().any(|s| s.span_kind == "server"),
+        "expected a grouped-stats entry with span_kind='server', got: {:?}",
+        grouped.iter().map(|s| &s.span_kind).collect::<Vec<_>>(),
+    );
+}
+
+/// End-to-end: a `span.kind="client"` span carrying peer-tag meta keys
+/// (`db.instance`, `db.system`) must arrive at the intake with those keys
+/// populated in `peer_tags`, proving peer-tags survive serialization through
+/// the concentrator -> flusher -> intake path.
+#[tokio::test]
+async fn stats_peer_tags_through_fake_intake() {
+    let fake_intake = FakeIntake::start().await;
+    let span = make_eligible_span(
+        "client",
+        &[("db.instance", "i-1234"), ("db.system", "postgres")],
+    );
+
+    let payload = flush_spans_to_fake_intake(&fake_intake, &[span]).await;
+
+    let with_peer_tags: Vec<_> = payload
+        .stats
+        .iter()
+        .flat_map(|p| &p.stats)
+        .flat_map(|b| &b.stats)
+        .filter(|s| !s.peer_tags.is_empty())
+        .collect();
+    assert!(
+        !with_peer_tags.is_empty(),
+        "expected at least one grouped-stats entry with non-empty peer_tags",
+    );
+    let peer_tags = &with_peer_tags[0].peer_tags;
+    assert!(
+        peer_tags.iter().any(|t| t.starts_with("db.instance:")),
+        "expected peer_tags to contain db.instance, got: {peer_tags:?}",
+    );
+    assert!(
+        peer_tags.iter().any(|t| t.starts_with("db.system:")),
+        "expected peer_tags to contain db.system, got: {peer_tags:?}",
+    );
 }
