@@ -65,7 +65,7 @@ pub struct LambdaConfig {
     pub lambda_proc_enhanced_metrics: bool,
     pub capture_lambda_payload: bool,
     pub capture_lambda_payload_max_depth: u32,
-    pub compute_trace_stats_on_extension: bool,
+    pub lambda_extension_compute_stats: bool,
     pub span_dedup_timeout: Option<Duration>,
     pub api_key_secret_reload_interval: Option<Duration>,
     pub dd_org_uuid: String,
@@ -95,7 +95,7 @@ impl Default for LambdaConfig {
             lambda_proc_enhanced_metrics: true,
             capture_lambda_payload: false,
             capture_lambda_payload_max_depth: 10,
-            compute_trace_stats_on_extension: false,
+            lambda_extension_compute_stats: false,
             span_dedup_timeout: None,
             api_key_secret_reload_interval: None,
             dd_org_uuid: String::new(),
@@ -144,8 +144,10 @@ pub struct LambdaConfigSource {
     pub capture_lambda_payload: Option<bool>,
     #[serde(deserialize_with = "deser_opt_lossless")]
     pub capture_lambda_payload_max_depth: Option<u32>,
+    /// `DD_LAMBDA_EXTENSION_COMPUTE_STATS` — when true, the extension computes
+    /// APM trace stats locally instead of letting the backend do it.
     #[serde(deserialize_with = "deser_opt_bool")]
-    pub compute_trace_stats_on_extension: Option<bool>,
+    pub lambda_extension_compute_stats: Option<bool>,
 
     #[serde(deserialize_with = "deser_dur_secs_ignore_zero")]
     pub span_dedup_timeout: Option<Duration>,
@@ -198,7 +200,7 @@ impl DatadogConfigExtension for LambdaConfig {
                 lambda_proc_enhanced_metrics,
                 capture_lambda_payload,
                 capture_lambda_payload_max_depth,
-                compute_trace_stats_on_extension,
+                lambda_extension_compute_stats,
                 serverless_appsec_enabled,
                 appsec_waf_timeout,
                 api_security_enabled,
@@ -487,12 +489,18 @@ mod lambda_config_tests {
     }
 
     #[test]
-    fn compute_trace_stats_on_extension_from_env() {
+    fn lambda_extension_compute_stats_from_env() {
         let config = load(|jail| {
-            jail.set_env("DD_COMPUTE_TRACE_STATS_ON_EXTENSION", "true");
+            jail.set_env("DD_LAMBDA_EXTENSION_COMPUTE_STATS", "true");
             Ok(())
         });
-        assert!(config.ext.compute_trace_stats_on_extension);
+        assert!(config.ext.lambda_extension_compute_stats);
+    }
+
+    #[test]
+    fn lambda_extension_compute_stats_defaults_false() {
+        let config = load(|_| Ok(()));
+        assert!(!config.ext.lambda_extension_compute_stats);
     }
 
     // ---- Duration fields ----
