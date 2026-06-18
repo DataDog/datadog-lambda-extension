@@ -2958,7 +2958,7 @@ mod tests {
     }
 
     /// Build a [`Processor`] with a caller-supplied config (for toggling
-    /// `compute_trace_stats_on_extension`).
+    /// `lambda_extension_compute_stats`).
     fn setup_with_config(config: Arc<config::Config>) -> Processor {
         let aws_config = Arc::new(AwsConfig {
             region: "us-east-1".into(),
@@ -3042,7 +3042,7 @@ mod tests {
                 apm_dd_url: "https://trace.agent.datadoghq.com".to_string(),
                 service: Some("test-service".to_string()),
                 ext: config::LambdaConfig {
-                    compute_trace_stats_on_extension: compute_on_extension,
+                    lambda_extension_compute_stats: compute_on_extension,
                     ..Default::default()
                 },
                 ..config::Config::default()

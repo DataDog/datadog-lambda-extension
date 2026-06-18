@@ -299,7 +299,7 @@ struct PipelineOutcome {
 }
 
 /// Drives `traces` through `SendingTraceProcessor::send_processed_traces` with the given
-/// `compute_trace_stats_on_extension` / `client_computed_stats`, then flushes both the trace
+/// `lambda_extension_compute_stats` / `client_computed_stats`, then flushes both the trace
 /// and stats pipelines into a fresh fake-intake and returns what it captured.
 async fn run_processor_pipeline_with_traces(
     compute_on_extension: bool,
@@ -315,7 +315,7 @@ async fn run_processor_pipeline_with_traces(
         apm_dd_url: fake_intake.traces_url(),
         service: Some("fake-intake-trace-service".to_string()),
         ext: bottlecap::config::LambdaConfig {
-            compute_trace_stats_on_extension: compute_on_extension,
+            lambda_extension_compute_stats: compute_on_extension,
             ..Default::default()
         },
         ..Config::default()

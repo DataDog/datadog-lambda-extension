@@ -38,7 +38,7 @@ use crate::traces::trace_aggregator::{OwnedTracerHeaderTags, SendDataBuilderInfo
 use libdd_trace_normalization::normalizer::SamplerPriority;
 
 /// Which party is responsible for computing trace stats for a trace, derived from
-/// `compute_trace_stats_on_extension` and the tracer's `Datadog-Client-Computed-Stats`
+/// `lambda_extension_compute_stats` and the tracer's `Datadog-Client-Computed-Stats`
 /// signal. Exactly one party computes, so the per-span `_dd.compute_stats` stamp and the
 /// extension-side stats-generation guards cannot disagree.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -90,7 +90,7 @@ impl TraceChunkProcessor for ChunkProcessor {
         // The stats-routing decision depends only on config and the per-request
         // client_computed_stats flag, so resolve it once instead of per span.
         let stamp_compute_stats = StatsComputedBy::resolve(
-            self.config.ext.compute_trace_stats_on_extension,
+            self.config.ext.lambda_extension_compute_stats,
             self.client_computed_stats,
         ) == StatsComputedBy::Backend;
 
@@ -128,7 +128,7 @@ impl TraceChunkProcessor for ChunkProcessor {
             });
 
             // Stamp `_dd.compute_stats="1"` to tell the backend to compute trace stats ONLY
-            // when nobody else did: neither the extension (compute_trace_stats_on_extension)
+            // when nobody else did: neither the extension (lambda_extension_compute_stats)
             // nor the tracer (client_computed_stats). Otherwise leave the key absent, which the
             // backend treats as "do not compute" (matching the Go agent's
             // pkg/serverless/tags/tags.go semantics, which only ever set "1" and never "0").
@@ -442,7 +442,7 @@ impl TraceProcessor for ServerlessTraceProcessor {
         // stats are still counted. SamplerPriority::None (-128) means no explicit priority
         // was set and the trace is kept; drop priorities are SamplerPriority::AutoDrop (0)
         // and UserDrop (-1, not represented in SamplerPriority).
-        if config.ext.compute_trace_stats_on_extension
+        if config.ext.lambda_extension_compute_stats
             && let TracerPayloadCollection::V07(ref mut tracer_payloads) = payload
         {
             for tp in tracer_payloads.iter_mut() {
@@ -581,7 +581,7 @@ impl SendingTraceProcessor {
         // Skip extension-side stats generation when the tracer already computed stats
         // client-side (Datadog-Client-Computed-Stats), to avoid double-counting.
         if StatsComputedBy::resolve(
-            config.ext.compute_trace_stats_on_extension,
+            config.ext.lambda_extension_compute_stats,
             client_computed_stats,
         ) == StatsComputedBy::Extension
             && let Err(err) = self.stats_generator.send(&processed_traces)
@@ -1172,7 +1172,7 @@ mod tests {
         );
     }
 
-    /// Verifies that when `compute_trace_stats_on_extension` is true, `process_traces`
+    /// Verifies that when `lambda_extension_compute_stats` is true, `process_traces`
     /// filters sampled-out chunks from the backend payload while preserving them in the
     /// stats collection.
     #[test]
@@ -1183,7 +1183,7 @@ mod tests {
         let config = Arc::new(Config {
             apm_dd_url: "https://trace.agent.datadoghq.com".to_string(),
             ext: crate::config::LambdaConfig {
-                compute_trace_stats_on_extension: true,
+                lambda_extension_compute_stats: true,
                 ..Default::default()
             },
             ..Config::default()
@@ -1272,7 +1272,7 @@ mod tests {
     }
 
     /// Verifies that `process_traces` returns `None` for the backend payload when all
-    /// traces are sampled out and `compute_trace_stats_on_extension` is true.
+    /// traces are sampled out and `lambda_extension_compute_stats` is true.
     #[test]
     fn test_process_traces_returns_none_when_all_sampled_out() {
         use libdd_trace_obfuscation::obfuscation_config::ObfuscationConfig;
@@ -1280,7 +1280,7 @@ mod tests {
         let config = Arc::new(Config {
             apm_dd_url: "https://trace.agent.datadoghq.com".to_string(),
             ext: crate::config::LambdaConfig {
-                compute_trace_stats_on_extension: true,
+                lambda_extension_compute_stats: true,
                 ..Default::default()
             },
             ..Config::default()
@@ -1361,7 +1361,7 @@ mod tests {
         let config = Arc::new(Config {
             apm_dd_url: "https://trace.agent.datadoghq.com".to_string(),
             ext: crate::config::LambdaConfig {
-                compute_trace_stats_on_extension: true,
+                lambda_extension_compute_stats: true,
                 ..Default::default()
             },
             ..Config::default()
@@ -1754,7 +1754,7 @@ mod tests {
     /// is absent. Assert directly on `Span.meta` (NOT `TracerPayload.tags`) — guards #1118.
     #[test]
     fn test_compute_stats_truth_table() {
-        // (compute_trace_stats_on_extension, client_computed_stats) -> expected meta value
+        // (lambda_extension_compute_stats, client_computed_stats) -> expected meta value
         let cases = [
             (false, false, Some("1")), // nobody computed -> tell backend to compute
             (false, true, None),       // tracer computed -> absent
@@ -1765,7 +1765,7 @@ mod tests {
         for (compute_on_extension, client_computed_stats, expected) in cases {
             let config = Arc::new(Config {
                 ext: crate::config::LambdaConfig {
-                    compute_trace_stats_on_extension: compute_on_extension,
+                    lambda_extension_compute_stats: compute_on_extension,
                     ..Default::default()
                 },
                 ..Config::default()
@@ -1811,7 +1811,7 @@ mod tests {
     }
 
     /// APMSVLS-487 Tier 1: `send_processed_traces` only generates extension-side stats when
-    /// `compute_trace_stats_on_extension == true AND client_computed_stats == false`. Drive the
+    /// `lambda_extension_compute_stats == true AND client_computed_stats == false`. Drive the
     /// real concentrator and assert a flushed payload is present/absent accordingly.
     #[tokio::test]
     #[allow(clippy::unwrap_used)]
@@ -1837,7 +1837,7 @@ mod tests {
                 apm_dd_url: "https://trace.agent.datadoghq.com".to_string(),
                 service: Some("test-service".to_string()),
                 ext: crate::config::LambdaConfig {
-                    compute_trace_stats_on_extension: compute_on_extension,
+                    lambda_extension_compute_stats: compute_on_extension,
                     ..Default::default()
                 },
                 ..Config::default()

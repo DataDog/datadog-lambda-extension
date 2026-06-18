@@ -139,7 +139,7 @@ fn tags_from_env(
 
     // NOTE: `_dd.compute_stats` is intentionally NOT set here. It is a per-span backend
     // directive (whether the backend should compute trace stats) that depends on both
-    // `compute_trace_stats_on_extension` AND the tracer's `Datadog-Client-Computed-Stats`
+    // `lambda_extension_compute_stats` AND the tracer's `Datadog-Client-Computed-Stats`
     // header. The trace processor stamps it on each span's meta at processing time; baking
     // it into the function tags would leak it into `_dd.tags.function` and ignore the header.
 

@@ -58,7 +58,7 @@ impl TracePipeline {
             return Err("Not sending traces, processor returned empty data".to_string());
         }
 
-        let compute_trace_stats_on_extension = self.config.ext.compute_trace_stats_on_extension;
+        let lambda_extension_compute_stats = self.config.ext.lambda_extension_compute_stats;
         // Capture before `tracer_header_tags` is moved into process_traces below.
         let client_computed_stats = tracer_header_tags.client_computed_stats;
         let (send_data_builder, processed_traces) = self.trace_processor.process_traces(
@@ -83,7 +83,7 @@ impl TracePipeline {
         // performs obfuscation, and we need to compute stats on the obfuscated traces.
         // Skip extension-side stats generation when the tracer already computed stats
         // client-side (Datadog-Client-Computed-Stats), to avoid double-counting.
-        if StatsComputedBy::resolve(compute_trace_stats_on_extension, client_computed_stats)
+        if StatsComputedBy::resolve(lambda_extension_compute_stats, client_computed_stats)
             == StatsComputedBy::Extension
             && let Err(err) = self.stats_generator.send(&processed_traces)
         {
