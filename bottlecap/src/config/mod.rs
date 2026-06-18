@@ -301,6 +301,14 @@ pub struct Config {
     pub trace_propagation_http_baggage_enabled: bool,
     pub trace_aws_service_representation_enabled: bool,
 
+    // Data Streams Monitoring
+    /// Enable extension-side DSM consume checkpoints (`DD_DSM_CONSUME_ENABLED`).
+    pub dsm_consume_enabled: bool,
+    /// Fallback DSM `exchange` (event bus name) used for `EventBridge` consume
+    /// checkpoints when it cannot be derived from the event payload
+    /// (`DD_DSM_EXCHANGE_NAME`).
+    pub dsm_exchange_name: Option<String>,
+
     // Metrics
     pub metrics_config_compression_level: i32,
     pub statsd_metric_namespace: Option<String>,
@@ -431,6 +439,8 @@ impl Default for Config {
             apm_filter_tags_regex_require: None,
             apm_filter_tags_regex_reject: None,
             trace_aws_service_representation_enabled: true,
+            dsm_consume_enabled: false,
+            dsm_exchange_name: None,
             trace_propagation_style: vec![
                 TracePropagationStyle::Datadog,
                 TracePropagationStyle::TraceContext,

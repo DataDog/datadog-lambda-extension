@@ -202,6 +202,16 @@ impl Trigger for SqsRecord {
     fn is_async(&self) -> bool {
         true
     }
+
+    fn get_dsm_edge_tags(&self) -> Option<Vec<String>> {
+        // queue name = last `:` segment of the event source ARN.
+        let queue = self.event_source_arn.split(':').next_back().unwrap_or_default();
+        Some(vec![
+            "direction:in".to_string(),
+            format!("topic:{queue}"),
+            "type:sqs".to_string(),
+        ])
+    }
 }
 
 impl ServiceNameResolver for SqsRecord {

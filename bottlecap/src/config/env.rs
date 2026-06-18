@@ -256,6 +256,15 @@ pub struct EnvConfig {
     /// Enable the new AWS-resource naming logic in the tracer.
     #[serde(deserialize_with = "deserialize_optional_bool_from_anything")]
     pub trace_aws_service_representation_enabled: Option<bool>,
+    /// @env `DD_DSM_CONSUME_ENABLED`
+    ///
+    /// Enable extension-side Data Streams Monitoring consume checkpoints. When
+    /// enabled, the extension extracts inbound DSM pathway context from event
+    /// payloads and emits `direction:in` checkpoints itself.
+    #[serde(deserialize_with = "deserialize_optional_bool_from_anything")]
+    pub dsm_consume_enabled: Option<bool>,
+    /// @env `DD_DSM_EXCHANGE_NAME`
+    pub dsm_exchange_name: Option<String>,
     //
     // Trace Propagation
     /// @env `DD_TRACE_PROPAGATION_STYLE`
@@ -582,6 +591,8 @@ fn merge_config(config: &mut Config, env_config: &EnvConfig) {
     merge_option!(config, env_config, apm_filter_tags_regex_require);
     merge_option!(config, env_config, apm_filter_tags_regex_reject);
     merge_option_to_value!(config, env_config, trace_aws_service_representation_enabled);
+    merge_option_to_value!(config, env_config, dsm_consume_enabled);
+    merge_option!(config, env_config, dsm_exchange_name);
 
     // Trace Propagation
     merge_vec!(config, env_config, trace_propagation_style);
@@ -1027,6 +1038,8 @@ mod tests {
                 trace_propagation_extract_first: true,
                 trace_propagation_http_baggage_enabled: true,
                 trace_aws_service_representation_enabled: true,
+                dsm_consume_enabled: false,
+                dsm_exchange_name: None,
                 metrics_config_compression_level: 3,
                 otlp_config_traces_enabled: false,
                 otlp_config_traces_span_name_as_resource_name: true,

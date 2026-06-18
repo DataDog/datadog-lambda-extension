@@ -165,6 +165,15 @@ impl Trigger for SnsRecord {
     fn is_async(&self) -> bool {
         true
     }
+
+    fn get_dsm_edge_tags(&self) -> Option<Vec<String>> {
+        // SNS uses the full topic ARN as the topic tag (matches dd-trace-js).
+        Some(vec![
+            "direction:in".to_string(),
+            format!("topic:{}", self.sns.topic_arn),
+            "type:sns".to_string(),
+        ])
+    }
 }
 
 impl ServiceNameResolver for SnsRecord {

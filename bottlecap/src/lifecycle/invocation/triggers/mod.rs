@@ -130,6 +130,13 @@ pub trait Trigger: ServiceNameResolver {
     fn get_carrier(&self) -> HashMap<String, String>;
     fn is_async(&self) -> bool;
 
+    /// Data Streams Monitoring consume-side edge tags for this trigger, with the
+    /// `direction:in` tag first. Returns `None` for sources that are not
+    /// DSM-eligible. Default: `None`.
+    fn get_dsm_edge_tags(&self) -> Option<Vec<String>> {
+        None
+    }
+
     fn get_dd_resource_key(&self, _region: &str) -> Option<String> {
         None
     }

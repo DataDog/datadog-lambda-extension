@@ -132,6 +132,19 @@ impl Trigger for KinesisRecord {
     fn is_async(&self) -> bool {
         true
     }
+
+    fn get_dsm_edge_tags(&self) -> Option<Vec<String>> {
+        // stream name = last `/` segment of the event source ARN.
+        let stream = self.event_source_arn.split('/').next_back().unwrap_or_default();
+        if stream.is_empty() {
+            return Some(vec!["direction:in".to_string(), "type:kinesis".to_string()]);
+        }
+        Some(vec![
+            "direction:in".to_string(),
+            format!("topic:{stream}"),
+            "type:kinesis".to_string(),
+        ])
+    }
 }
 
 impl ServiceNameResolver for KinesisRecord {

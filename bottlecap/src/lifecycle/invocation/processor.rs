@@ -111,6 +111,11 @@ pub struct Processor {
     /// on `platform.report`. This flag ensures whichever event arrives first wins and the other is skipped,
     /// preventing double counting.
     init_duration_metric_emitted: bool,
+    /// Optional extension-side DSM consume processor. `Some` only when
+    /// `DD_DSM_CONSUME_ENABLED` is set; records `direction:in` checkpoints from
+    /// inbound event payloads.
+    #[allow(clippy::struct_field_names)]
+    dsm_processor: Option<Arc<crate::traces::data_streams::DsmProcessor>>,
 }
 
 impl Processor {
@@ -154,7 +159,17 @@ impl Processor {
             durable_context_tx,
             restore_time: None,
             init_duration_metric_emitted: false,
+            dsm_processor: None,
         }
+    }
+
+    /// Attach an extension-side DSM consume processor. Called during startup only
+    /// when `DD_DSM_CONSUME_ENABLED` is set.
+    pub fn set_dsm_processor(
+        &mut self,
+        dsm_processor: Arc<crate::traces::data_streams::DsmProcessor>,
+    ) {
+        self.dsm_processor = Some(dsm_processor);
     }
 
     /// Given a `request_id`, creates the context and adds the enhanced metric offsets to the context buffer.
@@ -1088,6 +1103,33 @@ impl Processor {
         context.extracted_span_context =
             Self::extract_span_context(&headers, &payload_value, Arc::clone(&self.propagator));
 
+        // Extension-side DSM: record a consume (`direction:in`) checkpoint for
+        // DSM-eligible event sources, continuing any inbound pathway context.
+        if let Some(dsm) = self.dsm_processor.clone() {
+            debug!("DSM: extraction hook fired for request {request_id}");
+            let identified =
+                crate::lifecycle::invocation::triggers::IdentifiedTrigger::from_value(&payload_value);
+            if let Some(trigger) = SpanInferrer::get_trigger_type(identified) {
+                if let Some(mut edge_tags) = trigger.get_dsm_edge_tags() {
+                    apply_dsm_exchange_fallback(
+                        &mut edge_tags,
+                        self.config.dsm_exchange_name.as_deref(),
+                    );
+                    debug!("DSM: trigger is DSM-eligible, edge_tags={edge_tags:?}");
+                    // Payload size is not currently measured; latency stats are unaffected.
+                    dsm.record_consume(&edge_tags, &trigger.get_carrier(), 0.0);
+                } else {
+                    debug!(
+                        "DSM: identified trigger is not DSM-eligible, skipping consume checkpoint"
+                    );
+                }
+            } else {
+                debug!("DSM: no trigger identified for payload, skipping consume checkpoint");
+            }
+        } else {
+            debug!("DSM: no DSM processor available, skipping consume checkpoint");
+        }
+
         // Set the extracted trace context to the spans
         if let Some(sc) = &context.extracted_span_context {
             #[allow(clippy::cast_possible_truncation)] // Datadog protocol uses lower 64 bits
@@ -1534,6 +1576,19 @@ impl Processor {
     }
 }
 
+/// Apply the configured `DD_DSM_EXCHANGE_NAME` fallback to DSM consume edge
+/// tags. The fallback only applies to `EventBridge` (`type:eventbridge`) tags
+/// that do not already carry a payload-derived `exchange:` tag, so a
+/// payload-derived bus always wins and other sources are never affected.
+fn apply_dsm_exchange_fallback(edge_tags: &mut Vec<String>, exchange: Option<&str>) {
+    if let Some(exchange) = exchange
+        && edge_tags.iter().any(|t| t == "type:eventbridge")
+        && !edge_tags.iter().any(|t| t.starts_with("exchange:"))
+    {
+        edge_tags.push(format!("exchange:{exchange}"));
+    }
+}
+
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
 mod tests {
@@ -1547,6 +1602,63 @@ mod tests {
     use dogstatsd::aggregator::AggregatorService;
     use dogstatsd::metric::EMPTY_TAGS;
     use serde_json::json;
+
+    #[test]
+    fn dsm_exchange_fallback_injects_for_eventbridge_without_exchange() {
+        let mut tags = vec![
+            "direction:in".to_string(),
+            "type:eventbridge".to_string(),
+            "topic:OrderPlaced".to_string(),
+        ];
+        apply_dsm_exchange_fallback(&mut tags, Some("my-bus"));
+        assert_eq!(
+            tags,
+            vec![
+                "direction:in".to_string(),
+                "type:eventbridge".to_string(),
+                "topic:OrderPlaced".to_string(),
+                "exchange:my-bus".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn dsm_exchange_fallback_does_not_override_payload_derived_exchange() {
+        let mut tags = vec![
+            "direction:in".to_string(),
+            "type:eventbridge".to_string(),
+            "exchange:payload-bus".to_string(),
+            "topic:OrderPlaced".to_string(),
+        ];
+        let before = tags.clone();
+        apply_dsm_exchange_fallback(&mut tags, Some("my-bus"));
+        assert_eq!(tags, before);
+    }
+
+    #[test]
+    fn dsm_exchange_fallback_ignored_for_non_eventbridge_sources() {
+        // SQS consume tags must never receive an injected exchange.
+        let mut tags = vec![
+            "direction:in".to_string(),
+            "topic:my-queue".to_string(),
+            "type:sqs".to_string(),
+        ];
+        let before = tags.clone();
+        apply_dsm_exchange_fallback(&mut tags, Some("my-bus"));
+        assert_eq!(tags, before);
+    }
+
+    #[test]
+    fn dsm_exchange_fallback_noop_when_unconfigured() {
+        let mut tags = vec![
+            "direction:in".to_string(),
+            "type:eventbridge".to_string(),
+            "topic:OrderPlaced".to_string(),
+        ];
+        let before = tags.clone();
+        apply_dsm_exchange_fallback(&mut tags, None);
+        assert_eq!(tags, before);
+    }
 
     fn setup() -> Processor {
         let aws_config = Arc::new(AwsConfig {

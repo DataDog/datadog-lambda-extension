@@ -196,7 +196,22 @@ async fn invocation_next_proxy(
                 }
             }
 
-            if aws_config.aws_lwa_proxy_lambda_runtime_api.is_some() {
+            // Drive universal instrumentation from the intercepted `/next` payload
+            // whenever the runtime API proxy is in the request path. For LWA this
+            // has always happened. We additionally enable it for the experimental
+            // wrapper proxy (`DD_EXPERIMENTAL_ENABLE_PROXY=true`, which the
+            // datadog_wrapper uses to reroute AWS_LAMBDA_RUNTIME_API to the
+            // extension), so the extension sees the event payload without a tracer
+            // calling `/lambda/start-invocation`.
+            //
+            // TEMPORARY: this is what feeds the extension-side DSM consume hook for
+            // functions whose tracer does not drive the invocation lifecycle.
+            let experimental_proxy_enabled = std::env::var("DD_EXPERIMENTAL_ENABLE_PROXY")
+                .is_ok_and(|v| v.eq_ignore_ascii_case("true"));
+            if aws_config.aws_lwa_proxy_lambda_runtime_api.is_some() || experimental_proxy_enabled {
+                debug!(
+                    "PROXY | invocation_next_proxy | driving universal instrumentation from intercepted payload"
+                );
                 lwa::process_invocation_next(
                     &invocation_processor,
                     &intercepted_parts_clone,
@@ -449,6 +464,7 @@ mod tests {
     };
 
     #[tokio::test]
+    #[allow(clippy::too_many_lines)]
     async fn test_noop_proxy() {
         let aws_lwa_lambda_runtime_api = "127.0.0.1:12345";
         let aws_lambda_runtime_api = "127.0.0.1:12344";
@@ -508,6 +524,7 @@ mod tests {
                 metrics_aggregator,
                 Arc::clone(&propagator),
                 durable_context_tx,
+                None,
             );
         tokio::spawn(async move {
             invocation_processor_service.run().await;

@@ -464,10 +464,11 @@ impl InvocationProcessorService {
         metrics_aggregator_handle: AggregatorHandle,
         propagator: Arc<DatadogCompositePropagator>,
         durable_context_tx: mpsc::Sender<DurableContextUpdate>,
+        dsm_processor: Option<Arc<crate::traces::data_streams::DsmProcessor>>,
     ) -> (InvocationProcessorHandle, Self) {
         let (sender, receiver) = mpsc::channel(1000);
 
-        let processor = Processor::new(
+        let mut processor = Processor::new(
             tags_provider,
             config,
             aws_config,
@@ -475,6 +476,9 @@ impl InvocationProcessorService {
             propagator,
             durable_context_tx,
         );
+        if let Some(dsm) = dsm_processor {
+            processor.set_dsm_processor(dsm);
+        }
 
         let handle = InvocationProcessorHandle { sender };
         let service = Self {

@@ -111,6 +111,45 @@ impl Trigger for EventBridgeEvent {
     fn is_async(&self) -> bool {
         true
     }
+
+    fn get_dsm_edge_tags(&self) -> Option<Vec<String>> {
+        // EventBridge consume edge tags. `topic` is the detail-type. `exchange`
+        // is the event bus name, which is NOT carried in the event delivered to
+        // Lambda; when a triggering rule ARN is present in `resources` it is
+        // encoded as `:rule/<bus>/<rule>`, so we recover it best-effort and omit
+        // the tag entirely when it cannot be determined (rather than emit a
+        // wrong/empty value that would corrupt the pathway hash).
+        let mut tags = vec![
+            "direction:in".to_string(),
+            "type:eventbridge".to_string(),
+        ];
+        if let Some(bus) = self.event_bus_name() {
+            tags.push(format!("exchange:{bus}"));
+        }
+        tags.push(format!("topic:{}", self.detail_type));
+        Some(tags)
+    }
+}
+
+impl EventBridgeEvent {
+    /// Best-effort event bus name recovered from a triggering rule ARN in
+    /// `resources`. Non-default buses encode the name as `:rule/<bus>/<rule>`;
+    /// the default bus appears as `:rule/<rule>` (no bus segment). Returns
+    /// `None` when no bus name can be determined from the payload.
+    fn event_bus_name(&self) -> Option<String> {
+        for arn in &self.resources {
+            if let Some(rest) = arn.split(":rule/").nth(1) {
+                let mut segments = rest.split('/');
+                let first = segments.next().unwrap_or_default();
+                // `rule/<bus>/<rule>` => bus is the first segment.
+                // `rule/<rule>` (default bus) => no second segment, skip.
+                if segments.next().is_some() && !first.is_empty() {
+                    return Some(first.to_string());
+                }
+            }
+        }
+        None
+    }
 }
 
 impl ServiceNameResolver for EventBridgeEvent {
@@ -234,6 +273,75 @@ mod tests {
         let payload = serde_json::from_str(&json).expect("Failed to deserialize into Value");
         let event = EventBridgeEvent::new(payload).expect("Failed to deserialize EventBridgeEvent");
         assert_eq!(event.get_arn("us-east-1"), "my.event");
+    }
+
+    fn make_event(detail_type: &str, resources: Vec<String>) -> EventBridgeEvent {
+        EventBridgeEvent {
+            id: "id".to_string(),
+            version: "0".to_string(),
+            account: "123456789012".to_string(),
+            time: Utc::now(),
+            region: "us-east-1".to_string(),
+            resources,
+            source: "my.event".to_string(),
+            detail_type: detail_type.to_string(),
+            detail: serde_json::json!({}),
+            replay_name: None,
+        }
+    }
+
+    #[test]
+    fn test_get_dsm_edge_tags_no_resources_omits_exchange() {
+        // The standard fixture has no `resources`, so the bus name is unknown
+        // and the exchange tag must be omitted.
+        let json = read_json_file("eventbridge_event.json");
+        let payload = serde_json::from_str(&json).expect("Failed to deserialize into Value");
+        let event =
+            EventBridgeEvent::new(payload).expect("Failed to deserialize EventBridge Event");
+        assert_eq!(
+            event.get_dsm_edge_tags(),
+            Some(vec![
+                "direction:in".to_string(),
+                "type:eventbridge".to_string(),
+                "topic:UserSignUp".to_string(),
+            ])
+        );
+    }
+
+    #[test]
+    fn test_get_dsm_edge_tags_recovers_bus_from_rule_arn() {
+        let event = make_event(
+            "OrderPlaced",
+            vec![
+                "arn:aws:events:us-east-1:123456789012:rule/my-bus/my-rule".to_string(),
+            ],
+        );
+        assert_eq!(
+            event.get_dsm_edge_tags(),
+            Some(vec![
+                "direction:in".to_string(),
+                "type:eventbridge".to_string(),
+                "exchange:my-bus".to_string(),
+                "topic:OrderPlaced".to_string(),
+            ])
+        );
+    }
+
+    #[test]
+    fn test_get_dsm_edge_tags_default_bus_rule_arn_omits_exchange() {
+        // Default-bus rule ARNs have no bus segment (`:rule/<rule>`).
+        let event = make_event(
+            "OrderPlaced",
+            vec!["arn:aws:events:us-east-1:123456789012:rule/my-rule".to_string()],
+        );
+        assert_eq!(
+            event.get_dsm_edge_tags(),
+            Some(vec![
+                "direction:in".to_string(),
+                "type:eventbridge".to_string(),
+                "topic:OrderPlaced".to_string(),
+            ])
+        );
     }
 
     #[test]
