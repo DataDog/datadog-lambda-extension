@@ -45,7 +45,7 @@ use datadog_agent_config::{
     deserialize_optional_duration_from_microseconds as deser_dur_micros,
     deserialize_optional_duration_from_seconds as deser_dur_secs,
     deserialize_optional_duration_from_seconds_ignore_zero as deser_dur_secs_ignore_zero,
-    deserialize_optional_string as deser_opt_str, deserialize_string_or_int as deser_str_or_int,
+    deserialize_optional_string as deser_opt_str,
     flush_strategy::FlushStrategy as UpstreamFlushStrategy,
 };
 
@@ -68,7 +68,6 @@ pub struct LambdaConfig {
     pub compute_trace_stats_on_extension: bool,
     pub span_dedup_timeout: Option<Duration>,
     pub api_key_secret_reload_interval: Option<Duration>,
-    pub dd_org_uuid: String,
     pub serverless_appsec_enabled: bool,
     pub appsec_rules: Option<String>,
     pub appsec_waf_timeout: Duration,
@@ -98,7 +97,6 @@ impl Default for LambdaConfig {
             compute_trace_stats_on_extension: false,
             span_dedup_timeout: None,
             api_key_secret_reload_interval: None,
-            dd_org_uuid: String::new(),
             serverless_appsec_enabled: false,
             appsec_rules: None,
             appsec_waf_timeout: Duration::from_millis(5),
@@ -151,12 +149,6 @@ pub struct LambdaConfigSource {
     pub span_dedup_timeout: Option<Duration>,
     #[serde(deserialize_with = "deser_dur_secs_ignore_zero")]
     pub api_key_secret_reload_interval: Option<Duration>,
-
-    /// `DD_ORG_UUID` — when set, delegated auth is auto-enabled. The source
-    /// field is `org_uuid` (matching the env var) and merges into the
-    /// `dd_org_uuid` config field.
-    #[serde(deserialize_with = "deser_str_or_int")]
-    pub org_uuid: Option<String>,
 
     #[serde(deserialize_with = "deser_opt_bool")]
     pub serverless_appsec_enabled: Option<bool>,
@@ -215,9 +207,6 @@ impl DatadogConfigExtension for LambdaConfig {
             self.serverless_logs_enabled = source.serverless_logs_enabled.unwrap_or(false)
                 || source.logs_enabled.unwrap_or(false);
         }
-
-        // org_uuid (source) → dd_org_uuid (config)
-        datadog_agent_config::merge_string!(self, dd_org_uuid, source, org_uuid);
 
         // lambda_customer_metrics_exclude_tags (source) → custom_metrics_exclude_tags (config)
         if !source.lambda_customer_metrics_exclude_tags.is_empty() {
@@ -590,10 +579,7 @@ mod lambda_config_tests {
             jail.set_env("DD_ORG_UUID", "00000000-1111-2222-3333-444444444444");
             Ok(())
         });
-        assert_eq!(
-            config.ext.dd_org_uuid,
-            "00000000-1111-2222-3333-444444444444"
-        );
+        assert_eq!(config.dd_org_uuid, "00000000-1111-2222-3333-444444444444");
     }
 
     #[test]
@@ -607,10 +593,7 @@ mod lambda_config_tests {
             )?;
             Ok(())
         });
-        assert_eq!(
-            config.ext.dd_org_uuid,
-            "00000000-1111-2222-3333-444444444444"
-        );
+        assert_eq!(config.dd_org_uuid, "00000000-1111-2222-3333-444444444444");
     }
 
     #[test]

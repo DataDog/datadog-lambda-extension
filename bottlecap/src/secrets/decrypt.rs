@@ -26,7 +26,7 @@ pub async fn resolve_secrets(
     let api_key_candidate = if !config.ext.api_key_secret_arn.is_empty()
         || !config.ext.kms_api_key.is_empty()
         || !config.ext.api_key_ssm_arn.is_empty()
-        || !config.ext.dd_org_uuid.is_empty()
+        || !config.dd_org_uuid.is_empty()
     {
         let before_decrypt = Instant::now();
 
@@ -48,7 +48,7 @@ pub async fn resolve_secrets(
 
         let aws_credentials = get_aws_credentials(&client).await?;
 
-        let decrypted_key = if !config.ext.dd_org_uuid.is_empty() {
+        let decrypted_key = if !config.dd_org_uuid.is_empty() {
             delegated_auth::get_delegated_api_key(
                 &config,
                 &aws_config,
