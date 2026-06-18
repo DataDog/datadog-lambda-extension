@@ -124,11 +124,19 @@ pub struct LambdaConfigSource {
     #[serde(deserialize_with = "deser_opt_str")]
     pub api_key_ssm_arn: Option<String>,
 
-    /// `DD_SERVERLESS_LOGS_ENABLED` — primary toggle for Lambda log shipping.
+    /// `DD_SERVERLESS_LOGS_ENABLED` — Lambda-specific log toggle, kept for
+    /// backwards compatibility. Defaults to `true` (the Lambda extension's
+    /// historical behavior).
     #[serde(deserialize_with = "deser_opt_bool")]
     pub serverless_logs_enabled: Option<bool>,
-    /// `DD_LOGS_ENABLED` — alias for `serverless_logs_enabled`; OR-merged so
-    /// either being `true` turns logs on. See `merge_from` below.
+    /// `DD_LOGS_ENABLED` — alias surface kept on the lambda source side
+    /// purely so we can detect "was it explicitly set?" and preserve the
+    /// legacy OR-merge semantics with `serverless_logs_enabled` (see
+    /// `merge_from`). The canonical `Config::logs_enabled` upstream field
+    /// is also populated by the upstream env/yaml parsing; lambda call
+    /// sites that gate on log shipping should keep using
+    /// `config.ext.serverless_logs_enabled`, which the merge logic below
+    /// reconciles with this alias.
     #[serde(deserialize_with = "deser_opt_bool")]
     pub logs_enabled: Option<bool>,
 
@@ -202,9 +210,15 @@ impl DatadogConfigExtension for LambdaConfig {
             option: [span_dedup_timeout, api_key_secret_reload_interval, appsec_rules],
         );
 
-        // OR-merge serverless_logs_enabled with the logs_enabled alias. Either
-        // env var set to `true` enables logs; if both are absent the default
-        // (true) is preserved.
+        // Preserve legacy OR-merge semantics: when either env var is
+        // explicitly set, the resolved value is the OR of the two (unset
+        // counts as false for the OR). When neither is set, the default
+        // (true) is preserved. This invariant — in particular that setting
+        // only DD_LOGS_ENABLED=false disables logs — predates upstream
+        // owning `logs_enabled` and must be kept. The duplicate parse of
+        // DD_LOGS_ENABLED (once upstream, once here via the alias) is
+        // intentional: upstream populates `config.logs_enabled` for any
+        // non-lambda consumer, while this branch keeps the lambda contract.
         if source.serverless_logs_enabled.is_some() || source.logs_enabled.is_some() {
             self.serverless_logs_enabled = source.serverless_logs_enabled.unwrap_or(false)
                 || source.logs_enabled.unwrap_or(false);
@@ -305,6 +319,14 @@ mod lambda_config_tests {
     }
 
     // ---- serverless_logs_enabled with OR-merge alias ----
+    //
+    // The legacy contract: DD_SERVERLESS_LOGS_ENABLED and DD_LOGS_ENABLED are
+    // OR-merged into config.ext.serverless_logs_enabled. The default (true)
+    // is preserved iff neither env var was explicitly set; otherwise the
+    // resolved value is the OR of the two (unset counts as false). The
+    // upstream `Config::logs_enabled` field is also populated independently
+    // (sourced by the upstream env/yaml parsing), but lambda call sites that
+    // gate on log shipping continue to use serverless_logs_enabled.
 
     #[test]
     fn serverless_logs_enabled_defaults_true() {
@@ -332,12 +354,24 @@ mod lambda_config_tests {
     }
 
     #[test]
-    fn logs_enabled_alias_only() {
+    fn logs_enabled_alias_only_true() {
         let config = load(|jail| {
             jail.set_env("DD_LOGS_ENABLED", "true");
             Ok(())
         });
         assert!(config.ext.serverless_logs_enabled);
+    }
+
+    #[test]
+    fn logs_enabled_alias_only_false_overrides_default() {
+        // Setting only DD_LOGS_ENABLED=false must disable logs, overriding
+        // the default-true. This is the legacy behavior that the alias-only
+        // entry into the OR-merge guards.
+        let config = load(|jail| {
+            jail.set_env("DD_LOGS_ENABLED", "false");
+            Ok(())
+        });
+        assert!(!config.ext.serverless_logs_enabled);
     }
 
     #[test]
@@ -357,6 +391,18 @@ mod lambda_config_tests {
             Ok(())
         });
         assert!(!config.ext.serverless_logs_enabled);
+    }
+
+    #[test]
+    fn dd_logs_enabled_also_populates_upstream_field() {
+        // The upstream Config::logs_enabled field is wired through the
+        // upstream env parsing independently of the lambda alias. Lambda
+        // doesn't read this field, but other consumers of the same crate do.
+        let config = load(|jail| {
+            jail.set_env("DD_LOGS_ENABLED", "true");
+            Ok(())
+        });
+        assert!(config.logs_enabled);
     }
 
     // ---- FlushStrategy ----
