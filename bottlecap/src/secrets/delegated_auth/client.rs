@@ -16,7 +16,7 @@ const INTAKE_KEY_ENDPOINT: &str = "/api/v2/intake-key";
 /// 3. Returns the managed API key
 ///
 /// # Arguments
-/// * `config` - The extension configuration containing site and `org_uuid`
+/// * `config` - The agent configuration containing `site` and `dd_org_uuid`
 /// * `aws_config` - The AWS configuration containing region
 /// * `client` - A pre-built `reqwest::Client` to use for the request. The client is built
 ///   with `create_reqwest_client_builder()` which respects proxy configuration via
