@@ -20,7 +20,7 @@ use base64::engine::general_purpose::STANDARD;
 
 /// Carrier key (preferred) holding the base64-encoded DSM pathway context.
 pub const DD_PATHWAY_CTX_BASE64_KEY: &str = "dd-pathway-ctx-base64";
-/// Legacy carrier key holding the raw (binary) DSM pathway context.
+/// Legacy carrier key holding the base64-encoded DSM pathway context.
 pub const DD_PATHWAY_CTX_KEY: &str = "dd-pathway-ctx";
 
 const MS_TO_NS: u64 = 1_000_000;

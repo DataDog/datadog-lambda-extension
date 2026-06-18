@@ -10,8 +10,8 @@
 //! constructed.
 
 use std::io::Write;
-use std::sync::Mutex;
 use std::sync::Arc;
+use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use bytes::Bytes;
@@ -88,8 +88,9 @@ impl DsmProcessor {
             edge_tags
         );
 
-        if let Ok(mut agg) = self.aggregator.lock() {
-            agg.add(&checkpoint, payload_size);
+        match self.aggregator.lock() {
+            Ok(mut agg) => agg.add(&checkpoint, payload_size),
+            Err(e) => warn!("DSM: aggregator lock poisoned; dropping consume checkpoint: {e}"),
         }
     }
 
@@ -98,7 +99,10 @@ impl DsmProcessor {
     pub async fn drain_into_proxy(&self) {
         let payload = match self.aggregator.lock() {
             Ok(mut agg) => agg.take_payload(),
-            Err(_) => None,
+            Err(e) => {
+                warn!("DSM: aggregator lock poisoned; skipping pipeline stats flush: {e}");
+                return;
+            }
         };
         let Some(payload) = payload else {
             return;
@@ -113,7 +117,10 @@ impl DsmProcessor {
         };
 
         let mut headers = HeaderMap::new();
-        headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/msgpack"));
+        headers.insert(
+            CONTENT_TYPE,
+            HeaderValue::from_static("application/msgpack"),
+        );
         headers.insert(CONTENT_ENCODING, HeaderValue::from_static("gzip"));
 
         let request = ProxyRequest {
@@ -122,7 +129,10 @@ impl DsmProcessor {
             target_url: self.target_url.clone(),
         };
 
-        debug!("DSM: enqueued pipeline stats payload ({} bytes gzipped)", request.body.len());
+        debug!(
+            "DSM: enqueued pipeline stats payload ({} bytes gzipped)",
+            request.body.len()
+        );
         self.proxy_aggregator.lock().await.add(request);
     }
 }
@@ -207,7 +217,13 @@ mod tests {
     #[tokio::test]
     async fn drain_is_noop_when_empty() {
         let proxy = Arc::new(TokioMutex::new(ProxyAggregator::default()));
-        let dsm = DsmProcessor::new("svc".into(), "env".into(), "1.0".into(), "datadoghq.com", proxy.clone());
+        let dsm = DsmProcessor::new(
+            "svc".into(),
+            "env".into(),
+            "1.0".into(),
+            "datadoghq.com",
+            proxy.clone(),
+        );
         dsm.drain_into_proxy().await;
         assert_eq!(proxy.lock().await.get_batch().len(), 0);
     }

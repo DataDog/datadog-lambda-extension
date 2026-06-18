@@ -1105,7 +1105,7 @@ impl Processor {
 
         // Extension-side DSM: record a consume (`direction:in`) checkpoint for
         // DSM-eligible event sources, continuing any inbound pathway context.
-        if let Some(dsm) = self.dsm_processor.clone() {
+        if let Some(dsm) = self.dsm_processor.as_ref() {
             debug!("DSM: extraction hook fired for request {request_id}");
             let identified =
                 crate::lifecycle::invocation::triggers::IdentifiedTrigger::from_value(&payload_value);
