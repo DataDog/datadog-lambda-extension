@@ -136,7 +136,13 @@ impl Aggregator {
         };
 
         // struct-as-map (named) so keys are emitted as strings, not positional.
-        rmp_serde::to_vec_named(&payload).ok()
+        match rmp_serde::to_vec_named(&payload) {
+            Ok(buf) => Some(buf),
+            Err(e) => {
+                tracing::warn!("DSM: failed to serialize pipeline stats payload: {e}");
+                None
+            }
+        }
     }
 }
 
@@ -218,7 +224,10 @@ mod tests {
 
         // Top-level is a 5-key msgpack fixmap (struct-as-map), so the first
         // byte is 0x85. This guards against accidental struct-as-array output.
-        assert_eq!(payload[0], 0x85, "top-level payload must be a 5-entry msgpack map");
+        assert_eq!(
+            payload[0], 0x85,
+            "top-level payload must be a 5-entry msgpack map"
+        );
     }
 
     #[test]
