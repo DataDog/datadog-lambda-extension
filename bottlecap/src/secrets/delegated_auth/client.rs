@@ -35,7 +35,7 @@ pub async fn get_delegated_api_key(
 ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
     debug!("Attempting to get API key via delegated auth");
 
-    let proof = generate_auth_proof(aws_credentials, &aws_config.region, &config.dd_org_uuid)?;
+    let proof = generate_auth_proof(aws_credentials, &aws_config.region, &config.ext.dd_org_uuid)?;
 
     let url = get_api_endpoint(&config.site);
     debug!("Requesting delegated API key from: {}", url);

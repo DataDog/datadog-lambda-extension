@@ -90,10 +90,10 @@ impl Processor {
         Ok(Self {
             handle,
             ruleset_version,
-            waf_timeout: cfg.appsec_waf_timeout,
-            api_sec_sampler: if cfg.api_security_enabled {
+            waf_timeout: cfg.ext.appsec_waf_timeout,
+            api_sec_sampler: if cfg.ext.api_security_enabled {
                 Some(Arc::new(Mutex::new(apisec::Sampler::with_interval(
-                    cfg.api_security_sample_delay,
+                    cfg.ext.api_security_sample_delay,
                 ))))
             } else {
                 None
@@ -212,10 +212,10 @@ impl Processor {
     }
 
     /// Parses the App & API Protection ruleset from the provided [`Config`], or
-    /// the default built-in ruleset if the [`Config::appsec_rules`] field is
+    /// the default built-in ruleset if the `cfg.ext.appsec_rules` field is
     /// [`None`].
     fn get_rules(cfg: &Config) -> Result<WafMap, Error> {
-        if let Some(ref rules) = cfg.appsec_rules {
+        if let Some(ref rules) = cfg.ext.appsec_rules {
             let file = File::open(rules).map_err(|e| Error::AppsecRulesError(rules.clone(), e))?;
             serde_json::from_reader(file)
         } else {
@@ -716,7 +716,10 @@ mod tests {
     #[test]
     fn test_new_with_default_config() {
         let config = Config {
-            serverless_appsec_enabled: true,
+            ext: crate::config::LambdaConfig {
+                serverless_appsec_enabled: true,
+                ..Default::default()
+            },
             ..Config::default()
         };
         let _ = Processor::new(&config).expect("Should not fail");
@@ -725,7 +728,10 @@ mod tests {
     #[test]
     fn test_new_disabled() {
         let config = Config {
-            serverless_appsec_enabled: false, // Explicitly testing this condition
+            ext: crate::config::LambdaConfig {
+                serverless_appsec_enabled: false, // Explicitly testing this condition
+                ..Default::default()
+            },
             ..Config::default()
         };
         assert!(matches!(
@@ -739,13 +745,16 @@ mod tests {
         let tmp = tempfile::NamedTempFile::new().expect("Failed to create tempfile");
 
         let config = Config {
-            serverless_appsec_enabled: true,
-            appsec_rules: Some(
-                tmp.path()
-                    .to_str()
-                    .expect("Failed to get tempfile path")
-                    .to_string(),
-            ),
+            ext: crate::config::LambdaConfig {
+                serverless_appsec_enabled: true,
+                appsec_rules: Some(
+                    tmp.path()
+                        .to_str()
+                        .expect("Failed to get tempfile path")
+                        .to_string(),
+                ),
+                ..Default::default()
+            },
             ..Config::default()
         };
         assert!(matches!(
@@ -797,13 +806,16 @@ mod tests {
         tmp.flush().expect("Failed to flush temp file");
 
         let config = Config {
-            serverless_appsec_enabled: true,
-            appsec_rules: Some(
-                tmp.path()
-                    .to_str()
-                    .expect("Failed to get tempfile path")
-                    .to_string(),
-            ),
+            ext: crate::config::LambdaConfig {
+                serverless_appsec_enabled: true,
+                appsec_rules: Some(
+                    tmp.path()
+                        .to_str()
+                        .expect("Failed to get tempfile path")
+                        .to_string(),
+                ),
+                ..Default::default()
+            },
             ..Config::default()
         };
         let result = Processor::new(&config);
