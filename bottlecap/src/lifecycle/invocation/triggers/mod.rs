@@ -112,6 +112,38 @@ pub fn get_default_service_name(
     instance_name.to_string()
 }
 
+/// DSM consume inputs for a single record: the source-specific edge tags plus
+/// the record's carrier (which may contain the inbound pathway context).
+#[derive(Debug, Clone, PartialEq)]
+pub struct DsmCheckpointInput {
+    pub edge_tags: Vec<String>,
+    pub carrier: HashMap<String, String>,
+}
+
+/// Build per-record DSM consume inputs for a batched event by deserializing
+/// every entry in the `Records` array into `T` and reading its edge tags and
+/// carrier. Records that fail to deserialize or are not DSM-eligible (no edge
+/// tags) are skipped. Returns empty when there is no `Records` array.
+pub(crate) fn dsm_checkpoints_from_records<T>(payload: &Value) -> Vec<DsmCheckpointInput>
+where
+    T: Trigger + serde::de::DeserializeOwned,
+{
+    let Some(records) = payload.get("Records").and_then(Value::as_array) else {
+        return Vec::new();
+    };
+    records
+        .iter()
+        .filter_map(|record| {
+            let record: T = serde_json::from_value(record.clone()).ok()?;
+            let edge_tags = record.get_dsm_edge_tags()?;
+            Some(DsmCheckpointInput {
+                edge_tags,
+                carrier: record.get_carrier(),
+            })
+        })
+        .collect()
+}
+
 pub trait Trigger: ServiceNameResolver {
     fn new(payload: Value) -> Option<Self>
     where
@@ -135,6 +167,26 @@ pub trait Trigger: ServiceNameResolver {
     /// DSM-eligible. Default: `None`.
     fn get_dsm_edge_tags(&self) -> Option<Vec<String>> {
         None
+    }
+
+    /// Per-record DSM consume inputs for this (possibly batched) event.
+    ///
+    /// Each Lambda invocation can deliver multiple records (e.g. an SQS/SNS/
+    /// Kinesis batch), and every record can carry its own inbound pathway
+    /// context. The default implementation yields a single entry derived from
+    /// the representative record this trigger was parsed from; batched sources
+    /// override it to yield one entry per record so no message is dropped.
+    ///
+    /// `payload` is the full, unparsed event so overrides can re-read every
+    /// record. Records that are not DSM-eligible are omitted.
+    fn get_dsm_checkpoints(&self, _payload: &Value) -> Vec<DsmCheckpointInput> {
+        match self.get_dsm_edge_tags() {
+            Some(edge_tags) => vec![DsmCheckpointInput {
+                edge_tags,
+                carrier: self.get_carrier(),
+            }],
+            None => Vec::new(),
+        }
     }
 
     fn get_dd_resource_key(&self, _region: &str) -> Option<String> {

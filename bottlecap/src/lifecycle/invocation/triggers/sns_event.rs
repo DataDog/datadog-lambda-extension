@@ -10,7 +10,8 @@ use crate::lifecycle::invocation::{
     base64_to_string,
     processor::MS_TO_NS,
     triggers::{
-        DATADOG_CARRIER_KEY, FUNCTION_TRIGGER_EVENT_SOURCE_TAG, ServiceNameResolver, Trigger,
+        DATADOG_CARRIER_KEY, DsmCheckpointInput, FUNCTION_TRIGGER_EVENT_SOURCE_TAG,
+        ServiceNameResolver, Trigger, dsm_checkpoints_from_records,
         event_bridge_event::EventBridgeEvent,
     },
 };
@@ -173,6 +174,10 @@ impl Trigger for SnsRecord {
             format!("topic:{}", self.sns.topic_arn),
             "type:sns".to_string(),
         ])
+    }
+
+    fn get_dsm_checkpoints(&self, payload: &Value) -> Vec<DsmCheckpointInput> {
+        dsm_checkpoints_from_records::<SnsRecord>(payload)
     }
 }
 

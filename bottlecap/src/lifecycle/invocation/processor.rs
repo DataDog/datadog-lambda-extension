@@ -1110,18 +1110,31 @@ impl Processor {
             let identified =
                 crate::lifecycle::invocation::triggers::IdentifiedTrigger::from_value(&payload_value);
             if let Some(trigger) = SpanInferrer::get_trigger_type(identified) {
-                if let Some(mut edge_tags) = trigger.get_dsm_edge_tags() {
-                    apply_dsm_exchange_fallback(
-                        &mut edge_tags,
-                        self.config.dsm_exchange_name.as_deref(),
-                    );
-                    debug!("DSM: trigger is DSM-eligible, edge_tags={edge_tags:?}");
-                    // Payload size is not currently measured; latency stats are unaffected.
-                    dsm.record_consume(&edge_tags, &trigger.get_carrier(), 0.0);
-                } else {
+                // Batched sources (SQS/SNS/Kinesis) yield one checkpoint per
+                // record so every message's pathway context is captured.
+                let checkpoints = trigger.get_dsm_checkpoints(&payload_value);
+                if checkpoints.is_empty() {
                     debug!(
                         "DSM: identified trigger is not DSM-eligible, skipping consume checkpoint"
                     );
+                } else {
+                    debug!(
+                        "DSM: trigger is DSM-eligible, {} record(s)",
+                        checkpoints.len()
+                    );
+                    for mut checkpoint in checkpoints {
+                        apply_dsm_exchange_fallback(
+                            &mut checkpoint.edge_tags,
+                            self.config.dsm_exchange_name.as_deref(),
+                        );
+                        debug!(
+                            "DSM: recording consume checkpoint edge_tags={:?}",
+                            checkpoint.edge_tags
+                        );
+                        // Payload size is not currently measured; latency stats
+                        // are unaffected.
+                        dsm.record_consume(&checkpoint.edge_tags, &checkpoint.carrier, 0.0);
+                    }
                 }
             } else {
                 debug!("DSM: no trigger identified for payload, skipping consume checkpoint");

@@ -2,7 +2,8 @@ use crate::config::aws::get_aws_partition_by_region;
 use crate::lifecycle::invocation::{
     processor::MS_TO_NS,
     triggers::{
-        DATADOG_CARRIER_KEY, FUNCTION_TRIGGER_EVENT_SOURCE_TAG, ServiceNameResolver, Trigger,
+        DATADOG_CARRIER_KEY, DsmCheckpointInput, FUNCTION_TRIGGER_EVENT_SOURCE_TAG,
+        ServiceNameResolver, Trigger, dsm_checkpoints_from_records,
         event_bridge_event::EventBridgeEvent,
         sns_event::{SnsEntity, SnsRecord},
     },
@@ -212,6 +213,10 @@ impl Trigger for SqsRecord {
             "type:sqs".to_string(),
         ])
     }
+
+    fn get_dsm_checkpoints(&self, payload: &Value) -> Vec<DsmCheckpointInput> {
+        dsm_checkpoints_from_records::<SqsRecord>(payload)
+    }
 }
 
 impl ServiceNameResolver for SqsRecord {
@@ -404,6 +409,59 @@ mod tests {
         assert_eq!(
             event.get_arn("us-east-1"),
             "arn:aws:sqs:us-east-1:123456789012:MyQueue"
+        );
+    }
+
+    #[test]
+    fn test_get_dsm_checkpoints_one_per_record() {
+        // Build a two-record batch from the single-record fixture, giving each
+        // record a distinct queue and a distinct pathway carrier.
+        let json = read_json_file("sqs_event.json");
+        let mut payload: Value =
+            serde_json::from_str(&json).expect("Failed to deserialize into Value");
+        let records = payload["Records"].as_array().expect("Records array");
+        let mut first = records[0].clone();
+        let mut second = records[0].clone();
+
+        first["eventSourceARN"] = Value::from("arn:aws:sqs:us-east-1:123456789012:QueueA");
+        first["messageAttributes"]["_datadog"]["stringValue"] =
+            Value::from("{\"x-datadog-trace-id\":\"111\",\"dd-pathway-ctx-base64\":\"ctxA\"}");
+
+        second["eventSourceARN"] = Value::from("arn:aws:sqs:us-east-1:123456789012:QueueB");
+        second["messageAttributes"]["_datadog"]["stringValue"] =
+            Value::from("{\"x-datadog-trace-id\":\"222\",\"dd-pathway-ctx-base64\":\"ctxB\"}");
+
+        payload["Records"] = Value::from(vec![first, second]);
+
+        let trigger = SqsRecord::new(payload.clone()).expect("Failed to deserialize SqsRecord");
+        let checkpoints = trigger.get_dsm_checkpoints(&payload);
+
+        assert_eq!(checkpoints.len(), 2, "expected one checkpoint per record");
+
+        assert_eq!(
+            checkpoints[0].edge_tags,
+            vec![
+                "direction:in".to_string(),
+                "topic:QueueA".to_string(),
+                "type:sqs".to_string(),
+            ]
+        );
+        assert_eq!(
+            checkpoints[0].carrier.get("dd-pathway-ctx-base64"),
+            Some(&"ctxA".to_string())
+        );
+
+        assert_eq!(
+            checkpoints[1].edge_tags,
+            vec![
+                "direction:in".to_string(),
+                "topic:QueueB".to_string(),
+                "type:sqs".to_string(),
+            ]
+        );
+        assert_eq!(
+            checkpoints[1].carrier.get("dd-pathway-ctx-base64"),
+            Some(&"ctxB".to_string())
         );
     }
 

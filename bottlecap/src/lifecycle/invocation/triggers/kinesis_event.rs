@@ -10,7 +10,8 @@ use tracing::debug;
 use crate::lifecycle::invocation::{
     processor::S_TO_NS,
     triggers::{
-        DATADOG_CARRIER_KEY, FUNCTION_TRIGGER_EVENT_SOURCE_TAG, ServiceNameResolver, Trigger,
+        DATADOG_CARRIER_KEY, DsmCheckpointInput, FUNCTION_TRIGGER_EVENT_SOURCE_TAG,
+        ServiceNameResolver, Trigger, dsm_checkpoints_from_records,
     },
 };
 
@@ -144,6 +145,10 @@ impl Trigger for KinesisRecord {
             format!("topic:{stream}"),
             "type:kinesis".to_string(),
         ])
+    }
+
+    fn get_dsm_checkpoints(&self, payload: &Value) -> Vec<DsmCheckpointInput> {
+        dsm_checkpoints_from_records::<KinesisRecord>(payload)
     }
 }
 
