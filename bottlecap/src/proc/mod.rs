@@ -12,7 +12,7 @@ use constants::{
     PROC_NET_DEV_PATH, PROC_PATH, PROC_STAT_PATH, PROC_UPTIME_PATH,
 };
 use regex::Regex;
-use tracing::{debug, trace};
+use tracing::debug;
 
 #[must_use]
 pub fn get_pid_list() -> Vec<i64> {
@@ -258,14 +258,9 @@ fn get_fd_use_data_from_path(path: &str, pids: &[i64]) -> f64 {
     for &pid in pids {
         let fd_path = format!("{path}/{pid}/fd");
         let Ok(files) = fs::read_dir(&fd_path) else {
-            trace!(
-                "File descriptor use data not found in path {} with pid {}",
-                fd_path, pid
-            );
             continue;
         };
-        let count = files.count();
-        fd_use += count;
+        fd_use += files.count();
     }
 
     fd_use as f64
