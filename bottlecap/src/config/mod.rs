@@ -129,14 +129,12 @@ pub struct LambdaConfigSource {
     /// historical behavior).
     #[serde(deserialize_with = "deser_opt_bool")]
     pub serverless_logs_enabled: Option<bool>,
-    /// `DD_LOGS_ENABLED` — alias surface kept on the lambda source side
-    /// purely so we can detect "was it explicitly set?" and preserve the
-    /// legacy OR-merge semantics with `serverless_logs_enabled` (see
-    /// `merge_from`). The canonical `Config::logs_enabled` upstream field
-    /// is also populated by the upstream env/yaml parsing; lambda call
-    /// sites that gate on log shipping should keep using
-    /// `config.ext.serverless_logs_enabled`, which the merge logic below
-    /// reconciles with this alias.
+    /// `DD_LOGS_ENABLED` — deserialized here a second time (the canonical
+    /// `Config::logs_enabled` upstream field is also populated by the upstream
+    /// env/yaml parsing) because lambda's default for logs is `true` while
+    /// upstream's is `false`. Keeping the alias as `Option<bool>` lets
+    /// `merge_from` detect "was it explicitly set?" and OR-merge it into
+    /// `serverless_logs_enabled` — that is the field lambda call sites read.
     #[serde(deserialize_with = "deser_opt_bool")]
     pub logs_enabled: Option<bool>,
 
