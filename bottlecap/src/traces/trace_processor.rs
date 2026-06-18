@@ -442,7 +442,7 @@ impl TraceProcessor for ServerlessTraceProcessor {
         // stats are still counted. SamplerPriority::None (-128) means no explicit priority
         // was set and the trace is kept; drop priorities are SamplerPriority::AutoDrop (0)
         // and UserDrop (-1, not represented in SamplerPriority).
-        let body_size = if config.compute_trace_stats_on_extension
+        if config.compute_trace_stats_on_extension
             && let TracerPayloadCollection::V07(ref mut tracer_payloads) = payload
         {
             for tp in tracer_payloads.iter_mut() {
@@ -454,18 +454,17 @@ impl TraceProcessor for ServerlessTraceProcessor {
             if tracer_payloads.is_empty() {
                 return (None, payloads_for_stats);
             }
+        }
 
-            // Update body_size after dropping sampled-out traces.
-            // Use the protobuf-encoded size of the filtered payload so the
-            // TraceAggregator's 3.2 MB batch limit reflects only the data that
-            // will actually be sent to the backend.
-            tracer_payloads
+        let body_size = match &payload {
+            TracerPayloadCollection::V07(tracer_payloads) => tracer_payloads
                 .iter()
                 .map(prost::Message::encoded_len)
-                .sum()
-        } else {
-            body_size
+                .sum(),
+            _ => body_size,
         };
+
+        debug!("TRACES | trace payload size after enrichment: {body_size} bytes");
 
         let owned_header_tags = OwnedTracerHeaderTags::from(header_tags.clone());
 
@@ -1450,6 +1449,86 @@ mod tests {
         assert!(
             info.size < 999_999,
             "body_size must be smaller than the original unfiltered request size"
+        );
+    }
+
+    /// `process_traces` enriches every span (adding the tags-provider map), so the
+    /// payload it sends is larger than the raw msgpack the tracer posted. `body_size`
+    /// must reflect that enriched, protobuf-encoded size — not the smaller ingress
+    /// size — otherwise the aggregator/coalesce caps undercount and oversized payloads
+    /// reach the backend and get a 413. This is the default config (no local stats).
+    #[test]
+    fn test_process_traces_body_size_reflects_enriched_payload() {
+        use libdd_trace_obfuscation::obfuscation_config::ObfuscationConfig;
+
+        let config = Arc::new(Config {
+            apm_dd_url: "https://trace.agent.datadoghq.com".to_string(),
+            ..Config::default()
+        });
+        let tags_provider = Arc::new(Provider::new(
+            config.clone(),
+            "lambda".to_string(),
+            &std::collections::HashMap::from([(
+                "function_arn".to_string(),
+                "test-arn".to_string(),
+            )]),
+        ));
+        let processor = ServerlessTraceProcessor {
+            obfuscation_config: Arc::new(
+                ObfuscationConfig::new().expect("Failed to create ObfuscationConfig"),
+            ),
+        };
+        let header_tags = tracer_header_tags::TracerHeaderTags {
+            lang: "rust",
+            lang_version: "1.0",
+            lang_interpreter: "",
+            lang_vendor: "",
+            tracer_version: "1.0",
+            container_id: "",
+            client_computed_top_level: false,
+            client_computed_stats: false,
+            dropped_p0_traces: 0,
+            dropped_p0_spans: 0,
+        };
+
+        let span = pb::Span {
+            trace_id: 1,
+            span_id: 1,
+            parent_id: 0,
+            service: "svc".to_string(),
+            name: "op".to_string(),
+            resource: "res".to_string(),
+            ..Default::default()
+        };
+        let traces = vec![vec![span]];
+
+        // Ingress size smaller than any real enriched payload, as it always is in
+        // production (raw msgpack < enriched protobuf).
+        let ingress_size = 1;
+        let (payload_info, processed_payloads) = processor.process_traces(
+            config,
+            tags_provider,
+            header_tags,
+            traces,
+            ingress_size,
+            None,
+        );
+
+        let info = payload_info.expect("expected Some payload");
+
+        // Nothing is filtered here, so the returned payloads are exactly what gets sent.
+        let TracerPayloadCollection::V07(ref payloads) = processed_payloads else {
+            panic!("expected V07");
+        };
+        let enriched_size: usize = payloads.iter().map(prost::Message::encoded_len).sum();
+
+        assert_eq!(
+            info.size, enriched_size,
+            "body_size must equal the protobuf encoded_len of the sent payload"
+        );
+        assert!(
+            info.size > ingress_size,
+            "enrichment inflates the payload, so body_size must exceed the ingress size"
         );
     }
 
