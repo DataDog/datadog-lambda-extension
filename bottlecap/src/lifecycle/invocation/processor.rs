@@ -1128,6 +1128,10 @@ impl Processor {
                             &mut checkpoint.edge_tags,
                             self.config.dsm_exchange_name.as_deref(),
                         );
+                        apply_dsm_kafka_group_fallback(
+                            &mut checkpoint.edge_tags,
+                            self.config.dsm_kafka_group.as_deref(),
+                        );
                         debug!(
                             "DSM: recording consume checkpoint edge_tags={:?}",
                             checkpoint.edge_tags
@@ -1603,6 +1607,19 @@ fn apply_dsm_exchange_fallback(edge_tags: &mut Vec<String>, exchange: Option<&st
     }
 }
 
+/// Apply the configured `DD_DSM_KAFKA_GROUP` fallback to DSM consume edge tags.
+/// The Kafka/`MSK` consumer group is not present in the Lambda event payload, so
+/// it can only be supplied via config. Applies only to `type:kafka` tags that do
+/// not already carry a `group:` tag.
+fn apply_dsm_kafka_group_fallback(edge_tags: &mut Vec<String>, group: Option<&str>) {
+    if let Some(group) = group
+        && edge_tags.iter().any(|t| t == "type:kafka")
+        && !edge_tags.iter().any(|t| t.starts_with("group:"))
+    {
+        edge_tags.push(format!("group:{group}"));
+    }
+}
+
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
 mod tests {
@@ -1671,6 +1688,63 @@ mod tests {
         ];
         let before = tags.clone();
         apply_dsm_exchange_fallback(&mut tags, None);
+        assert_eq!(tags, before);
+    }
+
+    #[test]
+    fn dsm_kafka_group_fallback_injects_for_kafka_without_group() {
+        let mut tags = vec![
+            "direction:in".to_string(),
+            "topic:my-topic".to_string(),
+            "type:kafka".to_string(),
+        ];
+        apply_dsm_kafka_group_fallback(&mut tags, Some("my-group"));
+        assert_eq!(
+            tags,
+            vec![
+                "direction:in".to_string(),
+                "topic:my-topic".to_string(),
+                "type:kafka".to_string(),
+                "group:my-group".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn dsm_kafka_group_fallback_does_not_override_existing_group() {
+        let mut tags = vec![
+            "direction:in".to_string(),
+            "group:payload-group".to_string(),
+            "topic:my-topic".to_string(),
+            "type:kafka".to_string(),
+        ];
+        let before = tags.clone();
+        apply_dsm_kafka_group_fallback(&mut tags, Some("my-group"));
+        assert_eq!(tags, before);
+    }
+
+    #[test]
+    fn dsm_kafka_group_fallback_ignored_for_non_kafka_sources() {
+        // SQS consume tags must never receive an injected group.
+        let mut tags = vec![
+            "direction:in".to_string(),
+            "topic:my-queue".to_string(),
+            "type:sqs".to_string(),
+        ];
+        let before = tags.clone();
+        apply_dsm_kafka_group_fallback(&mut tags, Some("my-group"));
+        assert_eq!(tags, before);
+    }
+
+    #[test]
+    fn dsm_kafka_group_fallback_noop_when_unconfigured() {
+        let mut tags = vec![
+            "direction:in".to_string(),
+            "topic:my-topic".to_string(),
+            "type:kafka".to_string(),
+        ];
+        let before = tags.clone();
+        apply_dsm_kafka_group_fallback(&mut tags, None);
         assert_eq!(tags, before);
     }
 

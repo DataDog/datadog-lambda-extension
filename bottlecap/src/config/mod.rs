@@ -308,6 +308,9 @@ pub struct Config {
     /// checkpoints when it cannot be derived from the event payload
     /// (`DD_DSM_EXCHANGE_NAME`).
     pub dsm_exchange_name: Option<String>,
+    /// Consumer group used for `MSK`/Kafka DSM consume checkpoints, which is not
+    /// present in the Lambda event payload (`DD_DSM_KAFKA_GROUP`).
+    pub dsm_kafka_group: Option<String>,
 
     // Metrics
     pub metrics_config_compression_level: i32,
@@ -441,6 +444,7 @@ impl Default for Config {
             trace_aws_service_representation_enabled: true,
             dsm_consume_enabled: false,
             dsm_exchange_name: None,
+            dsm_kafka_group: None,
             trace_propagation_style: vec![
                 TracePropagationStyle::Datadog,
                 TracePropagationStyle::TraceContext,

@@ -84,6 +84,7 @@ pub struct YamlConfig {
     #[serde(deserialize_with = "deserialize_optional_bool_from_anything")]
     pub dsm_consume_enabled: Option<bool>,
     pub dsm_exchange_name: Option<String>,
+    pub dsm_kafka_group: Option<String>,
     // Trace Propagation
     #[serde(deserialize_with = "deserialize_trace_propagation_style")]
     pub trace_propagation_style: Vec<TracePropagationStyle>,
@@ -558,6 +559,7 @@ fn merge_config(config: &mut Config, yaml_config: &YamlConfig) {
     );
     merge_option_to_value!(config, yaml_config, dsm_consume_enabled);
     merge_option!(config, yaml_config, dsm_exchange_name);
+    merge_option!(config, yaml_config, dsm_kafka_group);
 
     // OTLP
     if let Some(otlp_config) = &yaml_config.otlp_config {
@@ -982,6 +984,7 @@ api_security_sample_delay: 60 # Seconds
                 trace_aws_service_representation_enabled: true,
                 dsm_consume_enabled: false,
                 dsm_exchange_name: None,
+                dsm_kafka_group: None,
                 metrics_config_compression_level: 3,
                 otlp_config_traces_enabled: false,
                 otlp_config_traces_span_name_as_resource_name: true,

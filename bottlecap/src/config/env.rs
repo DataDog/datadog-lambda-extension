@@ -265,6 +265,8 @@ pub struct EnvConfig {
     pub dsm_consume_enabled: Option<bool>,
     /// @env `DD_DSM_EXCHANGE_NAME`
     pub dsm_exchange_name: Option<String>,
+    /// @env `DD_DSM_KAFKA_GROUP`
+    pub dsm_kafka_group: Option<String>,
     //
     // Trace Propagation
     /// @env `DD_TRACE_PROPAGATION_STYLE`
@@ -593,6 +595,7 @@ fn merge_config(config: &mut Config, env_config: &EnvConfig) {
     merge_option_to_value!(config, env_config, trace_aws_service_representation_enabled);
     merge_option_to_value!(config, env_config, dsm_consume_enabled);
     merge_option!(config, env_config, dsm_exchange_name);
+    merge_option!(config, env_config, dsm_kafka_group);
 
     // Trace Propagation
     merge_vec!(config, env_config, trace_propagation_style);
@@ -1040,6 +1043,7 @@ mod tests {
                 trace_aws_service_representation_enabled: true,
                 dsm_consume_enabled: false,
                 dsm_exchange_name: None,
+                dsm_kafka_group: None,
                 metrics_config_compression_level: 3,
                 otlp_config_traces_enabled: false,
                 otlp_config_traces_span_name_as_resource_name: true,
