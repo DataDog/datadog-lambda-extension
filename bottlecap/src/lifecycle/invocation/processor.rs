@@ -1107,8 +1107,9 @@ impl Processor {
         // DSM-eligible event sources, continuing any inbound pathway context.
         if let Some(dsm) = self.dsm_processor.as_ref() {
             debug!("DSM: extraction hook fired for request {request_id}");
-            let identified =
-                crate::lifecycle::invocation::triggers::IdentifiedTrigger::from_value(&payload_value);
+            let identified = crate::lifecycle::invocation::triggers::IdentifiedTrigger::from_value(
+                &payload_value,
+            );
             if let Some(trigger) = SpanInferrer::get_trigger_type(identified) {
                 // Batched sources (SQS/SNS/Kinesis) yield one checkpoint per
                 // record so every message's pathway context is captured.

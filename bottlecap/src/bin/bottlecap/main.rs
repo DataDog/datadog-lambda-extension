@@ -345,13 +345,15 @@ async fn extension_loop_active(
             .unwrap_or_else(|| "aws.lambda".to_string())
             .to_lowercase();
         let env = config.env.clone().unwrap_or_default();
-        Some(Arc::new(bottlecap::traces::data_streams::DsmProcessor::new(
-            service,
-            env,
-            env!("CARGO_PKG_VERSION").to_string(),
-            &config.site,
-            Arc::clone(&proxy_aggregator),
-        )))
+        Some(Arc::new(
+            bottlecap::traces::data_streams::DsmProcessor::new(
+                service,
+                env,
+                env!("CARGO_PKG_VERSION").to_string(),
+                &config.site,
+                Arc::clone(&proxy_aggregator),
+            ),
+        ))
     } else {
         None
     };

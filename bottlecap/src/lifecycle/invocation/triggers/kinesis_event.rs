@@ -136,7 +136,11 @@ impl Trigger for KinesisRecord {
 
     fn get_dsm_edge_tags(&self) -> Option<Vec<String>> {
         // stream name = last `/` segment of the event source ARN.
-        let stream = self.event_source_arn.split('/').next_back().unwrap_or_default();
+        let stream = self
+            .event_source_arn
+            .split('/')
+            .next_back()
+            .unwrap_or_default();
         if stream.is_empty() {
             return Some(vec!["direction:in".to_string(), "type:kinesis".to_string()]);
         }

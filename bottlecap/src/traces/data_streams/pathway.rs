@@ -103,13 +103,7 @@ mod tests {
 
     #[test]
     fn manual_checkpoint_tag_is_excluded() {
-        let without = compute_pathway_hash(
-            "svc",
-            "env",
-            &tags(&["direction:in"]),
-            [0u8; 8],
-            None,
-        );
+        let without = compute_pathway_hash("svc", "env", &tags(&["direction:in"]), [0u8; 8], None);
         let with = compute_pathway_hash(
             "svc",
             "env",

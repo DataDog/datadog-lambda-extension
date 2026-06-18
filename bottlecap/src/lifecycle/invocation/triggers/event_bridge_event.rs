@@ -119,10 +119,7 @@ impl Trigger for EventBridgeEvent {
         // encoded as `:rule/<bus>/<rule>`, so we recover it best-effort and omit
         // the tag entirely when it cannot be determined (rather than emit a
         // wrong/empty value that would corrupt the pathway hash).
-        let mut tags = vec![
-            "direction:in".to_string(),
-            "type:eventbridge".to_string(),
-        ];
+        let mut tags = vec!["direction:in".to_string(), "type:eventbridge".to_string()];
         if let Some(bus) = self.event_bus_name() {
             tags.push(format!("exchange:{bus}"));
         }
@@ -312,9 +309,7 @@ mod tests {
     fn test_get_dsm_edge_tags_recovers_bus_from_rule_arn() {
         let event = make_event(
             "OrderPlaced",
-            vec![
-                "arn:aws:events:us-east-1:123456789012:rule/my-bus/my-rule".to_string(),
-            ],
+            vec!["arn:aws:events:us-east-1:123456789012:rule/my-bus/my-rule".to_string()],
         );
         assert_eq!(
             event.get_dsm_edge_tags(),

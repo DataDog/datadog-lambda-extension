@@ -44,9 +44,7 @@ mod tests {
     fn applies_multiply_before_xor() {
         // FNV-1 (multiply-then-XOR) differs from FNV-1a (XOR-then-multiply).
         // Verify the first step explicitly for a single byte.
-        let expected = FNV1_64_OFFSET_BASIS
-            .wrapping_mul(FNV1_64_PRIME)
-            ^ u64::from(b'a');
+        let expected = FNV1_64_OFFSET_BASIS.wrapping_mul(FNV1_64_PRIME) ^ u64::from(b'a');
         assert_eq!(fnv1_64(b"a"), expected);
     }
 }
