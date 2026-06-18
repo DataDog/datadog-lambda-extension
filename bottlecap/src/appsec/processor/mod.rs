@@ -212,7 +212,7 @@ impl Processor {
     }
 
     /// Parses the App & API Protection ruleset from the provided [`Config`], or
-    /// the default built-in ruleset if the [`Config::appsec_rules`] field is
+    /// the default built-in ruleset if the `cfg.ext.appsec_rules` field is
     /// [`None`].
     fn get_rules(cfg: &Config) -> Result<WafMap, Error> {
         if let Some(ref rules) = cfg.ext.appsec_rules {
