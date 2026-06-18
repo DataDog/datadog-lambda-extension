@@ -114,11 +114,10 @@ impl Trigger for EventBridgeEvent {
 
     fn get_dsm_edge_tags(&self) -> Option<Vec<String>> {
         // EventBridge consume edge tags. `topic` is the detail-type. `exchange`
-        // is the event bus name, which is NOT carried in the event delivered to
-        // Lambda; when a triggering rule ARN is present in `resources` it is
-        // encoded as `:rule/<bus>/<rule>`, so we recover it best-effort and omit
-        // the tag entirely when it cannot be determined (rather than emit a
-        // wrong/empty value that would corrupt the pathway hash).
+        // (event bus) is not carried in the event; we only emit a payload-derived
+        // bus here when a `:rule/<bus>/<rule>` ARN is present. The final exchange
+        // value (with `DD_DSM_EXCHANGE_NAME` taking priority and a `default`
+        // floor) is resolved downstream in the extraction hook.
         let mut tags = vec!["direction:in".to_string(), "type:eventbridge".to_string()];
         if let Some(bus) = self.event_bus_name() {
             tags.push(format!("exchange:{bus}"));
@@ -129,17 +128,18 @@ impl Trigger for EventBridgeEvent {
 }
 
 impl EventBridgeEvent {
-    /// Best-effort event bus name recovered from a triggering rule ARN in
-    /// `resources`. Non-default buses encode the name as `:rule/<bus>/<rule>`;
-    /// the default bus appears as `:rule/<rule>` (no bus segment). Returns
-    /// `None` when no bus name can be determined from the payload.
+    /// Payload-derived event bus name from a triggering rule ARN in `resources`.
+    /// Only non-default buses can be recovered, encoded as `:rule/<bus>/<rule>`;
+    /// the first segment is the bus. Default-bus rules (`:rule/<rule>`, no bus
+    /// segment) and missing rule ARNs return `None`, leaving the hook to apply
+    /// the configured override or the `default` floor.
     fn event_bus_name(&self) -> Option<String> {
         for arn in &self.resources {
             if let Some(rest) = arn.split(":rule/").nth(1) {
                 let mut segments = rest.split('/');
                 let first = segments.next().unwrap_or_default();
-                // `rule/<bus>/<rule>` => bus is the first segment.
-                // `rule/<rule>` (default bus) => no second segment, skip.
+                // `:rule/<bus>/<rule>` => bus is the first segment.
+                // `:rule/<rule>` (default bus) => no second segment, not derivable here.
                 if segments.next().is_some() && !first.is_empty() {
                     return Some(first.to_string());
                 }
@@ -323,8 +323,10 @@ mod tests {
     }
 
     #[test]
-    fn test_get_dsm_edge_tags_default_bus_rule_arn_omits_exchange() {
-        // Default-bus rule ARNs have no bus segment (`:rule/<rule>`).
+    fn test_get_dsm_edge_tags_default_bus_rule_arn_omits_exchange_at_trigger() {
+        // Default-bus rule ARNs (`:rule/<rule>`, no bus segment) are not
+        // derivable at the trigger level; the `default` floor is applied later
+        // by the extraction hook.
         let event = make_event(
             "OrderPlaced",
             vec!["arn:aws:events:us-east-1:123456789012:rule/my-rule".to_string()],

@@ -1124,7 +1124,7 @@ impl Processor {
                         checkpoints.len()
                     );
                     for mut checkpoint in checkpoints {
-                        apply_dsm_exchange_fallback(
+                        resolve_dsm_eventbridge_exchange(
                             &mut checkpoint.edge_tags,
                             self.config.dsm_exchange_name.as_deref(),
                         );
@@ -1594,17 +1594,26 @@ impl Processor {
     }
 }
 
-/// Apply the configured `DD_DSM_EXCHANGE_NAME` fallback to DSM consume edge
-/// tags. The fallback only applies to `EventBridge` (`type:eventbridge`) tags
-/// that do not already carry a payload-derived `exchange:` tag, so a
-/// payload-derived bus always wins and other sources are never affected.
-fn apply_dsm_exchange_fallback(edge_tags: &mut Vec<String>, exchange: Option<&str>) {
-    if let Some(exchange) = exchange
-        && edge_tags.iter().any(|t| t == "type:eventbridge")
-        && !edge_tags.iter().any(|t| t.starts_with("exchange:"))
-    {
-        edge_tags.push(format!("exchange:{exchange}"));
+/// Resolve the `exchange` (event bus) tag for `EventBridge` (`type:eventbridge`)
+/// DSM consume edge tags, with precedence: configured `DD_DSM_EXCHANGE_NAME` >
+/// payload-derived bus (rule ARN) > `default`. The resolved tag always replaces
+/// any payload-derived `exchange:` tag; other sources are never affected.
+fn resolve_dsm_eventbridge_exchange(edge_tags: &mut Vec<String>, configured: Option<&str>) {
+    if !edge_tags.iter().any(|t| t == "type:eventbridge") {
+        return;
     }
+    // Precedence: configured `DD_DSM_EXCHANGE_NAME` > payload-derived bus (rule
+    // ARN) > `default`. EventBridge consume checkpoints always carry an
+    // `exchange:` tag so the node hashes consistently across invocations.
+    let payload_exchange = edge_tags
+        .iter()
+        .find_map(|t| t.strip_prefix("exchange:").map(ToString::to_string));
+    let exchange = configured
+        .map(ToString::to_string)
+        .or(payload_exchange)
+        .unwrap_or_else(|| "default".to_string());
+    edge_tags.retain(|t| !t.starts_with("exchange:"));
+    edge_tags.push(format!("exchange:{exchange}"));
 }
 
 /// Apply the configured `DD_DSM_KAFKA_GROUP` fallback to DSM consume edge tags.
@@ -1635,59 +1644,74 @@ mod tests {
     use serde_json::json;
 
     #[test]
-    fn dsm_exchange_fallback_injects_for_eventbridge_without_exchange() {
-        let mut tags = vec![
-            "direction:in".to_string(),
-            "type:eventbridge".to_string(),
-            "topic:OrderPlaced".to_string(),
-        ];
-        apply_dsm_exchange_fallback(&mut tags, Some("my-bus"));
-        assert_eq!(
-            tags,
-            vec![
-                "direction:in".to_string(),
-                "type:eventbridge".to_string(),
-                "topic:OrderPlaced".to_string(),
-                "exchange:my-bus".to_string(),
-            ]
-        );
-    }
-
-    #[test]
-    fn dsm_exchange_fallback_does_not_override_payload_derived_exchange() {
+    fn dsm_exchange_config_takes_priority_over_payload() {
+        // Priority 1: configured DD_DSM_EXCHANGE_NAME overrides a payload-derived bus.
         let mut tags = vec![
             "direction:in".to_string(),
             "type:eventbridge".to_string(),
             "exchange:payload-bus".to_string(),
             "topic:OrderPlaced".to_string(),
         ];
-        let before = tags.clone();
-        apply_dsm_exchange_fallback(&mut tags, Some("my-bus"));
-        assert_eq!(tags, before);
+        resolve_dsm_eventbridge_exchange(&mut tags, Some("config-bus"));
+        assert!(tags.contains(&"exchange:config-bus".to_string()));
+        assert!(!tags.contains(&"exchange:payload-bus".to_string()));
+        // Exactly one exchange tag remains.
+        assert_eq!(
+            tags.iter().filter(|t| t.starts_with("exchange:")).count(),
+            1
+        );
     }
 
     #[test]
-    fn dsm_exchange_fallback_ignored_for_non_eventbridge_sources() {
-        // SQS consume tags must never receive an injected exchange.
+    fn dsm_exchange_uses_payload_bus_when_unconfigured() {
+        // Priority 2: payload-derived bus is kept when no config is set.
+        let mut tags = vec![
+            "direction:in".to_string(),
+            "type:eventbridge".to_string(),
+            "exchange:payload-bus".to_string(),
+            "topic:OrderPlaced".to_string(),
+        ];
+        resolve_dsm_eventbridge_exchange(&mut tags, None);
+        assert!(tags.contains(&"exchange:payload-bus".to_string()));
+        assert_eq!(
+            tags.iter().filter(|t| t.starts_with("exchange:")).count(),
+            1
+        );
+    }
+
+    #[test]
+    fn dsm_exchange_uses_config_when_no_payload_bus() {
+        let mut tags = vec![
+            "direction:in".to_string(),
+            "type:eventbridge".to_string(),
+            "topic:OrderPlaced".to_string(),
+        ];
+        resolve_dsm_eventbridge_exchange(&mut tags, Some("config-bus"));
+        assert!(tags.contains(&"exchange:config-bus".to_string()));
+    }
+
+    #[test]
+    fn dsm_exchange_defaults_when_nothing_found() {
+        // Priority 3: no config and no payload bus => `default` floor.
+        let mut tags = vec![
+            "direction:in".to_string(),
+            "type:eventbridge".to_string(),
+            "topic:OrderPlaced".to_string(),
+        ];
+        resolve_dsm_eventbridge_exchange(&mut tags, None);
+        assert!(tags.contains(&"exchange:default".to_string()));
+    }
+
+    #[test]
+    fn dsm_exchange_ignored_for_non_eventbridge_sources() {
+        // SQS consume tags must never receive an exchange.
         let mut tags = vec![
             "direction:in".to_string(),
             "topic:my-queue".to_string(),
             "type:sqs".to_string(),
         ];
         let before = tags.clone();
-        apply_dsm_exchange_fallback(&mut tags, Some("my-bus"));
-        assert_eq!(tags, before);
-    }
-
-    #[test]
-    fn dsm_exchange_fallback_noop_when_unconfigured() {
-        let mut tags = vec![
-            "direction:in".to_string(),
-            "type:eventbridge".to_string(),
-            "topic:OrderPlaced".to_string(),
-        ];
-        let before = tags.clone();
-        apply_dsm_exchange_fallback(&mut tags, None);
+        resolve_dsm_eventbridge_exchange(&mut tags, Some("config-bus"));
         assert_eq!(tags, before);
     }
 
