@@ -118,6 +118,9 @@ pub fn get_default_service_name(
 pub struct DsmCheckpointInput {
     pub edge_tags: Vec<String>,
     pub carrier: HashMap<String, String>,
+    /// Byte length of the record payload (message body / decoded data).
+    /// Used to populate the DSM `PayloadSize` sketch; 0.0 when not applicable.
+    pub payload_size_bytes: f64,
 }
 
 /// Build per-record DSM consume inputs for a batched event by deserializing
@@ -136,9 +139,11 @@ where
         .filter_map(|record| {
             let record: T = serde_json::from_value(record.clone()).ok()?;
             let edge_tags = record.get_dsm_edge_tags()?;
+            let payload_size_bytes = record.get_payload_size_bytes();
             Some(DsmCheckpointInput {
                 edge_tags,
                 carrier: record.get_carrier(),
+                payload_size_bytes,
             })
         })
         .collect()
@@ -169,6 +174,12 @@ pub trait Trigger: ServiceNameResolver {
         None
     }
 
+    /// Byte length of this record's payload (message body / decoded data).
+    /// Used to populate the DSM `PayloadSize` sketch. Default: `0.0`.
+    fn get_payload_size_bytes(&self) -> f64 {
+        0.0
+    }
+
     /// Per-record DSM consume inputs for this (possibly batched) event.
     ///
     /// Each Lambda invocation can deliver multiple records (e.g. an SQS/SNS/
@@ -184,6 +195,7 @@ pub trait Trigger: ServiceNameResolver {
             Some(edge_tags) => vec![DsmCheckpointInput {
                 edge_tags,
                 carrier: self.get_carrier(),
+                payload_size_bytes: self.get_payload_size_bytes(),
             }],
             None => Vec::new(),
         }

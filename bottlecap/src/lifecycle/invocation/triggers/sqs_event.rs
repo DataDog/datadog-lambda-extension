@@ -218,6 +218,10 @@ impl Trigger for SqsRecord {
         ])
     }
 
+    fn get_payload_size_bytes(&self) -> f64 {
+        self.body.len() as f64
+    }
+
     fn get_dsm_checkpoints(&self, payload: &Value) -> Vec<DsmCheckpointInput> {
         dsm_checkpoints_from_records::<SqsRecord>(payload)
     }
@@ -466,6 +470,34 @@ mod tests {
         assert_eq!(
             checkpoints[1].carrier.get("dd-pathway-ctx-base64"),
             Some(&"ctxB".to_string())
+        );
+    }
+
+    #[test]
+    fn test_get_dsm_checkpoints_payload_size() {
+        // Each checkpoint's payload_size_bytes must equal the UTF-8 byte length
+        // of its record's `body` field.
+        let json = read_json_file("sqs_event.json");
+        let mut payload: Value =
+            serde_json::from_str(&json).expect("Failed to deserialize into Value");
+        let records = payload["Records"].as_array().expect("Records array");
+        let mut first = records[0].clone();
+        let mut second = records[0].clone();
+        first["body"] = Value::from("hello");    // 5 bytes
+        second["body"] = Value::from("world!");  // 6 bytes
+        payload["Records"] = Value::from(vec![first, second]);
+
+        let trigger = SqsRecord::new(payload.clone()).expect("Failed to deserialize SqsRecord");
+        let checkpoints = trigger.get_dsm_checkpoints(&payload);
+
+        assert_eq!(checkpoints.len(), 2);
+        assert!(
+            (checkpoints[0].payload_size_bytes - 5.0).abs() < f64::EPSILON,
+            "expected 5.0, got {}", checkpoints[0].payload_size_bytes
+        );
+        assert!(
+            (checkpoints[1].payload_size_bytes - 6.0).abs() < f64::EPSILON,
+            "expected 6.0, got {}", checkpoints[1].payload_size_bytes
         );
     }
 

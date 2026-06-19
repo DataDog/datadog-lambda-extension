@@ -112,6 +112,11 @@ impl Trigger for EventBridgeEvent {
         true
     }
 
+    fn get_payload_size_bytes(&self) -> f64 {
+        // Measure the serialized JSON byte length of the event detail object.
+        serde_json::to_string(&self.detail).map_or(0.0, |s| s.len() as f64)
+    }
+
     fn get_dsm_edge_tags(&self) -> Option<Vec<String>> {
         // EventBridge consume edge tags. `topic` is the detail-type. `exchange`
         // (event bus) is not carried in the event; we only emit a payload-derived
@@ -473,6 +478,34 @@ mod tests {
                 false // aws_service_representation_enabled = false
             ),
             "eventbridge" // fallback value
+        );
+    }
+
+    #[test]
+    fn test_get_payload_size_bytes() {
+        // Construct an event with a known detail and verify payload_size_bytes
+        // equals the byte length of the compact JSON serialization of that detail.
+        let detail = serde_json::json!({"key": "value"});
+        let expected_bytes = serde_json::to_string(&detail)
+            .expect("serialization must succeed")
+            .len() as f64;
+
+        let event = EventBridgeEvent {
+            id: "id".to_string(),
+            version: "0".to_string(),
+            account: "123456789012".to_string(),
+            time: Utc::now(),
+            region: "us-east-1".to_string(),
+            resources: vec![],
+            source: "my.source".to_string(),
+            detail_type: "MyType".to_string(),
+            detail,
+            replay_name: None,
+        };
+
+        assert!(
+            (event.get_payload_size_bytes() - expected_bytes).abs() < f64::EPSILON,
+            "expected {expected_bytes}, got {}", event.get_payload_size_bytes()
         );
     }
 }

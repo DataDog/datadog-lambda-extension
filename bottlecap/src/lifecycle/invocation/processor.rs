@@ -1136,9 +1136,11 @@ impl Processor {
                             "DSM: recording consume checkpoint edge_tags={:?}",
                             checkpoint.edge_tags
                         );
-                        // Payload size is not currently measured; latency stats
-                        // are unaffected.
-                        dsm.record_consume(&checkpoint.edge_tags, &checkpoint.carrier, 0.0);
+                        dsm.record_consume(
+                            &checkpoint.edge_tags,
+                            &checkpoint.carrier,
+                            checkpoint.payload_size_bytes,
+                        );
                     }
                 }
             } else {

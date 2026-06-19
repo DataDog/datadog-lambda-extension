@@ -176,6 +176,13 @@ impl Trigger for SnsRecord {
         ])
     }
 
+    fn get_payload_size_bytes(&self) -> f64 {
+        self.sns
+            .message
+            .as_ref()
+            .map_or(0.0, |m| m.len() as f64)
+    }
+
     fn get_dsm_checkpoints(&self, payload: &Value) -> Vec<DsmCheckpointInput> {
         dsm_checkpoints_from_records::<SnsRecord>(payload)
     }
@@ -475,6 +482,34 @@ mod tests {
                 false // aws_service_representation_enabled = false
             ),
             "sns" // fallback value
+        );
+    }
+
+    #[test]
+    fn test_get_dsm_checkpoints_payload_size() {
+        // The checkpoint payload_size_bytes must equal the byte length of the
+        // SNS Message field for each record in the batch.
+        let json = read_json_file("sns_event.json");
+        let mut payload: Value =
+            serde_json::from_str(&json).expect("Failed to deserialize into Value");
+        let records = payload["Records"].as_array().expect("Records array");
+        let mut first = records[0].clone();
+        let mut second = records[0].clone();
+        first["Sns"]["Message"] = Value::from("hello");   // 5 bytes
+        second["Sns"]["Message"] = Value::from("world!"); // 6 bytes
+        payload["Records"] = Value::from(vec![first, second]);
+
+        let trigger = SnsRecord::new(payload.clone()).expect("Failed to deserialize SnsRecord");
+        let checkpoints = trigger.get_dsm_checkpoints(&payload);
+
+        assert_eq!(checkpoints.len(), 2);
+        assert!(
+            (checkpoints[0].payload_size_bytes - 5.0).abs() < f64::EPSILON,
+            "expected 5.0, got {}", checkpoints[0].payload_size_bytes
+        );
+        assert!(
+            (checkpoints[1].payload_size_bytes - 6.0).abs() < f64::EPSILON,
+            "expected 6.0, got {}", checkpoints[1].payload_size_bytes
         );
     }
 }

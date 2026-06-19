@@ -97,7 +97,6 @@ pub struct LambdaConfig {
 impl Default for LambdaConfig {
     fn default() -> Self {
         Self {
-
             api_key_secret_arn: String::new(),
             kms_api_key: String::new(),
             api_key_ssm_arn: String::new(),
