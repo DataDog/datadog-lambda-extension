@@ -406,8 +406,7 @@ mod tests {
         // The checkpoint payload_size_bytes must equal the decoded byte length
         // of the base64-encoded `kinesis.data` field for each record.
         let json = read_json_file("kinesis_event.json");
-        let payload: Value =
-            serde_json::from_str(&json).expect("Failed to deserialize into Value");
+        let payload: Value = serde_json::from_str(&json).expect("Failed to deserialize into Value");
 
         let event = KinesisRecord::new(payload.clone()).expect("Failed to deserialize");
         let checkpoints = event.get_dsm_checkpoints(&payload);
@@ -416,7 +415,8 @@ mod tests {
         // The fixture data field decodes to 155 bytes.
         assert!(
             (checkpoints[0].payload_size_bytes - 155.0).abs() < f64::EPSILON,
-            "expected 155.0, got {}", checkpoints[0].payload_size_bytes
+            "expected 155.0, got {}",
+            checkpoints[0].payload_size_bytes
         );
     }
 }

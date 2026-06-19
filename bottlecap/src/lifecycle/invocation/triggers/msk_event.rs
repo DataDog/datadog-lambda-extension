@@ -1,9 +1,9 @@
-use base64::Engine;
-use base64::engine::general_purpose;
 use crate::lifecycle::invocation::processor::MS_TO_NS;
 use crate::lifecycle::invocation::triggers::{
     DsmCheckpointInput, FUNCTION_TRIGGER_EVENT_SOURCE_TAG, ServiceNameResolver, Trigger,
 };
+use base64::Engine;
+use base64::engine::general_purpose;
 use libdd_trace_protobuf::pb::Span;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -749,10 +749,18 @@ mod tests {
             .map(|c| c.payload_size_bytes)
             .collect();
         assert_eq!(topic1_sizes.len(), 2);
-        assert!(topic1_sizes.iter().any(|&s| (s - 34.0).abs() < f64::EPSILON),
-            "expected a 34-byte record, got {topic1_sizes:?}");
-        assert!(topic1_sizes.iter().any(|&s| (s - 33.0).abs() < f64::EPSILON),
-            "expected a 33-byte record, got {topic1_sizes:?}");
+        assert!(
+            topic1_sizes
+                .iter()
+                .any(|&s| (s - 34.0).abs() < f64::EPSILON),
+            "expected a 34-byte record, got {topic1_sizes:?}"
+        );
+        assert!(
+            topic1_sizes
+                .iter()
+                .any(|&s| (s - 33.0).abs() < f64::EPSILON),
+            "expected a 33-byte record, got {topic1_sizes:?}"
+        );
 
         let topic2_cp = checkpoints
             .iter()
@@ -760,7 +768,8 @@ mod tests {
             .expect("topic2 checkpoint must exist");
         assert!(
             topic2_cp.payload_size_bytes.abs() < f64::EPSILON,
-            "null value must yield 0.0, got {}", topic2_cp.payload_size_bytes
+            "null value must yield 0.0, got {}",
+            topic2_cp.payload_size_bytes
         );
     }
 }

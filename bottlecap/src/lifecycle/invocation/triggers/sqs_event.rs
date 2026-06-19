@@ -483,8 +483,8 @@ mod tests {
         let records = payload["Records"].as_array().expect("Records array");
         let mut first = records[0].clone();
         let mut second = records[0].clone();
-        first["body"] = Value::from("hello");    // 5 bytes
-        second["body"] = Value::from("world!");  // 6 bytes
+        first["body"] = Value::from("hello"); // 5 bytes
+        second["body"] = Value::from("world!"); // 6 bytes
         payload["Records"] = Value::from(vec![first, second]);
 
         let trigger = SqsRecord::new(payload.clone()).expect("Failed to deserialize SqsRecord");
@@ -493,11 +493,13 @@ mod tests {
         assert_eq!(checkpoints.len(), 2);
         assert!(
             (checkpoints[0].payload_size_bytes - 5.0).abs() < f64::EPSILON,
-            "expected 5.0, got {}", checkpoints[0].payload_size_bytes
+            "expected 5.0, got {}",
+            checkpoints[0].payload_size_bytes
         );
         assert!(
             (checkpoints[1].payload_size_bytes - 6.0).abs() < f64::EPSILON,
-            "expected 6.0, got {}", checkpoints[1].payload_size_bytes
+            "expected 6.0, got {}",
+            checkpoints[1].payload_size_bytes
         );
     }
 

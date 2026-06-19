@@ -505,7 +505,8 @@ mod tests {
 
         assert!(
             (event.get_payload_size_bytes() - expected_bytes).abs() < f64::EPSILON,
-            "expected {expected_bytes}, got {}", event.get_payload_size_bytes()
+            "expected {expected_bytes}, got {}",
+            event.get_payload_size_bytes()
         );
     }
 }
