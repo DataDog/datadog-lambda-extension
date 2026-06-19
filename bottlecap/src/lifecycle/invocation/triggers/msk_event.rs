@@ -750,9 +750,9 @@ mod tests {
             .collect();
         assert_eq!(topic1_sizes.len(), 2);
         assert!(topic1_sizes.iter().any(|&s| (s - 34.0).abs() < f64::EPSILON),
-            "expected a 34-byte record, got {:?}", topic1_sizes);
+            "expected a 34-byte record, got {topic1_sizes:?}");
         assert!(topic1_sizes.iter().any(|&s| (s - 33.0).abs() < f64::EPSILON),
-            "expected a 33-byte record, got {:?}", topic1_sizes);
+            "expected a 33-byte record, got {topic1_sizes:?}");
 
         let topic2_cp = checkpoints
             .iter()
