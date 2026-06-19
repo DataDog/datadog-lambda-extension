@@ -200,7 +200,7 @@ pub struct LambdaConfigSource {
     /// `DD_DSM_CONSUME_ENABLED` — enable extension-side DSM consume checkpoints.
     #[serde(deserialize_with = "deser_opt_bool")]
     pub dsm_consume_enabled: Option<bool>,
-    /// `DD_DSM_EXCHANGE_NAME` — fallback exchange name for EventBridge DSM checkpoints.
+    /// `DD_DSM_EXCHANGE_NAME` — fallback exchange name for `EventBridge` DSM checkpoints.
     #[serde(deserialize_with = "deser_opt_str")]
     pub dsm_exchange_name: Option<String>,
     /// `DD_DSM_KAFKA_GROUP` — consumer group for MSK/Kafka DSM consume checkpoints.
