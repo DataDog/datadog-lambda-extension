@@ -25,7 +25,8 @@ pub fn should_start_proxy(config: &Arc<Config>, aws_config: Arc<AwsConfig>) -> b
         env::var("DD_EXPERIMENTAL_ENABLE_PROXY").is_ok_and(|v| v.to_lowercase().eq("true"));
 
     lwa_proxy_set
-        || (datadog_wrapper_set && (config.serverless_appsec_enabled || experimental_proxy_enabled))
+        || (datadog_wrapper_set
+            && (config.ext.serverless_appsec_enabled || experimental_proxy_enabled))
 }
 
 #[cfg(test)]
@@ -37,7 +38,10 @@ mod tests {
     fn test_should_start_proxy_everything_set() {
         let config = Arc::new(Config {
             // Appsec is enabled, so we should start the proxy
-            serverless_appsec_enabled: true,
+            ext: crate::config::LambdaConfig {
+                serverless_appsec_enabled: true,
+                ..Default::default()
+            },
             ..Default::default()
         });
         let aws_config = Arc::new(AwsConfig {
@@ -71,7 +75,10 @@ mod tests {
     fn test_should_start_proxy_appsec_enabled_and_datadog_wrapper_set() {
         let config = Arc::new(Config {
             // Appsec is enabled, so we should start the proxy
-            serverless_appsec_enabled: true,
+            ext: crate::config::LambdaConfig {
+                serverless_appsec_enabled: true,
+                ..Default::default()
+            },
             ..Default::default()
         });
         let aws_config = Arc::new(AwsConfig {
@@ -90,7 +97,10 @@ mod tests {
     fn test_should_start_proxy_appsec_disabled_and_datadog_wrapper_set() {
         let config = Arc::new(Config {
             // Appsec is disabled, so we should not start the proxy
-            serverless_appsec_enabled: false,
+            ext: crate::config::LambdaConfig {
+                serverless_appsec_enabled: false,
+                ..Default::default()
+            },
             ..Default::default()
         });
         let aws_config = Arc::new(AwsConfig {
@@ -109,7 +119,10 @@ mod tests {
     fn test_should_start_proxy_appsec_enabled_datadog_wrapper_not_set() {
         let config = Arc::new(Config {
             // Appsec is enabled, so we should not start the proxy
-            serverless_appsec_enabled: true,
+            ext: crate::config::LambdaConfig {
+                serverless_appsec_enabled: true,
+                ..Default::default()
+            },
             ..Default::default()
         });
         let aws_config = Arc::new(AwsConfig {

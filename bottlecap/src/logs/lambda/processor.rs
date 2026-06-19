@@ -140,9 +140,9 @@ impl LambdaProcessor {
         let function_arn = tags_provider.get_canonical_id().unwrap_or_default();
 
         let processing_rules = &datadog_config.logs_config_processing_rules;
-        let logs_enabled = datadog_config.serverless_logs_enabled;
+        let logs_enabled = datadog_config.ext.serverless_logs_enabled;
         let lambda_durable_function_log_buffer_size =
-            datadog_config.lambda_durable_function_log_buffer_size;
+            datadog_config.ext.lambda_durable_function_log_buffer_size;
         let rules = LambdaProcessor::compile_rules(processing_rules);
         LambdaProcessor {
             function_arn,
@@ -1439,7 +1439,10 @@ mod tests {
         let config = Arc::new(config::Config {
             service: Some("test-service".to_string()),
             tags: HashMap::from([("test".to_string(), "tags".to_string())]),
-            serverless_logs_enabled: false,
+            ext: config::LambdaConfig {
+                serverless_logs_enabled: false,
+                ..Default::default()
+            },
             ..config::Config::default()
         });
 
@@ -2531,7 +2534,10 @@ mod tests {
         let config = Arc::new(config::Config {
             service: Some("test-service".to_string()),
             tags: tags.clone(),
-            serverless_logs_enabled: true,
+            ext: config::LambdaConfig {
+                serverless_logs_enabled: true,
+                ..Default::default()
+            },
             ..config::Config::default()
         });
         let tags_provider = Arc::new(provider::Provider::new(

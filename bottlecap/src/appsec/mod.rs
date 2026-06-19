@@ -7,7 +7,7 @@ pub mod processor;
 /// Determines whether the Serverless App & API Protection features are enabled.
 #[must_use]
 pub const fn is_enabled(cfg: &Config) -> bool {
-    cfg.serverless_appsec_enabled
+    cfg.ext.serverless_appsec_enabled
 }
 
 /// Determines whether APM is only used as a transport for App & API Protection,

@@ -210,7 +210,7 @@ impl Processor {
             .try_into()
             .unwrap_or_default();
 
-        if self.config.lambda_proc_enhanced_metrics {
+        if self.config.ext.lambda_proc_enhanced_metrics {
             if self.aws_config.is_managed_instance_mode() {
                 // In Managed Instance mode, track concurrent invocations
                 self.active_invocations += 1;
@@ -662,7 +662,7 @@ impl Processor {
         // span to the inferred trigger span. AppSec's process_span will set it again from the
         // security context when it runs, but this baseline guarantees the tag is always present
         // even when the context cannot be found at flush time.
-        if self.config.serverless_appsec_enabled {
+        if self.config.ext.serverless_appsec_enabled {
             context
                 .invocation_span
                 .metrics
@@ -1090,12 +1090,12 @@ impl Processor {
         };
 
         // Tag the invocation span with the request payload
-        if self.config.capture_lambda_payload {
+        if self.config.ext.capture_lambda_payload {
             let metadata = get_metadata_from_value(
                 "function.request",
                 &payload_value,
                 0,
-                self.config.capture_lambda_payload_max_depth,
+                self.config.ext.capture_lambda_payload_max_depth,
             );
             context.invocation_span.meta.extend(metadata);
         }
@@ -1126,11 +1126,11 @@ impl Processor {
                     for mut checkpoint in checkpoints {
                         resolve_dsm_eventbridge_exchange(
                             &mut checkpoint.edge_tags,
-                            self.config.dsm_exchange_name.as_deref(),
+                            self.config.ext.dsm_exchange_name.as_deref(),
                         );
                         apply_dsm_kafka_group_fallback(
                             &mut checkpoint.edge_tags,
-                            self.config.dsm_kafka_group.as_deref(),
+                            self.config.ext.dsm_kafka_group.as_deref(),
                         );
                         debug!(
                             "DSM: recording consume checkpoint edge_tags={:?}",
@@ -1353,12 +1353,12 @@ impl Processor {
         };
 
         // Tag the invocation span with the request payload
-        if self.config.capture_lambda_payload {
+        if self.config.ext.capture_lambda_payload {
             let metadata = get_metadata_from_value(
                 "function.response",
                 &payload_value,
                 0,
-                self.config.capture_lambda_payload_max_depth,
+                self.config.ext.capture_lambda_payload_max_depth,
             );
             context.invocation_span.meta.extend(metadata);
         }
@@ -2959,7 +2959,10 @@ mod tests {
         });
         let config = Arc::new(config::Config {
             service: Some("test-service".to_string()),
-            serverless_appsec_enabled: true,
+            ext: config::LambdaConfig {
+                serverless_appsec_enabled: true,
+                ..Default::default()
+            },
             ..config::Config::default()
         });
         let tags_provider = Arc::new(provider::Provider::new(
@@ -3179,7 +3182,7 @@ mod tests {
     }
 
     /// Build a [`Processor`] with a caller-supplied config (for toggling
-    /// `compute_trace_stats_on_extension`).
+    /// `lambda_extension_compute_stats`).
     fn setup_with_config(config: Arc<config::Config>) -> Processor {
         let aws_config = Arc::new(AwsConfig {
             region: "us-east-1".into(),
@@ -3262,7 +3265,10 @@ mod tests {
             let config = Arc::new(config::Config {
                 apm_dd_url: "https://trace.agent.datadoghq.com".to_string(),
                 service: Some("test-service".to_string()),
-                compute_trace_stats_on_extension: compute_on_extension,
+                ext: config::LambdaConfig {
+                    lambda_extension_compute_stats: compute_on_extension,
+                    ..Default::default()
+                },
                 ..config::Config::default()
             });
             let mut processor = setup_with_config(Arc::clone(&config));

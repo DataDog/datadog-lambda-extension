@@ -313,7 +313,7 @@ impl SpanInferrer {
                 invocation_span.service.clone(),
             );
             s.meta.insert("span.kind".to_string(), "server".to_string());
-            let appsec_enabled = self.config.serverless_appsec_enabled;
+            let appsec_enabled = self.config.ext.serverless_appsec_enabled;
             propagate_appsec(appsec_enabled, invocation_span, s);
 
             if let Some(ws) = &mut self.wrapped_inferred_span {
@@ -716,7 +716,10 @@ mod tests {
     #[test]
     fn test_complete_inferred_spans_sets_appsec_when_enabled_in_config() {
         let config = Config {
-            serverless_appsec_enabled: true,
+            ext: crate::config::LambdaConfig {
+                serverless_appsec_enabled: true,
+                ..Default::default()
+            },
             ..Config::default()
         };
         let mut inferrer = SpanInferrer::new(Arc::new(config));

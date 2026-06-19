@@ -484,6 +484,7 @@ dependencies = [
  "bytes",
  "chrono",
  "cookie",
+ "datadog-agent-config",
  "datadog-fips",
  "datadog-opentelemetry",
  "datadog-protos",
@@ -780,9 +781,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "datadog-agent-config"
+version = "0.1.0"
+source = "git+https://github.com/DataDog/serverless-components?rev=bb4dedeee20b949db3143c05e5a779b843a8a484#bb4dedeee20b949db3143c05e5a779b843a8a484"
+dependencies = [
+ "datadog-opentelemetry",
+ "dogstatsd",
+ "figment",
+ "libdd-trace-obfuscation",
+ "libdd-trace-utils 6.0.1",
+ "log",
+ "serde",
+ "serde-aux",
+ "serde_json",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "datadog-fips"
 version = "0.1.0"
-source = "git+https://github.com/DataDog/serverless-components?rev=5b68f50f49c9defbfed4d25bd621e2a86405a972#5b68f50f49c9defbfed4d25bd621e2a86405a972"
+source = "git+https://github.com/DataDog/serverless-components?rev=bb4dedeee20b949db3143c05e5a779b843a8a484#bb4dedeee20b949db3143c05e5a779b843a8a484"
 dependencies = [
  "reqwest",
  "rustls",
@@ -924,7 +943,7 @@ dependencies = [
 [[package]]
 name = "dogstatsd"
 version = "0.1.0"
-source = "git+https://github.com/DataDog/serverless-components?rev=5b68f50f49c9defbfed4d25bd621e2a86405a972#5b68f50f49c9defbfed4d25bd621e2a86405a972"
+source = "git+https://github.com/DataDog/serverless-components?rev=bb4dedeee20b949db3143c05e5a779b843a8a484#bb4dedeee20b949db3143c05e5a779b843a8a484"
 dependencies = [
  "datadog-protos",
  "ddsketch-agent",
