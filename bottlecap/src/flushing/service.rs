@@ -31,7 +31,7 @@ pub struct FlushingService {
 
     /// Optional extension-side DSM processor. When present, its aggregated
     /// pipeline-stats payload is drained into the proxy aggregator immediately
-    /// before each proxy flush. `None` unless `DD_DSM_CONSUME_ENABLED` is set.
+    /// before each proxy flush. `None` unless `DD_DATA_STREAMS_ENABLED` is set.
     dsm_processor: Option<Arc<crate::traces::data_streams::DsmProcessor>>,
 
     // Metrics aggregator handle for getting data to flush

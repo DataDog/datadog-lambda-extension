@@ -6,7 +6,7 @@
 //! [`ProxyRequest`] so the shared [`crate::traces::proxy_flusher`] ships it to
 //! `/api/v0.1/pipeline_stats` (adding the API key + tags).
 //!
-//! Gated entirely by `DD_DSM_CONSUME_ENABLED`; when disabled this is never
+//! Gated entirely by `DD_DATA_STREAMS_ENABLED`; when disabled this is never
 //! constructed.
 
 use std::io::Write;

@@ -336,7 +336,7 @@ async fn extension_loop_active(
     let proxy_aggregator = Arc::new(TokioMutex::new(proxy_aggregator::Aggregator::default()));
 
     // Extension-side Data Streams Monitoring (consume checkpoints), gated by
-    // DD_DSM_CONSUME_ENABLED.
+    // DD_DATA_STREAMS_ENABLED.
     let dsm_processor = if config.ext.dsm_consume_enabled {
         let service = config
             .service

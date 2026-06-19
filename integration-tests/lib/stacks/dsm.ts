@@ -20,10 +20,11 @@ import {
  * runtimes (Node/Python via datadog-lambda-*) do NOT call start-invocation and
  * would never exercise the hook.
  *
- * DD_DSM_CONSUME_ENABLED turns the feature on. DD_DATA_STREAMS_ENABLED is forced
- * off so the tracer does not also emit DSM, which would create a second consume
- * node and let the test pass for the wrong reason — the extension must be the
- * only source of `data_streams.latency` for this service.
+ * DD_DATA_STREAMS_ENABLED turns the feature on. It is the same flag the tracer
+ * libraries use, but the extension and tracer never emit checkpoints for the
+ * same runtime: Java's universal instrumentation (the path that drives the
+ * extension hook) does not propagate DSM, so the extension remains the only
+ * source of `data_streams.latency` for this service.
  *
  * Reuses the shared default-java handler, which accepts an arbitrary JSON event
  * map; the test invokes it with a synthetic SQS event carrying a known producer
@@ -50,11 +51,10 @@ export class Dsm extends cdk.Stack {
         DD_SERVICE: functionName,
         AWS_LAMBDA_EXEC_WRAPPER: "/opt/datadog_wrapper",
         DD_TRACE_ENABLED: "true",
-        // Feature under test.
-        DD_DSM_CONSUME_ENABLED: "true",
-        // Keep tracer-side DSM off so the extension is the only source of
+        // Feature under test. Java's universal instrumentation does not emit
+        // tracer-side DSM, so the extension is the only source of
         // data_streams.latency for this service.
-        DD_DATA_STREAMS_ENABLED: "false",
+        DD_DATA_STREAMS_ENABLED: "true",
       },
       logGroup: createLogGroup(this, functionName),
     });

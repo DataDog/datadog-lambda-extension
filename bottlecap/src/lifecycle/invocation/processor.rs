@@ -112,7 +112,7 @@ pub struct Processor {
     /// preventing double counting.
     init_duration_metric_emitted: bool,
     /// Optional extension-side DSM consume processor. `Some` only when
-    /// `DD_DSM_CONSUME_ENABLED` is set; records `direction:in` checkpoints from
+    /// `DD_DATA_STREAMS_ENABLED` is set; records `direction:in` checkpoints from
     /// inbound event payloads.
     #[allow(clippy::struct_field_names)]
     dsm_processor: Option<Arc<crate::traces::data_streams::DsmProcessor>>,
@@ -164,7 +164,7 @@ impl Processor {
     }
 
     /// Attach an extension-side DSM consume processor. Called during startup only
-    /// when `DD_DSM_CONSUME_ENABLED` is set.
+    /// when `DD_DATA_STREAMS_ENABLED` is set.
     pub fn set_dsm_processor(
         &mut self,
         dsm_processor: Arc<crate::traces::data_streams::DsmProcessor>,
