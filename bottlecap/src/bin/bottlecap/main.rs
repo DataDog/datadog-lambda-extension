@@ -97,6 +97,7 @@ use dogstatsd::{
 };
 use libdd_trace_obfuscation::obfuscation_config;
 use reqwest::Client;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::{collections::hash_map, env, path::Path, str::FromStr, sync::Arc};
 use tokio::time::Instant;
 use tokio::{sync::Mutex as TokioMutex, sync::mpsc::Sender};
@@ -114,6 +115,12 @@ async fn main() -> anyhow::Result<()> {
     log_fips_status(&aws_config.region);
     let version_without_next = EXTENSION_VERSION.split('-').next().unwrap_or("NA");
     debug!("Starting Datadog Extension v{version_without_next}");
+    // Tokio sizes its worker pool from available_parallelism(); logging it makes the
+    // value the runtime actually sees observable per memory tier (see cold-start H15).
+    debug!(
+        "INIT | available_parallelism={:?}",
+        std::thread::available_parallelism()
+    );
 
     // Debug: Wait for debugger to attach if DD_DEBUG_WAIT_FOR_ATTACH is set
     if let Ok(wait_secs) = env::var("DD_DEBUG_WAIT_FOR_ATTACH")
@@ -126,11 +133,15 @@ async fn main() -> anyhow::Result<()> {
     }
 
     prepare_client_provider()?;
+    // Separate checkpoint so the next difference isolates the TLS client build from
+    // crypto-provider setup (the latter is non-trivial in FIPS builds).
+    log_init_checkpoint(start_time, "crypto_provider_ready");
     let client = create_reqwest_client_builder()
         .map_err(|e| anyhow::anyhow!("Failed to create client builder: {e:?}"))?
         .no_proxy()
         .build()
         .map_err(|e| anyhow::anyhow!("Failed to create client: {e:?}"))?;
+    log_init_checkpoint(start_time, "tls_client_build");
 
     let cloned_client = client.clone();
     let runtime_api = aws_config.runtime_api.clone();
@@ -148,6 +159,7 @@ async fn main() -> anyhow::Result<()> {
     let lambda_directory: String =
         env::var("LAMBDA_TASK_ROOT").unwrap_or_else(|_| "/var/task".to_string());
     let config = Arc::new(config::get_config(Path::new(&lambda_directory)));
+    log_init_checkpoint(start_time, "config_parse");
 
     let aws_config = Arc::new(aws_config);
     // Build one shared reqwest::Client for metrics, logs, trace proxy flushing, and calls to
@@ -155,11 +167,13 @@ async fn main() -> anyhow::Result<()> {
     // just increments a refcount and shares the connection pool.
     let shared_client = bottlecap::http::get_client(&config);
     let api_key_factory = create_api_key_factory(&config, &aws_config, &shared_client);
+    log_init_checkpoint(start_time, "shared_client_ready");
 
     let r = response
         .await
         .map_err(|e| anyhow::anyhow!("Failed to join task: {e:?}"))?
         .map_err(|e| anyhow::anyhow!("Failed to register extension: {e:?}"))?;
+    log_init_checkpoint(start_time, "register_ready");
 
     match extension_loop_active(
         Arc::clone(&aws_config),
@@ -189,6 +203,34 @@ fn init_ustr() {
     tokio::spawn(async {
         Ustr::from("");
     });
+}
+
+/// Cumulative nanoseconds (since process start) recorded at the previous init
+/// checkpoint, so each checkpoint can report its own per-phase delta without the
+/// reader having to subtract consecutive lines by hand.
+static LAST_INIT_CHECKPOINT_NS: AtomicU64 = AtomicU64::new(0);
+
+/// Records a cold-start init checkpoint at `phase`, logging both `delta` (time
+/// since the previous checkpoint, i.e. this phase's own cost) and `cumulative`
+/// (time since process start), in milliseconds to 6 decimal places (nanosecond
+/// resolution) so sub-millisecond phases are still visible. This attributes init
+/// time per phase so the cold-start optimizations can be measured, not guessed.
+///
+/// The bookkeeping is guarded behind a `DEBUG`-level check, so it stays
+/// effectively free at the default `info` level (no clock read, no logging).
+fn log_init_checkpoint(start_time: Instant, phase: &str) {
+    if !tracing::enabled!(tracing::Level::DEBUG) {
+        return;
+    }
+    let cumulative = start_time.elapsed();
+    let cumulative_ns = u64::try_from(cumulative.as_nanos()).unwrap_or(u64::MAX);
+    let previous_ns = LAST_INIT_CHECKPOINT_NS.swap(cumulative_ns, Ordering::Relaxed);
+    let delta = std::time::Duration::from_nanos(cumulative_ns.saturating_sub(previous_ns));
+    debug!(
+        "INIT | phase={phase} delta={:.6}ms cumulative={:.6}ms",
+        delta.as_secs_f64() * 1000.0,
+        cumulative.as_secs_f64() * 1000.0
+    );
 }
 
 fn enable_logging_subsystem() {
@@ -328,6 +370,7 @@ async fn extension_loop_active(
         &shared_client,
     )
     .await;
+    log_init_checkpoint(start_time, "dogstatsd_started");
 
     let propagator = Arc::new(DatadogCompositePropagator::new(Arc::clone(config)));
     // Lifecycle Invocation Processor
@@ -373,6 +416,7 @@ async fn extension_loop_active(
         appsec_processor.clone(),
         &shared_client,
     );
+    log_init_checkpoint(start_time, "trace_agent_started");
 
     let api_runtime_proxy_shutdown_signal = start_api_runtime_proxy(
         config,
@@ -402,6 +446,7 @@ async fn extension_loop_active(
         aws_config.is_managed_instance_mode(),
     )
     .await?;
+    log_init_checkpoint(start_time, "telemetry_subscribed");
 
     let otlp_cancel_token = start_otlp_agent(
         config,
@@ -421,6 +466,8 @@ async fn extension_loop_active(
         "Datadog Next-Gen Extension ready in {:}ms",
         start_time.elapsed().as_millis().to_string()
     );
+    // Terminal checkpoint so the whole init timeline is one greppable "INIT |" series.
+    log_init_checkpoint(start_time, "ready");
 
     if aws_config.is_managed_instance_mode() {
         // Clone Arc references for the background flusher task
