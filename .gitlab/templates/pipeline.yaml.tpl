@@ -629,10 +629,6 @@ integration-suite:
     IDENTIFIER: ${CI_COMMIT_SHORT_SHA}
     AWS_DEFAULT_REGION: us-east-1
     DD_SITE: datadoghq.com
-    # Datadog Test Optimization (agentless): upload per-test results so flaky /
-    # most-failing tests are tracked over time. DD_API_KEY is exported by
-    # get_secrets.sh in before_script; DD_SITE is set above. NODE_OPTIONS is set
-    # inline on the jest command only (setting it job-wide breaks npm/tsc/cdk).
     DD_CIVISIBILITY_AGENTLESS_ENABLED: "true"
     DD_SERVICE: datadog-lambda-extension
     DD_ENV: ci
