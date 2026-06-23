@@ -629,6 +629,13 @@ integration-suite:
     IDENTIFIER: ${CI_COMMIT_SHORT_SHA}
     AWS_DEFAULT_REGION: us-east-1
     DD_SITE: datadoghq.com
+    # Datadog Test Optimization (agentless): upload per-test results so flaky /
+    # most-failing tests are tracked over time. DD_API_KEY is exported by
+    # get_secrets.sh in before_script; DD_SITE is set above. NODE_OPTIONS is set
+    # inline on the jest command only (setting it job-wide breaks npm/tsc/cdk).
+    DD_CIVISIBILITY_AGENTLESS_ENABLED: "true"
+    DD_SERVICE: datadog-lambda-extension
+    DD_ENV: ci
   {{ with $environment := (ds "environments").environments.sandbox }}
   before_script:
     - EXTERNAL_ID_NAME={{ $environment.external_id }} ROLE_TO_ASSUME={{ $environment.role_to_assume }} AWS_ACCOUNT={{ $environment.account }} source .gitlab/scripts/get_secrets.sh
@@ -652,7 +659,7 @@ integration-suite:
     - npx cdk deploy "integ-${IDENTIFIER}-${TEST_SUITE}" --require-approval never --import-existing-resources
     - echo "Running ${TEST_SUITE} integration tests with identifier ${IDENTIFIER}..."
     - export TEST_SUITE=${TEST_SUITE}
-    - npx jest tests/${TEST_SUITE}.test.ts
+    - DD_TEST_SESSION_NAME="integration-${TEST_SUITE}" NODE_OPTIONS="-r dd-trace/ci/init" npx jest tests/${TEST_SUITE}.test.ts
   {{ with $environment := (ds "environments").environments.sandbox }}
   after_script:
     - EXTERNAL_ID_NAME={{ $environment.external_id }} ROLE_TO_ASSUME={{ $environment.role_to_assume }} AWS_ACCOUNT={{ $environment.account }} source .gitlab/scripts/get_secrets.sh

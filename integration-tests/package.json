@@ -32,6 +32,7 @@
     "aws-cdk": "^2.1111.0",
     "aws-cdk-lib": "^2.237.1",
     "constructs": "^10.4.5",
+    "dd-trace": "^5.109.0",
     "jest": "^29.7.0",
     "jest-html-reporters": "^3.1.7",
     "jest-junit": "^16.0.0",
