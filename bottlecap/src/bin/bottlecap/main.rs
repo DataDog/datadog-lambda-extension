@@ -429,20 +429,23 @@ async fn extension_loop_active(
     let propagator = Arc::new(DatadogCompositePropagator::new(Arc::clone(config)));
 
     // The Lambda Extensions API ends the INIT phase at the first `/next` call, so the
-    // serialized critical path before that call directly inflates cold-start time. The
-    // telemetry subscription only depends on `logs_agent_channel` (already available),
-    // and its `subscribe` HTTP round-trip is independent of constructing the trace agent,
-    // AppSec, API-runtime proxy, and lifecycle listener below. We therefore issue the
-    // subscribe and run that remaining (synchronous) service construction concurrently
-    // via `tokio::join!`: the subscribe future is polled first so its network round-trip
-    // is in flight while construction proceeds, instead of being serialized behind it.
+    // serialized critical path before that call directly inflates cold-start time.
+    // `setup_telemetry_client` binds the telemetry listener socket synchronously (it awaits
+    // the bind — see `TelemetryListener::start`) so the socket is already accepting
+    // connections, then — per H18 — issues the `subscribe` HTTP round-trip in a detached
+    // task and returns the cancel token WITHOUT awaiting the subscribe. We run that bind
+    // concurrently with the remaining (synchronous) service construction (trace agent,
+    // AppSec, API-runtime proxy, lifecycle listener) via `tokio::join!`. Because the
+    // subscribe is no longer awaited here, neither it nor service construction blocks the
+    // path to the first `/next`: the subscribe round-trip now overlaps the `/next`
+    // long-poll wait instead of being serialized ahead of it.
     //
-    // Correctness: `setup_telemetry_client` binds the telemetry listener socket
-    // (synchronously, before `subscribe` returns — see `TelemetryListener::start`) prior
-    // to subscribing, so the listener is already accepting connections when the Telemetry
-    // API begins delivering events. No early `platform.initStart`/`initReport` or logs are
-    // dropped. The construction branch only spawns background tasks and returns handles;
-    // it performs no I/O that the subscribe depends on, so the two are order-independent.
+    // Correctness: the listener socket is bound before this returns, so the listener is
+    // serving when the Telemetry API begins delivering events — nothing is dropped for a
+    // closed-port reason, and the cancel token still drives graceful shutdown. The OPEN
+    // RISK that the subscription may register slightly after `/next` (potentially missing
+    // early `platform.initStart`/`initReport`/logs) is documented in `setup_telemetry_client`
+    // and is what the H18 experiment will measure.
     let telemetry_setup = setup_telemetry_client(
         client,
         &r.extension_id,
@@ -1503,6 +1506,11 @@ async fn setup_telemetry_client(
     let listener = TelemetryListener::new(EXTENSION_HOST_IP, TELEMETRY_PORT, logs_tx, event_bus_tx);
 
     let cancel_token = listener.cancel_token();
+    // Bind the listener socket synchronously (this awaits the bind inside
+    // `TelemetryListener::start`) BEFORE we issue the subscribe. The socket must already
+    // be accepting connections when the Telemetry API begins delivering events, so we
+    // never lose early telemetry to a closed port — the cancel token is wired exactly as
+    // before and still drives graceful shutdown of the spawned serve task.
     match listener.start().await {
         Ok(()) => {
             // Drop the listener, so event_bus_tx is closed
@@ -1513,16 +1521,39 @@ async fn setup_telemetry_client(
         }
     }
 
-    telemetry::subscribe(
-        client,
-        runtime_api,
-        extension_id,
-        TELEMETRY_PORT,
-        logs_enabled,
-        managed_instance_mode,
-    )
-    .await
-    .map_err(|e| anyhow::anyhow!("Failed to subscribe to telemetry: {e:?}"))?;
+    // H18 (experiment): take the Telemetry API `subscribe` round-trip OFF the cold-start
+    // critical path. The Lambda platform ends the extension's INIT phase at the first
+    // `/next` call, and that call then long-polls until the first INVOKE (≫ the ~25 ms
+    // subscribe round-trip we measured as the single dominant init phase). Instead of
+    // awaiting the subscribe's `200 OK` before returning — which previously completed it
+    // before `/next` — we issue it in a detached `tokio::spawn` and return immediately so
+    // init proceeds straight to `/next`. The subscribe HTTP round-trip then overlaps the
+    // `/next` long-poll wait rather than serializing ahead of it.
+    //
+    // OPEN RISK (to be validated, not solved here): the platform may emit
+    // `platform.initStart`/`platform.initReport` and early function logs the moment INIT
+    // ends. If the subscription registers slightly after `/next`, those early init events
+    // could be delivered before the subscription exists and be lost. The listener socket
+    // is already bound (above), so nothing is dropped for a *closed port* reason — the
+    // only exposure is the platform-side registration race. We deliberately do not attempt
+    // to close that race; it is exactly what the H18 benchmark will measure.
+    let subscribe_client = client.clone();
+    let runtime_api = runtime_api.to_string();
+    let extension_id = extension_id.to_string();
+    tokio::spawn(async move {
+        if let Err(e) = telemetry::subscribe(
+            &subscribe_client,
+            &runtime_api,
+            &extension_id,
+            TELEMETRY_PORT,
+            logs_enabled,
+            managed_instance_mode,
+        )
+        .await
+        {
+            error!("Failed to subscribe to telemetry: {e:?}");
+        }
+    });
 
     Ok(cancel_token)
 }
