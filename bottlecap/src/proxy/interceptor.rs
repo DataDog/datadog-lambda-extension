@@ -2,8 +2,12 @@ use crate::lifecycle::invocation::processor_service::InvocationProcessorHandle;
 use crate::lifecycle::invocation::triggers::IdentifiedTrigger;
 use crate::traces::propagation::DatadogCompositePropagator;
 use crate::{
-    appsec::processor::Processor as AppSecProcessor, config::aws::AwsConfig,
-    extension::EXTENSION_HOST, lwa, proxy::tee_body::TeeBodyWithCompletion,
+    appsec::{self, DeferredProcessor as AppSecProcessor},
+    config::Config,
+    config::aws::AwsConfig,
+    extension::EXTENSION_HOST,
+    lwa,
+    proxy::tee_body::TeeBodyWithCompletion,
 };
 use axum::{
     Router,
@@ -32,16 +36,18 @@ type InterceptorState = (
     Arc<AwsConfig>,
     Arc<Client<HttpConnector, Body>>,
     InvocationProcessorHandle,
-    Option<Arc<Mutex<AppSecProcessor>>>,
+    Option<AppSecProcessor>,
     Arc<DatadogCompositePropagator>,
     Arc<Mutex<JoinSet<()>>>,
+    Arc<Config>,
 );
 
 pub fn start(
     aws_config: Arc<AwsConfig>,
     invocation_processor_handle: InvocationProcessorHandle,
-    appsec_processor: Option<Arc<Mutex<AppSecProcessor>>>,
+    appsec_processor: Option<AppSecProcessor>,
     propagator: Arc<DatadogCompositePropagator>,
+    config: Arc<Config>,
 ) -> Result<CancellationToken, Box<dyn std::error::Error>> {
     let socket = get_proxy_socket_address(aws_config.aws_lwa_proxy_lambda_runtime_api.as_ref());
     let shutdown_token = CancellationToken::new();
@@ -62,6 +68,7 @@ pub fn start(
         appsec_processor,
         propagator,
         tasks.clone(),
+        config,
     );
 
     let tasks_clone = tasks.clone();
@@ -133,9 +140,15 @@ fn get_proxy_socket_address(aws_lwa_proxy_lambda_runtime_api: Option<&String>) -
 
 async fn invocation_next_proxy(
     Path(api_version): Path<String>,
-    State((aws_config, client, invocation_processor, appsec_processor, propagator, tasks)): State<
-        InterceptorState,
-    >,
+    State((
+        aws_config,
+        client,
+        invocation_processor,
+        appsec_processor,
+        propagator,
+        tasks,
+        config,
+    )): State<InterceptorState>,
     request: Request,
 ) -> Response {
     debug!("PROXY | invocation_next_proxy | api_version: {api_version}");
@@ -179,20 +192,23 @@ async fn invocation_next_proxy(
         if let Ok(body) = intercepted_completion_receiver.await {
             debug!("PROXY | invocation_next_proxy | intercepted body completed");
 
-            if let Some(appsec_processor) = appsec_processor
+            if let Some(appsec_handle) = &appsec_processor
                 && let Some(request_id) = intercepted_parts_clone
                     .headers
                     .get("Lambda-Runtime-Aws-Request-Id")
                     .and_then(|v| v.to_str().ok())
+                && let Ok(trigger) = IdentifiedTrigger::from_slice(&body)
             {
-                {
-                    if let Ok(trigger) = IdentifiedTrigger::from_slice(&body) {
-                        appsec_processor
-                            .lock()
-                            .await
-                            .process_invocation_next(request_id, &trigger)
-                            .await;
-                    }
+                // Resolve the deferred WAF handle, awaiting its off-critical-path
+                // build if it has not finished yet. This is the first request
+                // payload to be evaluated, so it is the earliest point the WAF is
+                // actually needed.
+                if let Some(appsec_processor) = appsec::resolve(appsec_handle, &config).await {
+                    appsec_processor
+                        .lock()
+                        .await
+                        .process_invocation_next(request_id, &trigger)
+                        .await;
                 }
             }
 
@@ -223,7 +239,7 @@ async fn invocation_next_proxy(
 
 async fn invocation_response_proxy(
     Path((api_version, request_id)): Path<(String, String)>,
-    State((aws_config, client, invocation_processor, appsec_processor, _, tasks)): State<
+    State((aws_config, client, invocation_processor, appsec_processor, _, tasks, config)): State<
         InterceptorState,
     >,
     request: Request,
@@ -241,7 +257,9 @@ async fn invocation_response_proxy(
     join_set.spawn(async move {
         if let Ok(body) = outgoing_completion_receiver.await {
             debug!("PROXY | invocation_response_proxy | intercepted outgoing body completed");
-            if let Some(appsec_processor) = appsec_processor {
+            if let Some(appsec_handle) = &appsec_processor
+                && let Some(appsec_processor) = appsec::resolve(appsec_handle, &config).await
+            {
                 appsec_processor
                     .lock()
                     .await
@@ -304,8 +322,10 @@ async fn invocation_error_proxy(
     request: Request,
 ) -> Response {
     debug!("PROXY | invocation_error_proxy | api_version: {api_version}, request_id: {request_id}");
-    let State((_, _, _, appsec_processor, _, _)) = &state;
-    if let Some(appsec_processor) = appsec_processor {
+    let State((_, _, _, appsec_processor, _, _, config)) = &state;
+    if let Some(appsec_handle) = appsec_processor
+        && let Some(appsec_processor) = appsec::resolve(appsec_handle, config).await
+    {
         // Marking any outstanding security context as finalized by sending a blank response.
         appsec_processor
             .lock()
@@ -318,7 +338,7 @@ async fn invocation_error_proxy(
 }
 
 async fn passthrough_proxy(
-    State((aws_config, client, _, _, _, _)): State<InterceptorState>,
+    State((aws_config, client, _, _, _, _, _)): State<InterceptorState>,
     request: Request,
 ) -> Response {
     let (parts, body) = request.into_parts();
@@ -434,7 +454,7 @@ where
 mod tests {
     use http_body_util::BodyExt;
     use std::{collections::HashMap, time::Duration};
-    use tokio::{sync::Mutex as TokioMutex, time::Instant};
+    use tokio::time::Instant;
 
     use dogstatsd::{aggregator::AggregatorService, metric::EMPTY_TAGS};
     use http_body_util::Full;
@@ -444,8 +464,8 @@ mod tests {
     use super::*;
     use crate::lifecycle::invocation::processor_service::InvocationProcessorService;
     use crate::{
-        LAMBDA_RUNTIME_SLUG, appsec::processor::Error::FeatureDisabled as AppSecFeatureDisabled,
-        config::Config, tags::provider::Provider, traces::propagation::DatadogCompositePropagator,
+        LAMBDA_RUNTIME_SLUG, config::Config, tags::provider::Provider,
+        traces::propagation::DatadogCompositePropagator,
     };
 
     #[tokio::test]
@@ -513,22 +533,16 @@ mod tests {
             invocation_processor_service.run().await;
         });
 
-        let appsec_processor = match AppSecProcessor::new(&config) {
-            Ok(p) => Some(Arc::new(TokioMutex::new(p))),
-            Err(AppSecFeatureDisabled) => None,
-            Err(e) => {
-                error!(
-                    "PROXY | aap | error creating App & API Protection processor, the feature will be disabled: {e}"
-                );
-                None
-            }
-        };
+        // App & API Protection is disabled in the default config, so this
+        // resolves to `None` synchronously (no WAF build is spawned).
+        let appsec_processor = appsec::defer_processor(&config);
 
         let proxy_handle = start(
             aws_config,
             invocation_processor_handle,
             appsec_processor,
             propagator,
+            Arc::clone(&config),
         )
         .expect("Failed to start API runtime proxy");
         let https = HttpConnector::new();
