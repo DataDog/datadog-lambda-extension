@@ -33,7 +33,7 @@ describe('OTLP Integration Tests', () => {
     telemetry = await invokeAndCollectTelemetry(functions, 1, 1, 0, {}, DATADOG_INDEXING_WAIT_5_MIN_MS);
 
     console.log('All OTLP Lambda invocations and data fetching completed');
-  }, 700000);
+  }, 1800000);
 
   describe.each(runtimes)('%s Runtime', (runtime) => {
     const getResult = () => telemetry[runtime]?.threads[0]?.[0];
