@@ -17,8 +17,7 @@ RUN set -euo pipefail && \
     curl https://sh.rustup.rs -sSf | \
         sh -s -- --profile minimal \
                  --default-host "${PLATFORM}-unknown-linux-musl" \
-                 --default-toolchain "stable-${PLATFORM}-unknown-linux-musl" \
-                 --component rust-src \
+                 --default-toolchain none \
                  -y
 ENV PATH="${PATH}:/root/.cargo/bin"
 
@@ -47,7 +46,7 @@ RUN --mount=type=cache,target=/root/.cargo/git \
     # -Ctarget-feature=-crt-static so that it is capable of dynamically loading
     # libclang; while still building bottlecap with a static CRT.
     RUSTC_WRAPPER=/tmp/dd/.cargo/musl.rustc-wrapper \
-    cargo +stable build --verbose --locked --no-default-features \
+    cargo build --verbose --locked --no-default-features \
         --features="${FEATURES}" \
         --profile="${PROFILE:-release}" && \
     mkdir -p /tmp/out && \
