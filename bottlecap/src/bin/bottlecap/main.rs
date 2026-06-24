@@ -491,7 +491,6 @@ async fn extension_loop_active(
             &invocation_processor_handle,
             appsec_processor.as_ref(),
             Arc::clone(&propagator),
-            Arc::clone(config),
         );
 
         let lifecycle_listener =
