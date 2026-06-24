@@ -24,6 +24,11 @@ ENV PATH="${PATH}:/root/.cargo/bin"
 
 # Build the binary
 ENV RUSTFLAGS="-Cpanic=abort"
+# tikv-jemallocator uses the `_rjem_` symbol prefix, so the runtime MALLOC_CONF
+# env var is ignored. Tune jemalloc at compile time instead: a single arena
+# reduces metadata mapped at init and lowers RSS (the extension is not
+# allocation-throughput-bound, so arena contention is a non-issue here).
+ENV JEMALLOC_SYS_WITH_MALLOC_CONF="narenas:1"
 
 WORKDIR /tmp/dd/bottlecap
 RUN --mount=type=cache,target=/root/.cargo/git \
