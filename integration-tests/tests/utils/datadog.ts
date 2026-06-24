@@ -54,27 +54,14 @@ function formatDatadogError(error: unknown, query: string): string {
   return `Error (query: '${query}'): ${String(error)}`;
 }
 
-// Total time a single request is allowed to spend waiting out 429s before
-// giving up. Kept under the Jest `beforeAll` timeout (30 min) — with margin
-// for the other requests a suite makes — so a rate-limited suite fails with
-// the rich 429 message rather than timing out.
 const MAX_RETRY_WAIT_MS = 20 * 60 * 1000;
-// Fallback wait when the API returns 429 without a usable retry-after header.
 const DEFAULT_RETRY_AFTER_MS = 5000;
-// Upper bound on any single backoff so one large header value can't blow the
-// whole budget on the first retry.
 const MAX_SINGLE_WAIT_MS = 60 * 1000;
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-/**
- * Reads the retry delay (ms) advertised by a 429 response, honoring
- * `retry-after` / `x-ratelimit-reset` (both expressed in seconds). Falls back
- * to a default when the header is missing or unparseable, and caps a single
- * wait so an oversized value can't consume the entire retry budget at once.
- */
 function parseRetryAfterMs(error: AxiosError): number {
   const headers = error.response?.headers ?? {};
   const raw = headers['x-ratelimit-reset'] ?? headers['retry-after'];
@@ -84,12 +71,8 @@ function parseRetryAfterMs(error: AxiosError): number {
 }
 
 /**
- * Executes a Datadog API request, retrying with backoff when the API responds
- * 429 Too Many Requests. Honors the rate-limit reset header, adds a little
- * random jitter so the ~7 suites running in parallel (each sharing one API
- * key) don't retry in lockstep, and caps the total time spent waiting. When the
- * budget is exhausted the last 429 is rethrown so callers still surface the
- * rich rate-limit error message via formatDatadogError.
+ * Executes a Datadog API request, retrying with jittered backoff on HTTP 429
+ * until MAX_RETRY_WAIT_MS is exhausted, then rethrowing the last 429.
  */
 async function requestWithRetry<T>(fn: () => Promise<T>, query: string): Promise<T> {
   let waited = 0;
@@ -106,7 +89,6 @@ async function requestWithRetry<T>(fn: () => Promise<T>, query: string): Promise
       const jitter = Math.floor(Math.random() * 1000);
       const wait = parseRetryAfterMs(error as AxiosError) + jitter;
       if (waited + wait > MAX_RETRY_WAIT_MS) {
-        // Out of budget — rethrow so the caller logs the rich 429 message.
         throw error;
       }
       attempt += 1;
