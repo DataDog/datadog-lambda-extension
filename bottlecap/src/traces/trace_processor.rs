@@ -3,6 +3,7 @@
 
 use crate::appsec::processor::Processor as AppSecProcessor;
 use crate::appsec::processor::context::HoldArguments;
+use crate::appsec::{self, DeferredProcessor as AppSecDeferredProcessor};
 use crate::config;
 use crate::lifecycle::invocation::processor::S_TO_MS;
 use crate::lifecycle::invocation::triggers::get_default_service_name;
@@ -28,7 +29,6 @@ use libdd_trace_utils::tracer_payload::{TraceChunkProcessor, TracerPayloadCollec
 use regex::Regex;
 use std::str::FromStr;
 use std::sync::Arc;
-use tokio::sync::Mutex;
 use tokio::sync::mpsc::Sender;
 use tokio::sync::mpsc::error::SendError;
 use tracing::{debug, error};
@@ -498,9 +498,10 @@ impl TraceProcessor for ServerlessTraceProcessor {
 /// Once ready to flush, the traces are submitted to the provided [`Sender`].
 #[derive(Clone)]
 pub struct SendingTraceProcessor {
-    /// The [`AppSecProcessor`] to use for security-processing the traces, if
-    /// configured.
-    pub appsec: Option<Arc<Mutex<AppSecProcessor>>>,
+    /// A deferred handle to the [`AppSecProcessor`] to use for
+    /// security-processing the traces, if the feature is enabled. The handle is
+    /// resolved (awaiting the off-critical-path WAF build) at the point of use.
+    pub appsec: Option<AppSecDeferredProcessor>,
     /// The [`TraceProcessor`]  to use for transforming raw traces into
     /// [`SendDataBuilderInfo`]s before flushing.
     pub processor: Arc<dyn TraceProcessor + Send + Sync>,
@@ -522,7 +523,13 @@ impl SendingTraceProcessor {
         body_size: usize,
         span_pointers: Option<Vec<SpanPointer>>,
     ) -> Result<(), SendError<SendDataBuilderInfo>> {
-        traces = if let Some(appsec) = &self.appsec {
+        // Resolve the deferred AppSec handle (awaiting the off-critical-path WAF
+        // build if it is still in flight) only when the feature is enabled.
+        let appsec = match &self.appsec {
+            Some(handle) => appsec::resolve(handle, &config).await,
+            None => None,
+        };
+        traces = if let Some(appsec) = &appsec {
             let mut appsec = appsec.lock().await;
             traces.into_iter().filter_map(|mut trace| {
                 let Some(span) = AppSecProcessor::service_entry_span_mut(&mut trace) else {
