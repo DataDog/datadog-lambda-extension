@@ -106,8 +106,22 @@ use tracing::{debug, error, warn};
 use tracing_subscriber::EnvFilter;
 use ustr::Ustr;
 
-#[tokio::main]
-async fn main() -> anyhow::Result<()> {
+fn main() -> anyhow::Result<()> {
+    // Right-size the Tokio worker pool to the Lambda memory tier instead of letting
+    // `#[tokio::main]` default to `available_parallelism()`. AWS scales a function's
+    // vCPU allotment linearly with memory, granting one full vCPU at 1769 MB, so we
+    // map memory -> workers with integer math (no float casts that would trip
+    // clippy::pedantic) and clamp to a sane 1..=4 range. Pairs with the H0
+    // `available_parallelism` log so the chosen worker count can be benchmarked.
+    let worker_threads = tokio_worker_threads();
+    tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(worker_threads)
+        .enable_all()
+        .build()?
+        .block_on(run())
+}
+
+async fn run() -> anyhow::Result<()> {
     let start_time = Instant::now();
     init_ustr();
     enable_logging_subsystem();
@@ -194,6 +208,30 @@ async fn main() -> anyhow::Result<()> {
             error!("Extension loop failed: {e:?}, Calling /next without Datadog instrumentation");
             extension_loop_idle(&client, &r, &aws_config).await
         }
+    }
+}
+
+/// Derives the Tokio worker-thread count from the Lambda memory tier exposed via
+/// `AWS_LAMBDA_FUNCTION_MEMORY_SIZE` (megabytes). AWS allocates ~1 vCPU per
+/// 1769 MB, so `workers = round(mem_mb / 1769)` approximates the vCPUs the
+/// sandbox actually grants; the result is clamped to `1..=4`. Uses integer math
+/// — `(mem_mb + 884) / 1769` is `round(mem_mb / 1769)` — to avoid float casts.
+/// Falls back to 2 workers when the variable is absent or unparseable.
+fn tokio_worker_threads() -> usize {
+    const MB_PER_VCPU: u32 = 1769;
+    const DEFAULT_WORKERS: usize = 2;
+    const MAX_WORKERS: usize = 4;
+
+    match env::var("AWS_LAMBDA_FUNCTION_MEMORY_SIZE")
+        .ok()
+        .and_then(|mem| mem.trim().parse::<u32>().ok())
+    {
+        Some(mem_mb) => {
+            // round(mem_mb / 1769) via integer arithmetic, then clamp to 1..=4.
+            let workers = (mem_mb + MB_PER_VCPU / 2) / MB_PER_VCPU;
+            (workers as usize).clamp(1, MAX_WORKERS)
+        }
+        None => DEFAULT_WORKERS,
     }
 }
 
