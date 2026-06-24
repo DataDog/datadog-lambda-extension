@@ -16,11 +16,16 @@ use tikv_jemallocator::Jemalloc;
 #[global_allocator]
 static GLOBAL: Jemalloc = Jemalloc;
 
+#[cfg(not(feature = "appsec"))]
+use bottlecap::AppSecProcessorStub as AppSecProcessor;
+#[cfg(feature = "appsec")]
+use bottlecap::appsec::processor::{
+    Error::FeatureDisabled as AppSecFeatureDisabled, Processor as AppSecProcessor,
+};
+#[cfg(feature = "otlp")]
+use bottlecap::otlp::{agent::Agent as OtlpAgent, should_enable_otlp_agent};
 use bottlecap::{
     DOGSTATSD_PORT, LAMBDA_RUNTIME_SLUG,
-    appsec::processor::{
-        Error::FeatureDisabled as AppSecFeatureDisabled, Processor as AppSecProcessor,
-    },
     config::{
         self, Config,
         aws::{AwsConfig, build_lambda_function_arn},
@@ -53,7 +58,6 @@ use bottlecap::{
         flusher::LogsFlusher,
         lambda::DurableContextUpdate,
     },
-    otlp::{agent::Agent as OtlpAgent, should_enable_otlp_agent},
     proxy::{interceptor, should_start_proxy},
     secrets::decrypt,
     tags::{
@@ -388,6 +392,7 @@ async fn extension_loop_active(
     });
 
     // AppSec processor (if enabled)
+    #[cfg(feature = "appsec")]
     let appsec_processor = match AppSecProcessor::new(config) {
         Ok(p) => Some(Arc::new(TokioMutex::new(p))),
         Err(AppSecFeatureDisabled) => None,
@@ -398,6 +403,10 @@ async fn extension_loop_active(
             None
         }
     };
+    // AppSec compiled out: the processor is always absent, but the value is still
+    // threaded through trace/proxy wiring (as `None`) to keep call sites uniform.
+    #[cfg(not(feature = "appsec"))]
+    let appsec_processor: Option<Arc<TokioMutex<AppSecProcessor>>> = None;
 
     let (
         trace_agent_channel,
@@ -1441,6 +1450,7 @@ async fn setup_telemetry_client(
     Ok(cancel_token)
 }
 
+#[cfg(feature = "otlp")]
 fn start_otlp_agent(
     config: &Arc<Config>,
     tags_provider: Arc<TagProvider>,
@@ -1471,6 +1481,20 @@ fn start_otlp_agent(
     });
 
     Some(cancel_token)
+}
+
+/// No-op fallback when the `otlp` feature is disabled: the OTLP agent is not
+/// compiled in, so there is never a cancellation token to return.
+#[cfg(not(feature = "otlp"))]
+#[allow(clippy::needless_pass_by_value, clippy::unnecessary_wraps)]
+fn start_otlp_agent(
+    _config: &Arc<Config>,
+    _tags_provider: Arc<TagProvider>,
+    _trace_processor: Arc<dyn trace_processor::TraceProcessor + Send + Sync>,
+    _trace_tx: Sender<SendDataBuilderInfo>,
+    _stats_concentrator: StatsConcentratorHandle,
+) -> Option<CancellationToken> {
+    None
 }
 
 fn start_api_runtime_proxy(

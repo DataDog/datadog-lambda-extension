@@ -19,6 +19,7 @@
 // Allow use of the `coverage_nightly` attribute
 #![cfg_attr(coverage_nightly, feature(coverage_attribute))]
 
+#[cfg(feature = "appsec")]
 pub mod appsec;
 pub mod config;
 pub mod event_bus;
@@ -31,12 +32,23 @@ pub mod logger;
 pub mod logs;
 pub mod lwa;
 pub mod metrics;
+#[cfg(feature = "otlp")]
 pub mod otlp;
 pub mod proc;
 pub mod proxy;
 pub mod secrets;
 pub mod tags;
 pub mod traces;
+
+/// Placeholder standing in for [`appsec::processor::Processor`] when the `appsec`
+/// feature is disabled. It keeps `Option<Arc<Mutex<…>>>` fields and the proxy
+/// state tuple identically shaped across both builds, so call sites that merely
+/// thread the value through (always as `None`) compile unchanged. It is an
+/// uninhabited enum and can never be constructed; every code path that would
+/// actually invoke the WAF is itself `#[cfg(feature = "appsec")]`-gated.
+#[cfg(not(feature = "appsec"))]
+#[derive(Debug, Clone, Copy)]
+pub enum AppSecProcessorStub {}
 
 pub const LAMBDA_RUNTIME_SLUG: &str = "lambda";
 

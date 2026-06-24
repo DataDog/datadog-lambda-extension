@@ -1,9 +1,13 @@
+#[cfg(not(feature = "appsec"))]
+use crate::AppSecProcessorStub as AppSecProcessor;
+#[cfg(feature = "appsec")]
+use crate::appsec::processor::Processor as AppSecProcessor;
 use crate::lifecycle::invocation::processor_service::InvocationProcessorHandle;
+#[cfg(feature = "appsec")]
 use crate::lifecycle::invocation::triggers::IdentifiedTrigger;
 use crate::traces::propagation::DatadogCompositePropagator;
 use crate::{
-    appsec::processor::Processor as AppSecProcessor, config::aws::AwsConfig,
-    extension::EXTENSION_HOST, lwa, proxy::tee_body::TeeBodyWithCompletion,
+    config::aws::AwsConfig, extension::EXTENSION_HOST, lwa, proxy::tee_body::TeeBodyWithCompletion,
 };
 use axum::{
     Router,
@@ -179,6 +183,7 @@ async fn invocation_next_proxy(
         if let Ok(body) = intercepted_completion_receiver.await {
             debug!("PROXY | invocation_next_proxy | intercepted body completed");
 
+            #[cfg(feature = "appsec")]
             if let Some(appsec_processor) = appsec_processor
                 && let Some(request_id) = intercepted_parts_clone
                     .headers
@@ -195,6 +200,10 @@ async fn invocation_next_proxy(
                     }
                 }
             }
+            // AppSec compiled out: the processor is always `None`; drop it to keep
+            // the State tuple shape uniform without an unused-variable warning.
+            #[cfg(not(feature = "appsec"))]
+            let _ = appsec_processor;
 
             if aws_config.aws_lwa_proxy_lambda_runtime_api.is_some() {
                 lwa::process_invocation_next(
@@ -241,6 +250,7 @@ async fn invocation_response_proxy(
     join_set.spawn(async move {
         if let Ok(body) = outgoing_completion_receiver.await {
             debug!("PROXY | invocation_response_proxy | intercepted outgoing body completed");
+            #[cfg(feature = "appsec")]
             if let Some(appsec_processor) = appsec_processor {
                 appsec_processor
                     .lock()
@@ -248,6 +258,8 @@ async fn invocation_response_proxy(
                     .process_invocation_result(&request_id, &body)
                     .await;
             }
+            #[cfg(not(feature = "appsec"))]
+            let _ = appsec_processor;
 
             if aws_config_clone.aws_lwa_proxy_lambda_runtime_api.is_some() {
                 lwa::process_invocation_response(&invocation_processor, &body).await;
@@ -304,14 +316,17 @@ async fn invocation_error_proxy(
     request: Request,
 ) -> Response {
     debug!("PROXY | invocation_error_proxy | api_version: {api_version}, request_id: {request_id}");
-    let State((_, _, _, appsec_processor, _, _)) = &state;
-    if let Some(appsec_processor) = appsec_processor {
-        // Marking any outstanding security context as finalized by sending a blank response.
-        appsec_processor
-            .lock()
-            .await
-            .process_invocation_result(&request_id, &Bytes::from("{}"))
-            .await;
+    #[cfg(feature = "appsec")]
+    {
+        let State((_, _, _, appsec_processor, _, _)) = &state;
+        if let Some(appsec_processor) = appsec_processor {
+            // Marking any outstanding security context as finalized by sending a blank response.
+            appsec_processor
+                .lock()
+                .await
+                .process_invocation_result(&request_id, &Bytes::from("{}"))
+                .await;
+        }
     }
 
     passthrough_proxy(state, request).await
@@ -442,13 +457,16 @@ mod tests {
     use hyper_util::rt::TokioIo;
 
     use super::*;
+    #[cfg(feature = "appsec")]
+    use crate::appsec::processor::Error::FeatureDisabled as AppSecFeatureDisabled;
     use crate::lifecycle::invocation::processor_service::InvocationProcessorService;
     use crate::{
-        LAMBDA_RUNTIME_SLUG, appsec::processor::Error::FeatureDisabled as AppSecFeatureDisabled,
-        config::Config, tags::provider::Provider, traces::propagation::DatadogCompositePropagator,
+        LAMBDA_RUNTIME_SLUG, config::Config, tags::provider::Provider,
+        traces::propagation::DatadogCompositePropagator,
     };
 
     #[tokio::test]
+    #[allow(clippy::too_many_lines)]
     async fn test_noop_proxy() {
         let aws_lwa_lambda_runtime_api = "127.0.0.1:12345";
         let aws_lambda_runtime_api = "127.0.0.1:12344";
@@ -513,6 +531,7 @@ mod tests {
             invocation_processor_service.run().await;
         });
 
+        #[cfg(feature = "appsec")]
         let appsec_processor = match AppSecProcessor::new(&config) {
             Ok(p) => Some(Arc::new(TokioMutex::new(p))),
             Err(AppSecFeatureDisabled) => None,
@@ -523,6 +542,8 @@ mod tests {
                 None
             }
         };
+        #[cfg(not(feature = "appsec"))]
+        let appsec_processor: Option<Arc<TokioMutex<AppSecProcessor>>> = None;
 
         let proxy_handle = start(
             aws_config,

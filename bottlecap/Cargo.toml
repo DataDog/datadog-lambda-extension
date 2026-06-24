@@ -48,14 +48,17 @@ rustls-pki-types = { version = "1.0", default-features = false }
 hyper-rustls = { version = "0.27.7", default-features = false }
 rand = { version = "0.8", default-features = false }
 prost = { version = "0.14", default-features = false }
-tonic = { version = "0.14", features = ["transport", "codegen", "server", "channel", "router"], default-features = false }
-tonic-types = { version = "0.14", default-features = false }
+# otlp-only (also pulled transitively via datadog-protos, but the OTLP gRPC server
+# needs them as direct deps). Gated behind the `otlp` feature.
+tonic = { version = "0.14", features = ["transport", "codegen", "server", "channel", "router"], default-features = false, optional = true }
+tonic-types = { version = "0.14", default-features = false, optional = true }
 zstd = { version = "0.13.3", default-features = false }
 futures = { version = "0.3.31", default-features = false }
 serde-aux = { version = "4.7", default-features = false }
 serde_html_form = { version = "0.2", default-features = false }
-opentelemetry-proto = { version = "0.31.0", features = ["trace", "with-serde", "gen-tonic"] }
-opentelemetry-semantic-conventions = { version = "0.30", features = ["semconv_experimental"] }
+# otlp-only. Gated behind the `otlp` feature.
+opentelemetry-proto = { version = "0.31.0", features = ["trace", "with-serde", "gen-tonic"], optional = true }
+opentelemetry-semantic-conventions = { version = "0.30", features = ["semconv_experimental"], optional = true }
 # Pinned to <0.8.3: version 0.8.3 upgraded to openssl-probe 0.2.x which scans all cert
 # directories and parses ~200 individual cert files on Lambda instead of loading a single
 # bundle file, adding ~45ms to each reqwest::Client::build() call.
@@ -85,7 +88,8 @@ datadog-opentelemetry = { git = "https://github.com/DataDog/dd-trace-rs", rev = 
 dogstatsd = { git = "https://github.com/DataDog/serverless-components", rev = "8ce37eb029410b7cf30847376772e3af6baa5f5c", default-features = false }
 datadog-fips = { git = "https://github.com/DataDog/serverless-components", rev = "8ce37eb029410b7cf30847376772e3af6baa5f5c", default-features = false }
 datadog-agent-config = { git = "https://github.com/DataDog/serverless-components", rev = "8ce37eb029410b7cf30847376772e3af6baa5f5c", default-features = false }
-libddwaf = { version = "1.28.1", git = "https://github.com/DataDog/libddwaf-rust", rev = "d1534a158d976bd4f747bf9fcc58e0712d2d17fc", default-features = false, features = ["serde"] }
+# appsec-only. Gated behind the `appsec` feature.
+libddwaf = { version = "1.28.1", git = "https://github.com/DataDog/libddwaf-rust", rev = "d1534a158d976bd4f747bf9fcc58e0712d2d17fc", default-features = false, features = ["serde"], optional = true }
 
 [dev-dependencies]
 figment = { version = "0.10", default-features = false, features = ["yaml", "env", "test"] }
@@ -129,6 +133,8 @@ tikv-jemallocator = "0.5"
 
 [features]
 default = [
+    "otlp",
+    "appsec",
     "reqwest/rustls-tls-native-roots",
     "datadog-fips/default",
     "datadog-agent-config/https",
@@ -137,6 +143,17 @@ default = [
     "libdd-trace-obfuscation/https",
     "libdd-trace-stats/https",
 ]
+# OpenTelemetry Protocol (OTLP) ingest. Pulls in the heavy `tonic` /
+# `opentelemetry-proto` stack. On by default so the shipped binary is unchanged.
+otlp = [
+    "dep:opentelemetry-proto",
+    "dep:opentelemetry-semantic-conventions",
+    "dep:tonic",
+    "dep:tonic-types",
+]
+# App & API Protection (AAP / AppSec). Pulls in the `libddwaf` WAF engine. On by
+# default so the shipped binary is unchanged.
+appsec = ["dep:libddwaf"]
 fips = [
     "datadog-agent-config/fips",
     "libdd-common/fips",
@@ -144,6 +161,8 @@ fips = [
     "libdd-trace-obfuscation/fips",
     "libdd-trace-stats/fips",
     "datadog-fips/fips",
+    # FIPS-mode WAF only makes sense when AppSec is compiled in.
+    "appsec",
     "libddwaf/fips",
     "reqwest/rustls-tls-native-roots-no-provider",
     "rustls/fips",

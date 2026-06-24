@@ -21,9 +21,12 @@ use tokio_util::sync::CancellationToken;
 use tower_http::limit::RequestBodyLimitLayer;
 use tracing::{debug, error, warn};
 
+#[cfg(not(feature = "appsec"))]
+use crate::AppSecProcessorStub as AppSecProcessor;
+#[cfg(feature = "appsec")]
+use crate::appsec::processor::Processor as AppSecProcessor;
 use crate::traces::trace_processor::SendingTraceProcessor;
 use crate::{
-    appsec::processor::Processor as AppSecProcessor,
     config,
     http::{extract_request_body, handler_not_found},
     lifecycle::invocation::{

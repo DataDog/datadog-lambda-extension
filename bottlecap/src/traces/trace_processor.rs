@@ -1,7 +1,11 @@
 // Copyright 2023-Present Datadog, Inc. https://www.datadoghq.com/
 // SPDX-License-Identifier: Apache-2.0
 
+#[cfg(not(feature = "appsec"))]
+use crate::AppSecProcessorStub as AppSecProcessor;
+#[cfg(feature = "appsec")]
 use crate::appsec::processor::Processor as AppSecProcessor;
+#[cfg(feature = "appsec")]
 use crate::appsec::processor::context::HoldArguments;
 use crate::config;
 use crate::lifecycle::invocation::processor::S_TO_MS;
@@ -522,41 +526,53 @@ impl SendingTraceProcessor {
         body_size: usize,
         span_pointers: Option<Vec<SpanPointer>>,
     ) -> Result<(), SendError<SendDataBuilderInfo>> {
-        traces = if let Some(appsec) = &self.appsec {
-            let mut appsec = appsec.lock().await;
-            traces.into_iter().filter_map(|mut trace| {
-                let Some(span) = AppSecProcessor::service_entry_span_mut(&mut trace) else {
-                    return Some(trace);
-                };
+        // App & API Protection span processing. Only compiled in when the `appsec`
+        // feature is enabled; otherwise the traces pass through untouched. The
+        // outer block keeps `traces` reassigned (hence `mut` used) in both builds.
+        traces = {
+            #[cfg(feature = "appsec")]
+            {
+                if let Some(appsec) = &self.appsec {
+                    let mut appsec = appsec.lock().await;
+                    traces.into_iter().filter_map(|mut trace| {
+                        let Some(span) = AppSecProcessor::service_entry_span_mut(&mut trace) else {
+                            return Some(trace);
+                        };
 
-                let (finalized, ctx) = appsec.process_span(span);
-                if  finalized {
-                    Some(trace)
-                } else if let Some(ctx) = ctx{
-                    debug!("TRACE_PROCESSOR | Holding trace for App & API Protection additional data");
-                    ctx.hold_trace(trace, SendingTraceProcessor{ appsec:  None, processor: self.processor.clone(), trace_tx: self.trace_tx.clone(), stats_generator: self.stats_generator.clone() }, HoldArguments{
-                        config:Arc::clone(&config),
-                        tags_provider:Arc::clone(&tags_provider),
-                        body_size,
-                        span_pointers:span_pointers.clone(),
-                        tracer_header_tags_lang: header_tags.lang.to_string(),
-                        tracer_header_tags_lang_version: header_tags.lang_version.to_string(),
-                        tracer_header_tags_lang_interpreter: header_tags.lang_interpreter.to_string(),
-                        tracer_header_tags_lang_vendor: header_tags.lang_vendor.to_string(),
-                        tracer_header_tags_tracer_version: header_tags.tracer_version.to_string(),
-                        tracer_header_tags_container_id: header_tags.container_id.to_string(),
-                        tracer_header_tags_client_computed_top_level: header_tags.client_computed_top_level,
-                        tracer_header_tags_client_computed_stats: header_tags.client_computed_stats,
-                        tracer_header_tags_dropped_p0_traces: header_tags.dropped_p0_traces,
-                        tracer_header_tags_dropped_p0_spans: header_tags.dropped_p0_spans,
-                    });
-                    None
+                        let (finalized, ctx) = appsec.process_span(span);
+                        if  finalized {
+                            Some(trace)
+                        } else if let Some(ctx) = ctx{
+                            debug!("TRACE_PROCESSOR | Holding trace for App & API Protection additional data");
+                            ctx.hold_trace(trace, SendingTraceProcessor{ appsec:  None, processor: self.processor.clone(), trace_tx: self.trace_tx.clone(), stats_generator: self.stats_generator.clone() }, HoldArguments{
+                                config:Arc::clone(&config),
+                                tags_provider:Arc::clone(&tags_provider),
+                                body_size,
+                                span_pointers:span_pointers.clone(),
+                                tracer_header_tags_lang: header_tags.lang.to_string(),
+                                tracer_header_tags_lang_version: header_tags.lang_version.to_string(),
+                                tracer_header_tags_lang_interpreter: header_tags.lang_interpreter.to_string(),
+                                tracer_header_tags_lang_vendor: header_tags.lang_vendor.to_string(),
+                                tracer_header_tags_tracer_version: header_tags.tracer_version.to_string(),
+                                tracer_header_tags_container_id: header_tags.container_id.to_string(),
+                                tracer_header_tags_client_computed_top_level: header_tags.client_computed_top_level,
+                                tracer_header_tags_client_computed_stats: header_tags.client_computed_stats,
+                                tracer_header_tags_dropped_p0_traces: header_tags.dropped_p0_traces,
+                                tracer_header_tags_dropped_p0_spans: header_tags.dropped_p0_spans,
+                            });
+                            None
+                        } else {
+                            Some(trace)
+                        }
+                    }).collect()
                 } else {
-                    Some(trace)
+                    traces
                 }
-            }).collect()
-        } else {
-            traces
+            }
+            #[cfg(not(feature = "appsec"))]
+            {
+                traces
+            }
         };
 
         if traces.is_empty() {
