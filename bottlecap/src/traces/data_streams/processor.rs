@@ -45,10 +45,13 @@ impl DsmProcessor {
         service: String,
         env: String,
         tracer_version: String,
+        version: String,
+        tags: Vec<String>,
         site: &str,
         proxy_aggregator: Arc<TokioMutex<ProxyAggregator>>,
     ) -> Self {
-        let aggregator = Aggregator::new(service.clone(), env.clone(), tracer_version);
+        let aggregator =
+            Aggregator::new(service.clone(), env.clone(), tracer_version, version, tags);
         Self {
             service,
             env,
@@ -197,6 +200,8 @@ mod tests {
             "svc".into(),
             "env".into(),
             "1.0".into(),
+            "2.0".into(),
+            vec!["team:serverless".into()],
             "datadoghq.com",
             proxy.clone(),
         );
@@ -221,6 +226,8 @@ mod tests {
             "svc".into(),
             "env".into(),
             "1.0".into(),
+            "2.0".into(),
+            vec!["team:serverless".into()],
             "datadoghq.com",
             proxy.clone(),
         );

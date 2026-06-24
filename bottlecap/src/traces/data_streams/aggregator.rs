@@ -60,16 +60,26 @@ pub struct Aggregator {
     service: String,
     env: String,
     tracer_version: String,
+    version: String,
+    tags: Vec<String>,
     buckets: HashMap<u64, StatsBucket>,
 }
 
 impl Aggregator {
     #[must_use]
-    pub fn new(service: String, env: String, tracer_version: String) -> Self {
+    pub fn new(
+        service: String,
+        env: String,
+        tracer_version: String,
+        version: String,
+        tags: Vec<String>,
+    ) -> Self {
         Self {
             service,
             env,
             tracer_version,
+            version,
+            tags,
             buckets: HashMap::new(),
         }
     }
@@ -133,9 +143,13 @@ impl Aggregator {
             stats,
             tracer_version: self.tracer_version.clone(),
             lang: "rust-extension".to_string(),
+            version: self.version.clone(),
+            tags: self.tags.clone(),
+            // TODO(DSM): Validate resolver-side behavior for extension-produced
+            // DD_TAGS / unified tags and whether ProcessTags should also be
+            // emitted in addition to top-level Tags.
         };
 
-        // struct-as-map (named) so keys are emitted as strings, not positional.
         match rmp_serde::to_vec_named(&payload) {
             Ok(buf) => Some(buf),
             Err(e) => {
@@ -158,6 +172,10 @@ struct StatsPayloadSer {
     tracer_version: String,
     #[serde(rename = "Lang")]
     lang: String,
+    #[serde(rename = "Version")]
+    version: String,
+    #[serde(rename = "Tags")]
+    tags: Vec<String>,
 }
 
 #[derive(Serialize)]
@@ -180,7 +198,6 @@ struct StatsPointSer {
     parent_hash: u64,
     #[serde(rename = "EdgeTags")]
     edge_tags: Vec<String>,
-    // serde_bytes => msgpack `bin` (the agent decodes these as []byte).
     #[serde(rename = "EdgeLatency", with = "serde_bytes")]
     edge_latency: Vec<u8>,
     #[serde(rename = "PathwayLatency", with = "serde_bytes")]
@@ -194,8 +211,9 @@ struct StatsPointSer {
 mod tests {
     use super::*;
     use crate::traces::data_streams::checkpoint::compute_consume_checkpoint;
+    use serde::Deserialize;
 
-    fn tags() -> Vec<String> {
+    fn edge_tags() -> Vec<String> {
         vec![
             "direction:in".to_string(),
             "topic:q".to_string(),
@@ -205,37 +223,66 @@ mod tests {
 
     #[test]
     fn empty_aggregator_has_no_payload() {
-        let mut agg = Aggregator::new("svc".into(), "env".into(), "1.0".into());
+        let mut agg = Aggregator::new(
+            "svc".into(),
+            "env".into(),
+            "1.0".into(),
+            "2.0".into(),
+            vec!["team:serverless".into()],
+        );
         assert!(agg.is_empty());
         assert!(agg.take_payload().is_none());
     }
 
     #[test]
     fn aggregates_and_serializes() {
-        let mut agg = Aggregator::new("svc".into(), "env".into(), "1.0".into());
-        let cp = compute_consume_checkpoint("svc", "env", &tags(), None, 2_000_000_000, None);
+        let mut agg = Aggregator::new(
+            "svc".into(),
+            "env".into(),
+            "1.0".into(),
+            "2.0".into(),
+            vec!["team:serverless".into(), "region:us-east-1".into()],
+        );
+        let cp = compute_consume_checkpoint("svc", "env", &edge_tags(), None, 2_000_000_000, None);
         agg.add(&cp, 128.0);
         assert!(!agg.is_empty());
 
         let payload = agg.take_payload().expect("payload");
         assert!(!payload.is_empty());
-        // Draining leaves the aggregator empty.
         assert!(agg.is_empty());
 
-        // Top-level is a 5-key msgpack fixmap (struct-as-map), so the first
-        // byte is 0x85. This guards against accidental struct-as-array output.
         assert_eq!(
-            payload[0], 0x85,
-            "top-level payload must be a 5-entry msgpack map"
+            payload[0], 0x87,
+            "top-level payload must be a 7-entry msgpack map"
         );
+
+        #[derive(Deserialize)]
+        struct DecodedPayload {
+            #[serde(rename = "TracerVersion")]
+            tracer_version: String,
+            #[serde(rename = "Version")]
+            version: String,
+            #[serde(rename = "Tags")]
+            tags: Vec<String>,
+        }
+
+        let decoded: DecodedPayload = rmp_serde::from_slice(&payload).expect("decode payload");
+        assert_eq!(decoded.tracer_version, "1.0");
+        assert_eq!(decoded.version, "2.0");
+        assert_eq!(decoded.tags, vec!["team:serverless", "region:us-east-1"]);
     }
 
     #[test]
     fn same_hash_merges_into_one_point() {
-        let mut agg = Aggregator::new("svc".into(), "env".into(), "1.0".into());
-        // Two checkpoints with identical inputs land in the same bucket+point.
-        let cp1 = compute_consume_checkpoint("svc", "env", &tags(), None, 2_000_000_000, None);
-        let cp2 = compute_consume_checkpoint("svc", "env", &tags(), None, 2_000_000_001, None);
+        let mut agg = Aggregator::new(
+            "svc".into(),
+            "env".into(),
+            "1.0".into(),
+            "2.0".into(),
+            vec!["team:serverless".into()],
+        );
+        let cp1 = compute_consume_checkpoint("svc", "env", &edge_tags(), None, 2_000_000_000, None);
+        let cp2 = compute_consume_checkpoint("svc", "env", &edge_tags(), None, 2_000_000_001, None);
         agg.add(&cp1, 1.0);
         agg.add(&cp2, 1.0);
 

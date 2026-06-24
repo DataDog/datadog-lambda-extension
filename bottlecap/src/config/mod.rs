@@ -242,7 +242,10 @@ impl DatadogConfigExtension for LambdaConfig {
         // data_streams_enabled (source / DD_DATA_STREAMS_ENABLED) →
         // dsm_consume_enabled (config)
         datadog_agent_config::merge_option_to_value!(
-            self, dsm_consume_enabled, source, data_streams_enabled
+            self,
+            dsm_consume_enabled,
+            source,
+            data_streams_enabled
         );
 
         // OR-merge serverless_logs_enabled with the logs_enabled alias. Either
