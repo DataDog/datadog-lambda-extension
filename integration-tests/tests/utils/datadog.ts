@@ -54,7 +54,7 @@ function formatDatadogError(error: unknown, query: string): string {
   return `Error (query: '${query}'): ${String(error)}`;
 }
 
-const MAX_RETRY_WAIT_MS = 20 * 60 * 1000;
+const MAX_RETRY_WAIT_MS = 5 * 60 * 1000;
 const DEFAULT_RETRY_AFTER_MS = 5000;
 const MAX_SINGLE_WAIT_MS = 60 * 1000;
 
