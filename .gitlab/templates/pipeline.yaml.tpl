@@ -626,7 +626,7 @@ integration-suite:
     - build ruby lambdas
     - build go lambdas
   variables:
-    IDENTIFIER: ${CI_COMMIT_SHORT_SHA}
+    IDENTIFIER: ${CI_COMMIT_SHORT_SHA}-${CI_JOB_ID}
     AWS_DEFAULT_REGION: us-east-1
     DD_SITE: datadoghq.com
   {{ with $environment := (ds "environments").environments.sandbox }}
