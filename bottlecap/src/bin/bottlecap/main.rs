@@ -373,70 +373,23 @@ async fn extension_loop_active(
     log_init_checkpoint(start_time, "dogstatsd_started");
 
     let propagator = Arc::new(DatadogCompositePropagator::new(Arc::clone(config)));
-    // Lifecycle Invocation Processor
-    let (invocation_processor_handle, invocation_processor_service) =
-        InvocationProcessorService::new(
-            Arc::clone(&tags_provider),
-            Arc::clone(config),
-            Arc::clone(&aws_config),
-            metrics_aggregator_handle.clone(),
-            Arc::clone(&propagator),
-            durable_context_tx,
-        );
-    tokio::spawn(async move {
-        invocation_processor_service.run().await;
-    });
 
-    // AppSec processor (if enabled)
-    let appsec_processor = match AppSecProcessor::new(config) {
-        Ok(p) => Some(Arc::new(TokioMutex::new(p))),
-        Err(AppSecFeatureDisabled) => None,
-        Err(e) => {
-            error!(
-                "AAP | error creating App & API Protection processor, the feature will be disabled: {e}"
-            );
-            None
-        }
-    };
-
-    let (
-        trace_agent_channel,
-        trace_flusher,
-        trace_processor,
-        stats_flusher,
-        proxy_flusher,
-        trace_agent_shutdown_token,
-        stats_concentrator,
-        trace_aggregator_handle,
-    ) = start_trace_agent(
-        config,
-        &api_key_factory,
-        &tags_provider,
-        invocation_processor_handle.clone(),
-        appsec_processor.clone(),
-        &shared_client,
-    );
-    log_init_checkpoint(start_time, "trace_agent_started");
-
-    let api_runtime_proxy_shutdown_signal = start_api_runtime_proxy(
-        config,
-        Arc::clone(&aws_config),
-        &invocation_processor_handle,
-        appsec_processor.as_ref(),
-        Arc::clone(&propagator),
-    );
-
-    let lifecycle_listener =
-        LifecycleListener::new(invocation_processor_handle.clone(), Arc::clone(&propagator));
-    let lifecycle_listener_shutdown_token = lifecycle_listener.get_shutdown_token();
-    // TODO(astuyve): deprioritize this task after the first request
-    tokio::spawn(async move {
-        if let Err(e) = lifecycle_listener.start().await {
-            error!("Error starting lifecycle listener: {e:?}");
-        }
-    });
-
-    let telemetry_listener_cancel_token = setup_telemetry_client(
+    // The Lambda Extensions API ends the INIT phase at the first `/next` call, so the
+    // serialized critical path before that call directly inflates cold-start time. The
+    // telemetry subscription only depends on `logs_agent_channel` (already available),
+    // and its `subscribe` HTTP round-trip is independent of constructing the trace agent,
+    // AppSec, API-runtime proxy, and lifecycle listener below. We therefore issue the
+    // subscribe and run that remaining (synchronous) service construction concurrently
+    // via `tokio::join!`: the subscribe future is polled first so its network round-trip
+    // is in flight while construction proceeds, instead of being serialized behind it.
+    //
+    // Correctness: `setup_telemetry_client` binds the telemetry listener socket
+    // (synchronously, before `subscribe` returns — see `TelemetryListener::start`) prior
+    // to subscribing, so the listener is already accepting connections when the Telemetry
+    // API begins delivering events. No early `platform.initStart`/`initReport` or logs are
+    // dropped. The construction branch only spawns background tasks and returns handles;
+    // it performs no I/O that the subscribe depends on, so the two are order-independent.
+    let telemetry_setup = setup_telemetry_client(
         client,
         &r.extension_id,
         &aws_config.runtime_api,
@@ -444,8 +397,92 @@ async fn extension_loop_active(
         event_bus_tx.clone(),
         config.ext.serverless_logs_enabled,
         aws_config.is_managed_instance_mode(),
-    )
-    .await?;
+    );
+
+    let build_services = async {
+        // Lifecycle Invocation Processor
+        let (invocation_processor_handle, invocation_processor_service) =
+            InvocationProcessorService::new(
+                Arc::clone(&tags_provider),
+                Arc::clone(config),
+                Arc::clone(&aws_config),
+                metrics_aggregator_handle.clone(),
+                Arc::clone(&propagator),
+                durable_context_tx,
+            );
+        tokio::spawn(async move {
+            invocation_processor_service.run().await;
+        });
+
+        // AppSec processor (if enabled)
+        let appsec_processor = match AppSecProcessor::new(config) {
+            Ok(p) => Some(Arc::new(TokioMutex::new(p))),
+            Err(AppSecFeatureDisabled) => None,
+            Err(e) => {
+                error!(
+                    "AAP | error creating App & API Protection processor, the feature will be disabled: {e}"
+                );
+                None
+            }
+        };
+
+        let trace_agent_bundle = start_trace_agent(
+            config,
+            &api_key_factory,
+            &tags_provider,
+            invocation_processor_handle.clone(),
+            appsec_processor.clone(),
+            &shared_client,
+        );
+        log_init_checkpoint(start_time, "trace_agent_started");
+
+        let api_runtime_proxy_shutdown_signal = start_api_runtime_proxy(
+            config,
+            Arc::clone(&aws_config),
+            &invocation_processor_handle,
+            appsec_processor.as_ref(),
+            Arc::clone(&propagator),
+        );
+
+        let lifecycle_listener =
+            LifecycleListener::new(invocation_processor_handle.clone(), Arc::clone(&propagator));
+        let lifecycle_listener_shutdown_token = lifecycle_listener.get_shutdown_token();
+        // TODO(astuyve): deprioritize this task after the first request
+        tokio::spawn(async move {
+            if let Err(e) = lifecycle_listener.start().await {
+                error!("Error starting lifecycle listener: {e:?}");
+            }
+        });
+
+        (
+            invocation_processor_handle,
+            appsec_processor,
+            trace_agent_bundle,
+            api_runtime_proxy_shutdown_signal,
+            lifecycle_listener_shutdown_token,
+        )
+    };
+
+    let (
+        telemetry_listener_cancel_token,
+        (
+            invocation_processor_handle,
+            appsec_processor,
+            (
+                trace_agent_channel,
+                trace_flusher,
+                trace_processor,
+                stats_flusher,
+                proxy_flusher,
+                trace_agent_shutdown_token,
+                stats_concentrator,
+                trace_aggregator_handle,
+            ),
+            api_runtime_proxy_shutdown_signal,
+            lifecycle_listener_shutdown_token,
+        ),
+    ) = tokio::join!(telemetry_setup, build_services);
+    let telemetry_listener_cancel_token = telemetry_listener_cancel_token?;
     log_init_checkpoint(start_time, "telemetry_subscribed");
 
     let otlp_cancel_token = start_otlp_agent(
@@ -1417,7 +1454,7 @@ async fn setup_telemetry_client(
     let listener = TelemetryListener::new(EXTENSION_HOST_IP, TELEMETRY_PORT, logs_tx, event_bus_tx);
 
     let cancel_token = listener.cancel_token();
-    match listener.start() {
+    match listener.start().await {
         Ok(()) => {
             // Drop the listener, so event_bus_tx is closed
             drop(listener);
