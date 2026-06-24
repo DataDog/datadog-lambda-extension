@@ -129,7 +129,19 @@ tikv-jemallocator = "0.5"
 
 [features]
 default = [
-    "reqwest/rustls-tls-native-roots",
+    # Use webpki-roots (compiled-in Mozilla CA bundle) rather than
+    # rustls-tls-native-roots for the non-FIPS reqwest clients. native-roots
+    # calls rustls_native_certs::load_native_certs() — a filesystem cert-bundle
+    # scan/parse — on *every* reqwest::Client::build(), and bottlecap builds two
+    # reqwest clients during cold-start init (the register client in
+    # bin/bottlecap/main.rs and the shared flush client in src/http.rs).
+    # webpki-roots removes that per-build scan. Trade-off: webpki trusts only the
+    # public Mozilla roots, so private/internal OS-installed CAs are no longer
+    # picked up implicitly; users relying on those must point DD_PROXY_HTTPS at a
+    # trusted intercept or supply the CA via tls_cert_file (which still layers on
+    # top via add_root_certificate in src/http.rs). FIPS builds keep native-roots
+    # (see the `fips` feature) and are unaffected.
+    "reqwest/rustls-tls-webpki-roots",
     "datadog-fips/default",
     "datadog-agent-config/https",
     "libdd-common/https",
