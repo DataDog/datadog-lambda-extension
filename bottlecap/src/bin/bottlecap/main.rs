@@ -18,9 +18,7 @@ static GLOBAL: Jemalloc = Jemalloc;
 
 use bottlecap::{
     DOGSTATSD_PORT, LAMBDA_RUNTIME_SLUG,
-    appsec::processor::{
-        Error::FeatureDisabled as AppSecFeatureDisabled, Processor as AppSecProcessor,
-    },
+    appsec::{self, DeferredProcessor as AppSecProcessor},
     config::{
         self, Config,
         aws::{AwsConfig, build_lambda_function_arn},
@@ -470,17 +468,12 @@ async fn extension_loop_active(
             invocation_processor_service.run().await;
         });
 
-        // AppSec processor (if enabled)
-        let appsec_processor = match AppSecProcessor::new(config) {
-            Ok(p) => Some(Arc::new(TokioMutex::new(p))),
-            Err(AppSecFeatureDisabled) => None,
-            Err(e) => {
-                error!(
-                    "AAP | error creating App & API Protection processor, the feature will be disabled: {e}"
-                );
-                None
-            }
-        };
+        // AppSec processor (if enabled). The WAF build (ruleset decompression, JSON
+        // parsing, and `libddwaf` compilation) is CPU-bound and only needed once the
+        // first request payload is evaluated, which is strictly after the first
+        // `/next`. Defer it off the init critical path: consumers receive an
+        // awaitable handle and resolve it where they actually use the WAF.
+        let appsec_processor = appsec::defer_processor(config);
 
         let trace_agent_bundle = start_trace_agent(
             config,
@@ -498,6 +491,7 @@ async fn extension_loop_active(
             &invocation_processor_handle,
             appsec_processor.as_ref(),
             Arc::clone(&propagator),
+            Arc::clone(config),
         );
 
         let lifecycle_listener =
@@ -918,7 +912,7 @@ async fn extension_loop_active(
 async fn wait_for_tombstone_event(
     event_bus: &mut EventBus,
     invocation_processor_handle: &InvocationProcessorHandle,
-    appsec_processor: Option<Arc<TokioMutex<AppSecProcessor>>>,
+    appsec_processor: Option<AppSecProcessor>,
     tags_provider: Arc<TagProvider>,
     trace_processor: Arc<trace_processor::ServerlessTraceProcessor>,
     trace_agent_channel: Sender<SendDataBuilderInfo>,
@@ -975,7 +969,7 @@ fn cancel_background_services(
 async fn handle_event_bus_event(
     event: Event,
     invocation_processor_handle: InvocationProcessorHandle,
-    appsec_processor: Option<Arc<TokioMutex<AppSecProcessor>>>,
+    appsec_processor: Option<AppSecProcessor>,
     tags_provider: Arc<TagProvider>,
     trace_processor: Arc<trace_processor::ServerlessTraceProcessor>,
     trace_agent_channel: Sender<SendDataBuilderInfo>,
@@ -1242,7 +1236,7 @@ fn start_trace_agent(
     api_key_factory: &Arc<ApiKeyFactory>,
     tags_provider: &Arc<TagProvider>,
     invocation_processor_handle: InvocationProcessorHandle,
-    appsec_processor: Option<Arc<TokioMutex<AppSecProcessor>>>,
+    appsec_processor: Option<AppSecProcessor>,
     client: &Client,
 ) -> (
     Sender<SendDataBuilderInfo>,
@@ -1570,7 +1564,7 @@ fn start_api_runtime_proxy(
     config: &Arc<Config>,
     aws_config: Arc<AwsConfig>,
     invocation_processor_handle: &InvocationProcessorHandle,
-    appsec_processor: Option<&Arc<TokioMutex<AppSecProcessor>>>,
+    appsec_processor: Option<&AppSecProcessor>,
     propagator: Arc<DatadogCompositePropagator>,
 ) -> Option<CancellationToken> {
     if !should_start_proxy(config, Arc::clone(&aws_config)) {
@@ -1584,6 +1578,7 @@ fn start_api_runtime_proxy(
         invocation_processor_handle.clone(),
         appsec_processor,
         propagator,
+        Arc::clone(config),
     )
     .ok()
 }
