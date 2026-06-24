@@ -65,6 +65,12 @@ const RESOURCE_KEY: &str = "resource";
 #[derive(Debug, Clone)]
 pub struct Lambda {
     tags_map: HashMap<String, String>,
+    // Cached representations computed once at construction so that the hot
+    // getters below are O(1) reads instead of re-iterating `tags_map` and
+    // re-running `format!("{k}:{v}")`/`join(",")` on every call.
+    tags_vec: Vec<String>,
+    tags_string: String,
+    function_tags_map: HashMap<String, String>,
 }
 
 fn arch_to_platform<'a>() -> &'a str {
@@ -227,17 +233,29 @@ impl Lambda {
         config: Arc<config::Config>,
         metadata: &HashMap<String, String>,
     ) -> Self {
+        let tags_map = tags_from_env(HashMap::new(), config, metadata);
+        // Compute the derived representations once. The tag set is immutable
+        // after construction, so callers can read these cached values cheaply.
+        let tags_vec: Vec<String> = tags_map.iter().map(|(k, v)| format!("{k}:{v}")).collect();
+        let tags_string = tags_vec.join(",");
+        let function_tags_map =
+            HashMap::from_iter([(FUNCTION_TAGS_KEY.to_string(), tags_string.clone())]);
         Lambda {
-            tags_map: tags_from_env(HashMap::new(), config, metadata),
+            tags_map,
+            tags_vec,
+            tags_string,
+            function_tags_map,
         }
     }
 
     #[must_use]
     pub fn get_tags_vec(&self) -> Vec<String> {
-        self.tags_map
-            .iter()
-            .map(|(k, v)| format!("{k}:{v}"))
-            .collect()
+        self.tags_vec.clone()
+    }
+
+    #[must_use]
+    pub fn get_tags_string(&self) -> &str {
+        &self.tags_string
     }
 
     #[must_use]
@@ -257,13 +275,7 @@ impl Lambda {
 
     #[must_use]
     pub fn get_function_tags_map(&self) -> HashMap<String, String> {
-        let tags = self
-            .tags_map
-            .iter()
-            .map(|(k, v)| format!("{k}:{v}"))
-            .collect::<Vec<String>>()
-            .join(",");
-        HashMap::from_iter([(FUNCTION_TAGS_KEY.to_string(), tags)])
+        self.function_tags_map.clone()
     }
 }
 

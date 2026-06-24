@@ -16,13 +16,17 @@ RUN chmod +x /install-protoc.sh && /install-protoc.sh
 RUN curl https://sh.rustup.rs -sSf | \
     sh -s -- --profile minimal \
              --default-host "${PLATFORM}-unknown-linux-gnu" \
-             --default-toolchain "stable-${PLATFORM}-unknown-linux-gnu" \
-             --component rust-src \
+             --default-toolchain none \
              -y
 ENV PATH="${PATH}:/root/.cargo/bin"
 
 # Build the binary
 ENV RUSTFLAGS="-Cpanic=abort"
+# tikv-jemallocator uses the `_rjem_` symbol prefix, so the runtime MALLOC_CONF
+# env var is ignored. Tune jemalloc at compile time instead: a single arena
+# reduces metadata mapped at init and lowers RSS (the extension is not
+# allocation-throughput-bound, so arena contention is a non-issue here).
+ENV JEMALLOC_SYS_WITH_MALLOC_CONF="narenas:1"
 ENV AWS_LC_FIPS_SYS_CC=clang
 ENV AWS_LC_FIPS_SYS_CXX=clang++
 
@@ -43,10 +47,13 @@ RUN --mount=type=cache,target=/usr/local/cargo/git \
         export BUILD_MODE=debug; \
         export BUILD_FLAG=""; \
     fi; \
+    # Tune codegen for the known Lambda CPUs: arm64 is Graviton2 (neoverse-n1),
+    # x86_64 uses the universally-safe x86-64-v2 baseline (NOT v3, which risks SIGILL).
+    if [ "${PLATFORM}" = "aarch64" ]; then TARGET_CPU="neoverse-n1"; else TARGET_CPU="x86-64-v2"; fi; \
     # The `libddwaf` crate links against static objects that require `libclang_rt.builtins`, but
     # this is not presented to the linker by default on this platform, so we force it in.
-    export RUSTFLAGS="${RUSTFLAGS:-} -Clinker=clang -L$(dirname $(clang --print-file-name="libclang_rt.builtins-$(uname -m).a")) -lclang_rt.builtins-$(uname -m)"; \
-    cargo +stable build --verbose --locked --no-default-features --features="${FEATURES}" ${BUILD_FLAG} && \
+    export RUSTFLAGS="${RUSTFLAGS:-} -Clinker=clang -L$(dirname $(clang --print-file-name="libclang_rt.builtins-$(uname -m).a")) -lclang_rt.builtins-$(uname -m) -Clink-arg=-Wl,-z,now -Clink-arg=-Wl,-z,relro -Ctarget-cpu=${TARGET_CPU}"; \
+    cargo build --verbose --locked --no-default-features --features="${FEATURES}" ${BUILD_FLAG} && \
     mkdir -p /tmp/out && cp "/tmp/dd/bottlecap/target/${BUILD_MODE}/bottlecap" /tmp/out/bottlecap
 
 # Use smallest image possible

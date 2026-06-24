@@ -23,7 +23,7 @@ use tracing::{debug, error, warn};
 
 use crate::traces::trace_processor::SendingTraceProcessor;
 use crate::{
-    appsec::processor::Processor as AppSecProcessor,
+    appsec::DeferredProcessor as AppSecProcessor,
     config,
     http::{extract_request_body, handler_not_found},
     lifecycle::invocation::{
@@ -113,7 +113,7 @@ pub struct TraceAgent {
     pub proxy_aggregator: Arc<Mutex<proxy_aggregator::Aggregator>>,
     pub tags_provider: Arc<provider::Provider>,
     invocation_processor_handle: InvocationProcessorHandle,
-    appsec_processor: Option<Arc<Mutex<AppSecProcessor>>>,
+    appsec_processor: Option<AppSecProcessor>,
     shutdown_token: CancellationToken,
     tx: Sender<SendDataBuilderInfo>,
     stats_concentrator: StatsConcentratorHandle,
@@ -137,7 +137,7 @@ impl TraceAgent {
         stats_processor: Arc<dyn stats_processor::StatsProcessor + Send + Sync>,
         proxy_aggregator: Arc<Mutex<proxy_aggregator::Aggregator>>,
         invocation_processor_handle: InvocationProcessorHandle,
-        appsec_processor: Option<Arc<Mutex<AppSecProcessor>>>,
+        appsec_processor: Option<AppSecProcessor>,
         tags_provider: Arc<provider::Provider>,
         stats_concentrator: StatsConcentratorHandle,
         span_deduper: DedupHandle,

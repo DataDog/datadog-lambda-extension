@@ -18,9 +18,7 @@ static GLOBAL: Jemalloc = Jemalloc;
 
 use bottlecap::{
     DOGSTATSD_PORT, LAMBDA_RUNTIME_SLUG,
-    appsec::processor::{
-        Error::FeatureDisabled as AppSecFeatureDisabled, Processor as AppSecProcessor,
-    },
+    appsec::{self, DeferredProcessor as AppSecProcessor},
     config::{
         self, Config,
         aws::{AwsConfig, build_lambda_function_arn},
@@ -97,6 +95,7 @@ use dogstatsd::{
 };
 use libdd_trace_obfuscation::obfuscation_config;
 use reqwest::Client;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::{collections::hash_map, env, path::Path, str::FromStr, sync::Arc};
 use tokio::time::Instant;
 use tokio::{sync::Mutex as TokioMutex, sync::mpsc::Sender};
@@ -105,8 +104,22 @@ use tracing::{debug, error, warn};
 use tracing_subscriber::EnvFilter;
 use ustr::Ustr;
 
-#[tokio::main]
-async fn main() -> anyhow::Result<()> {
+fn main() -> anyhow::Result<()> {
+    // Right-size the Tokio worker pool to the Lambda memory tier instead of letting
+    // `#[tokio::main]` default to `available_parallelism()`. AWS scales a function's
+    // vCPU allotment linearly with memory, granting one full vCPU at 1769 MB, so we
+    // map memory -> workers with integer math (no float casts that would trip
+    // clippy::pedantic) and clamp to a sane 1..=4 range. Pairs with the H0
+    // `available_parallelism` log so the chosen worker count can be benchmarked.
+    let worker_threads = tokio_worker_threads();
+    tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(worker_threads)
+        .enable_all()
+        .build()?
+        .block_on(run())
+}
+
+async fn run() -> anyhow::Result<()> {
     let start_time = Instant::now();
     init_ustr();
     enable_logging_subsystem();
@@ -114,6 +127,12 @@ async fn main() -> anyhow::Result<()> {
     log_fips_status(&aws_config.region);
     let version_without_next = EXTENSION_VERSION.split('-').next().unwrap_or("NA");
     debug!("Starting Datadog Extension v{version_without_next}");
+    // Tokio sizes its worker pool from available_parallelism(); logging it makes the
+    // value the runtime actually sees observable per memory tier (see cold-start H15).
+    debug!(
+        "INIT | available_parallelism={:?}",
+        std::thread::available_parallelism()
+    );
 
     // Debug: Wait for debugger to attach if DD_DEBUG_WAIT_FOR_ATTACH is set
     if let Ok(wait_secs) = env::var("DD_DEBUG_WAIT_FOR_ATTACH")
@@ -126,40 +145,65 @@ async fn main() -> anyhow::Result<()> {
     }
 
     prepare_client_provider()?;
-    let client = create_reqwest_client_builder()
-        .map_err(|e| anyhow::anyhow!("Failed to create client builder: {e:?}"))?
-        .no_proxy()
-        .build()
-        .map_err(|e| anyhow::anyhow!("Failed to create client: {e:?}"))?;
+    // Separate checkpoint so the next difference isolates the TLS client build from
+    // crypto-provider setup (the latter is non-trivial in FIPS builds).
+    log_init_checkpoint(start_time, "crypto_provider_ready");
 
-    let cloned_client = client.clone();
+    // Build the register/`/next` reqwest client and register the extension on a
+    // background task. Both the TLS client build (which loads native root certs)
+    // and the register network round-trip then overlap with config parsing and
+    // the shared client build on the main task below, instead of running
+    // serially. The task hands back the client because the `/next` long-poll
+    // reuses it for the lifetime of the extension.
+    //
+    // This client is kept separate from the shared flushing client on purpose:
+    // the Extension API register + `/next` long-poll must NOT route through
+    // `DD_PROXY_HTTPS` (hence `.no_proxy()`) and must NOT carry the shared
+    // client's `flush_timeout` (which would abort the long-poll that blocks
+    // until the next invocation). Those needs conflict, so the two clients
+    // cannot be collapsed into one — we overlap their construction instead.
     let runtime_api = aws_config.runtime_api.clone();
     let managed_instance_mode = aws_config.is_managed_instance_mode();
-    let response = tokio::task::spawn(async move {
-        extension::register(
-            &cloned_client,
+    let register_handle = tokio::task::spawn(async move {
+        let client = tokio::task::spawn_blocking(|| {
+            create_reqwest_client_builder()
+                .map_err(|e| anyhow::anyhow!("Failed to create client builder: {e:?}"))?
+                .no_proxy()
+                .build()
+                .map_err(|e| anyhow::anyhow!("Failed to create client: {e:?}"))
+        })
+        .await
+        .map_err(|e| anyhow::anyhow!("Failed to join client build task: {e:?}"))??;
+        let response = extension::register(
+            &client,
             &runtime_api,
             extension::EXTENSION_NAME,
             managed_instance_mode,
         )
         .await
+        .map_err(|e| anyhow::anyhow!("Failed to register extension: {e:?}"))?;
+        Ok::<_, anyhow::Error>((client, response))
     });
+
     // First load the AWS configuration
     let lambda_directory: String =
         env::var("LAMBDA_TASK_ROOT").unwrap_or_else(|_| "/var/task".to_string());
     let config = Arc::new(config::get_config(Path::new(&lambda_directory)));
+    log_init_checkpoint(start_time, "config_parse");
 
     let aws_config = Arc::new(aws_config);
     // Build one shared reqwest::Client for metrics, logs, trace proxy flushing, and calls to
     // Datadog APIs (e.g. delegated auth). reqwest::Client is Arc-based internally, so cloning
-    // just increments a refcount and shares the connection pool.
+    // just increments a refcount and shares the connection pool. Its TLS build overlaps with
+    // the register client build kicked off above.
     let shared_client = bottlecap::http::get_client(&config);
     let api_key_factory = create_api_key_factory(&config, &aws_config, &shared_client);
+    log_init_checkpoint(start_time, "shared_client_ready");
 
-    let r = response
+    let (client, r) = register_handle
         .await
-        .map_err(|e| anyhow::anyhow!("Failed to join task: {e:?}"))?
-        .map_err(|e| anyhow::anyhow!("Failed to register extension: {e:?}"))?;
+        .map_err(|e| anyhow::anyhow!("Failed to join task: {e:?}"))??;
+    log_init_checkpoint(start_time, "register_ready");
 
     match extension_loop_active(
         Arc::clone(&aws_config),
@@ -183,12 +227,64 @@ async fn main() -> anyhow::Result<()> {
     }
 }
 
+/// Derives the Tokio worker-thread count from the Lambda memory tier exposed via
+/// `AWS_LAMBDA_FUNCTION_MEMORY_SIZE` (megabytes). AWS allocates ~1 vCPU per
+/// 1769 MB, so `workers = round(mem_mb / 1769)` approximates the vCPUs the
+/// sandbox actually grants; the result is clamped to `1..=4`. Uses integer math
+/// — `(mem_mb + 884) / 1769` is `round(mem_mb / 1769)` — to avoid float casts.
+/// Falls back to 2 workers when the variable is absent or unparseable.
+fn tokio_worker_threads() -> usize {
+    const MB_PER_VCPU: u32 = 1769;
+    const DEFAULT_WORKERS: usize = 2;
+    const MAX_WORKERS: usize = 4;
+
+    match env::var("AWS_LAMBDA_FUNCTION_MEMORY_SIZE")
+        .ok()
+        .and_then(|mem| mem.trim().parse::<u32>().ok())
+    {
+        Some(mem_mb) => {
+            // round(mem_mb / 1769) via integer arithmetic, then clamp to 1..=4.
+            let workers = (mem_mb + MB_PER_VCPU / 2) / MB_PER_VCPU;
+            (workers as usize).clamp(1, MAX_WORKERS)
+        }
+        None => DEFAULT_WORKERS,
+    }
+}
+
 // Ustr initialization can take 10+ ms.
 // Start it early in a separate thread so it won't become a bottleneck later when SortedTags::parse() is called.
 fn init_ustr() {
     tokio::spawn(async {
         Ustr::from("");
     });
+}
+
+/// Cumulative nanoseconds (since process start) recorded at the previous init
+/// checkpoint, so each checkpoint can report its own per-phase delta without the
+/// reader having to subtract consecutive lines by hand.
+static LAST_INIT_CHECKPOINT_NS: AtomicU64 = AtomicU64::new(0);
+
+/// Records a cold-start init checkpoint at `phase`, logging both `delta` (time
+/// since the previous checkpoint, i.e. this phase's own cost) and `cumulative`
+/// (time since process start), in milliseconds to 6 decimal places (nanosecond
+/// resolution) so sub-millisecond phases are still visible. This attributes init
+/// time per phase so the cold-start optimizations can be measured, not guessed.
+///
+/// The bookkeeping is guarded behind a `DEBUG`-level check, so it stays
+/// effectively free at the default `info` level (no clock read, no logging).
+fn log_init_checkpoint(start_time: Instant, phase: &str) {
+    if !tracing::enabled!(tracing::Level::DEBUG) {
+        return;
+    }
+    let cumulative = start_time.elapsed();
+    let cumulative_ns = u64::try_from(cumulative.as_nanos()).unwrap_or(u64::MAX);
+    let previous_ns = LAST_INIT_CHECKPOINT_NS.swap(cumulative_ns, Ordering::Relaxed);
+    let delta = std::time::Duration::from_nanos(cumulative_ns.saturating_sub(previous_ns));
+    debug!(
+        "INIT | phase={phase} delta={:.6}ms cumulative={:.6}ms",
+        delta.as_secs_f64() * 1000.0,
+        cumulative.as_secs_f64() * 1000.0
+    );
 }
 
 fn enable_logging_subsystem() {
@@ -328,71 +424,26 @@ async fn extension_loop_active(
         &shared_client,
     )
     .await;
+    log_init_checkpoint(start_time, "dogstatsd_started");
 
     let propagator = Arc::new(DatadogCompositePropagator::new(Arc::clone(config)));
-    // Lifecycle Invocation Processor
-    let (invocation_processor_handle, invocation_processor_service) =
-        InvocationProcessorService::new(
-            Arc::clone(&tags_provider),
-            Arc::clone(config),
-            Arc::clone(&aws_config),
-            metrics_aggregator_handle.clone(),
-            Arc::clone(&propagator),
-            durable_context_tx,
-        );
-    tokio::spawn(async move {
-        invocation_processor_service.run().await;
-    });
 
-    // AppSec processor (if enabled)
-    let appsec_processor = match AppSecProcessor::new(config) {
-        Ok(p) => Some(Arc::new(TokioMutex::new(p))),
-        Err(AppSecFeatureDisabled) => None,
-        Err(e) => {
-            error!(
-                "AAP | error creating App & API Protection processor, the feature will be disabled: {e}"
-            );
-            None
-        }
-    };
-
-    let (
-        trace_agent_channel,
-        trace_flusher,
-        trace_processor,
-        stats_flusher,
-        proxy_flusher,
-        trace_agent_shutdown_token,
-        stats_concentrator,
-        trace_aggregator_handle,
-    ) = start_trace_agent(
-        config,
-        &api_key_factory,
-        &tags_provider,
-        invocation_processor_handle.clone(),
-        appsec_processor.clone(),
-        &shared_client,
-    );
-
-    let api_runtime_proxy_shutdown_signal = start_api_runtime_proxy(
-        config,
-        Arc::clone(&aws_config),
-        &invocation_processor_handle,
-        appsec_processor.as_ref(),
-        Arc::clone(&propagator),
-    );
-
-    let lifecycle_listener =
-        LifecycleListener::new(invocation_processor_handle.clone(), Arc::clone(&propagator));
-    let lifecycle_listener_shutdown_token = lifecycle_listener.get_shutdown_token();
-    // TODO(astuyve): deprioritize this task after the first request
-    tokio::spawn(async move {
-        if let Err(e) = lifecycle_listener.start().await {
-            error!("Error starting lifecycle listener: {e:?}");
-        }
-    });
-
-    let telemetry_listener_cancel_token = setup_telemetry_client(
+    // The Lambda Extensions API ends the INIT phase at the first `/next` call, so the
+    // serialized critical path before that call directly inflates cold-start time. The
+    // telemetry subscription only depends on `logs_agent_channel` (already available),
+    // and its `subscribe` HTTP round-trip is independent of constructing the trace agent,
+    // AppSec, API-runtime proxy, and lifecycle listener below. We therefore issue the
+    // subscribe and run that remaining (synchronous) service construction concurrently
+    // via `tokio::join!`: the subscribe future is polled first so its network round-trip
+    // is in flight while construction proceeds, instead of being serialized behind it.
+    //
+    // Correctness: `setup_telemetry_client` binds the telemetry listener socket
+    // (synchronously, before `subscribe` returns — see `TelemetryListener::start`) prior
+    // to subscribing, so the listener is already accepting connections when the Telemetry
+    // API begins delivering events. No early `platform.initStart`/`initReport` or logs are
+    // dropped. The construction branch only spawns background tasks and returns handles;
+    // it performs no I/O that the subscribe depends on, so the two are order-independent.
+    let telemetry_setup = setup_telemetry_client(
         client,
         &r.extension_id,
         &aws_config.runtime_api,
@@ -400,8 +451,88 @@ async fn extension_loop_active(
         event_bus_tx.clone(),
         config.ext.serverless_logs_enabled,
         aws_config.is_managed_instance_mode(),
-    )
-    .await?;
+    );
+
+    let build_services = async {
+        // Lifecycle Invocation Processor
+        let (invocation_processor_handle, invocation_processor_service) =
+            InvocationProcessorService::new(
+                Arc::clone(&tags_provider),
+                Arc::clone(config),
+                Arc::clone(&aws_config),
+                metrics_aggregator_handle.clone(),
+                Arc::clone(&propagator),
+                durable_context_tx,
+            );
+        tokio::spawn(async move {
+            invocation_processor_service.run().await;
+        });
+
+        // AppSec processor (if enabled). The WAF build (ruleset decompression, JSON
+        // parsing, and `libddwaf` compilation) is CPU-bound and only needed once the
+        // first request payload is evaluated, which is strictly after the first
+        // `/next`. Defer it off the init critical path: consumers receive an
+        // awaitable handle and resolve it where they actually use the WAF.
+        let appsec_processor = appsec::defer_processor(config);
+
+        let trace_agent_bundle = start_trace_agent(
+            config,
+            &api_key_factory,
+            &tags_provider,
+            invocation_processor_handle.clone(),
+            appsec_processor.clone(),
+            &shared_client,
+        );
+        log_init_checkpoint(start_time, "trace_agent_started");
+
+        let api_runtime_proxy_shutdown_signal = start_api_runtime_proxy(
+            config,
+            Arc::clone(&aws_config),
+            &invocation_processor_handle,
+            appsec_processor.as_ref(),
+            Arc::clone(&propagator),
+        );
+
+        let lifecycle_listener =
+            LifecycleListener::new(invocation_processor_handle.clone(), Arc::clone(&propagator));
+        let lifecycle_listener_shutdown_token = lifecycle_listener.get_shutdown_token();
+        // TODO(astuyve): deprioritize this task after the first request
+        tokio::spawn(async move {
+            if let Err(e) = lifecycle_listener.start().await {
+                error!("Error starting lifecycle listener: {e:?}");
+            }
+        });
+
+        (
+            invocation_processor_handle,
+            appsec_processor,
+            trace_agent_bundle,
+            api_runtime_proxy_shutdown_signal,
+            lifecycle_listener_shutdown_token,
+        )
+    };
+
+    let (
+        telemetry_listener_cancel_token,
+        (
+            invocation_processor_handle,
+            appsec_processor,
+            (
+                trace_agent_channel,
+                trace_flusher,
+                trace_processor,
+                stats_flusher,
+                proxy_flusher,
+                trace_agent_shutdown_token,
+                stats_concentrator,
+                trace_aggregator_handle,
+            ),
+            api_runtime_proxy_shutdown_signal,
+            lifecycle_listener_shutdown_token,
+        ),
+    ) = tokio::join!(telemetry_setup, build_services);
+    let telemetry_listener_cancel_token = telemetry_listener_cancel_token?;
+    log_init_checkpoint(start_time, "telemetry_subscribed");
 
     let otlp_cancel_token = start_otlp_agent(
         config,
@@ -421,6 +552,8 @@ async fn extension_loop_active(
         "Datadog Next-Gen Extension ready in {:}ms",
         start_time.elapsed().as_millis().to_string()
     );
+    // Terminal checkpoint so the whole init timeline is one greppable "INIT |" series.
+    log_init_checkpoint(start_time, "ready");
 
     if aws_config.is_managed_instance_mode() {
         // Clone Arc references for the background flusher task
@@ -778,7 +911,7 @@ async fn extension_loop_active(
 async fn wait_for_tombstone_event(
     event_bus: &mut EventBus,
     invocation_processor_handle: &InvocationProcessorHandle,
-    appsec_processor: Option<Arc<TokioMutex<AppSecProcessor>>>,
+    appsec_processor: Option<AppSecProcessor>,
     tags_provider: Arc<TagProvider>,
     trace_processor: Arc<trace_processor::ServerlessTraceProcessor>,
     trace_agent_channel: Sender<SendDataBuilderInfo>,
@@ -835,7 +968,7 @@ fn cancel_background_services(
 async fn handle_event_bus_event(
     event: Event,
     invocation_processor_handle: InvocationProcessorHandle,
-    appsec_processor: Option<Arc<TokioMutex<AppSecProcessor>>>,
+    appsec_processor: Option<AppSecProcessor>,
     tags_provider: Arc<TagProvider>,
     trace_processor: Arc<trace_processor::ServerlessTraceProcessor>,
     trace_agent_channel: Sender<SendDataBuilderInfo>,
@@ -1102,7 +1235,7 @@ fn start_trace_agent(
     api_key_factory: &Arc<ApiKeyFactory>,
     tags_provider: &Arc<TagProvider>,
     invocation_processor_handle: InvocationProcessorHandle,
-    appsec_processor: Option<Arc<TokioMutex<AppSecProcessor>>>,
+    appsec_processor: Option<AppSecProcessor>,
     client: &Client,
 ) -> (
     Sender<SendDataBuilderInfo>,
@@ -1370,7 +1503,7 @@ async fn setup_telemetry_client(
     let listener = TelemetryListener::new(EXTENSION_HOST_IP, TELEMETRY_PORT, logs_tx, event_bus_tx);
 
     let cancel_token = listener.cancel_token();
-    match listener.start() {
+    match listener.start().await {
         Ok(()) => {
             // Drop the listener, so event_bus_tx is closed
             drop(listener);
@@ -1430,7 +1563,7 @@ fn start_api_runtime_proxy(
     config: &Arc<Config>,
     aws_config: Arc<AwsConfig>,
     invocation_processor_handle: &InvocationProcessorHandle,
-    appsec_processor: Option<&Arc<TokioMutex<AppSecProcessor>>>,
+    appsec_processor: Option<&AppSecProcessor>,
     propagator: Arc<DatadogCompositePropagator>,
 ) -> Option<CancellationToken> {
     if !should_start_proxy(config, Arc::clone(&aws_config)) {
@@ -1444,6 +1577,7 @@ fn start_api_runtime_proxy(
         invocation_processor_handle.clone(),
         appsec_processor,
         propagator,
+        Arc::clone(config),
     )
     .ok()
 }

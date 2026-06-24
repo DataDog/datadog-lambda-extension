@@ -49,17 +49,27 @@ impl TelemetryListener {
         self.cancel_token.clone()
     }
 
-    pub fn start(&self) -> Result<(), Box<dyn std::error::Error>> {
+    /// Binds the telemetry listener socket and starts serving in a background task.
+    ///
+    /// The bind happens synchronously (before this method returns) so the socket is
+    /// already accepting connections by the time the caller subscribes to the Lambda
+    /// Telemetry API. This makes listener readiness deterministic and avoids dropping
+    /// early `platform.initStart`/`initReport` events delivered immediately after
+    /// subscription.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the listener socket cannot be bound.
+    pub async fn start(&self) -> Result<(), Box<dyn std::error::Error>> {
         let socket = SocketAddr::from((self.host, self.port));
         let router = self.make_router();
+
+        let listener = TcpListener::bind(&socket).await?;
+        debug!("TELEMETRY API | Starting listener on {}", socket);
 
         let cancel_token_clone = self.cancel_token();
         let event_bus_tx = self.event_bus_tx.clone();
         tokio::spawn(async move {
-            let listener = TcpListener::bind(&socket)
-                .await
-                .expect("Failed to bind socket");
-            debug!("TELEMETRY API | Starting listener on {}", socket);
             axum::serve(listener, router)
                 .with_graceful_shutdown(Self::graceful_shutdown(cancel_token_clone, event_bus_tx))
                 .await

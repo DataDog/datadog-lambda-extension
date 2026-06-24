@@ -17,13 +17,17 @@ RUN set -euo pipefail && \
     curl https://sh.rustup.rs -sSf | \
         sh -s -- --profile minimal \
                  --default-host "${PLATFORM}-unknown-linux-musl" \
-                 --default-toolchain "stable-${PLATFORM}-unknown-linux-musl" \
-                 --component rust-src \
+                 --default-toolchain none \
                  -y
 ENV PATH="${PATH}:/root/.cargo/bin"
 
 # Build the binary
 ENV RUSTFLAGS="-Cpanic=abort"
+# tikv-jemallocator uses the `_rjem_` symbol prefix, so the runtime MALLOC_CONF
+# env var is ignored. Tune jemalloc at compile time instead: a single arena
+# reduces metadata mapped at init and lowers RSS (the extension is not
+# allocation-throughput-bound, so arena contention is a non-issue here).
+ENV JEMALLOC_SYS_WITH_MALLOC_CONF="narenas:1"
 
 WORKDIR /tmp/dd/bottlecap
 RUN --mount=type=cache,target=/root/.cargo/git \
@@ -38,16 +42,21 @@ RUN --mount=type=cache,target=/root/.cargo/git \
     else \
         export FEATURES=default; \
     fi; \
+    # Tune codegen for the known Lambda CPUs: arm64 is Graviton2 (neoverse-n1),
+    # x86_64 uses the universally-safe x86-64-v2 baseline (NOT v3, which risks SIGILL).
+    if [ "${PLATFORM}" = "aarch64" ]; then TARGET_CPU="neoverse-n1"; else TARGET_CPU="x86-64-v2"; fi; \
     if [ "${PLATFORM}" = "x86_64" ]; then \
         # The `libddwaf` crate links against static objects that require `libclang_rt.builtins`, but
         # this is not presented to the linker by default on this platform, so we force it in.
-        export RUSTFLAGS="${RUSTFLAGS:-} -Clinker=clang -L$(dirname $(clang --print-file-name="libclang_rt.builtins-$(uname -m).a")) -lclang_rt.builtins-$(uname -m)"; \
+        export RUSTFLAGS="${RUSTFLAGS:-} -Clinker=clang -L$(dirname $(clang --print-file-name="libclang_rt.builtins-$(uname -m).a")) -lclang_rt.builtins-$(uname -m) -Clink-arg=-Wl,-z,now -Clink-arg=-Wl,-z,relro -Ctarget-cpu=${TARGET_CPU}"; \
+    else \
+        export RUSTFLAGS="${RUSTFLAGS:-} -Clink-arg=-Wl,-z,now -Clink-arg=-Wl,-z,relro -Ctarget-cpu=${TARGET_CPU}"; \
     fi; \
     # We use a wrapper to allow `libddwaf-sys`' build.rs to be compiled with
     # -Ctarget-feature=-crt-static so that it is capable of dynamically loading
     # libclang; while still building bottlecap with a static CRT.
     RUSTC_WRAPPER=/tmp/dd/.cargo/musl.rustc-wrapper \
-    cargo +stable build --verbose --locked --no-default-features \
+    cargo build --verbose --locked --no-default-features \
         --features="${FEATURES}" \
         --profile="${PROFILE:-release}" && \
     mkdir -p /tmp/out && \

@@ -5,19 +5,6 @@ ARG FILE_SUFFIX
 # Install dependencies
 RUN apt-get update && apt-get install -y zip binutils wget tar xz-utils
 
-# UPX installation directly from GitHub
-ENV UPX_VERSION=5.0.0
-RUN ARCH=$(uname -m) && \
-    if [ "$ARCH" = "x86_64" ]; then \
-        ARCH_NAME="amd64"; \
-    elif [ "$ARCH" = "aarch64" ]; then \
-        ARCH_NAME="arm64"; \
-    fi && \
-    wget https://github.com/upx/upx/releases/download/v${UPX_VERSION}/upx-${UPX_VERSION}-${ARCH_NAME}_linux.tar.xz && \
-    tar -xf upx-${UPX_VERSION}-${ARCH_NAME}_linux.tar.xz && \
-    mv upx-${UPX_VERSION}-${ARCH_NAME}_linux/upx /usr/local/bin/ && \
-    rm -rf upx-${UPX_VERSION}-${ARCH_NAME}_linux upx-${UPX_VERSION}-${ARCH_NAME}_linux.tar.xz
-
 RUN mkdir /extensions
 WORKDIR /extensions
 

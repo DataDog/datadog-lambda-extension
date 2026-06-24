@@ -22,13 +22,13 @@ lazy_static = { version = "1.5", default-features = false }
 log = { version = "0.4", default-features = false }
 mime = { version = "0.3", default-features = false }
 multipart = { version = "0.18", default-features = false, features = ["server"] }
-nix = { version = "0.26", default-features = false, features = ["feature", "fs"] }
+nix = { version = "0.29", default-features = false, features = ["feature", "fs"] }
 ordered_hash_map = { version = "0.4", default-features = false }
 regex = { version = "1.10", default-features = false }
 reqwest = { version = "0.12.11", features = ["json", "http2"], default-features = false }
 serde = { version = "1.0", default-features = false, features = ["derive"] }
 serde_json = { version = "1.0", default-features = false, features = ["alloc"] }
-thiserror = { version = "1.0", default-features = false }
+thiserror = { version = "2.0", default-features = false }
 # Transitive dependency (pulled in via cookie). Pinned to >=0.3.47 so cargo audit / CI passes (RUSTSEC-2026-0009).
 time = { version = "0.3.47", default-features = false }
 tokio = { version = "1.47", default-features = false, features = ["macros", "rt-multi-thread", "time"] }
@@ -46,7 +46,7 @@ rustls-webpki = { version = "0.103.13", default-features = false }
 rustls-pemfile = { version = "2.0", default-features = false, features = ["std"] }
 rustls-pki-types = { version = "1.0", default-features = false }
 hyper-rustls = { version = "0.27.7", default-features = false }
-rand = { version = "0.8", default-features = false }
+rand = { version = "0.9", default-features = false }
 prost = { version = "0.14", default-features = false }
 tonic = { version = "0.14", features = ["transport", "codegen", "server", "channel", "router"], default-features = false }
 tonic-types = { version = "0.14", default-features = false }
@@ -55,7 +55,7 @@ futures = { version = "0.3.31", default-features = false }
 serde-aux = { version = "4.7", default-features = false }
 serde_html_form = { version = "0.2", default-features = false }
 opentelemetry-proto = { version = "0.31.0", features = ["trace", "with-serde", "gen-tonic"] }
-opentelemetry-semantic-conventions = { version = "0.30", features = ["semconv_experimental"] }
+opentelemetry-semantic-conventions = { version = "0.31", features = ["semconv_experimental"] }
 # Pinned to <0.8.3: version 0.8.3 upgraded to openssl-probe 0.2.x which scans all cert
 # directories and parses ~200 individual cert files on Lambda instead of loading a single
 # bundle file, adding ~45ms to each reqwest::Client::build() call.
@@ -129,7 +129,19 @@ tikv-jemallocator = "0.5"
 
 [features]
 default = [
-    "reqwest/rustls-tls-native-roots",
+    # Use webpki-roots (compiled-in Mozilla CA bundle) rather than
+    # rustls-tls-native-roots for the non-FIPS reqwest clients. native-roots
+    # calls rustls_native_certs::load_native_certs() — a filesystem cert-bundle
+    # scan/parse — on *every* reqwest::Client::build(), and bottlecap builds two
+    # reqwest clients during cold-start init (the register client in
+    # bin/bottlecap/main.rs and the shared flush client in src/http.rs).
+    # webpki-roots removes that per-build scan. Trade-off: webpki trusts only the
+    # public Mozilla roots, so private/internal OS-installed CAs are no longer
+    # picked up implicitly; users relying on those must point DD_PROXY_HTTPS at a
+    # trusted intercept or supply the CA via tls_cert_file (which still layers on
+    # top via add_root_certificate in src/http.rs). FIPS builds keep native-roots
+    # (see the `fips` feature) and are unaffected.
+    "reqwest/rustls-tls-webpki-roots",
     "datadog-fips/default",
     "datadog-agent-config/https",
     "libdd-common/https",
