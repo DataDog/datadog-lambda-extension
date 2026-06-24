@@ -16,8 +16,7 @@ RUN chmod +x /install-protoc.sh && /install-protoc.sh
 RUN curl https://sh.rustup.rs -sSf | \
     sh -s -- --profile minimal \
              --default-host "${PLATFORM}-unknown-linux-gnu" \
-             --default-toolchain "stable-${PLATFORM}-unknown-linux-gnu" \
-             --component rust-src \
+             --default-toolchain none \
              -y
 ENV PATH="${PATH}:/root/.cargo/bin"
 
@@ -54,7 +53,7 @@ RUN --mount=type=cache,target=/usr/local/cargo/git \
     # The `libddwaf` crate links against static objects that require `libclang_rt.builtins`, but
     # this is not presented to the linker by default on this platform, so we force it in.
     export RUSTFLAGS="${RUSTFLAGS:-} -Clinker=clang -L$(dirname $(clang --print-file-name="libclang_rt.builtins-$(uname -m).a")) -lclang_rt.builtins-$(uname -m) -Clink-arg=-Wl,-z,now -Clink-arg=-Wl,-z,relro -Ctarget-cpu=${TARGET_CPU}"; \
-    cargo +stable build --verbose --locked --no-default-features --features="${FEATURES}" ${BUILD_FLAG} && \
+    cargo build --verbose --locked --no-default-features --features="${FEATURES}" ${BUILD_FLAG} && \
     mkdir -p /tmp/out && cp "/tmp/dd/bottlecap/target/${BUILD_MODE}/bottlecap" /tmp/out/bottlecap
 
 # Use smallest image possible
