@@ -1,6 +1,7 @@
 use base64::{DecodeError, Engine, engine::general_purpose};
 use libdd_trace_protobuf::pb::Span;
-use rand::{Rng, RngCore, rngs::OsRng};
+use rand::rngs::OsRng;
+use rand::{Rng, TryRngCore};
 use std::collections::HashMap;
 
 use crate::tags::lambda::tags::{INIT_TYPE, SNAP_START_VALUE};
@@ -51,11 +52,16 @@ fn create_empty_span(name: String, resource: &str, service: &str) -> Span {
 #[must_use]
 pub fn generate_span_id() -> u64 {
     if std::env::var(INIT_TYPE).is_ok_and(|it| it == SNAP_START_VALUE) {
-        return OsRng.next_u64();
+        // SnapStart restores from a snapshot, so seed directly from OS entropy to
+        // avoid reusing the snapshotted RNG state. Fall back to the thread RNG on
+        // the (effectively impossible) OS RNG failure rather than panicking.
+        if let Ok(id) = OsRng.try_next_u64() {
+            return id;
+        }
     }
 
-    let mut rng = rand::thread_rng();
-    rng.r#gen()
+    let mut rng = rand::rng();
+    rng.random()
 }
 
 fn redact_value(key: &str, value: String) -> String {
