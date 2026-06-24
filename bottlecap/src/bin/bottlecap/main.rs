@@ -150,25 +150,43 @@ async fn run() -> anyhow::Result<()> {
     // Separate checkpoint so the next difference isolates the TLS client build from
     // crypto-provider setup (the latter is non-trivial in FIPS builds).
     log_init_checkpoint(start_time, "crypto_provider_ready");
-    let client = create_reqwest_client_builder()
-        .map_err(|e| anyhow::anyhow!("Failed to create client builder: {e:?}"))?
-        .no_proxy()
-        .build()
-        .map_err(|e| anyhow::anyhow!("Failed to create client: {e:?}"))?;
-    log_init_checkpoint(start_time, "tls_client_build");
 
-    let cloned_client = client.clone();
+    // Build the register/`/next` reqwest client and register the extension on a
+    // background task. Both the TLS client build (which loads native root certs)
+    // and the register network round-trip then overlap with config parsing and
+    // the shared client build on the main task below, instead of running
+    // serially. The task hands back the client because the `/next` long-poll
+    // reuses it for the lifetime of the extension.
+    //
+    // This client is kept separate from the shared flushing client on purpose:
+    // the Extension API register + `/next` long-poll must NOT route through
+    // `DD_PROXY_HTTPS` (hence `.no_proxy()`) and must NOT carry the shared
+    // client's `flush_timeout` (which would abort the long-poll that blocks
+    // until the next invocation). Those needs conflict, so the two clients
+    // cannot be collapsed into one — we overlap their construction instead.
     let runtime_api = aws_config.runtime_api.clone();
     let managed_instance_mode = aws_config.is_managed_instance_mode();
-    let response = tokio::task::spawn(async move {
-        extension::register(
-            &cloned_client,
+    let register_handle = tokio::task::spawn(async move {
+        let client = tokio::task::spawn_blocking(|| {
+            create_reqwest_client_builder()
+                .map_err(|e| anyhow::anyhow!("Failed to create client builder: {e:?}"))?
+                .no_proxy()
+                .build()
+                .map_err(|e| anyhow::anyhow!("Failed to create client: {e:?}"))
+        })
+        .await
+        .map_err(|e| anyhow::anyhow!("Failed to join client build task: {e:?}"))??;
+        let response = extension::register(
+            &client,
             &runtime_api,
             extension::EXTENSION_NAME,
             managed_instance_mode,
         )
         .await
+        .map_err(|e| anyhow::anyhow!("Failed to register extension: {e:?}"))?;
+        Ok::<_, anyhow::Error>((client, response))
     });
+
     // First load the AWS configuration
     let lambda_directory: String =
         env::var("LAMBDA_TASK_ROOT").unwrap_or_else(|_| "/var/task".to_string());
@@ -178,15 +196,15 @@ async fn run() -> anyhow::Result<()> {
     let aws_config = Arc::new(aws_config);
     // Build one shared reqwest::Client for metrics, logs, trace proxy flushing, and calls to
     // Datadog APIs (e.g. delegated auth). reqwest::Client is Arc-based internally, so cloning
-    // just increments a refcount and shares the connection pool.
+    // just increments a refcount and shares the connection pool. Its TLS build overlaps with
+    // the register client build kicked off above.
     let shared_client = bottlecap::http::get_client(&config);
     let api_key_factory = create_api_key_factory(&config, &aws_config, &shared_client);
     log_init_checkpoint(start_time, "shared_client_ready");
 
-    let r = response
+    let (client, r) = register_handle
         .await
-        .map_err(|e| anyhow::anyhow!("Failed to join task: {e:?}"))?
-        .map_err(|e| anyhow::anyhow!("Failed to register extension: {e:?}"))?;
+        .map_err(|e| anyhow::anyhow!("Failed to join task: {e:?}"))??;
     log_init_checkpoint(start_time, "register_ready");
 
     match extension_loop_active(
