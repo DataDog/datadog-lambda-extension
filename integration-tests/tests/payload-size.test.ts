@@ -2,7 +2,7 @@ import { invokeAndCollectTelemetry, FunctionConfig } from './utils/default';
 import { DatadogTelemetry } from './utils/datadog';
 import { forceColdStart } from './utils/lambda';
 import { filterLogMessages } from './utils/cloudwatch';
-import { getIdentifier } from '../config';
+import { IDENTIFIER } from '../config';
 
 // The enriched payload must be large enough to need a high batch cap, yet stay
 // under the 12 MB cap so it flushes in a single batch without a 413.
@@ -12,8 +12,7 @@ const MIN_ENRICHED_BYTES = 10_000_000;
 const SPAN_COUNT = 400;
 const PAYLOAD_BYTES = 24_000;
 
-const identifier = getIdentifier();
-const stackName = `integ-${identifier}-payload-size`;
+const stackName = `${IDENTIFIER}-payload-size`;
 
 describe('Payload Size Integration Tests', () => {
 

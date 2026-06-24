@@ -1,13 +1,12 @@
 import { invokeAndCollectTelemetry, FunctionConfig } from './utils/default';
 import { DatadogTelemetry, DURATION_METRICS } from './utils/datadog';
 import { forceColdStart } from './utils/lambda';
-import { getIdentifier } from '../config';
+import { IDENTIFIER } from '../config';
 
 const runtimes = ['node', 'python', 'java', 'dotnet'] as const;
 type Runtime = typeof runtimes[number];
 
-const identifier = getIdentifier();
-const stackName = `integ-${identifier}-on-demand`;
+const stackName = `${IDENTIFIER}-on-demand`;
 
 describe('On-Demand Integration Tests', () => {
   let telemetry: Record<string, DatadogTelemetry>;

@@ -1,10 +1,9 @@
 import { invokeAndCollectTelemetry, FunctionConfig } from './utils/default';
 import { DatadogTelemetry } from './utils/datadog';
 import { forceColdStart, publishVersion, waitForSnapStartReady } from './utils/lambda';
-import { getIdentifier } from '../config';
+import { IDENTIFIER } from '../config';
 
-const identifier = getIdentifier();
-const stackName = `integ-${identifier}-auth`;
+const stackName = `${IDENTIFIER}-auth`;
 
 describe('Auth Integration Tests', () => {
   let telemetry: Record<string, DatadogTelemetry>;

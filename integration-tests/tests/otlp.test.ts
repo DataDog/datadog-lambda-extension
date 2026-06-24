@@ -1,12 +1,11 @@
 import { invokeAndCollectTelemetry, FunctionConfig } from './utils/default';
 import { DatadogTelemetry } from './utils/datadog';
-import { getIdentifier, DATADOG_INDEXING_WAIT_5_MIN_MS } from '../config';
+import { IDENTIFIER, DATADOG_INDEXING_WAIT_5_MIN_MS } from '../config';
 
 const runtimes = ['node', 'python', 'java', 'dotnet'] as const;
 type Runtime = typeof runtimes[number];
 
-const identifier = getIdentifier();
-const stackName = `integ-${identifier}-otlp`;
+const stackName = `${IDENTIFIER}-otlp`;
 
 describe('OTLP Integration Tests', () => {
   let telemetry: Record<string, DatadogTelemetry>;
