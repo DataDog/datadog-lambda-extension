@@ -1,6 +1,6 @@
 import { invokeLambda } from './utils/lambda';
 import { getMetricCount, OUT_OF_MEMORY_METRIC } from './utils/datadog';
-import { getIdentifier } from '../config';
+import { IDENTIFIER } from '../config';
 
 /**
  * Cross-runtime OOM test.
@@ -25,8 +25,7 @@ import { getIdentifier } from '../config';
  * after an initial wait we re-query every 30s until every runtime reports
  * count>=1 or the overall budget is exhausted.
  */
-const identifier = getIdentifier();
-const stackName = `integ-${identifier}-oom`;
+const stackName = `${IDENTIFIER}-oom`;
 
 interface OomCase {
   runtime: string;

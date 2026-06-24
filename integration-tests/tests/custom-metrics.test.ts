@@ -1,9 +1,8 @@
 import { hasMetricWithTag } from "./utils/datadog";
 import { forceColdStart, invokeLambda } from "./utils/lambda";
-import { getIdentifier, DEFAULT_DATADOG_INDEXING_WAIT_MS } from "../config";
+import { IDENTIFIER, DEFAULT_DATADOG_INDEXING_WAIT_MS } from "../config";
 
-const identifier = getIdentifier();
-const stackName = `integ-${identifier}-custom-metrics`;
+const stackName = `${IDENTIFIER}-custom-metrics`;
 
 const CUSTOM_METRIC_NAME = "custom.exclude_tags_test";
 const EXCLUDED_TAGS = ["function_arn", "region"];
