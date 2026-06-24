@@ -5,6 +5,7 @@ use std::{
     collections::HashMap,
     fs::{self, File},
     io::{self, BufRead},
+    sync::LazyLock,
 };
 
 use constants::{
@@ -13,6 +14,14 @@ use constants::{
 };
 use regex::Regex;
 use tracing::debug;
+
+// Compiled once on first use rather than on every call. Both patterns capture
+// the soft limit value (the first numeric value after the title) from a
+// process `limits` file.
+static MAX_OPEN_FILES_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"^Max open files\s+(\d+)").expect("valid static regex"));
+static MAX_PROCESSES_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"^Max processes\s+(\d+)").expect("valid static regex"));
 
 #[must_use]
 pub fn get_pid_list() -> Vec<i64> {
@@ -222,8 +231,7 @@ pub fn get_fd_max_data(pids: &[i64]) -> f64 {
 
 fn get_fd_max_data_from_path(path: &str, pids: &[i64]) -> f64 {
     let mut fd_max = constants::LAMBDA_FILE_DESCRIPTORS_DEFAULT_LIMIT;
-    // regex to capture the soft limit value (first numeric value after the title)
-    let re = Regex::new(r"^Max open files\s+(\d+)").expect("Failed to create regex");
+    let re = &*MAX_OPEN_FILES_RE;
 
     for &pid in pids {
         let limits_path = format!("{path}/{pid}/limits");
@@ -273,8 +281,7 @@ pub fn get_threads_max_data(pids: &[i64]) -> f64 {
 
 fn get_threads_max_data_from_path(path: &str, pids: &[i64]) -> f64 {
     let mut threads_max = constants::LAMBDA_EXECUTION_PROCESSES_DEFAULT_LIMIT;
-    // regex to capture the soft limit value (first numeric value after the title)
-    let re = Regex::new(r"^Max processes\s+(\d+)").expect("Failed to create regex");
+    let re = &*MAX_PROCESSES_RE;
 
     for &pid in pids {
         let limits_path = format!("{path}/{pid}/limits");
