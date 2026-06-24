@@ -22,7 +22,7 @@ describe('On-Demand Integration Tests', () => {
     telemetry = await invokeAndCollectTelemetry(functions, 2, 1, 5000);
 
     console.log('All invocations and data fetching completed');
-  }, 600000);
+  }, 1800000);
 
   describe.each(runtimes)('%s runtime', (runtime) => {
     const getTelemetry = () => telemetry[runtime];

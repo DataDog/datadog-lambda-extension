@@ -54,6 +54,71 @@ function formatDatadogError(error: unknown, query: string): string {
   return `Error (query: '${query}'): ${String(error)}`;
 }
 
+// Total time a single request is allowed to spend waiting out 429s before
+// giving up. Kept under the Jest `beforeAll` timeout (30 min) — with margin
+// for the other requests a suite makes — so a rate-limited suite fails with
+// the rich 429 message rather than timing out.
+const MAX_RETRY_WAIT_MS = 20 * 60 * 1000;
+// Fallback wait when the API returns 429 without a usable retry-after header.
+const DEFAULT_RETRY_AFTER_MS = 5000;
+// Upper bound on any single backoff so one large header value can't blow the
+// whole budget on the first retry.
+const MAX_SINGLE_WAIT_MS = 60 * 1000;
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * Reads the retry delay (ms) advertised by a 429 response, honoring
+ * `retry-after` / `x-ratelimit-reset` (both expressed in seconds). Falls back
+ * to a default when the header is missing or unparseable, and caps a single
+ * wait so an oversized value can't consume the entire retry budget at once.
+ */
+function parseRetryAfterMs(error: AxiosError): number {
+  const headers = error.response?.headers ?? {};
+  const raw = headers['x-ratelimit-reset'] ?? headers['retry-after'];
+  const seconds = raw !== undefined ? Number(raw) : NaN;
+  const ms = Number.isFinite(seconds) && seconds > 0 ? seconds * 1000 : DEFAULT_RETRY_AFTER_MS;
+  return Math.min(ms, MAX_SINGLE_WAIT_MS);
+}
+
+/**
+ * Executes a Datadog API request, retrying with backoff when the API responds
+ * 429 Too Many Requests. Honors the rate-limit reset header, adds a little
+ * random jitter so the ~7 suites running in parallel (each sharing one API
+ * key) don't retry in lockstep, and caps the total time spent waiting. When the
+ * budget is exhausted the last 429 is rethrown so callers still surface the
+ * rich rate-limit error message via formatDatadogError.
+ */
+async function requestWithRetry<T>(fn: () => Promise<T>, query: string): Promise<T> {
+  let waited = 0;
+  let attempt = 0;
+  // eslint-disable-next-line no-constant-condition
+  while (true) {
+    try {
+      return await fn();
+    } catch (error: unknown) {
+      const is429 = error instanceof AxiosError && error.response?.status === 429;
+      if (!is429) {
+        throw error;
+      }
+      const jitter = Math.floor(Math.random() * 1000);
+      const wait = parseRetryAfterMs(error as AxiosError) + jitter;
+      if (waited + wait > MAX_RETRY_WAIT_MS) {
+        // Out of budget — rethrow so the caller logs the rich 429 message.
+        throw error;
+      }
+      attempt += 1;
+      waited += wait;
+      console.warn(
+        `Datadog API 429 for '${query}'; retrying in ${wait}ms (attempt ${attempt}, total waited ${waited}ms)`,
+      );
+      await sleep(wait);
+    }
+  }
+}
+
 export interface DatadogTelemetry {
   threads: InvocationTracesLogs[][];  // [thread][invocation]
   metrics: EnhancedMetrics;
@@ -137,7 +202,7 @@ export async function getTraces(
   try {
     console.log(`Searching for traces: ${query}`);
 
-    const initialResponse = await datadogClient.post('/api/v2/spans/events/search', {
+    const initialResponse = await requestWithRetry(() => datadogClient.post('/api/v2/spans/events/search', {
       data: {
         type: 'search_request',
         attributes: {
@@ -152,7 +217,7 @@ export async function getTraces(
           sort: '-timestamp',
         },
       },
-    });
+    }), query);
 
     const initialSpans = initialResponse.data.data || [];
     console.log(`Found ${initialSpans.length} initial span(s)`);
@@ -169,12 +234,13 @@ export async function getTraces(
 
     const allSpans: any[] = [];
     for (const traceId of traceIds) {
-      const traceResponse = await datadogClient.post('/api/v2/spans/events/search', {
+      const traceQuery = `trace_id:${traceId}`;
+      const traceResponse = await requestWithRetry(() => datadogClient.post('/api/v2/spans/events/search', {
         data: {
           type: 'search_request',
           attributes: {
             filter: {
-              query: `trace_id:${traceId}`,
+              query: traceQuery,
               from: new Date(fromTime).toISOString(),
               to: new Date(toTime).toISOString(),
             },
@@ -183,7 +249,7 @@ export async function getTraces(
             },
           },
         },
-      });
+      }), traceQuery);
       const traceSpans = traceResponse.data.data || [];
       console.log(`Trace ${traceId}: ${traceSpans.length} spans`);
       allSpans.push(...traceSpans);
@@ -239,7 +305,7 @@ export async function getLogs(
   try {
     console.log(`Searching for logs: ${query}`);
 
-    const response = await datadogClient.post('/api/v2/logs/events/search', {
+    const response = await requestWithRetry(() => datadogClient.post('/api/v2/logs/events/search', {
       filter: {
         query: query,
         from: new Date(fromTime).toISOString(),
@@ -248,7 +314,7 @@ export async function getLogs(
       page: {
         limit: 1000,
       },
-    });
+    }), query);
 
     const rawLogs = response.data.data || [];
     console.log(`Found ${rawLogs.length} log(s)`);
@@ -309,13 +375,13 @@ export async function getMetricCount(
 
   console.log(`Querying metric count: ${query}`);
 
-  const response = await datadogClient.get('/api/v1/query', {
+  const response = await requestWithRetry(() => datadogClient.get('/api/v1/query', {
     params: {
       query,
       from: Math.floor(fromTime / 1000),
       to: Math.floor(toTime / 1000),
     },
-  });
+  }), query);
 
   const series = response.data.series || [];
   if (series.length === 0) {
@@ -337,13 +403,13 @@ async function getMetrics(
 
   console.log(`Querying metrics: ${query}`);
 
-  const response = await datadogClient.get('/api/v1/query', {
+  const response = await requestWithRetry(() => datadogClient.get('/api/v1/query', {
     params: {
       query,
       from: Math.floor(fromTime / 1000),
       to: Math.floor(toTime / 1000),
     },
-  });
+  }), query);
 
   const series = response.data.series || [];
   console.log(`Found ${series.length} series for ${metricName}`);
@@ -375,13 +441,13 @@ export async function hasMetricWithTag(
 
   console.log(`Querying metric with tag filter: ${query}`);
 
-  const response = await datadogClient.get('/api/v1/query', {
+  const response = await requestWithRetry(() => datadogClient.get('/api/v1/query', {
     params: {
       query,
       from: Math.floor(fromTime / 1000),
       to: Math.floor(toTime / 1000),
     },
-  });
+  }), query);
 
   const series = response.data.series || [];
   const hasData = series.some((s: any) => Array.isArray(s.pointlist) && s.pointlist.length > 0);
