@@ -18,7 +18,6 @@ RUN set -euo pipefail && \
         sh -s -- --profile minimal \
                  --default-host "${PLATFORM}-unknown-linux-musl" \
                  --default-toolchain none \
-                 --component rust-src \
                  -y
 ENV PATH="${PATH}:/root/.cargo/bin"
 
