@@ -70,10 +70,6 @@ function parseRetryAfterMs(error: AxiosError): number {
   return Math.min(ms, MAX_SINGLE_WAIT_MS);
 }
 
-/**
- * Executes a Datadog API request, retrying with jittered backoff on HTTP 429
- * until MAX_RETRY_WAIT_MS is exhausted, then rethrowing the last 429.
- */
 async function requestWithRetry<T>(fn: () => Promise<T>, query: string): Promise<T> {
   let waited = 0;
   let attempt = 0;
