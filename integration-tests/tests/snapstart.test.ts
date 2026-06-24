@@ -45,7 +45,7 @@ describe('Snapstart Integration Tests', () => {
     telemetry = await invokeAndCollectTelemetry(functions, 2, 2, 5000);
 
     console.log('All Snapstart Lambda invocations and data fetching completed');
-  }, 1800000);
+  }, 900000);
 
   describe.each(runtimes)('%s Runtime with SnapStart', (runtime) => {
     // With concurrency=2, invocations=2:

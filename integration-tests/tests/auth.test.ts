@@ -27,7 +27,7 @@ describe('Auth Integration Tests', () => {
     telemetry = await invokeAndCollectTelemetry(functions, 1);
 
     console.log('All invocations and data fetching completed');
-  }, 1800000);
+  }, 600000);
 
   describe('on-demand (node)', () => {
     it('should invoke Lambda successfully', () => {

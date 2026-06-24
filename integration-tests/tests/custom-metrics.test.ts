@@ -34,7 +34,7 @@ describe("Customer Metrics Exclude Tags Integration Tests", () => {
     metricsEndTime = Date.now();
 
     console.log("Lambdas invoked and indexing wait complete");
-  }, 1800000);
+  }, 900000);
 
   describe("unfiltered function (no DD_LAMBDA_CUSTOMER_METRICS_EXCLUDE_TAGS)", () => {
     it.each(EXCLUDED_TAGS)(

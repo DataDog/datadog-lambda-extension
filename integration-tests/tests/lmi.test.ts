@@ -22,7 +22,7 @@ describe('LMI Integration Tests', () => {
     telemetry = await invokeAndCollectTelemetry(functions, 1);
 
     console.log('LMI invocation and data fetching completed');
-  }, 1800000);
+  }, 600000);
 
   describe.each(runtimes)('%s Runtime with LMI', (runtime) => {
     const getResult = () => telemetry[runtime]?.threads[0]?.[0];
