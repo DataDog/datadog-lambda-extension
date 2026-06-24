@@ -161,6 +161,9 @@ fips = [
     "libdd-trace-obfuscation/fips",
     "libdd-trace-stats/fips",
     "datadog-fips/fips",
+    # OTLP is unconditional in the shipped binary; keep it in the FIPS feature set
+    # too since fips builds use --no-default-features.
+    "otlp",
     # FIPS-mode WAF only makes sense when AppSec is compiled in.
     "appsec",
     "libddwaf/fips",
