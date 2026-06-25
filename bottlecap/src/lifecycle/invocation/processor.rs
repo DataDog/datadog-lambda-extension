@@ -1127,11 +1127,7 @@ impl Processor {
         // Extension-side DSM: record a consume (`direction:in`) checkpoint for
         // DSM-eligible event sources, continuing any inbound pathway context.
         if let Some(dsm) = self.dsm_processor.as_ref() {
-            if !self.dsm_processed_request_ids.insert(request_id.clone()) {
-                debug!(
-                    "DSM: consume checkpoint already recorded for request {request_id}, skipping"
-                );
-            } else {
+            if self.dsm_processed_request_ids.insert(request_id.clone()) {
                 debug!("DSM: extraction hook fired for request {request_id}");
                 let identified =
                     crate::lifecycle::invocation::triggers::IdentifiedTrigger::from_value(
@@ -1173,6 +1169,10 @@ impl Processor {
                 } else {
                     debug!("DSM: no trigger identified for payload, skipping consume checkpoint");
                 }
+            } else {
+                debug!(
+                    "DSM: consume checkpoint already recorded for request {request_id}, skipping"
+                );
             }
         } else {
             debug!("DSM: no DSM processor available, skipping consume checkpoint");

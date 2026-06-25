@@ -10,7 +10,7 @@
 //! `fixtures/sketch_golden.json` (see `tools/dsm/gen_sketch_golden.js`).
 //!
 //! Note: this intentionally does not use `libdd-ddsketch::DDSketch` for the
-//! sketch itself. The crate does provide a Datadog DDSketch implementation and
+//! sketch itself. The crate does provide a Datadog `DDSketch` implementation and
 //! generated protobuf structs, but its public Rust API does not expose a
 //! `LogCollapsingLowestDenseDDSketch` type or constructors for the tracer/DSM
 //! mapping and store configuration used by `@datadog/sketches-js`.

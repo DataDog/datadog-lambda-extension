@@ -213,6 +213,16 @@ mod tests {
     use crate::traces::data_streams::checkpoint::compute_consume_checkpoint;
     use serde::Deserialize;
 
+    #[derive(Deserialize)]
+    struct DecodedPayload {
+        #[serde(rename = "TracerVersion")]
+        tracer_version: String,
+        #[serde(rename = "Version")]
+        version: String,
+        #[serde(rename = "Tags")]
+        tags: Vec<String>,
+    }
+
     fn edge_tags() -> Vec<String> {
         vec![
             "direction:in".to_string(),
@@ -255,16 +265,6 @@ mod tests {
             payload[0], 0x87,
             "top-level payload must be a 7-entry msgpack map"
         );
-
-        #[derive(Deserialize)]
-        struct DecodedPayload {
-            #[serde(rename = "TracerVersion")]
-            tracer_version: String,
-            #[serde(rename = "Version")]
-            version: String,
-            #[serde(rename = "Tags")]
-            tags: Vec<String>,
-        }
 
         let decoded: DecodedPayload = rmp_serde::from_slice(&payload).expect("decode payload");
         assert_eq!(decoded.tracer_version, "1.0");
