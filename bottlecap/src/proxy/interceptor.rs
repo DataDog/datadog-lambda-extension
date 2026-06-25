@@ -197,18 +197,23 @@ async fn invocation_next_proxy(
             }
 
             // Drive universal instrumentation from the intercepted `/next` payload
-            // whenever the runtime API proxy is in the request path. For LWA this
-            // has always happened. We additionally enable it for the experimental
-            // wrapper proxy (`DD_EXPERIMENTAL_ENABLE_PROXY=true`, which the
-            // datadog_wrapper uses to reroute AWS_LAMBDA_RUNTIME_API to the
-            // extension), so the extension sees the event payload without a tracer
-            // calling `/lambda/start-invocation`.
+            // whenever the runtime API proxy is in the request path and a feature
+            // needs the invocation payload without relying on a tracer calling
+            // `/lambda/start-invocation`.
             //
-            // TEMPORARY: this is what feeds the extension-side DSM consume hook for
-            // functions whose tracer does not drive the invocation lifecycle.
+            // For LWA this has always happened. We additionally enable it for the
+            // experimental wrapper proxy (`DD_EXPERIMENTAL_ENABLE_PROXY=true`) and
+            // for extension-side DSM consume extraction (`DD_DATA_STREAMS_ENABLED=true`).
+            // DSM recording is request-id idempotent in the invocation processor,
+            // so a later tracer-driven `/lambda/start-invocation` will not double-count.
             let experimental_proxy_enabled = std::env::var("DD_EXPERIMENTAL_ENABLE_PROXY")
                 .is_ok_and(|v| v.eq_ignore_ascii_case("true"));
-            if aws_config.aws_lwa_proxy_lambda_runtime_api.is_some() || experimental_proxy_enabled {
+            let dsm_consume_enabled = std::env::var("DD_DATA_STREAMS_ENABLED")
+                .is_ok_and(|v| v.eq_ignore_ascii_case("true"));
+            if aws_config.aws_lwa_proxy_lambda_runtime_api.is_some()
+                || experimental_proxy_enabled
+                || dsm_consume_enabled
+            {
                 debug!(
                     "PROXY | invocation_next_proxy | driving universal instrumentation from intercepted payload"
                 );

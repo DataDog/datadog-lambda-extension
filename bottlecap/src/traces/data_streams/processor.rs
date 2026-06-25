@@ -193,7 +193,10 @@ mod tests {
         // (zigzag varint 2), edgeStartMs=2 (zigzag varint 4). These bytes are
         // UTF-8 representable, matching the current string carrier shape while
         // still exercising raw-byte decoding for `dd-pathway-ctx`.
-        carrier.insert(DD_PATHWAY_CTX_KEY.to_string(), "abcdefgh\u{0002}\u{0004}".to_string());
+        carrier.insert(
+            DD_PATHWAY_CTX_KEY.to_string(),
+            "abcdefgh\u{0002}\u{0004}".to_string(),
+        );
         let ctx = extract_pathway_context(&carrier).expect("context");
         assert_eq!(ctx.hash, *b"abcdefgh");
         assert_eq!(ctx.pathway_start_ns, 1_000_000);
@@ -207,7 +210,10 @@ mod tests {
             DD_PATHWAY_CTX_BASE64_KEY.to_string(),
             "Z7CzXmXArPrE58Cfj2LI2cOfj2I=".to_string(),
         );
-        carrier.insert(DD_PATHWAY_CTX_KEY.to_string(), "abcdefgh\u{0002}\u{0004}".to_string());
+        carrier.insert(
+            DD_PATHWAY_CTX_KEY.to_string(),
+            "abcdefgh\u{0002}\u{0004}".to_string(),
+        );
 
         let ctx = extract_pathway_context(&carrier).expect("context");
         assert_eq!(hex::encode(ctx.hash), "67b0b35e65c0acfa");

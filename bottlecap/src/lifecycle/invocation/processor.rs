@@ -1,5 +1,5 @@
 use std::{
-    collections::{HashMap, VecDeque},
+    collections::{HashMap, HashSet, VecDeque},
     sync::Arc,
     time::{SystemTime, UNIX_EPOCH},
 };
@@ -116,6 +116,11 @@ pub struct Processor {
     /// inbound event payloads.
     #[allow(clippy::struct_field_names)]
     dsm_processor: Option<Arc<crate::traces::data_streams::DsmProcessor>>,
+    /// Request IDs whose extension-side DSM consume checkpoints have already
+    /// been recorded. This prevents double-counting when the same invocation
+    /// payload is observed through both the runtime API proxy and tracer-driven
+    /// `/lambda/start-invocation`.
+    dsm_processed_request_ids: HashSet<String>,
 }
 
 impl Processor {
@@ -160,6 +165,7 @@ impl Processor {
             restore_time: None,
             init_duration_metric_emitted: false,
             dsm_processor: None,
+            dsm_processed_request_ids: HashSet::new(),
         }
     }
 
@@ -714,6 +720,24 @@ impl Processor {
         .await;
     }
 
+    fn release_invocation_context(&mut self, request_id: &String) {
+        // Release the context now that all processing for this invocation is complete.
+        // This prevents unbounded memory growth across warm invocations.
+        self.context_buffer.remove(request_id);
+        // Prune DSM idempotency state at the same lifecycle boundary as the context,
+        // not on flush. A flush can happen while an invocation is still active.
+        self.dsm_processed_request_ids.remove(request_id);
+        // Prune the corresponding reparenting entry so that update_reparenting does not
+        // warn about a missing context for already-completed invocations.
+        self.context_buffer
+            .sorted_reparenting_info
+            .retain(|info| info.request_id != *request_id);
+        trace!(
+            "Context released (buffer size after remove: {})",
+            self.context_buffer.size()
+        );
+    }
+
     fn get_ctx_spans(&mut self, context: Context) -> (Vec<Span>, usize) {
         let mut body_size = std::mem::size_of_val(&context.invocation_span);
         let mut traces = vec![context.invocation_span.clone()];
@@ -877,18 +901,7 @@ impl Processor {
                 .set_cpu_time_enhanced_metrics(offsets.cpu_offset.clone());
         }
 
-        // Release the context now that all processing for this invocation is complete.
-        // This prevents unbounded memory growth across warm invocations.
-        self.context_buffer.remove(request_id);
-        // Prune the corresponding reparenting entry so that update_reparenting does not
-        // warn about a missing context for already-completed invocations.
-        self.context_buffer
-            .sorted_reparenting_info
-            .retain(|info| info.request_id != *request_id);
-        trace!(
-            "Context released (buffer size after remove: {})",
-            self.context_buffer.size()
-        );
+        self.release_invocation_context(request_id);
     }
 
     /// Handles Managed Instance mode platform report processing.
@@ -1106,45 +1119,52 @@ impl Processor {
         // Extension-side DSM: record a consume (`direction:in`) checkpoint for
         // DSM-eligible event sources, continuing any inbound pathway context.
         if let Some(dsm) = self.dsm_processor.as_ref() {
-            debug!("DSM: extraction hook fired for request {request_id}");
-            let identified = crate::lifecycle::invocation::triggers::IdentifiedTrigger::from_value(
-                &payload_value,
-            );
-            if let Some(trigger) = SpanInferrer::get_trigger_type(identified) {
-                // Batched sources (SQS/SNS/Kinesis) yield one checkpoint per
-                // record so every message's pathway context is captured.
-                let checkpoints = trigger.get_dsm_checkpoints(&payload_value);
-                if checkpoints.is_empty() {
-                    debug!(
-                        "DSM: identified trigger is not DSM-eligible, skipping consume checkpoint"
-                    );
-                } else {
-                    debug!(
-                        "DSM: trigger is DSM-eligible, {} record(s)",
-                        checkpoints.len()
-                    );
-                    for mut checkpoint in checkpoints {
-                        resolve_dsm_eventbridge_exchange(
-                            &mut checkpoint.edge_tags,
-                            self.config.ext.dsm_exchange_name.as_deref(),
-                        );
-                        apply_dsm_kafka_group_fallback(
-                            &mut checkpoint.edge_tags,
-                            self.config.ext.dsm_kafka_group.as_deref(),
-                        );
-                        debug!(
-                            "DSM: recording consume checkpoint edge_tags={:?}",
-                            checkpoint.edge_tags
-                        );
-                        dsm.record_consume(
-                            &checkpoint.edge_tags,
-                            &checkpoint.carrier,
-                            checkpoint.payload_size_bytes,
-                        );
-                    }
-                }
+            if !self.dsm_processed_request_ids.insert(request_id.clone()) {
+                debug!(
+                    "DSM: consume checkpoint already recorded for request {request_id}, skipping"
+                );
             } else {
-                debug!("DSM: no trigger identified for payload, skipping consume checkpoint");
+                debug!("DSM: extraction hook fired for request {request_id}");
+                let identified =
+                    crate::lifecycle::invocation::triggers::IdentifiedTrigger::from_value(
+                        &payload_value,
+                    );
+                if let Some(trigger) = SpanInferrer::get_trigger_type(identified) {
+                    // Batched sources (SQS/SNS/Kinesis) yield one checkpoint per
+                    // record so every message's pathway context is captured.
+                    let checkpoints = trigger.get_dsm_checkpoints(&payload_value);
+                    if checkpoints.is_empty() {
+                        debug!(
+                            "DSM: identified trigger is not DSM-eligible, skipping consume checkpoint"
+                        );
+                    } else {
+                        debug!(
+                            "DSM: trigger is DSM-eligible, {} record(s)",
+                            checkpoints.len()
+                        );
+                        for mut checkpoint in checkpoints {
+                            resolve_dsm_eventbridge_exchange(
+                                &mut checkpoint.edge_tags,
+                                self.config.ext.dsm_exchange_name.as_deref(),
+                            );
+                            apply_dsm_kafka_group_fallback(
+                                &mut checkpoint.edge_tags,
+                                self.config.ext.dsm_kafka_group.as_deref(),
+                            );
+                            debug!(
+                                "DSM: recording consume checkpoint edge_tags={:?}",
+                                checkpoint.edge_tags
+                            );
+                            dsm.record_consume(
+                                &checkpoint.edge_tags,
+                                &checkpoint.carrier,
+                                checkpoint.payload_size_bytes,
+                            );
+                        }
+                    }
+                } else {
+                    debug!("DSM: no trigger identified for payload, skipping consume checkpoint");
+                }
             }
         } else {
             debug!("DSM: no DSM processor available, skipping consume checkpoint");
@@ -1644,6 +1664,43 @@ mod tests {
     use dogstatsd::aggregator::AggregatorService;
     use dogstatsd::metric::EMPTY_TAGS;
     use serde_json::json;
+
+    fn sqs_payload() -> Value {
+        json!({
+            "Records": [{
+                "messageId": "msg-1",
+                "receiptHandle": "handle",
+                "attributes": {
+                    "ApproximateFirstReceiveTimestamp": "1700000000000",
+                    "ApproximateReceiveCount": "1",
+                    "SentTimestamp": "1700000000000",
+                    "SenderId": "sender",
+                    "AWSTraceHeader": null
+                },
+                "messageAttributes": {},
+                "md5OfBody": "5d41402abc4b2a76b9719d911017c592",
+                "eventSource": "aws:sqs",
+                "eventSourceARN": "arn:aws:sqs:us-east-1:123456789012:test-queue",
+                "awsRegion": "us-east-1",
+                "body": "hello"
+            }]
+        })
+    }
+
+    fn attach_test_dsm_processor(processor: &mut Processor) {
+        let proxy = Arc::new(tokio::sync::Mutex::new(
+            crate::traces::proxy_aggregator::Aggregator::default(),
+        ));
+        processor.set_dsm_processor(Arc::new(crate::traces::data_streams::DsmProcessor::new(
+            "svc".into(),
+            "env".into(),
+            "1.0".into(),
+            "2.0".into(),
+            Vec::new(),
+            "datadoghq.com",
+            proxy,
+        )));
+    }
 
     #[test]
     fn dsm_exchange_config_takes_priority_over_payload() {
@@ -3049,6 +3106,40 @@ mod tests {
             Some(&0.0),
             "pre-existing _dd.appsec.enabled value must not be overwritten"
         );
+    }
+
+    #[tokio::test]
+    async fn dsm_consume_is_idempotent_per_request_id() {
+        let mut p = setup();
+        attach_test_dsm_processor(&mut p);
+        let request_id = String::from("req-dsm-dedupe");
+        p.context_buffer.start_context(&request_id, Span::default());
+
+        p.process_on_universal_instrumentation_start(
+            request_id.clone(),
+            HashMap::new(),
+            sqs_payload(),
+        );
+        p.process_on_universal_instrumentation_start(
+            request_id.clone(),
+            HashMap::new(),
+            sqs_payload(),
+        );
+
+        assert_eq!(p.dsm_processed_request_ids.len(), 1);
+        assert!(p.dsm_processed_request_ids.contains(&request_id));
+    }
+
+    #[tokio::test]
+    async fn dsm_idempotency_state_is_cleared_with_invocation_context() {
+        let mut p = setup();
+        let request_id = String::from("req-dsm-cleanup");
+        p.context_buffer.start_context(&request_id, Span::default());
+        p.dsm_processed_request_ids.insert(request_id.clone());
+
+        p.release_invocation_context(&request_id);
+
+        assert!(!p.dsm_processed_request_ids.contains(&request_id));
     }
 
     /// Two OOM signals for the same `request_id` increment the metric exactly once.
