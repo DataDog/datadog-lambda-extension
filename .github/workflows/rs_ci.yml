@@ -182,3 +182,17 @@ jobs:
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           working-directory: bottlecap
+
+  # Guards cold-start H1 (PR #1276): the default build must keep reqwest on
+  # compiled-in webpki roots (no per-build native-cert filesystem scan), and the
+  # FIPS build must keep native roots. Reads the resolved feature graph only
+  # (no compilation), so it's fast and needs no protoc.
+  tls-root-features:
+    name: TLS Root Features
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions-rust-lang/setup-rust-toolchain@150fca883cd4034361b621bd4e6a9d34e5143606 # v1.15.4
+        with:
+          cache: false
+      - run: ./scripts/verify_tls_root_features.sh

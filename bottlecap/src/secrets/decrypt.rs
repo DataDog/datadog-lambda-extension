@@ -30,6 +30,18 @@ pub async fn resolve_secrets(
     {
         let before_decrypt = Instant::now();
 
+        // Dedicated client for *direct* AWS control-plane calls (KMS / Secrets
+        // Manager / SSM / STS, and the SnapStart container-credentials endpoint).
+        // It intentionally uses the default root set (compiled-in webpki roots on
+        // non-FIPS builds; see bottlecap/Cargo.toml) with no proxy and no
+        // tls_cert_file: AWS endpoints present certificates that chain to public
+        // AWS CAs, and DD_PROXY_HTTPS / tls_cert_file are for *Datadog* egress, not
+        // AWS API traffic (which goes direct, or through VPC endpoints that also
+        // present public certs). skip_ssl_validation is deliberately not applied
+        // here either — we do not disable certificate validation on the calls that
+        // fetch credentials and secrets. The delegated-auth path (dd_org_uuid)
+        // talks to a Datadog endpoint and so uses `shared_client` below, which does
+        // honor the proxy and tls_cert_file settings.
         let builder = match create_reqwest_client_builder() {
             Ok(builder) => builder,
             Err(err) => {

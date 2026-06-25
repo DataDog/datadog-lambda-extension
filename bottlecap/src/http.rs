@@ -152,7 +152,9 @@ pub fn headers_to_map(headers: &HeaderMap) -> HashMap<String, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::Write;
     use std::sync::atomic::{AtomicUsize, Ordering};
+    use tempfile::NamedTempFile;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::TcpListener;
 
@@ -243,6 +245,240 @@ mod tests {
         assert_eq!(
             opened, 2,
             "expected 2 fresh TCP connections, got {opened} (pooling not disabled?)"
+        );
+    }
+
+    // ---------------------------------------------------------------------
+    // TLS root-trust tests for cold-start hypothesis H1 (PR #1276). The
+    // non-FIPS build trusts compiled-in webpki roots; `tls_cert_file` is the
+    // supported mitigation for environments behind a private CA (e.g. a
+    // TLS-intercepting DD_PROXY_HTTPS). These pin both halves of that contract
+    // so the trust model can't regress silently.
+    // ---------------------------------------------------------------------
+
+    // Self-contained test PKI, generated offline with OpenSSL (ECDSA P-256,
+    // valid ~100 years). The CA is a *private* root deliberately NOT in the
+    // webpki/Mozilla bundle, so it exercises exactly the path this PR changes.
+    // Regenerate with:
+    //   openssl ecparam -name prime256v1 -genkey -noout -out ca.key
+    //   openssl req -x509 -new -key ca.key -sha256 -days 36500 \
+    //     -subj "/CN=Bottlecap Test CA" \
+    //     -addext "basicConstraints=critical,CA:TRUE" \
+    //     -addext "keyUsage=critical,keyCertSign,cRLSign" -out ca.crt
+    //   openssl ecparam -name prime256v1 -genkey -noout -out leaf.key
+    //   openssl req -new -key leaf.key -subj "/CN=localhost" -out leaf.csr
+    //   printf 'basicConstraints=CA:FALSE\nkeyUsage=critical,digitalSignature\nextendedKeyUsage=serverAuth\nsubjectAltName=DNS:localhost\n' > leaf.ext
+    //   openssl x509 -req -in leaf.csr -CA ca.crt -CAkey ca.key -CAcreateserial \
+    //     -sha256 -days 36500 -extfile leaf.ext -out leaf.crt
+    //   openssl pkcs8 -topk8 -nocrypt -in leaf.key -out leaf.pk8.pem
+    const TEST_CA_CERT_PEM: &str = r"
+-----BEGIN CERTIFICATE-----
+MIIBnzCCAUWgAwIBAgIUf5l+dmNjL/xU10EM0qk4Iseh3nQwCgYIKoZIzj0EAwIw
+HDEaMBgGA1UEAwwRQm90dGxlY2FwIFRlc3QgQ0EwIBcNMjYwNjI1MTgzNjMwWhgP
+MjEyNjA2MDExODM2MzBaMBwxGjAYBgNVBAMMEUJvdHRsZWNhcCBUZXN0IENBMFkw
+EwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEK9O0WnLz1pRAD3RZzYzsCf8vEieLLwnV
+D8RNYJBaEBZBJbE+4snr+0vhVm2mGtIojZTJ0bc5Z98JHpZ57LBpwqNjMGEwHQYD
+VR0OBBYEFJtZHbWEv1FI0KacM/4ctJkUuMg2MB8GA1UdIwQYMBaAFJtZHbWEv1FI
+0KacM/4ctJkUuMg2MA8GA1UdEwEB/wQFMAMBAf8wDgYDVR0PAQH/BAQDAgEGMAoG
+CCqGSM49BAMCA0gAMEUCIQDFLc+zjel9LGmytihROgErrPc6WDxmziypva+k2cSN
+CAIgYb1nsDag2/bwlzf4OOcYvqU9xNRdXMarkRxn4o5rPR4=
+-----END CERTIFICATE-----
+";
+    const TEST_SERVER_CERT_PEM: &str = r"
+-----BEGIN CERTIFICATE-----
+MIIBvTCCAWSgAwIBAgIUOkYng/RZxQcYlMY5I+RAXzR7dSkwCgYIKoZIzj0EAwIw
+HDEaMBgGA1UEAwwRQm90dGxlY2FwIFRlc3QgQ0EwIBcNMjYwNjI1MTgzNjMwWhgP
+MjEyNjA2MDExODM2MzBaMBQxEjAQBgNVBAMMCWxvY2FsaG9zdDBZMBMGByqGSM49
+AgEGCCqGSM49AwEHA0IABOuKun0roY5MAEOgA3NNebQa9l56HVsNFwGJ4a5chM2T
+s+vToAoyflPMZfxuS6PUv2WHrahmUH5WZKr0XaT/RIijgYkwgYYwCQYDVR0TBAIw
+ADAOBgNVHQ8BAf8EBAMCB4AwEwYDVR0lBAwwCgYIKwYBBQUHAwEwFAYDVR0RBA0w
+C4IJbG9jYWxob3N0MB0GA1UdDgQWBBTcqKduDXHEOeUXAL6fqwAYl50VVTAfBgNV
+HSMEGDAWgBSbWR21hL9RSNCmnDP+HLSZFLjINjAKBggqhkjOPQQDAgNHADBEAiAT
+nwOMjOwnQoeLvZgHhNqrzlVGNqnT4FPudJTgTKrAAAIgVMw8wqk70JXLm4pEdN8/
+oMUo5j7nV6S8Hd02b5hW5pM=
+-----END CERTIFICATE-----
+";
+    const TEST_SERVER_KEY_PEM: &str = r"
+-----BEGIN PRIVATE KEY-----
+MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQgkflx4lEcI8Fafj8E
+EgBejgnIKCAkaQXo+p0h3a6IsQOhRANCAATrirp9K6GOTABDoANzTXm0GvZeeh1b
+DRcBieGuXITNk7Pr06AKMn5TzGX8bkuj1L9lh62oZlB+VmSq9F2k/0SI
+-----END PRIVATE KEY-----
+";
+
+    /// Installs a process-default rustls `CryptoProvider` matching the build's
+    /// TLS backend (mirrors `traces/http_client.rs`); idempotent across tests.
+    fn ensure_crypto_provider() {
+        #[cfg(feature = "fips")]
+        let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+        #[cfg(not(feature = "fips"))]
+        let _ = rustls::crypto::ring::default_provider().install_default();
+    }
+
+    /// Spawns a local HTTPS (HTTP/1.1-over-TLS) server presenting the test leaf
+    /// certificate (signed by `TEST_CA_CERT_PEM`); returns the bound port.
+    async fn spawn_tls_server() -> u16 {
+        ensure_crypto_provider();
+        let certs = rustls_pemfile::certs(&mut BufReader::new(TEST_SERVER_CERT_PEM.as_bytes()))
+            .collect::<Result<Vec<_>, _>>()
+            .expect("parse test server cert");
+        let key = rustls_pemfile::private_key(&mut BufReader::new(TEST_SERVER_KEY_PEM.as_bytes()))
+            .expect("read test server key")
+            .expect("test server key present");
+        let server_config = rustls::ServerConfig::builder()
+            .with_no_client_auth()
+            .with_single_cert(certs, key)
+            .expect("build server TLS config");
+        let acceptor = tokio_rustls::TlsAcceptor::from(Arc::new(server_config));
+
+        let listener = TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind tls listener");
+        let port = listener.local_addr().expect("listener local_addr").port();
+        tokio::spawn(async move {
+            loop {
+                let Ok((sock, _)) = listener.accept().await else {
+                    return;
+                };
+                let acceptor = acceptor.clone();
+                tokio::spawn(async move {
+                    let Ok(mut tls) = acceptor.accept(sock).await else {
+                        return;
+                    };
+                    let mut buf = vec![0u8; 8192];
+                    let mut accumulated = Vec::new();
+                    loop {
+                        let n = match tls.read(&mut buf).await {
+                            Ok(0) | Err(_) => return,
+                            Ok(n) => n,
+                        };
+                        accumulated.extend_from_slice(&buf[..n]);
+                        while let Some(idx) = accumulated.windows(4).position(|w| w == b"\r\n\r\n")
+                        {
+                            accumulated.drain(..idx + 4);
+                            if tls
+                                .write_all(
+                                    b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: keep-alive\r\n\r\nok",
+                                )
+                                .await
+                                .is_err()
+                            {
+                                return;
+                            }
+                        }
+                    }
+                });
+            }
+        });
+        port
+    }
+
+    fn ca_temp_file() -> NamedTempFile {
+        let mut f = NamedTempFile::new().expect("create temp CA file");
+        f.write_all(TEST_CA_CERT_PEM.as_bytes())
+            .expect("write temp CA file");
+        f
+    }
+
+    /// `tls_cert_file` must add the private CA *on top of* the webpki roots, so a
+    /// server presenting a privately-signed cert is trusted. This is the
+    /// documented mitigation for private-CA / TLS-intercepting-proxy setups.
+    #[tokio::test]
+    async fn tls_cert_file_trusts_private_ca() {
+        let port = spawn_tls_server().await;
+        let ca = ca_temp_file();
+        let cfg = config::Config {
+            http_protocol: Some("http1".to_string()),
+            flush_timeout: 5,
+            tls_cert_file: Some(ca.path().to_str().expect("ca path utf8").to_string()),
+            ..config::Config::default()
+        };
+        let client = get_client(&Arc::new(cfg));
+        let resp = client
+            .get(format!("https://localhost:{port}/"))
+            .send()
+            .await
+            .expect("request should succeed when tls_cert_file trusts the private CA");
+        assert_eq!(resp.status(), 200);
+    }
+
+    /// Without `tls_cert_file`, the default root set (webpki on non-FIPS builds)
+    /// must reject a privately-signed cert. Pins the post-PR trust behavior:
+    /// private-CA users must opt in via `tls_cert_file`.
+    #[tokio::test]
+    async fn private_ca_rejected_without_tls_cert_file() {
+        let port = spawn_tls_server().await;
+        let cfg = config::Config {
+            http_protocol: Some("http1".to_string()),
+            flush_timeout: 5,
+            ..config::Config::default()
+        };
+        let client = get_client(&Arc::new(cfg));
+        let result = client
+            .get(format!("https://localhost:{port}/"))
+            .send()
+            .await;
+        assert!(
+            result.is_err(),
+            "default roots must reject a privately-signed cert without tls_cert_file"
+        );
+    }
+
+    /// `skip_ssl_validation` remains a full escape hatch: an untrusted cert is
+    /// accepted regardless of the configured root set.
+    #[tokio::test]
+    async fn skip_ssl_validation_accepts_untrusted_cert() {
+        let port = spawn_tls_server().await;
+        let cfg = config::Config {
+            http_protocol: Some("http1".to_string()),
+            flush_timeout: 5,
+            skip_ssl_validation: true,
+            ..config::Config::default()
+        };
+        let client = get_client(&Arc::new(cfg));
+        let resp = client
+            .get(format!("https://localhost:{port}/"))
+            .send()
+            .await
+            .expect("request should succeed when skip_ssl_validation is set");
+        assert_eq!(resp.status(), 200);
+    }
+
+    #[test]
+    fn load_custom_cert_parses_single() {
+        let ca = ca_temp_file();
+        let certs = load_custom_cert(ca.path().to_str().expect("path utf8"))
+            .expect("should parse one certificate");
+        assert_eq!(certs.len(), 1);
+    }
+
+    #[test]
+    fn load_custom_cert_parses_multiple() {
+        let mut f = NamedTempFile::new().expect("temp file");
+        f.write_all(format!("{TEST_CA_CERT_PEM}{TEST_SERVER_CERT_PEM}").as_bytes())
+            .expect("write certs");
+        let certs = load_custom_cert(f.path().to_str().expect("path utf8"))
+            .expect("should parse two certificates");
+        assert_eq!(certs.len(), 2);
+    }
+
+    #[test]
+    fn load_custom_cert_empty_file_errors() {
+        let f = NamedTempFile::new().expect("temp file");
+        assert!(
+            load_custom_cert(f.path().to_str().expect("path utf8")).is_err(),
+            "empty file must error"
+        );
+    }
+
+    #[test]
+    fn load_custom_cert_non_pem_errors() {
+        let mut f = NamedTempFile::new().expect("temp file");
+        f.write_all(b"this is not a certificate")
+            .expect("write garbage");
+        assert!(
+            load_custom_cert(f.path().to_str().expect("path utf8")).is_err(),
+            "non-PEM content must error"
         );
     }
 }
