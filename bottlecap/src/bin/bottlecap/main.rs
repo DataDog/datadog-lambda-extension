@@ -335,29 +335,34 @@ async fn extension_loop_active(
     // when enabled, the extension-side DSM processor).
     let proxy_aggregator = Arc::new(TokioMutex::new(proxy_aggregator::Aggregator::default()));
 
-    let dsm_service = config
-        .service
-        .clone()
-        .or_else(|| tags_provider.get_canonical_resource_name())
-        .unwrap_or_else(|| "aws.lambda".to_string())
-        .to_lowercase();
-    let dsm_env = config.env.clone().unwrap_or_default();
-    let dsm_version = config.version.clone().unwrap_or_default();
-    let mut dsm_tags: Vec<String> = config
-        .tags
-        .iter()
-        .map(|(key, value)| format!("{key}:{value}"))
-        .collect();
-    dsm_tags.sort();
-
-    debug!(
-        "DSM startup config: enabled={}, service={}, env={}, version={}, site={}, tags={:?}",
-        config.ext.dsm_consume_enabled, dsm_service, dsm_env, dsm_version, config.site, dsm_tags
-    );
-
     // Extension-side Data Streams Monitoring (consume checkpoints), gated by
     // DD_DATA_STREAMS_ENABLED.
     let dsm_processor = if config.ext.dsm_consume_enabled {
+        let dsm_service = config
+            .service
+            .clone()
+            .or_else(|| tags_provider.get_canonical_resource_name())
+            .unwrap_or_else(|| "aws.lambda".to_string())
+            .to_lowercase();
+        let dsm_env = config.env.clone().unwrap_or_default();
+        let dsm_version = config.version.clone().unwrap_or_default();
+        let mut dsm_tags: Vec<String> = config
+            .tags
+            .iter()
+            .map(|(key, value)| format!("{key}:{value}"))
+            .collect();
+        dsm_tags.sort();
+
+        debug!(
+            "DSM startup config: enabled={}, service={}, env={}, version={}, site={}, tags={:?}",
+            config.ext.dsm_consume_enabled,
+            dsm_service,
+            dsm_env,
+            dsm_version,
+            config.site,
+            dsm_tags
+        );
+
         Some(Arc::new(
             bottlecap::traces::data_streams::DsmProcessor::new(
                 dsm_service,
