@@ -136,9 +136,10 @@ default = [
     # Use webpki-roots (compiled-in Mozilla CA bundle) rather than
     # rustls-tls-native-roots for the non-FIPS reqwest clients. native-roots
     # calls rustls_native_certs::load_native_certs() — a filesystem cert-bundle
-    # scan/parse — on *every* reqwest::Client::build(), and bottlecap builds two
-    # reqwest clients during cold-start init (the register client in
-    # bin/bottlecap/main.rs and the shared flush client in src/http.rs).
+    # scan/parse — on *every* reqwest::Client::build(), and bottlecap builds
+    # three reqwest clients during cold-start init (the register client in
+    # bin/bottlecap/main.rs, the shared flush client in src/http.rs, and the
+    # secrets-decrypt client in src/secrets/decrypt.rs for KMS/SM/SSM/STS).
     # webpki-roots removes that per-build scan. Trade-off: webpki trusts only the
     # public Mozilla roots, so private/internal OS-installed CAs are no longer
     # picked up implicitly; users relying on those must point DD_PROXY_HTTPS at a
