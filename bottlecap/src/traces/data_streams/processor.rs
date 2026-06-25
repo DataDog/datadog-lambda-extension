@@ -141,14 +141,20 @@ impl DsmProcessor {
 }
 
 /// Extract the inbound DSM pathway context from a carrier, preferring the
-/// base64 key. Fails closed (returns `None`) on malformed input.
+/// explicit base64 key. The legacy `dd-pathway-ctx` key carries the raw binary
+/// DSM context by tracer convention (not base64), so decode it from bytes.
+/// Fails closed (returns `None`) on malformed input.
 fn extract_pathway_context(
     carrier: &std::collections::HashMap<String, String>,
 ) -> Option<DsmContext> {
     carrier
         .get(DD_PATHWAY_CTX_BASE64_KEY)
-        .or_else(|| carrier.get(DD_PATHWAY_CTX_KEY))
         .and_then(|v| DsmContext::from_base64(v))
+        .or_else(|| {
+            carrier
+                .get(DD_PATHWAY_CTX_KEY)
+                .and_then(|v| DsmContext::from_bytes(v.as_bytes()))
+        })
 }
 
 fn now_unix_nanos() -> u64 {
@@ -176,6 +182,33 @@ mod tests {
             DD_PATHWAY_CTX_BASE64_KEY.to_string(),
             "Z7CzXmXArPrE58Cfj2LI2cOfj2I=".to_string(),
         );
+        let ctx = extract_pathway_context(&carrier).expect("context");
+        assert_eq!(hex::encode(ctx.hash), "67b0b35e65c0acfa");
+    }
+
+    #[test]
+    fn extracts_legacy_raw_context_from_carrier() {
+        let mut carrier = HashMap::new();
+        // Raw context bytes: 8-byte hash (`abcdefgh`), pathwayStartMs=1
+        // (zigzag varint 2), edgeStartMs=2 (zigzag varint 4). These bytes are
+        // UTF-8 representable, matching the current string carrier shape while
+        // still exercising raw-byte decoding for `dd-pathway-ctx`.
+        carrier.insert(DD_PATHWAY_CTX_KEY.to_string(), "abcdefgh\u{0002}\u{0004}".to_string());
+        let ctx = extract_pathway_context(&carrier).expect("context");
+        assert_eq!(ctx.hash, *b"abcdefgh");
+        assert_eq!(ctx.pathway_start_ns, 1_000_000);
+        assert_eq!(ctx.edge_start_ns, 2_000_000);
+    }
+
+    #[test]
+    fn base64_context_takes_precedence_over_legacy_context() {
+        let mut carrier = HashMap::new();
+        carrier.insert(
+            DD_PATHWAY_CTX_BASE64_KEY.to_string(),
+            "Z7CzXmXArPrE58Cfj2LI2cOfj2I=".to_string(),
+        );
+        carrier.insert(DD_PATHWAY_CTX_KEY.to_string(), "abcdefgh\u{0002}\u{0004}".to_string());
+
         let ctx = extract_pathway_context(&carrier).expect("context");
         assert_eq!(hex::encode(ctx.hash), "67b0b35e65c0acfa");
     }
