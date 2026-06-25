@@ -112,6 +112,31 @@ async fn graceful_shutdown(tasks: Arc<Mutex<JoinSet<()>>>, shutdown_token: Cance
     }
 }
 
+async fn record_dsm_consume_from_invocation_next(
+    invocation_processor: &InvocationProcessorHandle,
+    parts: &http::response::Parts,
+    body: &Bytes,
+) {
+    let Some(request_id) = parts
+        .headers
+        .get("Lambda-Runtime-Aws-Request-Id")
+        .and_then(|v| v.to_str().ok())
+        .map(std::string::ToString::to_string)
+    else {
+        debug!("PROXY | invocation_next_proxy | missing request id for DSM consume extraction");
+        return;
+    };
+
+    let payload_value = serde_json::from_slice(body).unwrap_or_else(|e| {
+        error!("PROXY | invocation_next_proxy | error parsing DSM payload as JSON: {e}");
+        serde_json::json!({})
+    });
+
+    let _ = invocation_processor
+        .record_dsm_consume_from_payload(request_id, payload_value)
+        .await;
+}
+
 /// Given an optional String representing the LWA proxy lambda runtime API,
 /// return a `SocketAddr` that can be used to bind the proxy server.
 ///
@@ -196,24 +221,17 @@ async fn invocation_next_proxy(
                 }
             }
 
-            // Drive universal instrumentation from the intercepted `/next` payload
-            // whenever the runtime API proxy is in the request path and a feature
-            // needs the invocation payload without relying on a tracer calling
-            // `/lambda/start-invocation`.
-            //
-            // For LWA this has always happened. We additionally enable it for the
-            // experimental wrapper proxy (`DD_EXPERIMENTAL_ENABLE_PROXY=true`) and
-            // for extension-side DSM consume extraction (`DD_DATA_STREAMS_ENABLED=true`).
-            // DSM recording is request-id idempotent in the invocation processor,
-            // so a later tracer-driven `/lambda/start-invocation` will not double-count.
+            // Drive full LWA universal instrumentation only for LWA and the
+            // experimental wrapper proxy. DSM-only proxy support must not reuse
+            // `lwa::process_invocation_next`, because that path also queues LWA
+            // reparenting with a synthetic invocation span id. In tracer runtimes
+            // that still call `/lambda/start-invocation`, that synthetic id can
+            // conflict with the tracer-provided invocation span id.
             let experimental_proxy_enabled = std::env::var("DD_EXPERIMENTAL_ENABLE_PROXY")
                 .is_ok_and(|v| v.eq_ignore_ascii_case("true"));
             let dsm_consume_enabled = std::env::var("DD_DATA_STREAMS_ENABLED")
                 .is_ok_and(|v| v.eq_ignore_ascii_case("true"));
-            if aws_config.aws_lwa_proxy_lambda_runtime_api.is_some()
-                || experimental_proxy_enabled
-                || dsm_consume_enabled
-            {
+            if aws_config.aws_lwa_proxy_lambda_runtime_api.is_some() || experimental_proxy_enabled {
                 debug!(
                     "PROXY | invocation_next_proxy | driving universal instrumentation from intercepted payload"
                 );
@@ -222,6 +240,16 @@ async fn invocation_next_proxy(
                     &intercepted_parts_clone,
                     &body,
                     Arc::clone(&propagator),
+                )
+                .await;
+            } else if dsm_consume_enabled {
+                debug!(
+                    "PROXY | invocation_next_proxy | recording DSM consume from intercepted payload"
+                );
+                record_dsm_consume_from_invocation_next(
+                    &invocation_processor,
+                    &intercepted_parts_clone,
+                    &body,
                 )
                 .await;
             }

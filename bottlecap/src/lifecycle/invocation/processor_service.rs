@@ -83,6 +83,10 @@ pub enum ProcessorCommand {
         payload_value: Value,
         request_id: Option<String>,
     },
+    RecordDsmConsumeFromPayload {
+        request_id: String,
+        payload_value: Value,
+    },
     UniversalInstrumentationEnd {
         headers: HashMap<String, String>,
         payload_value: Value,
@@ -279,6 +283,19 @@ impl InvocationProcessorHandle {
                 headers,
                 payload_value,
                 request_id,
+            })
+            .await
+    }
+
+    pub async fn record_dsm_consume_from_payload(
+        &self,
+        request_id: String,
+        payload_value: Value,
+    ) -> Result<(), mpsc::error::SendError<ProcessorCommand>> {
+        self.sender
+            .send(ProcessorCommand::RecordDsmConsumeFromPayload {
+                request_id,
+                payload_value,
             })
             .await
     }
@@ -589,6 +606,13 @@ impl InvocationProcessorService {
                         payload_value,
                         request_id,
                     );
+                }
+                ProcessorCommand::RecordDsmConsumeFromPayload {
+                    request_id,
+                    payload_value,
+                } => {
+                    self.processor
+                        .record_dsm_consume_from_payload(request_id, &payload_value);
                 }
                 ProcessorCommand::UniversalInstrumentationEnd {
                     headers,

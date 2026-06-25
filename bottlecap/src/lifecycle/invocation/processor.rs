@@ -1124,6 +1124,34 @@ impl Processor {
         context.extracted_span_context =
             Self::extract_span_context(&headers, &payload_value, Arc::clone(&self.propagator));
 
+        // Set the extracted trace context to the spans
+        if let Some(sc) = &context.extracted_span_context {
+            #[allow(clippy::cast_possible_truncation)] // Datadog protocol uses lower 64 bits
+            {
+                context.invocation_span.trace_id = sc.trace_id as u64;
+            }
+            context.invocation_span.parent_id = sc.span_id;
+
+            // Set the right data to the correct root level span,
+            // If there's an inferred span, then that should be the root.
+            if self.inferrer.inferred_span.is_some() {
+                self.inferrer.set_parent_id(sc.span_id);
+                self.inferrer.extend_meta(sc.tags.clone());
+            } else {
+                context.invocation_span.meta.extend(sc.tags.clone());
+            }
+        }
+
+        // If we have an inferred span, set the invocation span parent id
+        // to be the inferred span id, even if we don't have an extracted trace context
+        if let Some(inferred_span) = &self.inferrer.inferred_span {
+            context.invocation_span.parent_id = inferred_span.span_id;
+        }
+
+        self.record_dsm_consume_from_payload(request_id, &payload_value);
+    }
+
+    pub fn record_dsm_consume_from_payload(&mut self, request_id: String, payload_value: &Value) {
         // Extension-side DSM: record a consume (`direction:in`) checkpoint for
         // DSM-eligible event sources, continuing any inbound pathway context.
         if let Some(dsm) = self.dsm_processor.as_ref() {
@@ -1131,12 +1159,12 @@ impl Processor {
                 debug!("DSM: extraction hook fired for request {request_id}");
                 let identified =
                     crate::lifecycle::invocation::triggers::IdentifiedTrigger::from_value(
-                        &payload_value,
+                        payload_value,
                     );
                 if let Some(trigger) = SpanInferrer::get_trigger_type(identified) {
                     // Batched sources (SQS/SNS/Kinesis) yield one checkpoint per
                     // record so every message's pathway context is captured.
-                    let checkpoints = trigger.get_dsm_checkpoints(&payload_value);
+                    let checkpoints = trigger.get_dsm_checkpoints(payload_value);
                     if checkpoints.is_empty() {
                         debug!(
                             "DSM: identified trigger is not DSM-eligible, skipping consume checkpoint"
@@ -1176,30 +1204,6 @@ impl Processor {
             }
         } else {
             debug!("DSM: no DSM processor available, skipping consume checkpoint");
-        }
-
-        // Set the extracted trace context to the spans
-        if let Some(sc) = &context.extracted_span_context {
-            #[allow(clippy::cast_possible_truncation)] // Datadog protocol uses lower 64 bits
-            {
-                context.invocation_span.trace_id = sc.trace_id as u64;
-            }
-            context.invocation_span.parent_id = sc.span_id;
-
-            // Set the right data to the correct root level span,
-            // If there's an inferred span, then that should be the root.
-            if self.inferrer.inferred_span.is_some() {
-                self.inferrer.set_parent_id(sc.span_id);
-                self.inferrer.extend_meta(sc.tags.clone());
-            } else {
-                context.invocation_span.meta.extend(sc.tags.clone());
-            }
-        }
-
-        // If we have an inferred span, set the invocation span parent id
-        // to be the inferred span id, even if we don't have an extracted trace context
-        if let Some(inferred_span) = &self.inferrer.inferred_span {
-            context.invocation_span.parent_id = inferred_span.span_id;
         }
     }
 
@@ -3140,6 +3144,25 @@ mod tests {
         assert!(
             p.dsm_processed_request_ids.contains(&request_id),
             "LMI UniversalInstrumentationStart must process immediately when the context already exists"
+        );
+    }
+
+    #[tokio::test]
+    async fn dsm_proxy_payload_extraction_does_not_mark_tracer_detected_or_reparent() {
+        let mut p = setup();
+        attach_test_dsm_processor(&mut p);
+        let request_id = String::from("req-dsm-proxy-only");
+
+        p.record_dsm_consume_from_payload(request_id.clone(), &sqs_payload());
+
+        assert!(p.dsm_processed_request_ids.contains(&request_id));
+        assert!(
+            !p.tracer_detected,
+            "DSM-only proxy extraction must not be treated as tracer universal instrumentation"
+        );
+        assert!(
+            p.context_buffer.sorted_reparenting_info.is_empty(),
+            "DSM-only proxy extraction must not add LWA reparenting"
         );
     }
 
