@@ -87,6 +87,9 @@ pub struct LambdaConfig {
     /// `DD_DATA_STREAMS_ENABLED` flag the tracer libraries use; the extension
     /// and tracer never emit checkpoints for the same runtime, so sharing the
     /// flag cannot double-count.
+    /// Java/.NET/Go - Datadog Lambda supports calls to '/start-invocation', no tracer support for parsing Lambda payloads
+    /// Python - Wrapper script in datadog-lambda-python extracts context and DSM, but does not call `/start-invocation`
+    /// JS - Wrapper script in datadog-lambda-js extracts context and DSM, but does not call `/start-invocation`
     pub dsm_consume_enabled: bool,
     /// Fallback DSM `exchange` (event bus name) used for `EventBridge` consume
     /// checkpoints when it cannot be derived from the event payload
