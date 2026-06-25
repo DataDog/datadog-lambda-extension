@@ -1053,7 +1053,15 @@ impl Processor {
                 "Processing UniversalInstrumentationStart for request_id: {}",
                 req_id
             );
-            if self
+            if self.aws_config.is_managed_instance_mode()
+                && self.context_buffer.get(&req_id).is_some()
+            {
+                // Managed Instance mode creates the invocation context from the
+                // platform invoke event without enqueueing the request id in the
+                // FIFO pairing queue. If the request-id-addressed context already
+                // exists, process immediately instead of buffering forever.
+                self.process_on_universal_instrumentation_start(req_id, headers, payload_value);
+            } else if self
                 .context_buffer
                 .pair_universal_instrumentation_start_with_request_id(
                     &req_id,
@@ -1832,6 +1840,14 @@ mod tests {
     }
 
     fn setup() -> Processor {
+        setup_with_initialization_type("on-demand")
+    }
+
+    fn setup_managed_instance() -> Processor {
+        setup_with_initialization_type(config::aws::LAMBDA_MANAGED_INSTANCES_INIT_TYPE)
+    }
+
+    fn setup_with_initialization_type(initialization_type: &str) -> Processor {
         let aws_config = Arc::new(AwsConfig {
             region: "us-east-1".into(),
             aws_lwa_proxy_lambda_runtime_api: Some("***".into()),
@@ -1839,7 +1855,7 @@ mod tests {
             sandbox_init_time: Instant::now(),
             runtime_api: "***".into(),
             exec_wrapper: None,
-            initialization_type: "on-demand".into(),
+            initialization_type: initialization_type.into(),
         });
 
         let config = Arc::new(config::Config {
@@ -3105,6 +3121,25 @@ mod tests {
             ctx.invocation_span.metrics.get("_dd.appsec.enabled"),
             Some(&0.0),
             "pre-existing _dd.appsec.enabled value must not be overwritten"
+        );
+    }
+
+    #[tokio::test]
+    async fn managed_instance_start_processes_immediately_when_context_exists() {
+        let mut p = setup_managed_instance();
+        attach_test_dsm_processor(&mut p);
+        let request_id = String::from("req-lmi-dsm");
+
+        p.on_invoke_event(request_id.clone());
+        p.on_universal_instrumentation_start(
+            HashMap::new(),
+            sqs_payload(),
+            Some(request_id.clone()),
+        );
+
+        assert!(
+            p.dsm_processed_request_ids.contains(&request_id),
+            "LMI UniversalInstrumentationStart must process immediately when the context already exists"
         );
     }
 
