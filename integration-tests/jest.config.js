@@ -10,7 +10,7 @@ module.exports = {
     '!tests/**/*.d.ts',
   ],
   // Increase timeout for integration tests that involve Lambda invocations and waiting for Datadog
-  testTimeout: 900000, // 15 minutes
+  testTimeout: 1800000, // 30 minutes
   verbose: true,
   // Reporters for test results
   reporters: [

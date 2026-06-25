@@ -70,7 +70,7 @@ describe('Payload Size Integration Tests', () => {
       console.log(`Extension send-error log lines: ${sendErrorMessages.length}`);
 
       console.log('Invocation and telemetry collection complete');
-    }, 900000);
+    }, 1800000);
 
     // Assert on the FIRST request's trace. Its flush is deferred to a later
     // invocation (cold-start race), which is why we invoke a few times — but the
