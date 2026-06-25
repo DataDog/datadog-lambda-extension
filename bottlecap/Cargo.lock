@@ -536,6 +536,7 @@ dependencies = [
  "rustls-webpki",
  "serde",
  "serde-aux",
+ "serde_bytes",
  "serde_html_form",
  "serde_json",
  "serial_test",

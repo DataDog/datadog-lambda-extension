@@ -83,6 +83,10 @@ pub enum ProcessorCommand {
         payload_value: Value,
         request_id: Option<String>,
     },
+    RecordDsmConsumeFromPayload {
+        request_id: String,
+        payload_value: Value,
+    },
     UniversalInstrumentationEnd {
         headers: HashMap<String, String>,
         payload_value: Value,
@@ -283,6 +287,19 @@ impl InvocationProcessorHandle {
             .await
     }
 
+    pub async fn record_dsm_consume_from_payload(
+        &self,
+        request_id: String,
+        payload_value: Value,
+    ) -> Result<(), mpsc::error::SendError<ProcessorCommand>> {
+        self.sender
+            .send(ProcessorCommand::RecordDsmConsumeFromPayload {
+                request_id,
+                payload_value,
+            })
+            .await
+    }
+
     pub async fn on_universal_instrumentation_end(
         &self,
         headers: HashMap<String, String>,
@@ -464,10 +481,11 @@ impl InvocationProcessorService {
         metrics_aggregator_handle: AggregatorHandle,
         propagator: Arc<DatadogCompositePropagator>,
         durable_context_tx: mpsc::Sender<DurableContextUpdate>,
+        dsm_processor: Option<Arc<crate::traces::data_streams::DsmProcessor>>,
     ) -> (InvocationProcessorHandle, Self) {
         let (sender, receiver) = mpsc::channel(1000);
 
-        let processor = Processor::new(
+        let mut processor = Processor::new(
             tags_provider,
             config,
             aws_config,
@@ -475,6 +493,9 @@ impl InvocationProcessorService {
             propagator,
             durable_context_tx,
         );
+        if let Some(dsm) = dsm_processor {
+            processor.set_dsm_processor(dsm);
+        }
 
         let handle = InvocationProcessorHandle { sender };
         let service = Self {
@@ -585,6 +606,13 @@ impl InvocationProcessorService {
                         payload_value,
                         request_id,
                     );
+                }
+                ProcessorCommand::RecordDsmConsumeFromPayload {
+                    request_id,
+                    payload_value,
+                } => {
+                    self.processor
+                        .record_dsm_consume_from_payload(request_id, &payload_value);
                 }
                 ProcessorCommand::UniversalInstrumentationEnd {
                     headers,

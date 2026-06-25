@@ -112,6 +112,31 @@ async fn graceful_shutdown(tasks: Arc<Mutex<JoinSet<()>>>, shutdown_token: Cance
     }
 }
 
+async fn record_dsm_consume_from_invocation_next(
+    invocation_processor: &InvocationProcessorHandle,
+    parts: &http::response::Parts,
+    body: &Bytes,
+) {
+    let Some(request_id) = parts
+        .headers
+        .get("Lambda-Runtime-Aws-Request-Id")
+        .and_then(|v| v.to_str().ok())
+        .map(std::string::ToString::to_string)
+    else {
+        debug!("PROXY | invocation_next_proxy | missing request id for DSM consume extraction");
+        return;
+    };
+
+    let payload_value = serde_json::from_slice(body).unwrap_or_else(|e| {
+        error!("PROXY | invocation_next_proxy | error parsing DSM payload as JSON: {e}");
+        serde_json::json!({})
+    });
+
+    let _ = invocation_processor
+        .record_dsm_consume_from_payload(request_id, payload_value)
+        .await;
+}
+
 /// Given an optional String representing the LWA proxy lambda runtime API,
 /// return a `SocketAddr` that can be used to bind the proxy server.
 ///
@@ -196,12 +221,35 @@ async fn invocation_next_proxy(
                 }
             }
 
-            if aws_config.aws_lwa_proxy_lambda_runtime_api.is_some() {
+            // Drive full LWA universal instrumentation only for LWA and the
+            // experimental wrapper proxy. DSM-only proxy support must not reuse
+            // `lwa::process_invocation_next`, because that path also queues LWA
+            // reparenting with a synthetic invocation span id. In tracer runtimes
+            // that still call `/lambda/start-invocation`, that synthetic id can
+            // conflict with the tracer-provided invocation span id.
+            let experimental_proxy_enabled = std::env::var("DD_EXPERIMENTAL_ENABLE_PROXY")
+                .is_ok_and(|v| v.eq_ignore_ascii_case("true"));
+            let dsm_consume_enabled = std::env::var("DD_DATA_STREAMS_ENABLED")
+                .is_ok_and(|v| v.eq_ignore_ascii_case("true"));
+            if aws_config.aws_lwa_proxy_lambda_runtime_api.is_some() || experimental_proxy_enabled {
+                debug!(
+                    "PROXY | invocation_next_proxy | driving universal instrumentation from intercepted payload"
+                );
                 lwa::process_invocation_next(
                     &invocation_processor,
                     &intercepted_parts_clone,
                     &body,
                     Arc::clone(&propagator),
+                )
+                .await;
+            } else if dsm_consume_enabled {
+                debug!(
+                    "PROXY | invocation_next_proxy | recording DSM consume from intercepted payload"
+                );
+                record_dsm_consume_from_invocation_next(
+                    &invocation_processor,
+                    &intercepted_parts_clone,
+                    &body,
                 )
                 .await;
             }
@@ -449,6 +497,7 @@ mod tests {
     };
 
     #[tokio::test]
+    #[allow(clippy::too_many_lines)]
     async fn test_noop_proxy() {
         let aws_lwa_lambda_runtime_api = "127.0.0.1:12345";
         let aws_lambda_runtime_api = "127.0.0.1:12344";
@@ -508,6 +557,7 @@ mod tests {
                 metrics_aggregator,
                 Arc::clone(&propagator),
                 durable_context_tx,
+                None,
             );
         tokio::spawn(async move {
             invocation_processor_service.run().await;

@@ -330,6 +330,54 @@ async fn extension_loop_active(
     .await;
 
     let propagator = Arc::new(DatadogCompositePropagator::new(Arc::clone(config)));
+
+    // Shared proxy aggregator (used by the trace agent's proxy endpoints and,
+    // when enabled, the extension-side DSM processor).
+    let proxy_aggregator = Arc::new(TokioMutex::new(proxy_aggregator::Aggregator::default()));
+
+    // Extension-side Data Streams Monitoring (consume checkpoints), gated by
+    // DD_DATA_STREAMS_ENABLED.
+    let dsm_processor = if config.ext.dsm_consume_enabled {
+        let dsm_service = config
+            .service
+            .clone()
+            .or_else(|| tags_provider.get_canonical_resource_name())
+            .unwrap_or_else(|| "aws.lambda".to_string())
+            .to_lowercase();
+        let dsm_env = config.env.clone().unwrap_or_default();
+        let dsm_version = config.version.clone().unwrap_or_default();
+        let mut dsm_tags: Vec<String> = config
+            .tags
+            .iter()
+            .map(|(key, value)| format!("{key}:{value}"))
+            .collect();
+        dsm_tags.sort();
+
+        debug!(
+            "DSM startup config: enabled={}, service={}, env={}, version={}, site={}, tags={:?}",
+            config.ext.dsm_consume_enabled,
+            dsm_service,
+            dsm_env,
+            dsm_version,
+            config.site,
+            dsm_tags
+        );
+
+        Some(Arc::new(
+            bottlecap::traces::data_streams::DsmProcessor::new(
+                dsm_service,
+                dsm_env,
+                EXTENSION_VERSION.to_string(),
+                dsm_version,
+                dsm_tags,
+                &config.site,
+                Arc::clone(&proxy_aggregator),
+            ),
+        ))
+    } else {
+        None
+    };
+
     // Lifecycle Invocation Processor
     let (invocation_processor_handle, invocation_processor_service) =
         InvocationProcessorService::new(
@@ -339,6 +387,7 @@ async fn extension_loop_active(
             metrics_aggregator_handle.clone(),
             Arc::clone(&propagator),
             durable_context_tx,
+            dsm_processor.clone(),
         );
     tokio::spawn(async move {
         invocation_processor_service.run().await;
@@ -372,6 +421,7 @@ async fn extension_loop_active(
         invocation_processor_handle.clone(),
         appsec_processor.clone(),
         &shared_client,
+        Arc::clone(&proxy_aggregator),
     );
 
     let api_runtime_proxy_shutdown_signal = start_api_runtime_proxy(
@@ -430,6 +480,7 @@ async fn extension_loop_active(
         let stats_flusher_clone = Arc::clone(&stats_flusher);
         let proxy_flusher_clone = proxy_flusher.clone();
         let metrics_aggr_handle_clone = metrics_aggregator_handle.clone();
+        let dsm_processor_clone = dsm_processor.clone();
 
         // In Managed Instance mode, create a separate interval for the background flusher task.
         // We don't reuse race_flush_interval because we need to configure the missed tick
@@ -460,6 +511,7 @@ async fn extension_loop_active(
                 proxy_flusher_clone,
                 metrics_flushers_clone,
                 metrics_aggr_handle_clone,
+                dsm_processor_clone,
             );
 
             loop {
@@ -634,6 +686,7 @@ async fn extension_loop_active(
         proxy_flusher.clone(),
         Arc::clone(&metrics_flushers),
         metrics_aggregator_handle.clone(),
+        dsm_processor.clone(),
     );
     handle_next_invocation(next_lambda_response, &invocation_processor_handle).await;
     loop {
@@ -1104,6 +1157,7 @@ fn start_trace_agent(
     invocation_processor_handle: InvocationProcessorHandle,
     appsec_processor: Option<Arc<TokioMutex<AppSecProcessor>>>,
     client: &Client,
+    proxy_aggregator: Arc<TokioMutex<proxy_aggregator::Aggregator>>,
 ) -> (
     Sender<SendDataBuilderInfo>,
     Arc<trace_flusher::TraceFlusher>,
@@ -1168,7 +1222,6 @@ fn start_trace_agent(
     tokio::spawn(span_dedup_service.run());
 
     // Proxy
-    let proxy_aggregator = Arc::new(TokioMutex::new(proxy_aggregator::Aggregator::default()));
     let proxy_flusher = Arc::new(ProxyFlusher::new(
         api_key_factory.clone(),
         Arc::clone(&proxy_aggregator),

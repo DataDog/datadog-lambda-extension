@@ -388,3 +388,41 @@ export async function hasMetricWithTag(
   console.log(`Tag filter query returned ${series.length} series, hasData=${hasData}`);
   return hasData;
 }
+
+/**
+ * Returns true if the DSM `data_streams.latency` metric reports data points for
+ * the given service (plus any optional edge tags) in the window.
+ *
+ * Data Streams Monitoring is powered by `data_streams.latency`, so the metric
+ * appearing for a service proves a DSM node was created for it. There is no
+ * documented public DSM API; per the DSM team this metric is the supported
+ * signal. `service` is always a tag; edge tags such as `type:sqs` or
+ * `topic:<name>` are best-effort and should be verified on first run.
+ *
+ * Note: DSM metrics are tagged by `service` (not `functionname`), which is why
+ * this does not reuse `hasMetricWithTag`.
+ */
+export async function hasDataStreamsLatency(
+  service: string,
+  extraTags: string[],
+  fromTime: number,
+  toTime: number,
+): Promise<boolean> {
+  const tags = [`service:${service.toLowerCase()}`, ...extraTags].join(',');
+  const query = `avg:data_streams.latency{${tags}}`;
+
+  console.log(`Querying DSM latency: ${query}`);
+
+  const response = await datadogClient.get('/api/v1/query', {
+    params: {
+      query,
+      from: Math.floor(fromTime / 1000),
+      to: Math.floor(toTime / 1000),
+    },
+  });
+
+  const series = response.data.series || [];
+  const hasData = series.some((s: any) => Array.isArray(s.pointlist) && s.pointlist.length > 0);
+  console.log(`DSM latency query returned ${series.length} series, hasData=${hasData}`);
+  return hasData;
+}
