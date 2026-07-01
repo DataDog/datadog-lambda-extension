@@ -1,7 +1,7 @@
 * @DataDog/serverless-aws
 
 .github/chainguard/serverless-init-ci-publish.sts.yaml @DataDog/serverless
-.github/workflows/publish-serverless-init-to-ghcr.yml @DataDog/serverless
+.github/workflows/publish-serverless-init-to-ghcr.yml  @DataDog/serverless
 
-bottlecap/src/traces/ @DataDog/serverless-aws @DataDog/apm-serverless
+bottlecap/src/traces/                   @DataDog/serverless-aws @DataDog/apm-serverless
 bottlecap/tests/apm_integration_test.rs @DataDog/serverless-aws @DataDog/apm-serverless
