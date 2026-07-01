@@ -27,6 +27,7 @@ use bottlecap::{
         flush_strategy::{FlushStrategy, PeriodicStrategy},
         log_level::LogLevel,
     },
+    metrics::intake::metrics_intake_url,
     event_bus::{Event, EventBus},
     extension::{
         self, EXTENSION_HOST, EXTENSION_HOST_IP, ExtensionError, NextEventResponse,
@@ -88,8 +89,8 @@ use dogstatsd::{
     api_key::ApiKeyFactory,
     constants::CONTEXTS,
     datadog::{
-        DdDdUrl, DdUrl, MetricsIntakeUrlPrefix, MetricsIntakeUrlPrefixOverride,
-        RetryStrategy as DsdRetryStrategy, Site as MetricsSite,
+        DdUrl, MetricsIntakeUrlPrefix, MetricsIntakeUrlPrefixOverride,
+        RetryStrategy as DsdRetryStrategy,
     },
     dogstatsd::{DogStatsD, DogStatsDConfig},
     flusher::{Flusher as MetricsFlusher, FlusherConfig as MetricsFlusherConfig},
@@ -1295,26 +1296,12 @@ fn start_metrics_flushers(
 ) -> Vec<MetricsFlusher> {
     let mut flushers = Vec::new();
 
-    let metrics_intake_url = if !config.dd_url.is_empty() {
-        let dd_dd_url = DdDdUrl::new(config.dd_url.clone()).expect("can't parse DD_DD_URL");
-
-        let prefix_override = MetricsIntakeUrlPrefixOverride::maybe_new(None, Some(dd_dd_url));
-        MetricsIntakeUrlPrefix::new(None, prefix_override)
-    } else if !config.url.is_empty() {
-        let dd_url = DdUrl::new(config.url.clone()).expect("can't parse DD_URL");
-
-        let prefix_override = MetricsIntakeUrlPrefixOverride::maybe_new(Some(dd_url), None);
-        MetricsIntakeUrlPrefix::new(None, prefix_override)
-    } else {
-        // use site
-        let metrics_site = MetricsSite::new(config.site.clone()).expect("can't parse site");
-        MetricsIntakeUrlPrefix::new(Some(metrics_site), None)
-    };
+    let metrics_intake_url = metrics_intake_url(config);
 
     let flusher_config = MetricsFlusherConfig {
         api_key_factory,
         aggregator_handle: metrics_aggr_handle.clone(),
-        metrics_intake_url_prefix: metrics_intake_url.expect("can't parse site or override"),
+        metrics_intake_url_prefix: metrics_intake_url,
         client: client.clone(),
         retry_strategy: DsdRetryStrategy::Immediate(3),
         compression_level: config.metrics_config_compression_level,

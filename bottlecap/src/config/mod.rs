@@ -216,6 +216,9 @@ impl ConfigBuilder {
                 .clone_from(&self.config.trace_propagation_style);
         }
 
+        self.config.dd_url = trim_url(&self.config.dd_url);
+        self.config.url = trim_url(&self.config.url);
+
         // If Logs URL is not set, set it to the default
         if self.config.logs_config_logs_dd_url.trim().is_empty() {
             self.config.logs_config_logs_dd_url = build_fqdn_logs(self.config.site.clone());
@@ -229,7 +232,7 @@ impl ConfigBuilder {
             self.config.apm_dd_url = trace_intake_url(self.config.site.clone().as_str());
         } else {
             // If APM URL is set, add the site to the URL
-            self.config.apm_dd_url = trace_intake_url_prefixed(self.config.apm_dd_url.as_str());
+            self.config.apm_dd_url = trace_intake_url_prefixed(&trim_url(&self.config.apm_dd_url));
         }
 
         self.config.clone()
@@ -550,6 +553,10 @@ pub fn get_config(config_directory: &Path) -> Config {
 #[must_use]
 fn build_fqdn_logs(site: String) -> String {
     format!("https://http-intake.logs.{site}")
+}
+
+fn trim_url(url: &str) -> String {
+    url.trim_end_matches('/').to_owned()
 }
 
 #[inline]
@@ -954,6 +961,24 @@ pub mod tests {
     }
 
     #[test]
+    fn test_support_apm_dd_url_untrimmed() {
+        figment::Jail::expect_with(|jail| {
+            jail.clear_env();
+            jail.set_env(
+                "DD_APM_DD_URL",
+                "https://dr-test-failover-trace.agent.datadoghq.com/",
+            );
+
+            let config = get_config(Path::new(""));
+            assert_eq!(
+                config.apm_dd_url,
+                "https://dr-test-failover-trace.agent.datadoghq.com/api/v0.2/traces".to_string()
+            );
+            Ok(())
+        });
+    }
+
+    #[test]
     fn test_support_dd_dd_url() {
         figment::Jail::expect_with(|jail| {
             jail.clear_env();
@@ -966,6 +991,21 @@ pub mod tests {
     }
 
     #[test]
+    fn test_support_dd_dd_url_untrimmed() {
+        figment::Jail::expect_with(|jail| {
+            jail.clear_env();
+            jail.set_env("DD_DD_URL", "https://dr-test-failover.agent.datadoghq.com/");
+
+            let config = get_config(Path::new(""));
+            assert_eq!(
+                config.dd_url,
+                "https://dr-test-failover.agent.datadoghq.com".to_string()
+            );
+            Ok(())
+        });
+    }
+
+    #[test]
     fn test_support_dd_url() {
         figment::Jail::expect_with(|jail| {
             jail.clear_env();
@@ -973,6 +1013,21 @@ pub mod tests {
 
             let config = get_config(Path::new(""));
             assert_eq!(config.url, "custom_proxy:3128".to_string());
+            Ok(())
+        });
+    }
+
+    #[test]
+    fn test_support_dd_url_untrimmed() {
+        figment::Jail::expect_with(|jail| {
+            jail.clear_env();
+            jail.set_env("DD_URL", "https://dr-test-failover.agent.datadoghq.com/");
+
+            let config = get_config(Path::new(""));
+            assert_eq!(
+                config.url,
+                "https://dr-test-failover.agent.datadoghq.com".to_string()
+            );
             Ok(())
         });
     }
