@@ -27,7 +27,7 @@ use bottlecap::{
         flush_strategy::{FlushStrategy, PeriodicStrategy},
         log_level::LogLevel,
     },
-    metrics::intake::metrics_intake_url,
+    metrics::intake::{additional_endpoints, metrics_intake_url},
     event_bus::{Event, EventBus},
     extension::{
         self, EXTENSION_HOST, EXTENSION_HOST_IP, ExtensionError, NextEventResponse,
@@ -88,10 +88,7 @@ use dogstatsd::{
     },
     api_key::ApiKeyFactory,
     constants::CONTEXTS,
-    datadog::{
-        DdUrl, MetricsIntakeUrlPrefix, MetricsIntakeUrlPrefixOverride,
-        RetryStrategy as DsdRetryStrategy,
-    },
+    datadog::RetryStrategy as DsdRetryStrategy,
     dogstatsd::{DogStatsD, DogStatsDConfig},
     flusher::{Flusher as MetricsFlusher, FlusherConfig as MetricsFlusherConfig},
     metric::{EMPTY_TAGS, SortedTags},
@@ -1308,34 +1305,16 @@ fn start_metrics_flushers(
     };
     flushers.push(MetricsFlusher::new(flusher_config));
 
-    for (endpoint_url, api_keys) in &config.additional_endpoints {
-        let dd_url = match DdUrl::new(endpoint_url.clone()) {
-            Ok(url) => url,
-            Err(err) => {
-                error!(
-                    "Invalid additional endpoint: {err}. Falling back to 'https://app.datadoghq.com'"
-                );
-                DdUrl::new("https://app.datadoghq.com".to_string())
-                    .expect("additional endpoint fallback URL is invalid")
-            }
+    for endpoint in additional_endpoints(config) {
+        let additional_flusher_config = MetricsFlusherConfig {
+            api_key_factory: Arc::new(ApiKeyFactory::new(&endpoint.api_key)),
+            aggregator_handle: metrics_aggr_handle.clone(),
+            metrics_intake_url_prefix: endpoint.intake_url,
+            client: client.clone(),
+            retry_strategy: DsdRetryStrategy::Immediate(3),
+            compression_level: config.metrics_config_compression_level,
         };
-        let prefix_override = MetricsIntakeUrlPrefixOverride::maybe_new(Some(dd_url), None);
-        let metrics_intake_url = MetricsIntakeUrlPrefix::new(None, prefix_override)
-            .expect("can't parse additional endpoint URL");
-
-        // Create a flusher for each endpoint URL and API key pair
-        for api_key in api_keys {
-            let additional_api_key_factory = Arc::new(ApiKeyFactory::new(api_key));
-            let additional_flusher_config = MetricsFlusherConfig {
-                api_key_factory: additional_api_key_factory,
-                aggregator_handle: metrics_aggr_handle.clone(),
-                metrics_intake_url_prefix: metrics_intake_url.clone(),
-                client: client.clone(),
-                retry_strategy: DsdRetryStrategy::Immediate(3),
-                compression_level: config.metrics_config_compression_level,
-            };
-            flushers.push(MetricsFlusher::new(additional_flusher_config));
-        }
+        flushers.push(MetricsFlusher::new(additional_flusher_config));
     }
     flushers
 }
