@@ -4,6 +4,7 @@ use dogstatsd::datadog::{
 };
 use tracing::error;
 
+#[must_use]
 pub fn metrics_intake_url(config: &Config) -> MetricsIntakeUrlPrefix {
     if !config.dd_url.is_empty() {
         let dd_dd_url = DdDdUrl::new(config.dd_url.clone()).expect("can't parse DD_DD_URL");

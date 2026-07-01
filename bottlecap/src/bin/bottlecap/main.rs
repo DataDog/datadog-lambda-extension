@@ -27,7 +27,6 @@ use bottlecap::{
         flush_strategy::{FlushStrategy, PeriodicStrategy},
         log_level::LogLevel,
     },
-    metrics::intake::{additional_endpoints, metrics_intake_url},
     event_bus::{Event, EventBus},
     extension::{
         self, EXTENSION_HOST, EXTENSION_HOST_IP, ExtensionError, NextEventResponse,
@@ -54,6 +53,7 @@ use bottlecap::{
         flusher::LogsFlusher,
         lambda::DurableContextUpdate,
     },
+    metrics::intake::{additional_endpoints, metrics_intake_url},
     otlp::{agent::Agent as OtlpAgent, should_enable_otlp_agent},
     proxy::{interceptor, should_start_proxy},
     secrets::decrypt,
