@@ -82,7 +82,10 @@ impl StatsProcessor for ServerlessStatsProcessor {
         // treat it as a harmless no-op instead of indexing into an empty vec (which panics).
         let Some(first_bucket) = stats.stats.first_mut() else {
             debug!("Received empty trace stats payload; nothing to aggregate.");
-            return Ok((StatusCode::ACCEPTED, "Empty stats payload; nothing to aggregate.")
+            return Ok((
+                StatusCode::ACCEPTED,
+                "Empty stats payload; nothing to aggregate.",
+            )
                 .into_response());
         };
 
