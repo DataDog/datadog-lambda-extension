@@ -485,6 +485,7 @@ dependencies = [
  "chrono",
  "cookie",
  "datadog-agent-config",
+ "datadog-agent-trace-sampler",
  "datadog-fips",
  "datadog-opentelemetry",
  "datadog-protos",
@@ -823,6 +824,11 @@ dependencies = [
  "tokio",
  "tracing",
 ]
+
+[[package]]
+name = "datadog-agent-trace-sampler"
+version = "0.1.0"
+source = "git+https://github.com/DataDog/serverless-components?rev=9daae40afa87f52fad1489f4d7cfd4a579037d2d#9daae40afa87f52fad1489f4d7cfd4a579037d2d"
 
 [[package]]
 name = "datadog-fips"
@@ -1657,7 +1663,7 @@ dependencies = [
  "libc",
  "percent-encoding",
  "pin-project-lite",
- "socket2 0.5.10",
+ "socket2 0.6.3",
  "tokio",
  "tower-service",
  "tracing",
@@ -3274,7 +3280,7 @@ dependencies = [
  "quinn-udp",
  "rustc-hash",
  "rustls",
- "socket2 0.5.10",
+ "socket2 0.6.3",
  "thiserror 2.0.18",
  "tokio",
  "tracing",
@@ -3311,7 +3317,7 @@ dependencies = [
  "cfg_aliases",
  "libc",
  "once_cell",
- "socket2 0.5.10",
+ "socket2 0.6.3",
  "tracing",
  "windows-sys 0.60.2",
 ]
