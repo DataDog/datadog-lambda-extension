@@ -95,6 +95,7 @@ datadog-opentelemetry = { git = "https://github.com/DataDog/dd-trace-rs", rev = 
 dogstatsd = { git = "https://github.com/DataDog/serverless-components", rev = "9daae40afa87f52fad1489f4d7cfd4a579037d2d", default-features = false }
 datadog-fips = { git = "https://github.com/DataDog/serverless-components", rev = "9daae40afa87f52fad1489f4d7cfd4a579037d2d", default-features = false }
 datadog-agent-config = { git = "https://github.com/DataDog/serverless-components", rev = "9daae40afa87f52fad1489f4d7cfd4a579037d2d", default-features = false }
+datadog-agent-trace-sampler = { git = "https://github.com/DataDog/serverless-components", rev = "9daae40afa87f52fad1489f4d7cfd4a579037d2d", default-features = false }
 libddwaf = { version = "1.28.1", git = "https://github.com/DataDog/libddwaf-rust", rev = "d1534a158d976bd4f747bf9fcc58e0712d2d17fc", default-features = false, features = ["serde"] }
 
 [dev-dependencies]
