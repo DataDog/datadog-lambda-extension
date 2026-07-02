@@ -259,6 +259,14 @@ impl LogsFlusher {
         &self,
         retry_request: Option<reqwest::RequestBuilder>,
     ) -> Vec<reqwest::RequestBuilder> {
+        // APM-only ("traces only") mode: never send logs to intake. Logs are also
+        // dropped upstream (serverless_logs_enabled is forced off, so the processor
+        // never queues them), but this guard guarantees no log egress regardless of
+        // aggregator or redrive state. See DD_SERVERLESS_APM_ONLY.
+        if self.config.ext.serverless_apm_only {
+            return Vec::new();
+        }
+
         let mut failed_requests = Vec::new();
 
         // If retry_request is provided, only process that request
