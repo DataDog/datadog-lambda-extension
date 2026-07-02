@@ -117,6 +117,8 @@ pub struct YamlConfig {
     pub serverless_logs_enabled: Option<bool>,
     #[serde(deserialize_with = "deserialize_optional_bool_from_anything")]
     pub logs_enabled: Option<bool>,
+    #[serde(deserialize_with = "deserialize_optional_bool_from_anything")]
+    pub serverless_apm_only: Option<bool>,
     pub serverless_flush_strategy: Option<FlushStrategy>,
     #[serde(deserialize_with = "deserialize_optional_bool_from_anything")]
     pub enhanced_metrics: Option<bool>,
@@ -701,6 +703,7 @@ fn merge_config(config: &mut Config, yaml_config: &YamlConfig) {
             || yaml_config.logs_enabled.unwrap_or(false);
     }
 
+    merge_option_to_value!(config, yaml_config, serverless_apm_only);
     merge_option_to_value!(config, yaml_config, serverless_flush_strategy);
     merge_option_to_value!(config, yaml_config, enhanced_metrics);
     merge_option_to_value!(config, yaml_config, lambda_proc_enhanced_metrics);
@@ -1011,6 +1014,7 @@ api_security_sample_delay: 60 # Seconds
                 kms_api_key: "test-kms-key".to_string(),
                 api_key_ssm_arn: String::default(),
                 serverless_logs_enabled: false,
+                serverless_apm_only: false,
                 serverless_flush_strategy: FlushStrategy::Periodically(PeriodicStrategy {
                     interval: 60000,
                 }),

@@ -1275,6 +1275,17 @@ fn start_metrics_flushers(
 ) -> Vec<MetricsFlusher> {
     let mut flushers = Vec::new();
 
+    // APM-only ("traces only") mode: do not create any metrics flushers, so that
+    // no metrics (custom DogStatsD, enhanced, or process) ever reach intake. The
+    // DogStatsD server still runs and the aggregator is still drained on flush, but
+    // the drained data is discarded because there is no flusher to send it. This is
+    // the authoritative guarantee that no infrastructure-monitoring charges are
+    // incurred (see DD_SERVERLESS_APM_ONLY).
+    if config.serverless_apm_only {
+        debug!("DD_SERVERLESS_APM_ONLY is enabled: not starting any metrics flushers");
+        return flushers;
+    }
+
     let metrics_intake_url = if !config.dd_url.is_empty() {
         let dd_dd_url = DdDdUrl::new(config.dd_url.clone()).expect("can't parse DD_DD_URL");
 

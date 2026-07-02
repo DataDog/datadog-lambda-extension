@@ -401,6 +401,14 @@ pub struct EnvConfig {
     /// Enable logs for AWS Lambda. Alias for `DD_SERVERLESS_LOGS_ENABLED`. Default is `true`.
     #[serde(deserialize_with = "deserialize_optional_bool_from_anything")]
     pub logs_enabled: Option<bool>,
+    /// @env `DD_SERVERLESS_APM_ONLY`
+    ///
+    /// Run the extension in APM-only ("traces only") mode. When `true`, logs and
+    /// all metrics (enhanced, process, custom `DogStatsD`, and OTLP) are suppressed
+    /// at intake so no infrastructure-monitoring or log-ingestion charges are
+    /// incurred. Traces and APM trace stats are unaffected. Default is `false`.
+    #[serde(deserialize_with = "deserialize_optional_bool_from_anything")]
+    pub serverless_apm_only: Option<bool>,
     /// @env `DD_SERVERLESS_FLUSH_STRATEGY`
     ///
     /// The flush strategy to use for AWS Lambda.
@@ -677,6 +685,7 @@ fn merge_config(config: &mut Config, env_config: &EnvConfig) {
             || env_config.logs_enabled.unwrap_or(false);
     }
 
+    merge_option_to_value!(config, env_config, serverless_apm_only);
     merge_option_to_value!(config, env_config, serverless_flush_strategy);
     merge_option_to_value!(config, env_config, enhanced_metrics);
     merge_option_to_value!(config, env_config, lambda_proc_enhanced_metrics);
@@ -1037,6 +1046,7 @@ mod tests {
                 kms_api_key: "test-kms-key".to_string(),
                 api_key_ssm_arn: String::default(),
                 serverless_logs_enabled: false,
+                serverless_apm_only: false,
                 serverless_flush_strategy: FlushStrategy::Periodically(PeriodicStrategy {
                     interval: 60000,
                 }),

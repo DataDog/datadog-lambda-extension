@@ -186,6 +186,31 @@ impl ConfigBuilder {
             self.config.site = "datadoghq.com".to_string();
         }
 
+        // APM-only ("traces only") mode: suppress every billable metrics and logs
+        // egress path so the customer incurs no infrastructure-monitoring or
+        // log-ingestion charges. This intentionally overrides any individually
+        // configured metrics/logs toggles, since the guarantee must hold even if a
+        // user also set, e.g., DD_ENHANCED_METRICS=true. Traces and APM trace stats
+        // are unaffected. The custom DogStatsD egress is additionally disabled in
+        // the metrics flusher wiring (see start_metrics_flushers in main.rs).
+        if self.config.serverless_apm_only {
+            if self.config.serverless_logs_enabled
+                || self.config.enhanced_metrics
+                || self.config.lambda_proc_enhanced_metrics
+                || self.config.otlp_config_metrics_enabled
+                || self.config.otlp_config_logs_enabled
+            {
+                debug!(
+                    "DD_SERVERLESS_APM_ONLY is enabled: forcing logs and all metrics off (traces-only mode)"
+                );
+            }
+            self.config.serverless_logs_enabled = false;
+            self.config.enhanced_metrics = false;
+            self.config.lambda_proc_enhanced_metrics = false;
+            self.config.otlp_config_metrics_enabled = false;
+            self.config.otlp_config_logs_enabled = false;
+        }
+
         // If `proxy_https` is not set, set it from `HTTPS_PROXY` environment variable
         // if it exists
         if let Ok(https_proxy) = std::env::var("HTTPS_PROXY")
@@ -355,6 +380,11 @@ pub struct Config {
     pub kms_api_key: String,
     pub api_key_ssm_arn: String,
     pub serverless_logs_enabled: bool,
+    /// When true, the extension operates in APM-only ("traces only") mode:
+    /// logs and all metrics (enhanced, process, custom `DogStatsD`, and OTLP) are
+    /// suppressed at intake so that no infrastructure-monitoring or log-ingestion
+    /// charges are incurred. Traces and APM trace stats are unaffected.
+    pub serverless_apm_only: bool,
     pub serverless_flush_strategy: FlushStrategy,
     pub enhanced_metrics: bool,
     pub lambda_proc_enhanced_metrics: bool,
@@ -472,6 +502,7 @@ impl Default for Config {
             kms_api_key: String::default(),
             api_key_ssm_arn: String::default(),
             serverless_logs_enabled: true,
+            serverless_apm_only: false,
             serverless_flush_strategy: FlushStrategy::Default,
             enhanced_metrics: true,
             lambda_proc_enhanced_metrics: true,
@@ -1450,6 +1481,45 @@ pub mod tests {
             assert!(config.enhanced_metrics);
             assert!(config.logs_config_use_compression);
             assert!(!config.capture_lambda_payload);
+            Ok(())
+        });
+    }
+
+    #[test]
+    fn test_serverless_apm_only_defaults_off() {
+        figment::Jail::expect_with(|jail| {
+            jail.clear_env();
+            let config = get_config(Path::new(""));
+            assert!(!config.serverless_apm_only);
+            // Defaults remain unchanged when APM-only is not set.
+            assert!(config.serverless_logs_enabled);
+            assert!(config.enhanced_metrics);
+            assert!(config.lambda_proc_enhanced_metrics);
+            Ok(())
+        });
+    }
+
+    #[test]
+    fn test_serverless_apm_only_forces_metrics_and_logs_off() {
+        figment::Jail::expect_with(|jail| {
+            jail.clear_env();
+            jail.set_env("DD_SERVERLESS_APM_ONLY", "true");
+            // Even when a user explicitly enables these, APM-only must override them
+            // so that no metrics or logs reach intake (billing guarantee).
+            jail.set_env("DD_SERVERLESS_LOGS_ENABLED", "true");
+            jail.set_env("DD_ENHANCED_METRICS", "true");
+            jail.set_env("DD_LAMBDA_PROC_ENHANCED_METRICS", "true");
+            jail.set_env("DD_OTLP_CONFIG_METRICS_ENABLED", "true");
+            jail.set_env("DD_OTLP_CONFIG_LOGS_ENABLED", "true");
+
+            let config = get_config(Path::new(""));
+
+            assert!(config.serverless_apm_only);
+            assert!(!config.serverless_logs_enabled);
+            assert!(!config.enhanced_metrics);
+            assert!(!config.lambda_proc_enhanced_metrics);
+            assert!(!config.otlp_config_metrics_enabled);
+            assert!(!config.otlp_config_logs_enabled);
             Ok(())
         });
     }
