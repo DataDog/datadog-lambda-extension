@@ -337,6 +337,11 @@ async fn run_processor_pipeline_with_traces(
             obfuscation_config: Arc::new(
                 ObfuscationConfig::new().expect("Failed to create ObfuscationConfig"),
             ),
+            error_sampler: Arc::new(std::sync::Mutex::new(
+                datadog_agent_trace_sampler::ErrorsSampler::new(
+                    datadog_agent_trace_sampler::ErrorSamplerConfig::default(),
+                ),
+            )),
         }),
         trace_tx,
         stats_generator: Arc::new(StatsGenerator::new(concentrator_handle.clone())),

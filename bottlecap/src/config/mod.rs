@@ -66,6 +66,17 @@ pub struct LambdaConfig {
     pub capture_lambda_payload: bool,
     pub capture_lambda_payload_max_depth: u32,
     pub lambda_extension_compute_stats: bool,
+
+    /// `DD_APM_ERROR_TPS` — target error traces per second rescued by the
+    /// agent-side error sampler when the extension computes stats. Matches the
+    /// Go trace agent's `apm_config.errors_per_second`. Default 10.0; `0`
+    /// disables the sampler (no rescue).
+    pub apm_error_tps: f64,
+    /// `DD_APM_EXTRA_SAMPLE_RATE` — extra raw sampling rate applied on top of
+    /// the computed error-sampler rate. Matches the Go trace agent's
+    /// `apm_config.extra_sample_rate`. Default 1.0.
+    pub apm_extra_sample_rate: f64,
+
     pub span_dedup_timeout: Option<Duration>,
     pub api_key_secret_reload_interval: Option<Duration>,
     pub serverless_appsec_enabled: bool,
@@ -95,6 +106,8 @@ impl Default for LambdaConfig {
             capture_lambda_payload: false,
             capture_lambda_payload_max_depth: 10,
             lambda_extension_compute_stats: false,
+            apm_error_tps: 10.0,
+            apm_extra_sample_rate: 1.0,
             span_dedup_timeout: None,
             api_key_secret_reload_interval: None,
             serverless_appsec_enabled: false,
@@ -153,6 +166,15 @@ pub struct LambdaConfigSource {
     #[serde(deserialize_with = "deser_opt_bool")]
     pub lambda_extension_compute_stats: Option<bool>,
 
+    /// `DD_APM_ERROR_TPS` — error sampler target traces/sec. Flat env/YAML key
+    /// (`apm_error_tps`), unlike the Go agent's nested `apm_config.errors_per_second`.
+    #[serde(deserialize_with = "deser_opt_lossless")]
+    pub apm_error_tps: Option<f64>,
+    /// `DD_APM_EXTRA_SAMPLE_RATE` — error sampler extra sample rate. Flat
+    /// env/YAML key (`apm_extra_sample_rate`).
+    #[serde(deserialize_with = "deser_opt_lossless")]
+    pub apm_extra_sample_rate: Option<f64>,
+
     #[serde(deserialize_with = "deser_dur_secs_ignore_zero")]
     pub span_dedup_timeout: Option<Duration>,
     #[serde(deserialize_with = "deser_dur_secs_ignore_zero")]
@@ -199,6 +221,8 @@ impl DatadogConfigExtension for LambdaConfig {
                 capture_lambda_payload,
                 capture_lambda_payload_max_depth,
                 lambda_extension_compute_stats,
+                apm_error_tps,
+                apm_extra_sample_rate,
                 serverless_appsec_enabled,
                 appsec_waf_timeout,
                 api_security_enabled,
@@ -233,6 +257,7 @@ impl DatadogConfigExtension for LambdaConfig {
 #[cfg_attr(coverage_nightly, coverage(off))] // Test modules skew coverage metrics
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
+#[allow(clippy::float_cmp)] // exact, representable config values (10.0, 1.0, ...) parsed deterministically
 mod lambda_config_tests {
     use datadog_agent_config::{
         Config as UpstreamConfig, flush_strategy::PeriodicStrategy, get_config_with_extension,
@@ -534,6 +559,39 @@ mod lambda_config_tests {
     fn lambda_extension_compute_stats_defaults_false() {
         let config = load(|_| Ok(()));
         assert!(!config.ext.lambda_extension_compute_stats);
+    }
+
+    // ---- error sampler (apm_error_tps / apm_extra_sample_rate) ----
+
+    #[test]
+    fn apm_error_tps_defaults_to_ten() {
+        let config = load(|_| Ok(()));
+        assert_eq!(config.ext.apm_error_tps, 10.0);
+        assert_eq!(config.ext.apm_extra_sample_rate, 1.0);
+    }
+
+    #[test]
+    fn apm_error_tps_from_env() {
+        let config = load(|jail| {
+            jail.set_env("DD_APM_ERROR_TPS", "25");
+            jail.set_env("DD_APM_EXTRA_SAMPLE_RATE", "0.5");
+            Ok(())
+        });
+        assert_eq!(config.ext.apm_error_tps, 25.0);
+        assert_eq!(config.ext.apm_extra_sample_rate, 0.5);
+    }
+
+    #[test]
+    fn apm_error_tps_from_yaml() {
+        let config = load(|jail| {
+            jail.create_file(
+                "datadog.yaml",
+                "apm_error_tps: 0\napm_extra_sample_rate: 2\n",
+            )?;
+            Ok(())
+        });
+        assert_eq!(config.ext.apm_error_tps, 0.0);
+        assert_eq!(config.ext.apm_extra_sample_rate, 2.0);
     }
 
     // ---- Duration fields ----

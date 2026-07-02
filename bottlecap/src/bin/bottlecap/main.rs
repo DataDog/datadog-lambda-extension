@@ -1162,6 +1162,14 @@ fn start_trace_agent(
 
     let trace_processor = Arc::new(trace_processor::ServerlessTraceProcessor {
         obfuscation_config: Arc::new(obfuscation_config),
+        error_sampler: Arc::new(std::sync::Mutex::new(
+            datadog_agent_trace_sampler::ErrorsSampler::new(
+                datadog_agent_trace_sampler::ErrorSamplerConfig {
+                    target_tps: config.ext.apm_error_tps,
+                    extra_sample_rate: config.ext.apm_extra_sample_rate,
+                },
+            ),
+        )),
     });
 
     let (span_dedup_service, span_dedup_handle) = span_dedup_service::DedupService::new();
