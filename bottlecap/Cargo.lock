@@ -783,7 +783,7 @@ dependencies = [
 [[package]]
 name = "datadog-agent-config"
 version = "0.1.0"
-source = "git+https://github.com/DataDog/serverless-components?rev=65eb3d052223b54620578673633e9a390ceb2c1c#65eb3d052223b54620578673633e9a390ceb2c1c"
+source = "git+https://github.com/DataDog/serverless-components?rev=ddb4378017a50761a89e3b9e9de3411b0d79211d#ddb4378017a50761a89e3b9e9de3411b0d79211d"
 dependencies = [
  "datadog-opentelemetry",
  "dogstatsd",
@@ -801,7 +801,7 @@ dependencies = [
 [[package]]
 name = "datadog-fips"
 version = "0.1.0"
-source = "git+https://github.com/DataDog/serverless-components?rev=65eb3d052223b54620578673633e9a390ceb2c1c#65eb3d052223b54620578673633e9a390ceb2c1c"
+source = "git+https://github.com/DataDog/serverless-components?rev=ddb4378017a50761a89e3b9e9de3411b0d79211d#ddb4378017a50761a89e3b9e9de3411b0d79211d"
 dependencies = [
  "reqwest",
  "rustls",
@@ -943,7 +943,7 @@ dependencies = [
 [[package]]
 name = "dogstatsd"
 version = "0.1.0"
-source = "git+https://github.com/DataDog/serverless-components?rev=65eb3d052223b54620578673633e9a390ceb2c1c#65eb3d052223b54620578673633e9a390ceb2c1c"
+source = "git+https://github.com/DataDog/serverless-components?rev=ddb4378017a50761a89e3b9e9de3411b0d79211d#ddb4378017a50761a89e3b9e9de3411b0d79211d"
 dependencies = [
  "datadog-protos",
  "ddsketch-agent",
@@ -1624,7 +1624,7 @@ dependencies = [
  "libc",
  "percent-encoding",
  "pin-project-lite",
- "socket2 0.5.10",
+ "socket2 0.6.3",
  "tokio",
  "tower-service",
  "tracing",
@@ -2973,7 +2973,7 @@ dependencies = [
  "quinn-udp",
  "rustc-hash",
  "rustls",
- "socket2 0.5.10",
+ "socket2 0.6.3",
  "thiserror 2.0.18",
  "tokio",
  "tracing",
@@ -3010,7 +3010,7 @@ dependencies = [
  "cfg_aliases",
  "libc",
  "once_cell",
- "socket2 0.5.10",
+ "socket2 0.6.3",
  "tracing",
  "windows-sys 0.60.2",
 ]
