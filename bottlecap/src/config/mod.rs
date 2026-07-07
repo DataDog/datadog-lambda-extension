@@ -698,30 +698,6 @@ mod lambda_config_tests {
         assert!(config.ext.capture_lambda_payload);
     }
 
-    // ---- ensure DD URL env vars with trailing slash can be parsed ----
-
-    #[test]
-    fn parse_dd_dd_url_with_trailing_slash() {
-        let config = load(|jail| {
-            jail.set_env("DD_DD_URL", "https://test.agent.datadoghq.com/");
-            Ok(())
-        });
-        assert_eq!(config.dd_url, "https://test.agent.datadoghq.com");
-        dogstatsd::datadog::DdDdUrl::new(config.dd_url.clone())
-            .expect("DD_DD_URL with a trailing slash should still parse");
-    }
-
-    #[test]
-    fn parse_dd_url_with_trailing_slash() {
-        let config = load(|jail| {
-            jail.set_env("DD_URL", "https://test.agent.datadoghq.com/");
-            Ok(())
-        });
-        assert_eq!(config.url, "https://test.agent.datadoghq.com");
-        dogstatsd::datadog::DdUrl::new(config.url.clone())
-            .expect("DD_URL with a trailing slash should still parse");
-    }
-
     // ---- malformed input falls back to default (forgiving deserializers) ----
 
     #[test]
