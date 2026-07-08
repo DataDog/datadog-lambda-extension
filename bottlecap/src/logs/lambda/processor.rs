@@ -689,7 +689,13 @@ impl LambdaProcessor {
         if is_platform_log(&log.message.message) {
             log.message.lambda.first_invocation = ctx.first_invocation;
         }
-        if log.message.message.starts_with("END RequestId:") {
+        // On-Demand mode emits both an END and a REPORT log per invocation; we prefer END since
+        // REPORT may arrive later. Managed Instance mode never emits an END (`PlatformRuntimeDone`),
+        // only REPORT (`PlatformReport`), so REPORT is the only log line available to carry it.
+        if log.message.message.starts_with("END RequestId:")
+            || (self.is_managed_instance_mode
+                && log.message.message.starts_with("REPORT RequestId:"))
+        {
             log.message
                 .lambda
                 .durable_execution_status
