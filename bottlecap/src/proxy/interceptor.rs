@@ -138,7 +138,7 @@ async fn record_dsm_consume_from_invocation_next(
     };
 
     let payload_value = serde_json::from_slice(body).unwrap_or_else(|e| {
-        error!("PROXY | invocation_next_proxy | error parsing DSM payload as JSON: {e}");
+        debug!("PROXY | invocation_next_proxy | error parsing DSM payload as JSON: {e}");
         serde_json::json!({})
     });
 
