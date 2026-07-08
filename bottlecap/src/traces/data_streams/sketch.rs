@@ -29,6 +29,9 @@
 const RELATIVE_ACCURACY: f64 = 0.01;
 const BIN_LIMIT: i64 = 2048;
 const CHUNK_SIZE: i64 = 128;
+// Match sketches-js KeyMapping.MIN_SAFE_FLOAT (= 2^-1023), which is smaller
+// than Rust's f64::MIN_POSITIVE (= 2^-1022).
+const JS_MIN_SAFE_FLOAT: f64 = 1.112_536_929_253_600_7e-308;
 
 /// Logarithmic key mapping, mirroring `sketches-js` `LogarithmicMapping`.
 #[derive(Debug, Clone, Copy)]
@@ -44,8 +47,9 @@ impl LogarithmicMapping {
         let gamma = 1.0 + i;
         // KeyMapping multiplier is 1/ln1p(i); LogarithmicMapping then * ln(2).
         let multiplier = std::f64::consts::LN_2 / i.ln_1p();
-        // KeyMapping.minPossible = MIN_NORMAL * gamma (MIN_NORMAL = f64::MIN_POSITIVE).
-        let min_possible = f64::MIN_POSITIVE * gamma;
+        // sketches-js uses KeyMapping.MIN_SAFE_FLOAT (= 2^-1023) here rather
+        // than the platform's smallest positive normal value.
+        let min_possible = JS_MIN_SAFE_FLOAT * gamma;
         Self {
             gamma,
             multiplier,
@@ -353,5 +357,19 @@ mod tests {
             let want = case["valueHex"].as_str().unwrap();
             assert_eq!(got, want, "sketch mismatch for case `{name}`");
         }
+    }
+
+    #[test]
+    fn accepts_values_between_js_and_rust_min_thresholds() {
+        let mut sketch = DdSketch::new();
+
+        // 0.75 * MIN_POSITIVE lies between the JS threshold (2^-1023) and the
+        // Rust normal minimum (2^-1022), so JS accepts it into the positive
+        // store rather than folding it into zero_count.
+        sketch.accept(0.75 * f64::MIN_POSITIVE);
+
+        assert_eq!(sketch.store.count, 1.0);
+        assert_eq!(sketch.negative_store.count, 0.0);
+        assert_eq!(sketch.zero_count, 0.0);
     }
 }
