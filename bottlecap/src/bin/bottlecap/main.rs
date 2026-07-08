@@ -1497,6 +1497,7 @@ fn start_api_runtime_proxy(
         invocation_processor_handle.clone(),
         appsec_processor,
         propagator,
+        config.ext.dsm_consume_enabled,
     )
     .ok()
 }
