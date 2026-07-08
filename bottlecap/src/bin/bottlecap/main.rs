@@ -105,6 +105,16 @@ use tracing::{debug, error, warn};
 use tracing_subscriber::EnvFilter;
 use ustr::Ustr;
 
+fn resolve_dsm_service(
+    configured_service: Option<&str>,
+    canonical_resource_name: Option<&str>,
+) -> String {
+    configured_service
+        .map(std::string::ToString::to_string)
+        .or_else(|| canonical_resource_name.map(std::string::ToString::to_string))
+        .unwrap_or_else(|| "aws.lambda".to_string())
+}
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let start_time = Instant::now();
@@ -338,12 +348,9 @@ async fn extension_loop_active(
     // Extension-side Data Streams Monitoring (consume checkpoints), gated by
     // DD_DATA_STREAMS_ENABLED.
     let dsm_processor = if config.ext.dsm_consume_enabled {
-        let dsm_service = config
-            .service
-            .clone()
-            .or_else(|| tags_provider.get_canonical_resource_name())
-            .unwrap_or_else(|| "aws.lambda".to_string())
-            .to_lowercase();
+        let canonical_resource_name = tags_provider.get_canonical_resource_name();
+        let dsm_service =
+            resolve_dsm_service(config.service.as_deref(), canonical_resource_name.as_deref());
         let dsm_env = config.env.clone().unwrap_or_default();
         let dsm_version = config.version.clone().unwrap_or_default();
         let mut dsm_tags: Vec<String> = config
@@ -1521,5 +1528,31 @@ mod flush_handles_tests {
         sleep(Duration::from_millis(10)).await;
 
         assert!(!handles.has_pending());
+    }
+}
+
+#[cfg(test)]
+mod dsm_config_tests {
+    use super::resolve_dsm_service;
+
+    #[test]
+    fn preserves_explicit_service_case() {
+        assert_eq!(
+            resolve_dsm_service(Some("MyMixedCaseService"), Some("function-name")),
+            "MyMixedCaseService"
+        );
+    }
+
+    #[test]
+    fn falls_back_to_canonical_resource_name() {
+        assert_eq!(
+            resolve_dsm_service(None, Some("FunctionName")),
+            "FunctionName"
+        );
+    }
+
+    #[test]
+    fn falls_back_to_aws_lambda_when_unset() {
+        assert_eq!(resolve_dsm_service(None, None), "aws.lambda");
     }
 }
