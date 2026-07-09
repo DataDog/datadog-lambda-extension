@@ -12,6 +12,11 @@ export const ASYNC_DATADOG_INDEXING_WAIT_MS = 90 * 1000; // 90 seconds
 // Extended wait time for tests that need more time (e.g., OTLP tests)
 export const DATADOG_INDEXING_WAIT_5_MIN_MS = 5 * 60 * 1000; // 5 minutes
 
+// Extra wait applied only to .NET when its trace hasn't landed yet after the default wait.
+// The .NET tracer's CLR profiler bootstrap (AWS_LAMBDA_EXEC_WRAPPER + JIT) is slower and more
+// variable than Node/Python/Java, so .NET traces intermittently miss the default indexing window.
+export const DOTNET_EXTRA_INDEXING_WAIT_MS = 3 * 60 * 1000; // 3 minutes
+
 
 export function getIdentifier(): string {
   if (process.env.IDENTIFIER) {

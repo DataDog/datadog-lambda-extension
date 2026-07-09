@@ -5,7 +5,7 @@ import {
   DatadogTelemetry,
   getEnhancedMetrics,
 } from './datadog';
-import { DEFAULT_DATADOG_INDEXING_WAIT_MS } from '../../config';
+import { DEFAULT_DATADOG_INDEXING_WAIT_MS, DOTNET_EXTRA_INDEXING_WAIT_MS } from '../../config';
 
 export interface FunctionConfig {
   functionName: string;
@@ -94,7 +94,16 @@ export async function invokeAndCollectTelemetry(
 
     for (const inv of results) {
       try {
-        const data = await getInvocationTracesLogsByRequestId(functionName, inv.requestId);
+        let data = await getInvocationTracesLogsByRequestId(functionName, inv.requestId);
+
+        if (runtime === 'dotnet' && (!data.traces || data.traces.length === 0)) {
+          console.log(
+            `No trace found yet for dotnet requestId ${inv.requestId}, waiting an extra ${DOTNET_EXTRA_INDEXING_WAIT_MS}ms before retrying`,
+          );
+          await sleep(DOTNET_EXTRA_INDEXING_WAIT_MS);
+          data = await getInvocationTracesLogsByRequestId(functionName, inv.requestId);
+        }
+
         data.statusCode = inv.statusCode;
         threadTelemetry.push(data);
       } catch (err) {
