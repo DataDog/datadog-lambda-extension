@@ -111,6 +111,17 @@ pub struct Processor {
     /// on `platform.report`. This flag ensures whichever event arrives first wins and the other is skipped,
     /// preventing double counting.
     init_duration_metric_emitted: bool,
+    /// Timestamp of the invocation metric for the sandbox's first (cold start) invocation in
+    /// On-Demand mode, held back from `enhanced_metrics` until `platform.initStart` is processed.
+    ///
+    /// The Extensions API's `/next` poll (which drives `on_invoke_event`) has no artificial
+    /// delay, while `platform.initStart` is delivered through the buffered Telemetry API. In
+    /// On-Demand mode the Invoke event consistently reaches the processor first, so emitting the
+    /// invocation metric immediately would race `set_durable_function_tag` and miss the
+    /// `durable_function:true` tag on invocation #1. Holding the metric here until
+    /// `on_platform_init_start` (or the next invocation, or shutdown) flushes it ensures the tag
+    /// is applied before the metric is counted.
+    pending_first_invocation_metric: Option<i64>,
 }
 
 impl Processor {
@@ -154,12 +165,24 @@ impl Processor {
             durable_context_tx,
             restore_time: None,
             init_duration_metric_emitted: false,
+            pending_first_invocation_metric: None,
         }
     }
 
     /// Given a `request_id`, creates the context and adds the enhanced metric offsets to the context buffer.
     ///
     pub fn on_invoke_event(&mut self, request_id: String) {
+        // Flush any invocation metric held back from a previous cold start. This is a fallback
+        // for the case where `platform.initStart` never arrived (or arrived very late) before
+        // this next invocation; see `pending_first_invocation_metric` for why it's held back.
+        self.flush_pending_first_invocation_metric();
+
+        // In On-Demand mode, the very first invocation of a cold sandbox races
+        // `platform.initStart` (see `pending_first_invocation_metric`); hold its invocation
+        // metric back instead of emitting it inline below.
+        let is_on_demand_cold_start =
+            !self.aws_config.is_managed_instance_mode() && self.context_buffer.is_empty();
+
         // In Managed Instance mode, if awaiting the first invocation after init, find and update the empty context created on init start
         if self.aws_config.is_managed_instance_mode() && self.awaiting_first_invocation {
             if self
@@ -224,8 +247,13 @@ impl Processor {
                 .add_enhanced_metric_data(&request_id, enhanced_metric_offsets);
         }
 
-        // Increment the invocation metric
-        self.enhanced_metrics.increment_invocation_metric(timestamp);
+        // Increment the invocation metric, unless it's an On-Demand cold start, in which case
+        // it's held back until `platform.initStart` (or a fallback) flushes it.
+        if is_on_demand_cold_start {
+            self.pending_first_invocation_metric = Some(timestamp);
+        } else {
+            self.enhanced_metrics.increment_invocation_metric(timestamp);
+        }
         self.enhanced_metrics.set_invoked_received();
 
         // Both modes: check for buffered UniversalInstrumentationStart by request_id first.
@@ -254,6 +282,14 @@ impl Processor {
                 self.inferrer.infer_span(&payload_value, &self.aws_config);
                 self.process_on_universal_instrumentation_start(request_id, headers, payload_value);
             }
+        }
+    }
+
+    /// Emits the invocation metric held back by `on_invoke_event` for an On-Demand cold start,
+    /// if one is pending. See `pending_first_invocation_metric` for why it's held back.
+    fn flush_pending_first_invocation_metric(&mut self) {
+        if let Some(timestamp) = self.pending_first_invocation_metric.take() {
+            self.enhanced_metrics.increment_invocation_metric(timestamp);
         }
     }
 
@@ -339,6 +375,10 @@ impl Processor {
         {
             self.enhanced_metrics.set_durable_function_tag();
         }
+        // Flush the held-back invocation metric now that the durable_function tag (if any) has
+        // been set, so invocation #1 is counted with the correct tag.
+        self.flush_pending_first_invocation_metric();
+
         let start_time: i64 = SystemTime::from(time)
             .duration_since(UNIX_EPOCH)
             .expect("time went backwards")
@@ -990,6 +1030,10 @@ impl Processor {
     }
 
     pub fn on_shutdown_event(&mut self) {
+        // Don't drop the invocation metric if the sandbox shuts down before
+        // `platform.initStart` (or a second invocation) had a chance to flush it.
+        self.flush_pending_first_invocation_metric();
+
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .expect("unable to poll clock, unrecoverable")
@@ -2092,6 +2136,78 @@ mod tests {
         assert!(
             entry.is_none(),
             "Expected no durable_function:true tag when runtime_version is None"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_on_invoke_event_cold_start_holds_invocation_metric_until_init_start() {
+        let mut processor = setup();
+
+        // Simulate the On-Demand race: the Invoke event reaches the processor before
+        // `platform.initStart`. The invocation metric must not be emitted yet.
+        processor.on_invoke_event("req-1".to_string());
+        assert!(
+            processor.pending_first_invocation_metric.is_some(),
+            "Expected the cold start invocation metric to be held back"
+        );
+
+        let now: i64 = std::time::UNIX_EPOCH
+            .elapsed()
+            .expect("unable to poll clock, unrecoverable")
+            .as_secs()
+            .try_into()
+            .unwrap_or_default();
+
+        // `platform.initStart` arrives afterwards and reports a durable runtime.
+        processor.on_platform_init_start(
+            Utc::now(),
+            Some("python:3.14.DurableFunction.v6".to_string()),
+        );
+
+        assert!(
+            processor.pending_first_invocation_metric.is_none(),
+            "Expected the held-back invocation metric to be flushed by on_platform_init_start"
+        );
+
+        let runtime = processor
+            .runtime
+            .clone()
+            .expect("runtime should have been resolved by on_invoke_event");
+        let ts = (now / 10) * 10;
+        let expected_tags = dogstatsd::metric::SortedTags::parse(&format!(
+            "cold_start:true,durable_function:true,runtime:{runtime}"
+        ))
+        .ok();
+        let entry = processor
+            .enhanced_metrics
+            .aggr_handle
+            .get_entry_by_id(
+                crate::metrics::enhanced::constants::INVOCATIONS_METRIC.into(),
+                expected_tags,
+                ts,
+            )
+            .await
+            .unwrap();
+        assert!(
+            entry.is_some(),
+            "Expected the flushed invocation metric to carry the durable_function:true tag"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_on_invoke_event_flushes_pending_metric_if_init_start_never_arrives() {
+        let mut processor = setup();
+
+        // First invocation of a cold sandbox: metric held back.
+        processor.on_invoke_event("req-1".to_string());
+        assert!(processor.pending_first_invocation_metric.is_some());
+
+        // A second invocation arrives without platform.initStart ever showing up. The held-back
+        // metric from req-1 must still be flushed (as a fallback), not lost.
+        processor.on_invoke_event("req-2".to_string());
+        assert!(
+            processor.pending_first_invocation_metric.is_none(),
+            "Expected the pending metric to be flushed as a fallback on the next invocation"
         );
     }
 
