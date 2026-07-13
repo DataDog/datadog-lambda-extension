@@ -111,16 +111,8 @@ pub struct Processor {
     /// on `platform.report`. This flag ensures whichever event arrives first wins and the other is skipped,
     /// preventing double counting.
     init_duration_metric_emitted: bool,
-    /// Timestamp of the invocation metric for the sandbox's first (cold start) invocation in
-    /// On-Demand mode, held back from `enhanced_metrics` until `platform.initStart` is processed.
-    ///
-    /// The Extensions API's `/next` poll (which drives `on_invoke_event`) has no artificial
-    /// delay, while `platform.initStart` is delivered through the buffered Telemetry API. In
-    /// On-Demand mode the Invoke event consistently reaches the processor first, so emitting the
-    /// invocation metric immediately would race `set_durable_function_tag` and miss the
-    /// `durable_function:true` tag on invocation #1. Holding the metric here until
-    /// `on_platform_init_start` (or the next invocation, or shutdown) flushes it ensures the tag
-    /// is applied before the metric is counted.
+    /// Timestamp of the On-Demand cold-start invocation metric, held back until
+    /// `platform.initStart` sets the durable tag so it's not missed on invocation #1.
     pending_first_invocation_metric: Option<i64>,
 }
 
@@ -172,14 +164,10 @@ impl Processor {
     /// Given a `request_id`, creates the context and adds the enhanced metric offsets to the context buffer.
     ///
     pub fn on_invoke_event(&mut self, request_id: String) {
-        // Flush any invocation metric held back from a previous cold start. This is a fallback
-        // for the case where `platform.initStart` never arrived (or arrived very late) before
-        // this next invocation; see `pending_first_invocation_metric` for why it's held back.
+        // Fallback flush in case `platform.initStart` never arrived before this invocation.
         self.flush_pending_first_invocation_metric();
 
-        // In On-Demand mode, the very first invocation of a cold sandbox races
-        // `platform.initStart` (see `pending_first_invocation_metric`); hold its invocation
-        // metric back instead of emitting it inline below.
+        // See `pending_first_invocation_metric`.
         let is_on_demand_cold_start =
             !self.aws_config.is_managed_instance_mode() && self.context_buffer.is_empty();
 
@@ -247,8 +235,7 @@ impl Processor {
                 .add_enhanced_metric_data(&request_id, enhanced_metric_offsets);
         }
 
-        // Increment the invocation metric, unless it's an On-Demand cold start, in which case
-        // it's held back until `platform.initStart` (or a fallback) flushes it.
+        // Hold back the metric for an On-Demand cold start; see `pending_first_invocation_metric`.
         if is_on_demand_cold_start {
             self.pending_first_invocation_metric = Some(timestamp);
         } else {
@@ -285,8 +272,7 @@ impl Processor {
         }
     }
 
-    /// Emits the invocation metric held back by `on_invoke_event` for an On-Demand cold start,
-    /// if one is pending. See `pending_first_invocation_metric` for why it's held back.
+    /// Flushes the metric held back by `on_invoke_event`, if any.
     fn flush_pending_first_invocation_metric(&mut self) {
         if let Some(timestamp) = self.pending_first_invocation_metric.take() {
             self.enhanced_metrics.increment_invocation_metric(timestamp);
@@ -375,8 +361,7 @@ impl Processor {
         {
             self.enhanced_metrics.set_durable_function_tag();
         }
-        // Flush the held-back invocation metric now that the durable_function tag (if any) has
-        // been set, so invocation #1 is counted with the correct tag.
+        // Flush the held-back metric now that the durable tag (if any) has been set.
         self.flush_pending_first_invocation_metric();
 
         let start_time: i64 = SystemTime::from(time)
@@ -1030,8 +1015,7 @@ impl Processor {
     }
 
     pub fn on_shutdown_event(&mut self) {
-        // Don't drop the invocation metric if the sandbox shuts down before
-        // `platform.initStart` (or a second invocation) had a chance to flush it.
+        // Fallback flush in case the sandbox shuts down before it's otherwise flushed.
         self.flush_pending_first_invocation_metric();
 
         let now = std::time::SystemTime::now()
