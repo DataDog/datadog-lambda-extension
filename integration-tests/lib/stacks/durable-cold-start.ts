@@ -10,12 +10,7 @@ import {
   defaultNodeRuntime,
 } from '../util';
 
-// Durable-function cold-start metric tag test.
-// The Lambda Telemetry API only reports a `platform.initStart` runtimeVersion
-// containing "DurableFunction" for functions actually configured with
-// `durableConfig`, so this stack deploys one durable and one non-durable
-// function to exercise bottlecap's `durable_function:true` tagging on the
-// cold-start `aws.lambda.enhanced.invocations` metric end-to-end.
+// Deploys a durable and a non-durable function to test the cold-start durable_function tag.
 export class DurableColdStart extends cdk.Stack {
   constructor(scope: Construct, id: string, props: cdk.StackProps) {
     super(scope, id, props);
