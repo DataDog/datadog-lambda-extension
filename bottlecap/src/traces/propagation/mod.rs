@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use crate::config;
 use datadog_opentelemetry::propagation::{
-    self as dd_propagation, carrier::Extractor, context::SpanContext,
+    self as dd_propagation, ExtractResult, carrier::Extractor, context::SpanContext,
 };
 
 pub mod carrier;
@@ -43,7 +43,12 @@ impl DatadogCompositePropagator {
     }
 
     pub fn extract(&self, carrier: &dyn Extractor) -> Option<SpanContext> {
-        let mut context = self.inner.extract(carrier)?;
+        let mut context = match self.inner.extract(carrier) {
+            ExtractResult::Continue(context) => context,
+            ExtractResult::Passthrough | ExtractResult::Ignore | ExtractResult::Restart(_) => {
+                return None;
+            }
+        };
 
         if self.config.trace_propagation_http_baggage_enabled {
             Self::attach_baggage(&mut context, carrier);
