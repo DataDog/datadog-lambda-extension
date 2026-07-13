@@ -57,7 +57,7 @@ describe('Durable Function Cold-Start Metric Tag Integration Tests', () => {
       windowStart,
       windowEnd,
     );
-    expect(totalCount).toBeGreaterThanOrEqual(2);
+    expect(totalCount).toBe(2);
     expect(taggedCount).toBe(totalCount);
   });
 
@@ -75,7 +75,7 @@ describe('Durable Function Cold-Start Metric Tag Integration Tests', () => {
       windowStart,
       windowEnd,
     );
-    expect(totalCount).toBeGreaterThanOrEqual(2);
+    expect(totalCount).toBe(2);
     expect(taggedCount).toBe(0);
   });
 });
