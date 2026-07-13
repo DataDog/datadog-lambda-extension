@@ -186,6 +186,10 @@ impl StatsConcentratorService {
                 .iter()
                 .map(ToString::to_string)
                 .collect(),
+            // Use libdd-trace-stats' default cardinality limit.
+            None,
+            // Bottlecap does not perform client-side stats obfuscation.
+            None,
         );
         let service: StatsConcentratorService = Self {
             concentrator,
@@ -216,7 +220,11 @@ impl StatsConcentratorService {
         force_flush: bool,
         response_tx: oneshot::Sender<Option<ClientStatsPayload>>,
     ) {
-        let stats_buckets = self.concentrator.flush(SystemTime::now(), force_flush);
+        let flush_result = self.concentrator.flush(SystemTime::now(), force_flush);
+        // Obfuscation is disabled (see `SpanConcentrator::new` above), so every bucket ends up
+        // in `unobfuscated_buckets`; combine both to stay correct if that ever changes.
+        let mut stats_buckets = flush_result.obfuscated_buckets;
+        stats_buckets.extend(flush_result.unobfuscated_buckets);
         let stats = if stats_buckets.is_empty() {
             None
         } else {

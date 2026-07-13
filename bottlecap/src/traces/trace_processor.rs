@@ -753,6 +753,7 @@ mod tests {
             env: "test-env".to_string(),
             hostname: String::new(),
             app_version: String::new(),
+            container_debug: None,
         };
 
         let received_payload = if let TracerPayloadCollection::V07(payload) =
