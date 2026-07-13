@@ -1,6 +1,6 @@
-// Verifies the invocations metric has durable_function:true only for a durable function, on
-// both the cold-start invocation and a subsequent warm invocation.
-import { hasMetricWithTag } from './utils/datadog';
+// Verifies the invocations metric has durable_function:true only for a durable function, and
+// that the tag persists across a second (warm) invocation instead of only being set on cold start.
+import { getMetricCount, getMetricCountWithTag } from './utils/datadog';
 import { forceColdStart, invokeLambda } from './utils/lambda';
 import { IDENTIFIER, DEFAULT_DATADOG_INDEXING_WAIT_MS } from '../config';
 
@@ -9,10 +9,8 @@ const stackName = `${IDENTIFIER}-durable-cold-start`;
 const INVOCATIONS_METRIC = 'aws.lambda.enhanced.invocations';
 
 describe('Durable Function Cold-Start Metric Tag Integration Tests', () => {
-  let coldStartWindowStart: number;
-  let coldStartWindowEnd: number;
-  let warmInvokeWindowStart: number;
-  let warmInvokeWindowEnd: number;
+  let windowStart: number;
+  let windowEnd: number;
 
   const durableFunctionName = `${stackName}-durable-lambda`;
   const nonDurableFunctionName = `${stackName}-non-durable-lambda`;
@@ -24,70 +22,60 @@ describe('Durable Function Cold-Start Metric Tag Integration Tests', () => {
       invokeLambda(nonDurableFunctionName),
     ]);
 
-  const waitForIndexing = () =>
-    new Promise((resolve) =>
-      setTimeout(resolve, DEFAULT_DATADOG_INDEXING_WAIT_MS),
-    );
-
   beforeAll(async () => {
     const functionNames = [durableFunctionName, nonDurableFunctionName];
     await Promise.all(functionNames.map((fn) => forceColdStart(fn)));
 
     // Back up 60s so the metric's rollup bucket falls inside the query range.
-    coldStartWindowStart = Date.now() - 60_000;
-    await invokeBoth(); // invocation #1 (cold start)
-    await waitForIndexing();
-    coldStartWindowEnd = Date.now();
+    windowStart = Date.now() - 60_000;
 
-    warmInvokeWindowStart = Date.now() - 60_000;
-    await invokeBoth(); // invocation #2 (warm)
-    await waitForIndexing();
-    warmInvokeWindowEnd = Date.now();
+    // Invoke twice back-to-back (cold start, then warm) and wait for indexing once, rather than
+    // waiting after each invocation. Whether the tag was set on both invocations (rather than
+    // only the first) is checked below by comparing tagged vs. total invocation counts.
+    await invokeBoth();
+    await invokeBoth();
 
-    console.log('Lambdas invoked twice and indexing waits complete');
-  }, 3600000);
+    await new Promise((resolve) =>
+      setTimeout(resolve, DEFAULT_DATADOG_INDEXING_WAIT_MS),
+    );
+    windowEnd = Date.now();
 
-  it('durable function cold-start invocation metric should have durable_function:true', async () => {
-    const hasTag = await hasMetricWithTag(
+    console.log('Lambdas invoked twice and indexing wait complete');
+  }, 1800000);
+
+  it('durable function invocation metric should have durable_function:true on every invocation', async () => {
+    const totalCount = await getMetricCount(
+      INVOCATIONS_METRIC,
+      durableFunctionName,
+      windowStart,
+      windowEnd,
+    );
+    const taggedCount = await getMetricCountWithTag(
       INVOCATIONS_METRIC,
       durableFunctionName,
       'durable_function:true',
-      coldStartWindowStart,
-      coldStartWindowEnd,
+      windowStart,
+      windowEnd,
     );
-    expect(hasTag).toBe(true);
+    expect(totalCount).toBeGreaterThanOrEqual(2);
+    expect(taggedCount).toBe(totalCount);
   });
 
-  it('non-durable function cold-start invocation metric should NOT have durable_function:true', async () => {
-    const hasTag = await hasMetricWithTag(
+  it('non-durable function invocation metric should NOT have durable_function:true on any invocation', async () => {
+    const totalCount = await getMetricCount(
+      INVOCATIONS_METRIC,
+      nonDurableFunctionName,
+      windowStart,
+      windowEnd,
+    );
+    const taggedCount = await getMetricCountWithTag(
       INVOCATIONS_METRIC,
       nonDurableFunctionName,
       'durable_function:true',
-      coldStartWindowStart,
-      coldStartWindowEnd,
+      windowStart,
+      windowEnd,
     );
-    expect(hasTag).toBe(false);
-  });
-
-  it('durable function warm invocation metric should still have durable_function:true', async () => {
-    const hasTag = await hasMetricWithTag(
-      INVOCATIONS_METRIC,
-      durableFunctionName,
-      'durable_function:true',
-      warmInvokeWindowStart,
-      warmInvokeWindowEnd,
-    );
-    expect(hasTag).toBe(true);
-  });
-
-  it('non-durable function warm invocation metric should still NOT have durable_function:true', async () => {
-    const hasTag = await hasMetricWithTag(
-      INVOCATIONS_METRIC,
-      nonDurableFunctionName,
-      'durable_function:true',
-      warmInvokeWindowStart,
-      warmInvokeWindowEnd,
-    );
-    expect(hasTag).toBe(false);
+    expect(totalCount).toBeGreaterThanOrEqual(2);
+    expect(taggedCount).toBe(0);
   });
 });
