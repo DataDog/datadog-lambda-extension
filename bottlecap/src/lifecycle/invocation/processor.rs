@@ -111,9 +111,9 @@ pub struct Processor {
     /// on `platform.report`. This flag ensures whichever event arrives first wins and the other is skipped,
     /// preventing double counting.
     init_duration_metric_emitted: bool,
-    /// Timestamp of the On-Demand cold-start invocation metric, held back until
+    /// Timestamp of the cold-start invocation metric in On-Demand mode, held back until
     /// `platform.initStart` sets the durable tag so it's not missed on invocation #1.
-    pending_first_invocation_metric: Option<i64>,
+    pending_first_invocation_metric_timestamp: Option<i64>,
 }
 
 impl Processor {
@@ -157,17 +157,14 @@ impl Processor {
             durable_context_tx,
             restore_time: None,
             init_duration_metric_emitted: false,
-            pending_first_invocation_metric: None,
+            pending_first_invocation_metric_timestamp: None,
         }
     }
 
     /// Given a `request_id`, creates the context and adds the enhanced metric offsets to the context buffer.
     ///
     pub fn on_invoke_event(&mut self, request_id: String) {
-        // Fallback flush in case `platform.initStart` never arrived before this invocation.
-        self.flush_pending_first_invocation_metric();
-
-        // See `pending_first_invocation_metric`.
+        // See `pending_first_invocation_metric_timestamp`.
         let is_on_demand_cold_start =
             !self.aws_config.is_managed_instance_mode() && self.context_buffer.is_empty();
 
@@ -235,9 +232,9 @@ impl Processor {
                 .add_enhanced_metric_data(&request_id, enhanced_metric_offsets);
         }
 
-        // Hold back the metric for an On-Demand cold start; see `pending_first_invocation_metric`.
+        // Hold back the metric for a cold start in On-Demand mode; see `pending_first_invocation_metric_timestamp`.
         if is_on_demand_cold_start {
-            self.pending_first_invocation_metric = Some(timestamp);
+            self.pending_first_invocation_metric_timestamp = Some(timestamp);
         } else {
             self.enhanced_metrics.increment_invocation_metric(timestamp);
         }
@@ -274,7 +271,7 @@ impl Processor {
 
     /// Flushes the metric held back by `on_invoke_event`, if any.
     fn flush_pending_first_invocation_metric(&mut self) {
-        if let Some(timestamp) = self.pending_first_invocation_metric.take() {
+        if let Some(timestamp) = self.pending_first_invocation_metric_timestamp.take() {
             self.enhanced_metrics.increment_invocation_metric(timestamp);
         }
     }
@@ -2131,7 +2128,9 @@ mod tests {
         // `platform.initStart`. The invocation metric must not be emitted yet.
         processor.on_invoke_event("req-1".to_string());
         assert!(
-            processor.pending_first_invocation_metric.is_some(),
+            processor
+                .pending_first_invocation_metric_timestamp
+                .is_some(),
             "Expected the cold start invocation metric to be held back"
         );
 
@@ -2149,7 +2148,9 @@ mod tests {
         );
 
         assert!(
-            processor.pending_first_invocation_metric.is_none(),
+            processor
+                .pending_first_invocation_metric_timestamp
+                .is_none(),
             "Expected the held-back invocation metric to be flushed by on_platform_init_start"
         );
 
@@ -2175,23 +2176,6 @@ mod tests {
         assert!(
             entry.is_some(),
             "Expected the flushed invocation metric to carry the durable_function:true tag"
-        );
-    }
-
-    #[tokio::test]
-    async fn test_on_invoke_event_flushes_pending_metric_if_init_start_never_arrives() {
-        let mut processor = setup();
-
-        // First invocation of a cold sandbox: metric held back.
-        processor.on_invoke_event("req-1".to_string());
-        assert!(processor.pending_first_invocation_metric.is_some());
-
-        // A second invocation arrives without platform.initStart ever showing up. The held-back
-        // metric from req-1 must still be flushed (as a fallback), not lost.
-        processor.on_invoke_event("req-2".to_string());
-        assert!(
-            processor.pending_first_invocation_metric.is_none(),
-            "Expected the pending metric to be flushed as a fallback on the next invocation"
         );
     }
 
