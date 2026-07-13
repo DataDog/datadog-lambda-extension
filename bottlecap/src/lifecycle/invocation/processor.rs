@@ -113,6 +113,9 @@ pub struct Processor {
     init_duration_metric_emitted: bool,
     /// Timestamp of the cold-start invocation metric in On-Demand mode, held back until
     /// `platform.initStart` sets the durable tag so it's not missed on invocation #1.
+    ///
+    /// This assumes `platform.initStart` always arrives after the Invoke event, which is what
+    /// we've observed in production.
     pending_first_invocation_metric_timestamp: Option<i64>,
 }
 
