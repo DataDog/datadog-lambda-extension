@@ -63,7 +63,6 @@ pub const DATADOG_INVOCATION_ERROR_KEY: &str = "x-datadog-invocation-error";
 const DATADOG_SPAN_ID_KEY: &str = "x-datadog-span-id";
 const TAG_SAMPLING_PRIORITY: &str = "_sampling_priority_v1";
 
-#[allow(clippy::struct_excessive_bools)]
 pub struct Processor {
     /// Buffer containing context of the previous 5 invocations
     context_buffer: ContextBuffer,
@@ -115,14 +114,6 @@ pub struct Processor {
     /// Timestamp of the cold-start invocation metric in On-Demand mode, held back until
     /// `platform.initStart` sets the durable tag so it's not missed on invocation #1.
     pending_first_invocation_metric_timestamp: Option<i64>,
-    /// Whether `platform.initStart` has already been processed for this sandbox.
-    ///
-    /// Covers the case where the Invoke event reaches the processor after `platform.initStart`
-    /// (the reverse of the usual On-Demand race). Without this check, `on_invoke_event` would see
-    /// an empty `context_buffer` (init start doesn't insert a context in On-Demand mode) and hold
-    /// the metric back again, even though the durable tag is already resolved — and nothing would
-    /// flush it until `on_shutdown_event`, since `platform.initStart` won't fire again.
-    platform_init_start_processed: bool,
 }
 
 impl Processor {
@@ -167,17 +158,15 @@ impl Processor {
             restore_time: None,
             init_duration_metric_emitted: false,
             pending_first_invocation_metric_timestamp: None,
-            platform_init_start_processed: false,
         }
     }
 
     /// Given a `request_id`, creates the context and adds the enhanced metric offsets to the context buffer.
     ///
     pub fn on_invoke_event(&mut self, request_id: String) {
-        // See `pending_first_invocation_metric_timestamp` and `platform_init_start_processed`.
-        let is_on_demand_cold_start = !self.aws_config.is_managed_instance_mode()
-            && self.context_buffer.is_empty()
-            && !self.platform_init_start_processed;
+        // See `pending_first_invocation_metric_timestamp`.
+        let is_on_demand_cold_start =
+            !self.aws_config.is_managed_instance_mode() && self.context_buffer.is_empty();
 
         // In Managed Instance mode, if awaiting the first invocation after init, find and update the empty context created on init start
         if self.aws_config.is_managed_instance_mode() && self.awaiting_first_invocation {
@@ -363,8 +352,6 @@ impl Processor {
     /// This is used to create a cold start span, since this telemetry event does not
     /// provide a `request_id`, we try to guess which invocation is the cold start.
     pub fn on_platform_init_start(&mut self, time: DateTime<Utc>, runtime_version: Option<String>) {
-        self.platform_init_start_processed = true;
-
         if runtime_version
             .as_deref()
             .is_some_and(|rv| rv.contains("DurableFunction"))
@@ -2189,68 +2176,6 @@ mod tests {
         assert!(
             entry.is_some(),
             "Expected the flushed invocation metric to carry the durable_function:true tag"
-        );
-    }
-
-    #[tokio::test]
-    async fn test_on_invoke_event_does_not_hold_metric_if_init_start_already_processed() {
-        let mut processor = setup();
-
-        // `platform.initStart` reaches the processor first (reverse of the usual On-Demand
-        // race). It resolves the durable tag but finds no context to attach a cold start span
-        // to yet, since On-Demand mode only looks up an existing context here.
-        processor.on_platform_init_start(
-            Utc::now(),
-            Some("python:3.14.DurableFunction.v6".to_string()),
-        );
-        assert!(processor.platform_init_start_processed);
-        assert!(
-            processor
-                .pending_first_invocation_metric_timestamp
-                .is_none(),
-            "Nothing should be pending yet, since no invocation has happened"
-        );
-
-        let now: i64 = std::time::UNIX_EPOCH
-            .elapsed()
-            .expect("unable to poll clock, unrecoverable")
-            .as_secs()
-            .try_into()
-            .unwrap_or_default();
-
-        // The Invoke event arrives afterwards. Without `platform_init_start_processed`, this
-        // would see an empty context_buffer and hold the metric back again — with nothing left
-        // to flush it until shutdown, since `platform.initStart` won't fire a second time.
-        processor.on_invoke_event("req-1".to_string());
-        assert!(
-            processor
-                .pending_first_invocation_metric_timestamp
-                .is_none(),
-            "Expected the invocation metric to be emitted immediately, not held back"
-        );
-
-        let runtime = processor
-            .runtime
-            .clone()
-            .expect("runtime should have been resolved by on_invoke_event");
-        let ts = (now / 10) * 10;
-        let expected_tags = dogstatsd::metric::SortedTags::parse(&format!(
-            "cold_start:true,durable_function:true,runtime:{runtime}"
-        ))
-        .ok();
-        let entry = processor
-            .enhanced_metrics
-            .aggr_handle
-            .get_entry_by_id(
-                crate::metrics::enhanced::constants::INVOCATIONS_METRIC.into(),
-                expected_tags,
-                ts,
-            )
-            .await
-            .unwrap();
-        assert!(
-            entry.is_some(),
-            "Expected the immediately-emitted invocation metric to carry the durable_function:true tag"
         );
     }
 
