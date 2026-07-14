@@ -116,11 +116,6 @@ pub struct Processor {
     /// arrive first (the Extensions API's `next()` call is unbuffered, while Telemetry API
     /// delivery lags, so we've observed the invocation arriving first in production, but that's
     /// not a hard ordering guarantee).
-    ///
-    /// Also replaces `context_buffer.is_empty()` for detecting the first invocation: the buffer
-    /// is emptied between warm invocations too, once `platform.report` is processed (an
-    /// unordered, separate path from `on_invoke_event`), so it can't be used to tell "first
-    /// invocation" from "buffer momentarily empty between warm invocations."
     first_invocation_metric_status: FirstInvocationMetricStatus,
 }
 
