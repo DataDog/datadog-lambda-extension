@@ -81,12 +81,10 @@ libdd-trace-utils = { git = "https://github.com/DataDog/libdatadog", rev = "a820
 libdd-trace-normalization = { git = "https://github.com/DataDog/libdatadog", rev = "a820699426f28cbabb3a74d87c7309d030b52e7c" }
 libdd-trace-obfuscation = { git = "https://github.com/DataDog/libdatadog", rev = "a820699426f28cbabb3a74d87c7309d030b52e7c", default-features = false }
 libdd-trace-stats = { git = "https://github.com/DataDog/libdatadog", rev = "a820699426f28cbabb3a74d87c7309d030b52e7c", default-features = false }
-# TODO(SLES-2907): serverless-components rev is DataDog/serverless-components#144 (unmerged).
-# Re-pin to the merged commit once that PR lands.
 datadog-opentelemetry = { git = "https://github.com/DataDog/dd-trace-rs", rev = "50bfea8755b75e448a80ac04d53fa7edd414eefe", default-features = false, features = ["_unstable_propagation"] }
-dogstatsd = { git = "https://github.com/DataDog/serverless-components", rev = "215d89872f0fc9888849d169e6db15b23dc46dad", default-features = false }
-datadog-fips = { git = "https://github.com/DataDog/serverless-components", rev = "215d89872f0fc9888849d169e6db15b23dc46dad", default-features = false }
-datadog-agent-config = { git = "https://github.com/DataDog/serverless-components", rev = "215d89872f0fc9888849d169e6db15b23dc46dad", default-features = false }
+dogstatsd = { git = "https://github.com/DataDog/serverless-components", rev = "56779dec9f4c9bcc48abcc9833ca4fa4b9d8d627", default-features = false }
+datadog-fips = { git = "https://github.com/DataDog/serverless-components", rev = "56779dec9f4c9bcc48abcc9833ca4fa4b9d8d627", default-features = false }
+datadog-agent-config = { git = "https://github.com/DataDog/serverless-components", rev = "56779dec9f4c9bcc48abcc9833ca4fa4b9d8d627", default-features = false }
 libddwaf = { version = "1.28.1", git = "https://github.com/DataDog/libddwaf-rust", rev = "d1534a158d976bd4f747bf9fcc58e0712d2d17fc", default-features = false, features = ["serde"] }
 
 [dev-dependencies]
