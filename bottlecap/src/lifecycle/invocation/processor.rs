@@ -121,11 +121,11 @@ pub struct Processor {
     /// is emptied between warm invocations too, once `platform.report` is processed (an
     /// unordered, separate path from `on_invoke_event`), so it can't be used to tell "first
     /// invocation" from "buffer momentarily empty between warm invocations."
-    first_invocation_metric: FirstInvocationMetric,
+    first_invocation_metric_status: FirstInvocationMetricStatus,
 }
 
-/// See `Processor::first_invocation_metric`.
-enum FirstInvocationMetric {
+/// See `Processor::first_invocation_metric_status`.
+enum FirstInvocationMetricStatus {
     /// Neither the first invocation nor `platform.initStart` has been seen yet.
     Pending,
     /// `platform.initStart` arrived first, so the durable tag is already known; the first
@@ -180,23 +180,24 @@ impl Processor {
             durable_context_tx,
             restore_time: None,
             init_duration_metric_emitted: false,
-            first_invocation_metric: FirstInvocationMetric::Pending,
+            first_invocation_metric_status: FirstInvocationMetricStatus::Pending,
         }
     }
 
     /// Given a `request_id`, creates the context and adds the enhanced metric offsets to the context buffer.
     ///
     pub fn on_invoke_event(&mut self, request_id: String) {
-        // See `first_invocation_metric`.
+        // See `first_invocation_metric_status`.
         let is_first_on_demand_invocation = !self.aws_config.is_managed_instance_mode()
             && matches!(
-                self.first_invocation_metric,
-                FirstInvocationMetric::Pending | FirstInvocationMetric::InitStartSeen
+                self.first_invocation_metric_status,
+                FirstInvocationMetricStatus::Pending | FirstInvocationMetricStatus::InitStartSeen
             );
         // Only hold back if `platform.initStart` hasn't already resolved the durable tag.
-        let should_hold_back_invocation_metric =
-            matches!(self.first_invocation_metric, FirstInvocationMetric::Pending)
-                && is_first_on_demand_invocation;
+        let should_hold_back_invocation_metric = matches!(
+            self.first_invocation_metric_status,
+            FirstInvocationMetricStatus::Pending
+        ) && is_first_on_demand_invocation;
 
         // In Managed Instance mode, if awaiting the first invocation after init, find and update the empty context created on init start
         if self.aws_config.is_managed_instance_mode() && self.awaiting_first_invocation {
@@ -262,13 +263,13 @@ impl Processor {
                 .add_enhanced_metric_data(&request_id, enhanced_metric_offsets);
         }
 
-        // Hold back the metric for a cold start in On-Demand mode; see `first_invocation_metric`.
+        // Hold back the metric for a cold start in On-Demand mode; see `first_invocation_metric_status`.
         if should_hold_back_invocation_metric {
-            self.first_invocation_metric = FirstInvocationMetric::HeldBack(timestamp);
+            self.first_invocation_metric_status = FirstInvocationMetricStatus::HeldBack(timestamp);
         } else {
             self.enhanced_metrics.increment_invocation_metric(timestamp);
             if is_first_on_demand_invocation {
-                self.first_invocation_metric = FirstInvocationMetric::Resolved;
+                self.first_invocation_metric_status = FirstInvocationMetricStatus::Resolved;
             }
         }
         self.enhanced_metrics.set_invoked_received();
@@ -304,9 +305,11 @@ impl Processor {
 
     /// Flushes the metric held back by `on_invoke_event`, if any.
     fn flush_pending_first_invocation_metric(&mut self) {
-        if let FirstInvocationMetric::HeldBack(timestamp) = self.first_invocation_metric {
+        if let FirstInvocationMetricStatus::HeldBack(timestamp) =
+            self.first_invocation_metric_status
+        {
             self.enhanced_metrics.increment_invocation_metric(timestamp);
-            self.first_invocation_metric = FirstInvocationMetric::Resolved;
+            self.first_invocation_metric_status = FirstInvocationMetricStatus::Resolved;
         }
     }
 
@@ -392,8 +395,11 @@ impl Processor {
         {
             self.enhanced_metrics.set_durable_function_tag();
         }
-        if matches!(self.first_invocation_metric, FirstInvocationMetric::Pending) {
-            self.first_invocation_metric = FirstInvocationMetric::InitStartSeen;
+        if matches!(
+            self.first_invocation_metric_status,
+            FirstInvocationMetricStatus::Pending
+        ) {
+            self.first_invocation_metric_status = FirstInvocationMetricStatus::InitStartSeen;
         }
         // Flush the held-back metric now that the durable tag (if any) has been set.
         self.flush_pending_first_invocation_metric();
@@ -2164,8 +2170,8 @@ mod tests {
         // Simulate the On-Demand race: the Invoke event reaches the processor before
         // `platform.initStart`. The invocation metric must not be emitted yet.
         processor.on_invoke_event("req-1".to_string());
-        let FirstInvocationMetric::HeldBack(held_back_timestamp) =
-            processor.first_invocation_metric
+        let FirstInvocationMetricStatus::HeldBack(held_back_timestamp) =
+            processor.first_invocation_metric_status
         else {
             panic!("Expected the cold start invocation metric to be held back")
         };
@@ -2178,8 +2184,8 @@ mod tests {
 
         assert!(
             matches!(
-                processor.first_invocation_metric,
-                FirstInvocationMetric::Resolved
+                processor.first_invocation_metric_status,
+                FirstInvocationMetricStatus::Resolved
             ),
             "Expected the held-back invocation metric to be flushed by on_platform_init_start"
         );
@@ -2231,8 +2237,8 @@ mod tests {
         processor.on_invoke_event("req-1".to_string());
         assert!(
             matches!(
-                processor.first_invocation_metric,
-                FirstInvocationMetric::Resolved
+                processor.first_invocation_metric_status,
+                FirstInvocationMetricStatus::Resolved
             ),
             "Expected the invocation metric to be emitted immediately, not held back"
         );
