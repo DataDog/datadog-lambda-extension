@@ -13,6 +13,7 @@ All Rust code lives under `bottlecap/`. Run these from that directory unless not
 ## Code Style
 
 - Do not be overly defensive and add unnecessary checks or tests unless you have a good reason.
+- Keep comments concise. Do not explain the history of a change or reference past code unless necessary.
 
 ## Pull Requests
 
