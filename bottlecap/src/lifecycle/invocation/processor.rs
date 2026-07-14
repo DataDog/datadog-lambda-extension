@@ -63,6 +63,7 @@ pub const DATADOG_INVOCATION_ERROR_KEY: &str = "x-datadog-invocation-error";
 const DATADOG_SPAN_ID_KEY: &str = "x-datadog-span-id";
 const TAG_SAMPLING_PRIORITY: &str = "_sampling_priority_v1";
 
+#[allow(clippy::struct_excessive_bools)]
 pub struct Processor {
     /// Buffer containing context of the previous 5 invocations
     context_buffer: ContextBuffer,
@@ -117,6 +118,13 @@ pub struct Processor {
     /// This assumes `platform.initStart` always arrives after the Invoke event, which is what
     /// we've observed in production.
     pending_first_invocation_metric_timestamp: Option<i64>,
+    /// Whether the first On-Demand invocation has already been seen.
+    ///
+    /// Used instead of `context_buffer.is_empty()` to detect the first invocation, since the
+    /// buffer is also emptied between warm invocations once `platform.report` is processed
+    /// (an unordered, separate path from `on_invoke_event`), which would otherwise make later
+    /// invocations look like cold starts too and hold back their metric indefinitely.
+    first_on_demand_invocation_seen: bool,
 }
 
 impl Processor {
@@ -161,15 +169,19 @@ impl Processor {
             restore_time: None,
             init_duration_metric_emitted: false,
             pending_first_invocation_metric_timestamp: None,
+            first_on_demand_invocation_seen: false,
         }
     }
 
     /// Given a `request_id`, creates the context and adds the enhanced metric offsets to the context buffer.
     ///
     pub fn on_invoke_event(&mut self, request_id: String) {
-        // See `pending_first_invocation_metric_timestamp`.
+        // See `pending_first_invocation_metric_timestamp` and `first_on_demand_invocation_seen`.
         let is_on_demand_cold_start =
-            !self.aws_config.is_managed_instance_mode() && self.context_buffer.is_empty();
+            !self.aws_config.is_managed_instance_mode() && !self.first_on_demand_invocation_seen;
+        if is_on_demand_cold_start {
+            self.first_on_demand_invocation_seen = true;
+        }
 
         // In Managed Instance mode, if awaiting the first invocation after init, find and update the empty context created on init start
         if self.aws_config.is_managed_instance_mode() && self.awaiting_first_invocation {
@@ -2130,19 +2142,9 @@ mod tests {
         // Simulate the On-Demand race: the Invoke event reaches the processor before
         // `platform.initStart`. The invocation metric must not be emitted yet.
         processor.on_invoke_event("req-1".to_string());
-        assert!(
-            processor
-                .pending_first_invocation_metric_timestamp
-                .is_some(),
-            "Expected the cold start invocation metric to be held back"
-        );
-
-        let now: i64 = std::time::UNIX_EPOCH
-            .elapsed()
-            .expect("unable to poll clock, unrecoverable")
-            .as_secs()
-            .try_into()
-            .unwrap_or_default();
+        let held_back_timestamp = processor
+            .pending_first_invocation_metric_timestamp
+            .expect("Expected the cold start invocation metric to be held back");
 
         // `platform.initStart` arrives afterwards and reports a durable runtime.
         processor.on_platform_init_start(
@@ -2161,7 +2163,7 @@ mod tests {
             .runtime
             .clone()
             .expect("runtime should have been resolved by on_invoke_event");
-        let ts = (now / 10) * 10;
+        let ts = (held_back_timestamp / 10) * 10;
         let expected_tags = dogstatsd::metric::SortedTags::parse(&format!(
             "cold_start:true,durable_function:true,runtime:{runtime}"
         ))
