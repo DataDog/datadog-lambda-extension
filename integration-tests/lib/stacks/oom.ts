@@ -38,9 +38,10 @@ import {
  *   - oom-go           : log line `fatal error: runtime: out of memory`
  *                        + PlatformReport memory equality (dedup)
  *
- * Each function is configured with low memory (256 MB) and a short timeout
- * (30 s) so the OOM fires quickly during the integration-test run. See the
- * `oomMemorySize` comment for why 256 MB rather than the customer's 192 MB.
+ * Each function is configured with low memory (256 MB, except python at
+ * 512 MB) and a short timeout (30 s) so the OOM fires quickly during the
+ * integration-test run. See the `oomMemorySize` and `pythonOomMemorySize`
+ * comments for the memory rationale.
  */
 export class Oom extends cdk.Stack {
   constructor(scope: Construct, id: string, props: cdk.StackProps) {
