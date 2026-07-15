@@ -53,18 +53,19 @@ export class Oom extends cdk.Stack {
     const dotnetLayer = getDefaultDotnetLayer(this);
     const rubyLayer = getDefaultRubyLayer(this);
 
-    // 256 MB (not the customer's 192 MB from #1237) so the bottlecap
-    // extension has memory headroom to survive when the function process
-    // OOMs. At 192 MB the kernel OOM-killer often picks the extension
-    // instead of the function runtime (Lambda surfaces this as the
-    // `Extension.Crash` error type), and a dead extension can't emit the
-    // OOM metric. With 256 MB the function runtime's RSS dominates and
-    // kernel reliably kills it; the extension survives to detect/flush.
-    // The detection paths under test are unchanged — the functions still
-    // hit `max_memory_used == memory_size` in PlatformReport and still
-    // emit runtime-specific OOM error log lines.
+    // 256 MB (not the customer's 192 MB from #1237) to give the extension
+    // headroom to survive the function's OOM. If memory is too tight the
+    // kernel OOM-killer takes the extension instead (Lambda reports
+    // `Extension.Crash`), and a dead extension emits neither logs nor the OOM
+    // metric. Detection paths are unchanged: functions still hit
+    // `max_memory_used == memory_size` and emit runtime-specific OOM log lines.
     const oomMemorySize = 256;
     const oomTimeout = cdk.Duration.seconds(30);
+
+    // python3.13 + the `datadog_lambda` handler shim need more slack: at
+    // 256 MB the extension was intermittently killed before its flush,
+    // dropping the metric (~1 run in 3). 512 MB keeps it alive.
+    const pythonOomMemorySize = 512;
 
     // Node case A — V8 heap exhaustion (log-line path).
     const nodeV8FunctionName = `${id}-node-v8-heap-lambda`;
@@ -122,7 +123,7 @@ export class Oom extends cdk.Stack {
       code: lambda.Code.fromAsset('./lambda/oom-python'),
       functionName: pythonFunctionName,
       timeout: oomTimeout,
-      memorySize: oomMemorySize,
+      memorySize: pythonOomMemorySize,
       environment: {
         ...defaultDatadogEnvVariables,
         DD_SERVICE: pythonFunctionName,
