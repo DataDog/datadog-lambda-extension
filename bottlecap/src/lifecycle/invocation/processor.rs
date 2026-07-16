@@ -111,6 +111,27 @@ pub struct Processor {
     /// on `platform.report`. This flag ensures whichever event arrives first wins and the other is skipped,
     /// preventing double counting.
     init_duration_metric_emitted: bool,
+    /// How the cold-start invocation metric in On-Demand mode has been resolved relative to
+    /// `platform.initStart`, since either the first invocation or `platform.initStart` can
+    /// arrive first (the Extensions API's `next()` call is unbuffered, while Telemetry API
+    /// delivery lags, so we've observed the invocation arriving first in production, but that's
+    /// not a hard ordering guarantee).
+    first_invocation_metric_status: FirstInvocationMetricStatus,
+}
+
+/// See `Processor::first_invocation_metric_status`.
+enum FirstInvocationMetricStatus {
+    /// Neither the first invocation nor `platform.initStart` has been seen yet.
+    Pending,
+    /// `platform.initStart` arrived first, so the durable tag is already known; the first
+    /// invocation's metric can be emitted immediately once it arrives.
+    InitStartSeen,
+    /// The first invocation arrived before `platform.initStart`; its metric is held back until
+    /// `platform.initStart` flushes it.
+    HeldBack(i64),
+    /// The first invocation's metric has been emitted, either immediately or after being held
+    /// back. Nothing left to track.
+    Resolved,
 }
 
 impl Processor {
@@ -154,12 +175,25 @@ impl Processor {
             durable_context_tx,
             restore_time: None,
             init_duration_metric_emitted: false,
+            first_invocation_metric_status: FirstInvocationMetricStatus::Pending,
         }
     }
 
     /// Given a `request_id`, creates the context and adds the enhanced metric offsets to the context buffer.
     ///
     pub fn on_invoke_event(&mut self, request_id: String) {
+        // See `first_invocation_metric_status`.
+        let is_first_on_demand_invocation = !self.aws_config.is_managed_instance_mode()
+            && matches!(
+                self.first_invocation_metric_status,
+                FirstInvocationMetricStatus::Pending | FirstInvocationMetricStatus::InitStartSeen
+            );
+        // Only hold back if `platform.initStart` hasn't already resolved the durable tag.
+        let should_hold_back_invocation_metric = matches!(
+            self.first_invocation_metric_status,
+            FirstInvocationMetricStatus::Pending
+        ) && is_first_on_demand_invocation;
+
         // In Managed Instance mode, if awaiting the first invocation after init, find and update the empty context created on init start
         if self.aws_config.is_managed_instance_mode() && self.awaiting_first_invocation {
             if self
@@ -224,8 +258,15 @@ impl Processor {
                 .add_enhanced_metric_data(&request_id, enhanced_metric_offsets);
         }
 
-        // Increment the invocation metric
-        self.enhanced_metrics.increment_invocation_metric(timestamp);
+        // Hold back the metric for a cold start in On-Demand mode; see `first_invocation_metric_status`.
+        if should_hold_back_invocation_metric {
+            self.first_invocation_metric_status = FirstInvocationMetricStatus::HeldBack(timestamp);
+        } else {
+            self.enhanced_metrics.increment_invocation_metric(timestamp);
+            if is_first_on_demand_invocation {
+                self.first_invocation_metric_status = FirstInvocationMetricStatus::Resolved;
+            }
+        }
         self.enhanced_metrics.set_invoked_received();
 
         // Both modes: check for buffered UniversalInstrumentationStart by request_id first.
@@ -254,6 +295,16 @@ impl Processor {
                 self.inferrer.infer_span(&payload_value, &self.aws_config);
                 self.process_on_universal_instrumentation_start(request_id, headers, payload_value);
             }
+        }
+    }
+
+    /// Flushes the metric held back by `on_invoke_event`, if any.
+    fn flush_pending_first_invocation_metric(&mut self) {
+        if let FirstInvocationMetricStatus::HeldBack(timestamp) =
+            self.first_invocation_metric_status
+        {
+            self.enhanced_metrics.increment_invocation_metric(timestamp);
+            self.first_invocation_metric_status = FirstInvocationMetricStatus::Resolved;
         }
     }
 
@@ -339,6 +390,15 @@ impl Processor {
         {
             self.enhanced_metrics.set_durable_function_tag();
         }
+        if matches!(
+            self.first_invocation_metric_status,
+            FirstInvocationMetricStatus::Pending
+        ) {
+            self.first_invocation_metric_status = FirstInvocationMetricStatus::InitStartSeen;
+        }
+        // Flush the held-back metric now that the durable tag (if any) has been set.
+        self.flush_pending_first_invocation_metric();
+
         let start_time: i64 = SystemTime::from(time)
             .duration_since(UNIX_EPOCH)
             .expect("time went backwards")
@@ -990,6 +1050,9 @@ impl Processor {
     }
 
     pub fn on_shutdown_event(&mut self) {
+        // Fallback flush in case the sandbox shuts down before it's otherwise flushed.
+        self.flush_pending_first_invocation_metric();
+
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .expect("unable to poll clock, unrecoverable")
@@ -2092,6 +2155,111 @@ mod tests {
         assert!(
             entry.is_none(),
             "Expected no durable_function:true tag when runtime_version is None"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_on_invoke_event_cold_start_holds_invocation_metric_until_init_start() {
+        let mut processor = setup();
+
+        // Simulate the On-Demand race: the Invoke event reaches the processor before
+        // `platform.initStart`. The invocation metric must not be emitted yet.
+        processor.on_invoke_event("req-1".to_string());
+        let FirstInvocationMetricStatus::HeldBack(held_back_timestamp) =
+            processor.first_invocation_metric_status
+        else {
+            panic!("Expected the cold start invocation metric to be held back")
+        };
+
+        // `platform.initStart` arrives afterwards and reports a durable runtime.
+        processor.on_platform_init_start(
+            Utc::now(),
+            Some("python:3.14.DurableFunction.v6".to_string()),
+        );
+
+        assert!(
+            matches!(
+                processor.first_invocation_metric_status,
+                FirstInvocationMetricStatus::Resolved
+            ),
+            "Expected the held-back invocation metric to be flushed by on_platform_init_start"
+        );
+
+        let runtime = processor
+            .runtime
+            .clone()
+            .expect("runtime should have been resolved by on_invoke_event");
+        let ts = (held_back_timestamp / 10) * 10;
+        let expected_tags = dogstatsd::metric::SortedTags::parse(&format!(
+            "cold_start:true,durable_function:true,runtime:{runtime}"
+        ))
+        .ok();
+        let entry = processor
+            .enhanced_metrics
+            .aggr_handle
+            .get_entry_by_id(
+                crate::metrics::enhanced::constants::INVOCATIONS_METRIC.into(),
+                expected_tags,
+                ts,
+            )
+            .await
+            .unwrap();
+        assert!(
+            entry.is_some(),
+            "Expected the flushed invocation metric to carry the durable_function:true tag"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_on_invoke_event_does_not_hold_metric_if_init_start_already_processed() {
+        let mut processor = setup();
+
+        // Simulate the reverse order: `platform.initStart` arrives before the Invoke event
+        // and reports a durable runtime.
+        processor.on_platform_init_start(
+            Utc::now(),
+            Some("python:3.14.DurableFunction.v6".to_string()),
+        );
+
+        // The durable tag is already known, so the metric must be emitted immediately
+        // instead of being held back.
+        let now: i64 = std::time::UNIX_EPOCH
+            .elapsed()
+            .expect("unable to poll clock, unrecoverable")
+            .as_secs()
+            .try_into()
+            .unwrap_or_default();
+        processor.on_invoke_event("req-1".to_string());
+        assert!(
+            matches!(
+                processor.first_invocation_metric_status,
+                FirstInvocationMetricStatus::Resolved
+            ),
+            "Expected the invocation metric to be emitted immediately, not held back"
+        );
+
+        let runtime = processor
+            .runtime
+            .clone()
+            .expect("runtime should have been resolved by on_invoke_event");
+        let ts = (now / 10) * 10;
+        let expected_tags = dogstatsd::metric::SortedTags::parse(&format!(
+            "cold_start:true,durable_function:true,runtime:{runtime}"
+        ))
+        .ok();
+        let entry = processor
+            .enhanced_metrics
+            .aggr_handle
+            .get_entry_by_id(
+                crate::metrics::enhanced::constants::INVOCATIONS_METRIC.into(),
+                expected_tags,
+                ts,
+            )
+            .await
+            .unwrap();
+        assert!(
+            entry.is_some(),
+            "Expected the invocation metric to carry the durable_function:true tag"
         );
     }
 
