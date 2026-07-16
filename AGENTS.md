@@ -10,6 +10,11 @@ The Datadog Lambda Extension ("Bottlecap") is an AWS Lambda Extension written in
 
 All Rust code lives under `bottlecap/`. Run these from that directory unless noted.
 
+## Code Style
+
+- Do not be overly defensive and add unnecessary checks or tests unless you have a good reason.
+- Keep comments concise. Do not explain the history of a change or reference past code unless necessary.
+
 ## Pull Requests
 
 - When creating a PR, follow the PR template at `.github/pull_request_template.md`.
