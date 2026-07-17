@@ -71,3 +71,21 @@ Event sources
 | `appsec/` | Application Security Monitoring |
 | `tags/` | Tag extraction and propagation |
 | `fips/` | FIPS mode cryptography support |
+
+## Gotchas
+
+### Be careful adding logs inside the logs pipeline
+
+Avoid adding log statements inside the logs pipeline (`logs/` — the processor, agent, and
+flusher) unless you really need them, and never in a per-log-line hot path.
+
+The extension ingests its own stdout/stderr as logs (it subscribes to the Lambda Telemetry
+API `extension` and `function` log types) and runs them back through this same pipeline. So a
+line you log *while handling a log* becomes another log that is processed — and logged —
+the same way. In a hot path this self-amplifies into a feedback loop that floods both
+CloudWatch and the Datadog logs intake. It is worst at `DD_LOG_LEVEL=debug`, where a single
+invocation can balloon into thousands of log lines and each emitted line can spawn more.
+
+If you need diagnostics in this area, prefer a temporary instrumented build, keep the logging
+off per-log-line paths, or surface the signal through something that is not re-ingested as a
+log (e.g. a metric or a one-shot line outside the loop).
