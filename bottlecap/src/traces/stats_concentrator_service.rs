@@ -222,9 +222,11 @@ impl StatsConcentratorService {
     ) {
         let flush_result = self.concentrator.flush(SystemTime::now(), force_flush);
         // Obfuscation is disabled (see `SpanConcentrator::new` above), so every bucket ends up
-        // in `unobfuscated_buckets`; combine both to stay correct if that ever changes.
-        let mut stats_buckets = flush_result.obfuscated_buckets;
-        stats_buckets.extend(flush_result.unobfuscated_buckets);
+        // in `unobfuscated_buckets`; combine both to stay correct if that ever changes. Start
+        // from `unobfuscated_buckets` since it's normally the only non-empty one, avoiding a
+        // reallocation to grow the (usually empty) `obfuscated_buckets` vec.
+        let mut stats_buckets = flush_result.unobfuscated_buckets;
+        stats_buckets.extend(flush_result.obfuscated_buckets);
         let stats = if stats_buckets.is_empty() {
             None
         } else {
