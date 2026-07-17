@@ -82,9 +82,9 @@ libdd-trace-normalization = { git = "https://github.com/DataDog/libdatadog", rev
 libdd-trace-obfuscation = { git = "https://github.com/DataDog/libdatadog", rev = "85ce322a1dcb1eda7df9bcc021223b2d1a236783", default-features = false }
 libdd-trace-stats = { git = "https://github.com/DataDog/libdatadog", rev = "85ce322a1dcb1eda7df9bcc021223b2d1a236783", default-features = false }
 datadog-opentelemetry = { git = "https://github.com/DataDog/dd-trace-rs", rev = "50bfea8755b75e448a80ac04d53fa7edd414eefe", default-features = false, features = ["_unstable_propagation"] }
-dogstatsd = { git = "https://github.com/DataDog/serverless-components", rev = "f9ce8b718160b7bd5a329371a54a1d88bf3ac69a", default-features = false }
-datadog-fips = { git = "https://github.com/DataDog/serverless-components", rev = "f9ce8b718160b7bd5a329371a54a1d88bf3ac69a", default-features = false }
-datadog-agent-config = { git = "https://github.com/DataDog/serverless-components", rev = "f9ce8b718160b7bd5a329371a54a1d88bf3ac69a", default-features = false }
+dogstatsd = { git = "https://github.com/DataDog/serverless-components", rev = "d0c7f44191445e20d309734675d5e8b91d2a5d51", default-features = false }
+datadog-fips = { git = "https://github.com/DataDog/serverless-components", rev = "d0c7f44191445e20d309734675d5e8b91d2a5d51", default-features = false }
+datadog-agent-config = { git = "https://github.com/DataDog/serverless-components", rev = "d0c7f44191445e20d309734675d5e8b91d2a5d51", default-features = false }
 libddwaf = { version = "1.28.1", git = "https://github.com/DataDog/libddwaf-rust", rev = "d1534a158d976bd4f747bf9fcc58e0712d2d17fc", default-features = false, features = ["serde"] }
 
 [dev-dependencies]
