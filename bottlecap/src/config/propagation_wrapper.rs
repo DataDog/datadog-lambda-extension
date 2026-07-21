@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use datadog_opentelemetry::configuration::TracePropagationBehaviorExtract;
 use datadog_opentelemetry::propagation::PropagationConfig;
 
 use crate::config::{Config, TracePropagationStyle};
@@ -43,6 +44,12 @@ impl PropagationConfig for PropConfig {
 
     fn trace_propagation_extract_first(&self) -> bool {
         self.0.trace_propagation_extract_first
+    }
+
+    fn trace_propagation_behavior_extract(&self) -> TracePropagationBehaviorExtract {
+        // Bottlecap does not expose DD_TRACE_PROPAGATION_BEHAVIOR_EXTRACT; upstream's
+        // default (`Continue`) matches bottlecap's existing extraction behavior.
+        TracePropagationBehaviorExtract::default()
     }
 
     fn datadog_tags_max_length(&self) -> usize {
