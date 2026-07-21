@@ -7,3 +7,4 @@ test_suites:
   - name: oom
   - name: lmi-oom
   - name: payload-size
+  - name: durable-cold-start

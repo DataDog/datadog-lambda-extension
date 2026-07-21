@@ -10,6 +10,11 @@ The Datadog Lambda Extension ("Bottlecap") is an AWS Lambda Extension written in
 
 All Rust code lives under `bottlecap/`. Run these from that directory unless noted.
 
+## Code Style
+
+- Do not be overly defensive and add unnecessary checks or tests unless you have a good reason.
+- Keep comments concise. Do not explain the history of a change or reference past code unless necessary.
+
 ## Pull Requests
 
 - When creating a PR, follow the PR template at `.github/pull_request_template.md`.
@@ -66,3 +71,15 @@ Event sources
 | `appsec/` | Application Security Monitoring |
 | `tags/` | Tag extraction and propagation |
 | `fips/` | FIPS mode cryptography support |
+
+## Gotchas
+
+### Be careful adding logs inside the logs pipeline
+
+The extension re-ingests its own stdout/stderr as logs, so a line logged while handling a log
+(in `logs/` — processor, agent, flusher) feeds back through the same pipeline. In a
+per-log-line hot path this self-amplifies into a flood of both CloudWatch and Datadog logs,
+worst at `DD_LOG_LEVEL=debug`.
+
+Avoid logging in this area unless necessary; prefer a temporary instrumented build, or surface
+signal via a metric instead.

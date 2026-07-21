@@ -370,6 +370,40 @@ export async function getMetricCount(
   return pointlist.reduce((acc, [, value]) => acc + (value || 0), 0);
 }
 
+/**
+ * Same as `getMetricCount`, but filtered by an additional tag (e.g. "durable_function:true").
+ * Used to check whether every emission of a metric over a window carried a given tag, by
+ * comparing against the untagged `getMetricCount` total for the same window.
+ */
+export async function getMetricCountWithTag(
+  metricName: string,
+  functionName: string,
+  tagFilter: string,
+  fromTime: number,
+  toTime: number,
+): Promise<number> {
+  const baseFunctionName = getServiceName(functionName).toLowerCase();
+  const query = `sum:${metricName}{functionname:${baseFunctionName},${tagFilter}}.as_count()`;
+
+  console.log(`Querying metric count with tag filter: ${query}`);
+
+  const response = await requestWithRetry(() => datadogClient.get('/api/v1/query', {
+    params: {
+      query,
+      from: Math.floor(fromTime / 1000),
+      to: Math.floor(toTime / 1000),
+    },
+  }), query);
+
+  const series = response.data.series || [];
+  if (series.length === 0) {
+    return 0;
+  }
+
+  const pointlist: [number, number][] = series[0].pointlist || [];
+  return pointlist.reduce((acc, [, value]) => acc + (value || 0), 0);
+}
+
 async function getMetrics(
   metricName: string,
   functionName: string,
