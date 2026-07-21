@@ -264,6 +264,11 @@ impl LogsFlusher {
         // never queues them), but this guard guarantees no log egress regardless of
         // aggregator or redrive state. See DD_SERVERLESS_APM_ONLY.
         if self.config.ext.serverless_apm_only {
+            // Drain and discard any queued batches so the aggregator stays bounded,
+            // mirroring the metrics path (which drains its aggregator and discards
+            // the data because no flusher is wired up). No requests are ever
+            // produced here, so nothing reaches intake.
+            let _ = self.aggregator_handle.get_batches().await;
             return Vec::new();
         }
 

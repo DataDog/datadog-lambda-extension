@@ -318,6 +318,18 @@ mod lambda_config_tests {
     }
 
     #[test]
+    fn serverless_apm_only_from_yaml() {
+        // Guards the YAML key mapping (`serverless_apm_only:`) independently of the
+        // env-var path. The override application is covered by
+        // `serverless_apm_only_forces_metrics_and_logs_off` via `get_config`.
+        let config = load(|jail| {
+            jail.create_file("datadog.yaml", "serverless_apm_only: true\n")?;
+            Ok(())
+        });
+        assert!(config.ext.serverless_apm_only);
+    }
+
+    #[test]
     fn serverless_apm_only_forces_metrics_and_logs_off() {
         // Exercised through `get_config` (not `load`) because the override is
         // applied there, after the shared env/yaml merge.
