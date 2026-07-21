@@ -28,33 +28,26 @@ pub type Config = datadog_agent_config::Config<LambdaConfig>;
 #[must_use]
 pub fn get_config(config_directory: &Path) -> Config {
     let mut config = get_config_with_extension::<LambdaConfig>(config_directory);
-    apply_serverless_apm_only(&mut config);
+    apply_apm_standalone(&mut config);
     config
 }
 
-/// APM-only ("traces only") mode: suppress every billable metrics and logs
-/// egress path so the customer incurs no infrastructure-monitoring or
+/// APM standalone ("traces only") mode: suppress every billable metrics and
+/// logs egress path so the customer incurs no infrastructure-monitoring or
 /// log-ingestion charges. This intentionally overrides any individually
 /// configured metrics/logs toggles, since the guarantee must hold even if a
 /// user also set, e.g., `DD_ENHANCED_METRICS=true`. Traces and APM trace stats
 /// are unaffected. The custom `DogStatsD` egress is additionally disabled in
 /// the metrics flusher wiring (see `start_metrics_flushers` in `main.rs`), and
 /// log egress is guarded in the logs flusher.
-fn apply_serverless_apm_only(config: &mut Config) {
-    if !config.ext.serverless_apm_only {
+fn apply_apm_standalone(config: &mut Config) {
+    if !config.ext.apm_standalone_enabled {
         return;
     }
 
-    if config.ext.serverless_logs_enabled
-        || config.ext.enhanced_metrics
-        || config.ext.lambda_proc_enhanced_metrics
-        || config.otlp_config_metrics_enabled
-        || config.otlp_config_logs_enabled
-    {
-        tracing::debug!(
-            "DD_SERVERLESS_APM_ONLY is enabled: forcing logs and all metrics off (traces-only mode)"
-        );
-    }
+    tracing::debug!(
+        "DD_APM_STANDALONE_ENABLED is set: forcing logs and all metrics off (traces-only mode)"
+    );
 
     config.ext.serverless_logs_enabled = false;
     config.ext.enhanced_metrics = false;
@@ -92,12 +85,12 @@ pub struct LambdaConfig {
     pub kms_api_key: String,
     pub api_key_ssm_arn: String,
     pub serverless_logs_enabled: bool,
-    /// When true, the extension operates in APM-only ("traces only") mode:
-    /// logs and all metrics (enhanced, process, custom `DogStatsD`, and OTLP)
-    /// are suppressed at intake so that no infrastructure-monitoring or
+    /// When true, the extension operates in APM standalone ("traces only")
+    /// mode: logs and all metrics (enhanced, process, custom `DogStatsD`, and
+    /// OTLP) are suppressed at intake so that no infrastructure-monitoring or
     /// log-ingestion charges are incurred. Traces and APM trace stats are
     /// unaffected. Defaults to `false`.
-    pub serverless_apm_only: bool,
+    pub apm_standalone_enabled: bool,
     pub serverless_flush_strategy: UpstreamFlushStrategy,
     pub enhanced_metrics: bool,
     pub lambda_proc_enhanced_metrics: bool,
@@ -127,7 +120,7 @@ impl Default for LambdaConfig {
             kms_api_key: String::new(),
             api_key_ssm_arn: String::new(),
             serverless_logs_enabled: true,
-            serverless_apm_only: false,
+            apm_standalone_enabled: false,
             serverless_flush_strategy: UpstreamFlushStrategy::Default,
             enhanced_metrics: true,
             lambda_proc_enhanced_metrics: true,
@@ -177,12 +170,12 @@ pub struct LambdaConfigSource {
     #[serde(deserialize_with = "deser_opt_bool")]
     pub logs_enabled: Option<bool>,
 
-    /// `DD_SERVERLESS_APM_ONLY` — run the extension in APM-only ("traces only")
-    /// mode. When `true`, logs and all metrics (enhanced, process, custom
-    /// `DogStatsD`, and OTLP) are suppressed at intake. Traces and APM trace
-    /// stats are unaffected. Defaults to `false`.
+    /// `DD_APM_STANDALONE_ENABLED` — run the extension in APM standalone
+    /// ("traces only") mode. When `true`, logs and all metrics (enhanced,
+    /// process, custom `DogStatsD`, and OTLP) are suppressed at intake. Traces
+    /// and APM trace stats are unaffected. Defaults to `false`.
     #[serde(deserialize_with = "deser_opt_bool")]
-    pub serverless_apm_only: Option<bool>,
+    pub apm_standalone_enabled: Option<bool>,
 
     pub serverless_flush_strategy: Option<UpstreamFlushStrategy>,
 
@@ -239,7 +232,7 @@ impl DatadogConfigExtension for LambdaConfig {
         datadog_agent_config::merge_fields!(self, source,
             string: [api_key_secret_arn, kms_api_key, api_key_ssm_arn],
             value:  [
-                serverless_apm_only,
+                apm_standalone_enabled,
                 serverless_flush_strategy,
                 enhanced_metrics,
                 lambda_proc_enhanced_metrics,
@@ -308,36 +301,37 @@ mod lambda_config_tests {
     }
 
     #[test]
-    fn serverless_apm_only_defaults_off() {
+    fn apm_standalone_defaults_off() {
         let config = load(|_| Ok(()));
-        assert!(!config.ext.serverless_apm_only);
-        // Defaults remain unchanged when APM-only is not set.
+        assert!(!config.ext.apm_standalone_enabled);
+        // Defaults remain unchanged when APM standalone is not set.
         assert!(config.ext.serverless_logs_enabled);
         assert!(config.ext.enhanced_metrics);
         assert!(config.ext.lambda_proc_enhanced_metrics);
     }
 
     #[test]
-    fn serverless_apm_only_from_yaml() {
-        // Guards the YAML key mapping (`serverless_apm_only:`) independently of the
-        // env-var path. The override application is covered by
-        // `serverless_apm_only_forces_metrics_and_logs_off` via `get_config`.
+    fn apm_standalone_from_yaml() {
+        // Guards the YAML key mapping (`apm_standalone_enabled:`) independently of
+        // the env-var path. The override application is covered by
+        // `apm_standalone_forces_metrics_and_logs_off` via `get_config`.
         let config = load(|jail| {
-            jail.create_file("datadog.yaml", "serverless_apm_only: true\n")?;
+            jail.create_file("datadog.yaml", "apm_standalone_enabled: true\n")?;
             Ok(())
         });
-        assert!(config.ext.serverless_apm_only);
+        assert!(config.ext.apm_standalone_enabled);
     }
 
     #[test]
-    fn serverless_apm_only_forces_metrics_and_logs_off() {
+    fn apm_standalone_forces_metrics_and_logs_off() {
         // Exercised through `get_config` (not `load`) because the override is
         // applied there, after the shared env/yaml merge.
         Jail::expect_with(|jail| {
             jail.clear_env();
-            jail.set_env("DD_SERVERLESS_APM_ONLY", "true");
-            // Even when a user explicitly enables these, APM-only must override
-            // them so that no metrics or logs reach intake (billing guarantee).
+            jail.set_env("DD_APM_STANDALONE_ENABLED", "true");
+            // Even when a user explicitly enables these, APM standalone must
+            // override them so that no metrics or logs reach intake (billing
+            // guarantee).
             jail.set_env("DD_SERVERLESS_LOGS_ENABLED", "true");
             jail.set_env("DD_ENHANCED_METRICS", "true");
             jail.set_env("DD_LAMBDA_PROC_ENHANCED_METRICS", "true");
@@ -346,7 +340,7 @@ mod lambda_config_tests {
 
             let config = get_config(Path::new(""));
 
-            assert!(config.ext.serverless_apm_only);
+            assert!(config.ext.apm_standalone_enabled);
             assert!(!config.ext.serverless_logs_enabled);
             assert!(!config.ext.enhanced_metrics);
             assert!(!config.ext.lambda_proc_enhanced_metrics);

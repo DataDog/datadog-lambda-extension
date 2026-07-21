@@ -1300,14 +1300,14 @@ fn start_metrics_flushers(
 ) -> Vec<MetricsFlusher> {
     let mut flushers = Vec::new();
 
-    // APM-only ("traces only") mode: do not create any metrics flushers, so that
-    // no metrics (custom DogStatsD, enhanced, or process) ever reach intake. The
-    // DogStatsD server still runs and the aggregator is still drained on flush, but
-    // the drained data is discarded because there is no flusher to send it. This is
-    // the authoritative guarantee that no infrastructure-monitoring charges are
-    // incurred (see DD_SERVERLESS_APM_ONLY).
-    if config.ext.serverless_apm_only {
-        debug!("DD_SERVERLESS_APM_ONLY is enabled: not starting any metrics flushers");
+    // APM standalone ("traces only") mode: skip wiring up metrics flushers
+    // entirely, so no metrics (custom DogStatsD, enhanced, or process) reach
+    // intake. The DogStatsD server still runs and its aggregator is still drained
+    // on flush, but the drained data is discarded since there is no flusher to
+    // send it. Logs and OTLP signals are suppressed separately (see
+    // `apply_apm_standalone` and the logs flusher guard). See
+    // DD_APM_STANDALONE_ENABLED.
+    if config.ext.apm_standalone_enabled {
         return flushers;
     }
 

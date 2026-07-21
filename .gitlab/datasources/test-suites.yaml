@@ -8,3 +8,4 @@ test_suites:
   - name: lmi-oom
   - name: payload-size
   - name: durable-cold-start
+  - name: apm-standalone

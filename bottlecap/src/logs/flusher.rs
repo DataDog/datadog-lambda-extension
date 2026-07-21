@@ -259,11 +259,11 @@ impl LogsFlusher {
         &self,
         retry_request: Option<reqwest::RequestBuilder>,
     ) -> Vec<reqwest::RequestBuilder> {
-        // APM-only ("traces only") mode: never send logs to intake. Logs are also
-        // dropped upstream (serverless_logs_enabled is forced off, so the processor
-        // never queues them), but this guard guarantees no log egress regardless of
-        // aggregator or redrive state. See DD_SERVERLESS_APM_ONLY.
-        if self.config.ext.serverless_apm_only {
+        // APM standalone ("traces only") mode: never send logs to intake. Logs are
+        // also dropped upstream (serverless_logs_enabled is forced off, so the
+        // processor never queues them), but this guard guarantees no log egress
+        // regardless of aggregator or redrive state. See DD_APM_STANDALONE_ENABLED.
+        if self.config.ext.apm_standalone_enabled {
             // Drain and discard any queued batches so the aggregator stays bounded,
             // mirroring the metrics path (which drains its aggregator and discards
             // the data because no flusher is wired up). No requests are ever
