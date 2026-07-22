@@ -186,8 +186,8 @@ impl StatsConcentratorService {
                 .iter()
                 .map(ToString::to_string)
                 .collect(),
-            // Use libdd-trace-stats' default cardinality limit.
-            None,
+            // Disable the cardinality limit to match pre-existing (unbounded) behavior.
+            Some(usize::MAX),
             // Bottlecap does not perform client-side stats obfuscation.
             None,
         );
@@ -280,6 +280,16 @@ mod tests {
     /// The span is non-root (`parent_id=1`) and not measured, so it will only be
     /// eligible for stats if `span_kinds_stats_computed` includes its `span.kind`.
     fn create_span_kind_span(span_kind: &str, meta: Vec<(&str, &str)>) -> pb::Span {
+        create_span_kind_span_with_resource(span_kind, "test-resource", meta)
+    }
+
+    /// Same as `create_span_kind_span`, but with a caller-provided resource name so tests can
+    /// generate many distinct aggregation keys.
+    fn create_span_kind_span_with_resource(
+        span_kind: &str,
+        resource: &str,
+        meta: Vec<(&str, &str)>,
+    ) -> pb::Span {
         let now_ns = i64::try_from(
             SystemTime::now()
                 .duration_since(SystemTime::UNIX_EPOCH)
@@ -295,7 +305,7 @@ mod tests {
         pb::Span {
             service: "test-service".to_string(),
             name: "test-op".to_string(),
-            resource: "test-resource".to_string(),
+            resource: resource.to_string(),
             trace_id: 1,
             span_id: 2,
             parent_id: 1, // non-root
@@ -384,6 +394,41 @@ mod tests {
         assert!(
             peer_tags.iter().any(|t| t.starts_with("db.system:")),
             "Expected peer_tags to contain db.system, got: {peer_tags:?}"
+        );
+    }
+
+    /// The concentrator is configured with no cardinality limit (`Some(usize::MAX)`), so
+    /// exceeding `libdd_trace_stats`' default limit of 7,000 distinct aggregation keys per
+    /// bucket must not collapse any of them into the `tracer_blocked_value` overflow key.
+    #[tokio::test]
+    async fn test_no_cardinality_limit_applied() {
+        use libdd_trace_stats::span_concentrator::DEFAULT_MAX_ENTRIES_PER_BUCKET;
+
+        const OVERFLOW_KEY: &str = "tracer_blocked_value";
+        let span_count = DEFAULT_MAX_ENTRIES_PER_BUCKET + 1;
+
+        let config = Arc::new(Config::default());
+        let (service, handle) = StatsConcentratorService::new(config);
+        tokio::spawn(service.run());
+
+        for i in 0..span_count {
+            let resource = format!("test-resource-{i}");
+            let span = create_span_kind_span_with_resource("client", &resource, vec![]);
+            handle.add(&span).unwrap();
+        }
+
+        let result = handle.flush(true).await.unwrap();
+
+        let payload = result.expect("Expected stats for the generated spans, but got None.");
+        let all_stats: Vec<_> = payload.stats.iter().flat_map(|b| &b.stats).collect();
+        assert_eq!(
+            all_stats.len(),
+            span_count,
+            "Expected one stats entry per distinct resource with no cardinality limit applied."
+        );
+        assert!(
+            all_stats.iter().all(|s| s.resource != OVERFLOW_KEY),
+            "Expected no stats entries collapsed into the '{OVERFLOW_KEY}' overflow key."
         );
     }
 }
