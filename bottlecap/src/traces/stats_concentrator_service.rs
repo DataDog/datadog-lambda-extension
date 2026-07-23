@@ -188,7 +188,7 @@ impl StatsConcentratorService {
                 .collect(),
             // Disable the cardinality limit to match pre-existing (unbounded) behavior.
             Some(usize::MAX),
-            // Bottlecap does not perform client-side stats obfuscation.
+            // Bottlecap does not perform agent-side stats obfuscation.
             None,
         );
         let service: StatsConcentratorService = Self {
