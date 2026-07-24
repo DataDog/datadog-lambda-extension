@@ -97,7 +97,16 @@ use dogstatsd::{
 };
 use libdd_trace_obfuscation::obfuscation_config;
 use reqwest::Client;
-use std::{collections::hash_map, env, path::Path, str::FromStr, sync::Arc};
+use std::{
+    collections::hash_map,
+    env,
+    path::Path,
+    str::FromStr,
+    sync::{
+        Arc,
+        atomic::{AtomicU64, Ordering},
+    },
+};
 use tokio::time::Instant;
 use tokio::{sync::Mutex as TokioMutex, sync::mpsc::Sender};
 use tokio_util::sync::CancellationToken;
@@ -430,6 +439,8 @@ async fn extension_loop_active(
         let stats_flusher_clone = Arc::clone(&stats_flusher);
         let proxy_flusher_clone = proxy_flusher.clone();
         let metrics_aggr_handle_clone = metrics_aggregator_handle.clone();
+        let shutdown_deadline_ms_flush = Arc::new(AtomicU64::new(0));
+        let shutdown_deadline_ms_shutdown = Arc::clone(&shutdown_deadline_ms_flush);
 
         // In Managed Instance mode, create a separate interval for the background flusher task.
         // We don't reuse race_flush_interval because we need to configure the missed tick
@@ -476,7 +487,7 @@ async fn extension_loop_active(
                         flushing_service.await_handles().await;
                         // Final flush to capture any data that accumulated since the last
                         // spawn_non_blocking(). This is our last opportunity to send data.
-                        flushing_service.flush_blocking_final().await;
+                        flushing_service.flush_blocking_final(shutdown_deadline_ms_flush.load(Ordering::Relaxed)).await;
                         break;
                     }
                 }
@@ -493,6 +504,7 @@ async fn extension_loop_active(
         let runtime_api_clone = aws_config.runtime_api.clone();
         let extension_id_clone = r.extension_id.clone();
         let client_clone = client.clone();
+        let shutdown_deadline_ms_clone = shutdown_deadline_ms_shutdown;
 
         // Main event loop for Managed Instance mode: process telemetry events until shutdown
         //
@@ -518,8 +530,9 @@ async fn extension_loop_active(
                         .await;
 
                 match next_response {
-                    Ok(NextEventResponse::Shutdown { .. }) => {
+                    Ok(NextEventResponse::Shutdown { deadline_ms, .. }) => {
                         debug!("Shutdown event received, stopping extension loop");
+                        shutdown_deadline_ms_clone.store(deadline_ms, Ordering::Relaxed);
                         // Notify the invocation processor about shutdown
                         if let Err(e) = invocation_processor_handle_clone.on_shutdown_event().await
                         {
@@ -635,7 +648,9 @@ async fn extension_loop_active(
         Arc::clone(&metrics_flushers),
         metrics_aggregator_handle.clone(),
     );
-    handle_next_invocation(next_lambda_response, &invocation_processor_handle).await;
+    let first_event =
+        handle_next_invocation(next_lambda_response, &invocation_processor_handle).await;
+    let mut current_deadline_ms = first_event.deadline_ms();
     loop {
         let maybe_shutdown_event;
 
@@ -656,18 +671,19 @@ async fn extension_loop_active(
                                 }
                         }
                         _ = race_flush_interval.tick() => {
-                            flushing_service.flush_blocking().await;
+                            flushing_service.flush_blocking(current_deadline_ms).await;
                             race_flush_interval.reset();
                         }
                     }
                 }
                 // flush
-                flushing_service.flush_blocking().await;
+                flushing_service.flush_blocking(current_deadline_ms).await;
                 race_flush_interval.reset();
                 let next_response =
                     extension::next_event(client, &aws_config.runtime_api, &r.extension_id).await;
                 maybe_shutdown_event =
                     handle_next_invocation(next_response, &invocation_processor_handle).await;
+                current_deadline_ms = maybe_shutdown_event.deadline_ms();
             }
             FlushDecision::Continuous | FlushDecision::Periodic | FlushDecision::Dont => {
                 match current_flush_decision {
@@ -679,7 +695,7 @@ async fn extension_loop_active(
                         }
                     }
                     FlushDecision::Periodic => {
-                        flushing_service.flush_blocking().await;
+                        flushing_service.flush_blocking(current_deadline_ms).await;
                         race_flush_interval.reset();
                     }
                     _ => {
@@ -699,6 +715,7 @@ async fn extension_loop_active(
                     biased;
                         next_response = &mut next_lambda_response => {
                             maybe_shutdown_event = handle_next_invocation(next_response, &invocation_processor_handle).await;
+                            current_deadline_ms = maybe_shutdown_event.deadline_ms();
                             // Need to break here to re-call next
                             break 'next_invocation;
                         }
@@ -707,7 +724,7 @@ async fn extension_loop_active(
                         }
                         _ = race_flush_interval.tick() => {
                             if flush_control.flush_strategy == FlushStrategy::Default {
-                                flushing_service.flush_blocking().await;
+                                flushing_service.flush_blocking(current_deadline_ms).await;
                                 race_flush_interval.reset();
                             }
                         }
@@ -716,7 +733,7 @@ async fn extension_loop_active(
             }
         }
 
-        if let NextEventResponse::Shutdown { .. } = maybe_shutdown_event {
+        if let NextEventResponse::Shutdown { deadline_ms, .. } = maybe_shutdown_event {
             // Cancel Telemetry API listener
             // Important to do this first, so we can receive the Tombstone event which signals
             // that there are no more Telemetry events to process
@@ -754,7 +771,7 @@ async fn extension_loop_active(
             );
 
             // Final flush - this is our last opportunity to send data before shutdown
-            flushing_service.flush_blocking_final().await;
+            flushing_service.flush_blocking_final(deadline_ms).await;
 
             // Even though we're shutting down, we need to reset the flush interval to prevent any future flushes
             race_flush_interval.reset();

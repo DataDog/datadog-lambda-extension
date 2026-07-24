@@ -1,6 +1,7 @@
 //! `FlushingService` for coordinating flush operations across multiple flusher types.
 
 use std::sync::Arc;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use tracing::{debug, error};
 
@@ -14,6 +15,9 @@ use crate::traces::{
     proxy_flusher::Flusher as ProxyFlusher, stats_flusher::StatsFlusher,
     trace_flusher::TraceFlusher,
 };
+
+/// How far before the Lambda deadline to cancel all in-flight flush requests.
+const FLUSH_CANCEL_GAP: Duration = Duration::from_millis(100);
 
 /// Service for coordinating flush operations across all flusher types.
 ///
@@ -288,8 +292,8 @@ impl FlushingService {
     ///
     /// The stats flusher respects its normal timing constraints (time-based bucketing),
     /// which may result in some stats being held back until the next flush cycle.
-    pub async fn flush_blocking(&self) {
-        self.flush_blocking_inner(false).await;
+    pub async fn flush_blocking(&self, deadline_ms: u64) {
+        self.flush_blocking_inner(false, deadline_ms).await;
     }
 
     /// Performs a final blocking flush of all telemetry data before shutdown.
@@ -299,14 +303,14 @@ impl FlushingService {
     /// flush immediately regardless of its normal timing constraints.
     ///
     /// Use this during shutdown when this is the last opportunity to send data.
-    pub async fn flush_blocking_final(&self) {
-        self.flush_blocking_inner(true).await;
+    pub async fn flush_blocking_final(&self, deadline_ms: u64) {
+        self.flush_blocking_inner(true, deadline_ms).await;
     }
 
     /// Internal implementation for blocking flush operations.
     ///
     /// Fetches metrics from the aggregator and flushes all data types in parallel.
-    async fn flush_blocking_inner(&self, force_stats: bool) {
+    async fn flush_blocking_inner(&self, force_stats: bool, deadline_ms: u64) {
         let flush_response = self
             .metrics_aggr_handle
             .flush()
@@ -324,13 +328,37 @@ impl FlushingService {
             })
             .collect();
 
-        tokio::join!(
-            self.logs_flusher.flush(None),
-            futures::future::join_all(metrics_futures),
-            self.trace_flusher.flush(None),
-            self.stats_flusher.flush(force_stats, None),
-            self.proxy_flusher.flush(None),
-        );
+        let now_ms = u64::try_from(
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_millis(),
+        )
+        .unwrap_or(u64::MAX);
+        let flush = async {
+            tokio::join!(
+                self.logs_flusher.flush(None),
+                futures::future::join_all(metrics_futures),
+                self.trace_flusher.flush(None),
+                self.stats_flusher.flush(force_stats, None),
+                self.proxy_flusher.flush(None),
+            );
+        };
+
+        if now_ms >= deadline_ms {
+            flush.await;
+            return;
+        }
+
+        let remaining = Duration::from_millis(deadline_ms - now_ms);
+        if tokio::time::timeout(remaining.saturating_sub(FLUSH_CANCEL_GAP), flush)
+            .await
+            .is_err()
+        {
+            error!(
+                "FLUSHING_SERVICE | flush canceled: Lambda deadline exceeded, in-flight requests dropped"
+            );
+        }
     }
 }
 
