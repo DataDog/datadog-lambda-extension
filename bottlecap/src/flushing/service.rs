@@ -1,8 +1,9 @@
 //! `FlushingService` for coordinating flush operations across multiple flusher types.
 
 use std::sync::Arc;
+use std::time::Instant;
 
-use tracing::{debug, error};
+use tracing::{debug, error, info};
 
 use dogstatsd::{
     aggregator::AggregatorHandle as MetricsAggregatorHandle, flusher::Flusher as MetricsFlusher,
@@ -102,10 +103,20 @@ impl FlushingService {
             let series_clone = series.clone();
             let sketches_clone = sketches.clone();
             let handle = tokio::spawn(async move {
+                let series_count = series_clone.len();
+                let sketches_count = sketches_clone.len();
+                info!(
+                    "FLUSH_TIMING | METRICS | Flushing metrics (flusher {idx}, {series_count} series, {sketches_count} sketches)"
+                );
+                let start = Instant::now();
                 let (retry_series, retry_sketches) = flusher
                     .flush_metrics(series_clone, sketches_clone)
                     .await
                     .unwrap_or_default();
+                info!(
+                    "FLUSH_TIMING | METRICS | Flushed metrics in {} ms (flusher {idx}, {series_count} series, {sketches_count} sketches)",
+                    start.elapsed().as_millis()
+                );
                 MetricsRetryBatch {
                     flusher_id: idx,
                     series: retry_series,
@@ -317,10 +328,22 @@ impl FlushingService {
             .metrics_flushers
             .iter()
             .map(|f| {
-                f.flush_metrics(
-                    flush_response.series.clone(),
-                    flush_response.distributions.clone(),
-                )
+                let series = flush_response.series.clone();
+                let sketches = flush_response.distributions.clone();
+                let series_count = series.len();
+                let sketches_count = sketches.len();
+                async move {
+                    info!(
+                        "FLUSH_TIMING | METRICS | Flushing metrics ({series_count} series, {sketches_count} sketches)"
+                    );
+                    let start = Instant::now();
+                    let result = f.flush_metrics(series, sketches).await;
+                    info!(
+                        "FLUSH_TIMING | METRICS | Flushed metrics in {} ms ({series_count} series, {sketches_count} sketches)",
+                        start.elapsed().as_millis()
+                    );
+                    result
+                }
             })
             .collect();
 

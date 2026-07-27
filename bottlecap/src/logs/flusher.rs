@@ -10,7 +10,7 @@ use std::time::Instant;
 use std::{io::Write, sync::Arc};
 use thiserror::Error as ThisError;
 use tokio::{sync::OnceCell, task::JoinSet};
-use tracing::{debug, error};
+use tracing::{debug, error, info};
 use zstd::stream::write::Encoder;
 
 #[derive(ThisError, Debug)]
@@ -275,7 +275,8 @@ impl LogsFlusher {
                 );
             }
         } else {
-            let logs_batches = Arc::new({
+            let start = Instant::now();
+            let logs_batches: Arc<Vec<Vec<u8>>> = Arc::new({
                 match self.aggregator_handle.get_batches().await {
                     Ok(batches) => batches
                         .into_iter()
@@ -288,6 +289,14 @@ impl LogsFlusher {
                 }
             });
 
+            if !logs_batches.is_empty() {
+                info!(
+                    "FLUSH_TIMING | LOGS | Flushing {} batches ({} bytes)",
+                    logs_batches.len(),
+                    logs_batches.iter().map(Vec::len).sum::<usize>(),
+                );
+            }
+
             // Send batches to each flusher
             let futures = self.flushers.iter().map(|flusher| {
                 let batches = Arc::clone(&logs_batches);
@@ -298,6 +307,15 @@ impl LogsFlusher {
             let results = join_all(futures).await;
             for failed in results {
                 failed_requests.extend(failed);
+            }
+
+            if !logs_batches.is_empty() {
+                info!(
+                    "FLUSH_TIMING | LOGS | Flushed {} batches ({} bytes) in {} ms",
+                    logs_batches.len(),
+                    logs_batches.iter().map(Vec::len).sum::<usize>(),
+                    start.elapsed().as_millis()
+                );
             }
         }
         failed_requests

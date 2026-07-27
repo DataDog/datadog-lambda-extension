@@ -105,6 +105,11 @@ impl Flusher {
             }
         }
 
+        info!(
+            "FLUSH_TIMING | PROXY_FLUSHER | Flushing {} requests",
+            requests.len()
+        );
+
         for request in requests {
             join_set.spawn(async move { Self::send(request).await });
         }
@@ -155,8 +160,8 @@ impl Flusher {
                     let status = r.status();
                     let body = r.text().await;
                     if status == 202 || status == 200 {
-                        debug!(
-                            "PROXY_FLUSHER | Successfully sent request in {} ms to {url}",
+                        info!(
+                            "FLUSH_TIMING | PROXY_FLUSHER | Successfully sent request in {} ms to {url}",
                             elapsed.as_millis()
                         );
                         return Ok(());

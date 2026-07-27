@@ -17,7 +17,7 @@ use libdd_capabilities::http::HttpClientTrait;
 use libdd_common::Endpoint;
 use libdd_trace_protobuf::pb;
 use libdd_trace_utils::stats_utils;
-use tracing::{debug, error};
+use tracing::{debug, error, info};
 
 pub struct StatsFlusher {
     aggregator: Arc<Mutex<StatsAggregator>>,
@@ -81,7 +81,7 @@ impl StatsFlusher {
             })
             .await;
 
-        debug!("STATS | Flushing {} stats", stats.len());
+        info!("FLUSH_TIMING | STATS | Flushing {} stats", stats.len());
 
         let stats_payload = stats_utils::construct_stats_payload(stats.clone());
 
@@ -109,16 +109,16 @@ impl StatsFlusher {
 
             match resp {
                 Ok(()) => {
-                    debug!(
-                        "STATS | Successfully flushed stats to {} in {} ms (attempt {attempt}/{FLUSH_RETRY_COUNT})",
+                    info!(
+                        "FLUSH_TIMING | STATS | Successfully flushed stats to {} in {} ms (attempt {attempt}/{FLUSH_RETRY_COUNT})",
                         endpoint.url,
                         elapsed.as_millis()
                     );
                     return None;
                 }
                 Err(e) => {
-                    debug!(
-                        "STATS | Failed to send stats to {} in {} ms (attempt {attempt}/{FLUSH_RETRY_COUNT}): {e:?}",
+                    info!(
+                        "FLUSH_TIMING | STATS | Failed to send stats to {} in {} ms (attempt {attempt}/{FLUSH_RETRY_COUNT}): {e:?}",
                         endpoint.url,
                         elapsed.as_millis()
                     );

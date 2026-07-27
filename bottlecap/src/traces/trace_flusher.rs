@@ -13,7 +13,7 @@ use libdd_trace_utils::{
 use std::str::FromStr;
 use std::sync::Arc;
 use tokio::task::JoinSet;
-use tracing::{debug, error};
+use tracing::{debug, error, info};
 
 use crate::FLUSH_RETRY_COUNT;
 use crate::config::Config;
@@ -194,7 +194,10 @@ impl TraceFlusher {
         let start = tokio::time::Instant::now();
         let coalesced_traces = trace_utils::coalesce_send_data(traces);
         tokio::task::yield_now().await;
-        debug!("TRACES | Flushing {} traces", coalesced_traces.len());
+        info!(
+            "FLUSH_TIMING | TRACES | Flushing {} traces",
+            coalesced_traces.len()
+        );
 
         for trace in &coalesced_traces {
             let result = trace.send(&http_client).await;
@@ -216,7 +219,10 @@ impl TraceFlusher {
             );
         }
 
-        debug!("TRACES | Flushing took {} ms", start.elapsed().as_millis());
+        info!(
+            "FLUSH_TIMING | TRACES | Flushing took {} ms",
+            start.elapsed().as_millis()
+        );
         None
     }
 }
