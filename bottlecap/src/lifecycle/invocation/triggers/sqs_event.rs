@@ -179,22 +179,22 @@ impl Trigger for SqsRecord {
         let carrier = HashMap::new();
 
         if let Some(ma) = self.message_attributes.get(DATADOG_CARRIER_KEY) {
-            match ma.data_type.as_str() {
-                "String" => {
-                    if let Some(string_value) = &ma.string_value {
-                        return serde_json::from_str(string_value).unwrap_or_default();
-                    }
+            // dataType may carry a custom label suffix, e.g. "String.foo" or "Binary.foo".
+            if ma.data_type.starts_with("String") {
+                if let Some(string_value) = &ma.string_value {
+                    return serde_json::from_str(string_value).unwrap_or_default();
                 }
-                "Binary" => {
-                    if let Some(binary_value) = &ma.binary_value
-                        && let Ok(carrier) = base64_to_string(binary_value)
-                    {
-                        return serde_json::from_str(&carrier).unwrap_or_default();
-                    }
+            } else if ma.data_type.starts_with("Binary") {
+                if let Some(binary_value) = &ma.binary_value
+                    && let Ok(carrier) = base64_to_string(binary_value)
+                {
+                    return serde_json::from_str(&carrier).unwrap_or_default();
                 }
-                _ => {
-                    debug!("Unsupported dataType in SQS message attribute");
-                }
+            } else {
+                debug!(
+                    "Unsupported dataType in SQS message attribute: {}",
+                    ma.data_type
+                );
             }
         }
 
@@ -449,6 +449,28 @@ mod tests {
             (
                 "x-datadog-parent-id".to_string(),
                 "2222222222222222222".to_string(),
+            ),
+            ("x-datadog-sampling-priority".to_string(), "1".to_string()),
+        ]);
+
+        assert_eq!(carrier, expected);
+    }
+
+    #[test]
+    fn test_get_carrier_binary_custom_label() {
+        let json = read_json_file("sqs_event_custom_label.json");
+        let payload = serde_json::from_str(&json).expect("Failed to deserialize into Value");
+        let event = SqsRecord::new(payload).expect("Failed to deserialize SqsRecord");
+        let carrier = event.get_carrier();
+
+        let expected = HashMap::from([
+            (
+                "x-datadog-trace-id".to_string(),
+                "3333333333333333333".to_string(),
+            ),
+            (
+                "x-datadog-parent-id".to_string(),
+                "4444444444444444444".to_string(),
             ),
             ("x-datadog-sampling-priority".to_string(), "1".to_string()),
         ]);
