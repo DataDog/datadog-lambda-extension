@@ -3,7 +3,7 @@ import { forceColdStart, invokeLambda } from "./utils/lambda";
 import { getIdentifier, DEFAULT_DATADOG_INDEXING_WAIT_MS } from "../config";
 
 const identifier = getIdentifier();
-const stackName = `integ-${identifier}-dsm`;
+const stackName = `${identifier}-dsm`;
 const functionName = `${stackName}-sqs-consumer`;
 
 // Queue name the consume edge tag (topic:) is derived from — the last ':'
