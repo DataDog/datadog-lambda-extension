@@ -626,7 +626,7 @@ integration-suite:
     - build ruby lambdas
     - build go lambdas
   variables:
-    IDENTIFIER: ${CI_COMMIT_SHORT_SHA}
+    IDENTIFIER: it-${CI_COMMIT_SHORT_SHA}-${CI_JOB_ID}
     AWS_DEFAULT_REGION: us-east-1
     DD_SITE: datadoghq.com
   {{ with $environment := (ds "environments").environments.sandbox }}
@@ -649,7 +649,7 @@ integration-suite:
     - export CDK_DEFAULT_ACCOUNT=$(aws sts get-caller-identity --query Account --output text)
     - export CDK_DEFAULT_REGION=us-east-1
     - npm run build
-    - npx cdk deploy "integ-${IDENTIFIER}-${TEST_SUITE}" --require-approval never --import-existing-resources
+    - npx cdk deploy "${IDENTIFIER}-${TEST_SUITE}" --require-approval never --import-existing-resources
     - echo "Running ${TEST_SUITE} integration tests with identifier ${IDENTIFIER}..."
     - export TEST_SUITE=${TEST_SUITE}
     - npx jest tests/${TEST_SUITE}.test.ts
@@ -658,7 +658,7 @@ integration-suite:
     - EXTERNAL_ID_NAME={{ $environment.external_id }} ROLE_TO_ASSUME={{ $environment.role_to_assume }} AWS_ACCOUNT={{ $environment.account }} source .gitlab/scripts/get_secrets.sh
     - echo "Destroying ${TEST_SUITE} CDK stack with identifier ${IDENTIFIER}..."
     - |
-      STACK_NAME="integ-${IDENTIFIER}-${TEST_SUITE}"
+      STACK_NAME="${IDENTIFIER}-${TEST_SUITE}"
 
       # Check if stack exists
       STACK_STATUS=$(aws cloudformation describe-stacks \

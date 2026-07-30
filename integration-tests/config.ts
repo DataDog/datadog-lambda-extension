@@ -22,11 +22,13 @@ export function getIdentifier(): string {
     const username = os.userInfo().username;
     const firstName = username.split('.')[0];
     if (firstName && firstName.length > 0) {
-      return firstName;
+      return `it-${firstName}`;
     }
   } catch (error) {
     console.error('Error getting identifier:', error);
   }
 
-  return 'integration';
+  return 'it-integration';
 }
+
+export const IDENTIFIER = getIdentifier();

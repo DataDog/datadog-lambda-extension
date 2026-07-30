@@ -1,6 +1,6 @@
 import { invokeLambda } from './utils/lambda';
 import { getMetricCount, OUT_OF_MEMORY_METRIC } from './utils/datadog';
-import { getIdentifier } from '../config';
+import { IDENTIFIER } from '../config';
 
 /**
  * LMI OOM test.
@@ -15,8 +15,7 @@ import { getIdentifier } from '../config';
  * (e.g. a future change where `handle_managed_instance_report` surfaces
  * `Runtime.OutOfMemory` in the synthesized runtime-done).
  */
-const identifier = getIdentifier();
-const stackName = `integ-${identifier}-lmi-oom`;
+const stackName = `${IDENTIFIER}-lmi-oom`;
 const functionName = `${stackName}-python-lambda`;
 
 const INITIAL_WAIT_MS = 90 * 1000;

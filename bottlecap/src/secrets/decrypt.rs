@@ -26,10 +26,22 @@ pub async fn resolve_secrets(
     let api_key_candidate = if !config.ext.api_key_secret_arn.is_empty()
         || !config.ext.kms_api_key.is_empty()
         || !config.ext.api_key_ssm_arn.is_empty()
-        || !config.ext.dd_org_uuid.is_empty()
+        || !config.dd_org_uuid.is_empty()
     {
         let before_decrypt = Instant::now();
 
+        // Dedicated client for *direct* AWS control-plane calls (KMS / Secrets
+        // Manager / SSM / STS, and the SnapStart container-credentials endpoint).
+        // It intentionally uses the default root set (compiled-in webpki roots on
+        // non-FIPS builds; see bottlecap/Cargo.toml) with no proxy and no
+        // tls_cert_file: AWS endpoints present certificates that chain to public
+        // AWS CAs, and DD_PROXY_HTTPS / tls_cert_file are for *Datadog* egress, not
+        // AWS API traffic (which goes direct, or through VPC endpoints that also
+        // present public certs). skip_ssl_validation is deliberately not applied
+        // here either — we do not disable certificate validation on the calls that
+        // fetch credentials and secrets. The delegated-auth path (dd_org_uuid)
+        // talks to a Datadog endpoint and so uses `shared_client` below, which does
+        // honor the proxy and tls_cert_file settings.
         let builder = match create_reqwest_client_builder() {
             Ok(builder) => builder,
             Err(err) => {
@@ -48,7 +60,7 @@ pub async fn resolve_secrets(
 
         let aws_credentials = get_aws_credentials(&client).await?;
 
-        let decrypted_key = if !config.ext.dd_org_uuid.is_empty() {
+        let decrypted_key = if !config.dd_org_uuid.is_empty() {
             delegated_auth::get_delegated_api_key(
                 &config,
                 &aws_config,
@@ -205,16 +217,22 @@ async fn decrypt_aws_sm(
     extract_secret_string(&v)
 }
 
-// When a Secrets Manager secret is a JSON object, this key is used to extract the API key.
-// Falls back to the raw secret string if the key is absent or the value is not valid JSON.
+// When a Secrets Manager secret is a JSON object, these keys are used to extract the API key,
+// checked in order. `dd_api_key` is our own convention; `apiKey` matches the field name used by
+// AWS's Managed Rotation for Datadog API Key secret type. Falls back to the raw secret string if
+// neither key is present or the value is not valid JSON.
 const JSON_SECRET_DD_API_KEY: &str = "dd_api_key";
+const JSON_SECRET_API_KEY: &str = "apiKey";
 
 fn extract_secret_string(v: &Value) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
     if let Some(secret_string) = v["SecretString"].as_str() {
-        if let Ok(parsed) = serde_json::from_str::<Value>(secret_string)
-            && let Some(extracted) = parsed[JSON_SECRET_DD_API_KEY].as_str()
-        {
-            return Ok(extracted.to_string());
+        if let Ok(parsed) = serde_json::from_str::<Value>(secret_string) {
+            if let Some(extracted) = parsed[JSON_SECRET_DD_API_KEY].as_str() {
+                return Ok(extracted.to_string());
+            }
+            if let Some(extracted) = parsed[JSON_SECRET_API_KEY].as_str() {
+                return Ok(extracted.to_string());
+            }
         }
         Ok(secret_string.to_string())
     } else {
@@ -438,6 +456,20 @@ mod tests {
     #[test]
     fn test_json_secret_extraction() {
         let v = make_sm_response(r#"{"dd_api_key":"abc123"}"#);
+        let result = extract_secret_string(&v).expect("should extract dd_api_key");
+        assert_eq!(result, "abc123");
+    }
+
+    #[test]
+    fn test_json_secret_extraction_api_key() {
+        let v = make_sm_response(r#"{"apiKey":"abc123","apiKeyId":"some-uuid"}"#);
+        let result = extract_secret_string(&v).expect("should extract apiKey");
+        assert_eq!(result, "abc123");
+    }
+
+    #[test]
+    fn test_json_secret_dd_api_key_takes_precedence_over_api_key() {
+        let v = make_sm_response(r#"{"dd_api_key":"abc123","apiKey":"def456"}"#);
         let result = extract_secret_string(&v).expect("should extract dd_api_key");
         assert_eq!(result, "abc123");
     }

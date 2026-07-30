@@ -11,8 +11,9 @@ import {LmiOom} from '../lib/stacks/lmi-oom';
 import {CustomMetrics} from '../lib/stacks/custom-metrics';
 import {PayloadSize} from '../lib/stacks/payload-size';
 import {Dsm} from '../lib/stacks/dsm';
+import {DurableColdStart} from '../lib/stacks/durable-cold-start';
 import {AuthRoleStack} from '../lib/auth-role';
-import {ACCOUNT, getIdentifier, REGION} from '../config';
+import {ACCOUNT, IDENTIFIER, REGION} from '../config';
 import {CapacityProviderStack} from "../lib/capacity-provider";
 
 const app = new cdk.App();
@@ -22,39 +23,40 @@ const env = {
     region: REGION,
 };
 
-const identifier = getIdentifier();
-
 // Use the same Lambda Managed Instance Capacity Provider for all LMI functions.
 // It is slow to create/destroy the related resources.
 new CapacityProviderStack(app, `integ-default-capacity-provider`, {env});
 new AuthRoleStack(app, `integ-auth-role`, {env});
 
 const stacks = [
-    new OnDemand(app, `integ-${identifier}-on-demand`, {
+    new OnDemand(app, `${IDENTIFIER}-on-demand`, {
         env,
     }),
-    new Otlp(app, `integ-${identifier}-otlp`, {
+    new Otlp(app, `${IDENTIFIER}-otlp`, {
         env,
     }),
-    new Snapstart(app, `integ-${identifier}-snapstart`, {
+    new Snapstart(app, `${IDENTIFIER}-snapstart`, {
         env,
     }),
-    new LambdaManagedInstancesStack(app, `integ-${identifier}-lmi`, {
+    new LambdaManagedInstancesStack(app, `${IDENTIFIER}-lmi`, {
         env,
     }),
-    new AuthStack(app, `integ-${identifier}-auth`, {
+    new AuthStack(app, `${IDENTIFIER}-auth`, {
         env,
     }),
-    new Oom(app, `integ-${identifier}-oom`, {
+    new Oom(app, `${IDENTIFIER}-oom`, {
         env,
     }),
-    new LmiOom(app, `integ-${identifier}-lmi-oom`, {
+    new LmiOom(app, `${IDENTIFIER}-lmi-oom`, {
         env,
     }),
-    new CustomMetrics(app, `integ-${identifier}-custom-metrics`, {
+    new CustomMetrics(app, `${IDENTIFIER}-custom-metrics`, {
         env,
     }),
-    new PayloadSize(app, `integ-${identifier}-payload-size`, {
+    new PayloadSize(app, `${IDENTIFIER}-payload-size`, {
+        env,
+    }),
+    new DurableColdStart(app, `${IDENTIFIER}-durable-cold-start`, {
         env,
     }),
     new Dsm(app, `integ-${identifier}-dsm`, {

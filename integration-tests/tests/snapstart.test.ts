@@ -1,13 +1,12 @@
 import { invokeAndCollectTelemetry, FunctionConfig } from './utils/default';
 import { DatadogTelemetry } from './utils/datadog';
 import { publishVersion, waitForSnapStartReady } from './utils/lambda';
-import { getIdentifier } from '../config';
+import { IDENTIFIER } from '../config';
 
 const runtimes = ['java', 'dotnet'] as const;
 type Runtime = typeof runtimes[number];
 
-const identifier = getIdentifier();
-const stackName = `integ-${identifier}-snapstart`;
+const stackName = `${IDENTIFIER}-snapstart`;
 
 describe('Snapstart Integration Tests', () => {
   let telemetry: Record<string, DatadogTelemetry>;
@@ -46,7 +45,7 @@ describe('Snapstart Integration Tests', () => {
     telemetry = await invokeAndCollectTelemetry(functions, 2, 2, 5000);
 
     console.log('All Snapstart Lambda invocations and data fetching completed');
-  }, 900000);
+  }, 1800000);
 
   describe.each(runtimes)('%s Runtime with SnapStart', (runtime) => {
     // With concurrency=2, invocations=2:

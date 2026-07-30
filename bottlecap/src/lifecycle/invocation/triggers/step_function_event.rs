@@ -253,7 +253,11 @@ impl ServiceNameResolver for StepFunctionEvent {
 mod tests {
     use super::*;
     use crate::lifecycle::invocation::triggers::test_utils::read_json_file;
-    use datadog_opentelemetry::constants::SAMPLING_DECISION_MAKER_TAG_KEY as DATADOG_SAMPLING_DECISION_KEY;
+
+    // dd-trace-rs no longer re-exports this constant publicly (moved to
+    // libdd-sampling internally); the tag key itself is part of the stable
+    // wire protocol, so it's hardcoded here instead of adding a new dependency.
+    const DATADOG_SAMPLING_DECISION_KEY: &str = "_dd.p.dm";
 
     #[test]
     fn test_new_event() {

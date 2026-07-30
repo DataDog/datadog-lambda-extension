@@ -689,7 +689,13 @@ impl LambdaProcessor {
         if is_platform_log(&log.message.message) {
             log.message.lambda.first_invocation = ctx.first_invocation;
         }
-        if log.message.message.starts_with("END RequestId:") {
+        // On-Demand mode emits both an END and a REPORT log per invocation; we prefer END since
+        // REPORT may arrive later. Managed Instance mode never emits an END (`PlatformRuntimeDone`),
+        // only REPORT (`PlatformReport`), so REPORT is the only log line available to carry it.
+        if log.message.message.starts_with("END RequestId:")
+            || (self.is_managed_instance_mode
+                && log.message.message.starts_with("REPORT RequestId:"))
+        {
             log.message
                 .lambda
                 .durable_execution_status
@@ -2666,6 +2672,66 @@ mod tests {
                     status: Status::Success,
                     error_type: None,
                     metrics: None,
+                },
+            };
+            let (aggregator_service, aggregator_handle) = AggregatorService::default();
+            tokio::spawn(async move { aggregator_service.run().await });
+            processor.process(event, &aggregator_handle).await;
+            let batches = aggregator_handle.get_batches().await.unwrap();
+            let logs: Vec<serde_json::Value> = serde_json::from_slice(&batches[0]).unwrap();
+            assert_eq!(
+                logs[0]["message"]["lambda"]["durable_function.execution_status"],
+                expected
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn test_execution_status_on_report_log_in_managed_instance_mode() {
+        for (execution_status, expected) in [
+            (Some("SUCCEEDED"), serde_json::json!("SUCCEEDED")),
+            (None, serde_json::Value::Null),
+        ] {
+            let config = Arc::new(config::Config {
+                service: Some("test-service".to_string()),
+                ext: config::LambdaConfig {
+                    serverless_logs_enabled: true,
+                    ..Default::default()
+                },
+                ..config::Config::default()
+            });
+            let tags_provider = Arc::new(provider::Provider::new(
+                Arc::clone(&config),
+                LAMBDA_RUNTIME_SLUG.to_string(),
+                &HashMap::from([("function_arn".to_string(), "test-arn".to_string())]),
+            ));
+            let (tx, _) = tokio::sync::mpsc::channel(2);
+            let mut processor = LambdaProcessor::new(
+                tags_provider,
+                config,
+                tx,
+                true, // Managed Instance mode
+            );
+            processor.lambda_durable_function_log_buffer_size = 50;
+            processor.is_durable_function = Some(true);
+            processor.invocation_context.request_id = "req-report".to_string();
+            processor.insert_to_durable_context_map(
+                "req-report",
+                "exec-id-123",
+                "exec-name-abc",
+                Some(false),
+                execution_status.map(str::to_string),
+            );
+            let event = TelemetryEvent {
+                time: Utc.with_ymd_and_hms(2023, 1, 7, 3, 23, 47).unwrap(),
+                record: TelemetryRecord::PlatformReport {
+                    request_id: "req-report".to_string(),
+                    metrics: ReportMetrics::ManagedInstance(ManagedInstanceReportMetrics {
+                        duration_ms: 123.45,
+                    }),
+                    status: Status::Success,
+                    error_type: None,
+                    spans: None,
                 },
             };
             let (aggregator_service, aggregator_handle) = AggregatorService::default();

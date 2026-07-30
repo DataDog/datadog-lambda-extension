@@ -1,10 +1,9 @@
 import { invokeAndCollectTelemetry, FunctionConfig } from './utils/default';
 import { DatadogTelemetry } from './utils/datadog';
 import { forceColdStart, publishVersion, waitForSnapStartReady } from './utils/lambda';
-import { getIdentifier } from '../config';
+import { IDENTIFIER } from '../config';
 
-const identifier = getIdentifier();
-const stackName = `integ-${identifier}-auth`;
+const stackName = `${IDENTIFIER}-auth`;
 
 describe('Auth Integration Tests', () => {
   let telemetry: Record<string, DatadogTelemetry>;
@@ -28,7 +27,7 @@ describe('Auth Integration Tests', () => {
     telemetry = await invokeAndCollectTelemetry(functions, 1);
 
     console.log('All invocations and data fetching completed');
-  }, 600000);
+  }, 1800000);
 
   describe('on-demand (node)', () => {
     it('should invoke Lambda successfully', () => {

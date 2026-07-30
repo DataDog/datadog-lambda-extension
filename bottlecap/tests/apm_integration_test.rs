@@ -141,6 +141,7 @@ async fn stats_payload_roundtrip_through_fake_intake() {
                 http_method: "GET".to_string(),
                 service_source: String::new(),
                 span_derived_primary_tags: vec![],
+                additional_metric_tags: vec![],
             }],
         }],
         agent_aggregation: String::new(),
@@ -232,6 +233,7 @@ async fn trace_payload_roundtrip_through_fake_intake() {
         env: "test-env".to_string(),
         hostname: String::new(),
         app_version: "1.2.3".to_string(),
+        container_debug: None,
     };
 
     let tags = header_tags();

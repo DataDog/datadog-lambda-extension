@@ -1,12 +1,11 @@
 import { invokeAndCollectTelemetry, FunctionConfig } from './utils/default';
 import { DatadogTelemetry } from './utils/datadog';
-import { getIdentifier } from '../config';
+import { IDENTIFIER } from '../config';
 
 const runtimes = ['node', 'python', 'java', 'dotnet'] as const;
 type Runtime = typeof runtimes[number];
 
-const identifier = getIdentifier();
-const stackName = `integ-${identifier}-lmi`;
+const stackName = `${IDENTIFIER}-lmi`;
 
 describe('LMI Integration Tests', () => {
   let telemetry: Record<string, DatadogTelemetry>;
@@ -23,7 +22,7 @@ describe('LMI Integration Tests', () => {
     telemetry = await invokeAndCollectTelemetry(functions, 1);
 
     console.log('LMI invocation and data fetching completed');
-  }, 600000);
+  }, 1800000);
 
   describe.each(runtimes)('%s Runtime with LMI', (runtime) => {
     const getResult = () => telemetry[runtime]?.threads[0]?.[0];

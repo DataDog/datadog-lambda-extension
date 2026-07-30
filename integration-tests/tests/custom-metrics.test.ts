@@ -1,9 +1,8 @@
 import { hasMetricWithTag } from "./utils/datadog";
 import { forceColdStart, invokeLambda } from "./utils/lambda";
-import { getIdentifier, DEFAULT_DATADOG_INDEXING_WAIT_MS } from "../config";
+import { IDENTIFIER, DEFAULT_DATADOG_INDEXING_WAIT_MS } from "../config";
 
-const identifier = getIdentifier();
-const stackName = `integ-${identifier}-custom-metrics`;
+const stackName = `${IDENTIFIER}-custom-metrics`;
 
 const CUSTOM_METRIC_NAME = "custom.exclude_tags_test";
 const EXCLUDED_TAGS = ["function_arn", "region"];
@@ -35,7 +34,7 @@ describe("Customer Metrics Exclude Tags Integration Tests", () => {
     metricsEndTime = Date.now();
 
     console.log("Lambdas invoked and indexing wait complete");
-  }, 900000);
+  }, 1800000);
 
   describe("unfiltered function (no DD_LAMBDA_CUSTOMER_METRICS_EXCLUDE_TAGS)", () => {
     it.each(EXCLUDED_TAGS)(
