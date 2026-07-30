@@ -59,7 +59,7 @@ const stacks = [
     new DurableColdStart(app, `${IDENTIFIER}-durable-cold-start`, {
         env,
     }),
-    new Dsm(app, `integ-${identifier}-dsm`, {
+    new Dsm(app, `${IDENTIFIER}-dsm`, {
         env,
     }),
 ]
