@@ -368,8 +368,8 @@ mod tests {
         // store rather than folding it into zero_count.
         sketch.accept(0.75 * f64::MIN_POSITIVE);
 
-        assert_eq!(sketch.store.count, 1.0);
-        assert_eq!(sketch.negative_store.count, 0.0);
-        assert_eq!(sketch.zero_count, 0.0);
+        assert!((sketch.store.count - 1.0).abs() < f64::EPSILON);
+        assert!(sketch.negative_store.count.abs() < f64::EPSILON);
+        assert!(sketch.zero_count.abs() < f64::EPSILON);
     }
 }

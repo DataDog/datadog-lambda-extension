@@ -349,8 +349,10 @@ async fn extension_loop_active(
     // DD_DATA_STREAMS_ENABLED.
     let dsm_processor = if config.ext.dsm_consume_enabled {
         let canonical_resource_name = tags_provider.get_canonical_resource_name();
-        let dsm_service =
-            resolve_dsm_service(config.service.as_deref(), canonical_resource_name.as_deref());
+        let dsm_service = resolve_dsm_service(
+            config.service.as_deref(),
+            canonical_resource_name.as_deref(),
+        );
         let dsm_env = config.env.clone().unwrap_or_default();
         let dsm_version = config.version.clone().unwrap_or_default();
         let mut dsm_tags: Vec<String> = config
