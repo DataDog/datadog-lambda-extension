@@ -47,7 +47,7 @@ impl DsmProcessor {
         tracer_version: String,
         version: String,
         tags: Vec<String>,
-        site: &str,
+        apm_dd_url: &str,
         proxy_aggregator: Arc<TokioMutex<ProxyAggregator>>,
     ) -> Self {
         let aggregator =
@@ -57,7 +57,12 @@ impl DsmProcessor {
             env,
             aggregator: Mutex::new(aggregator),
             proxy_aggregator,
-            target_url: format!("https://trace.agent.{site}/api/v0.1/pipeline_stats"),
+            // Mirror the trace pipeline's endpoint (config.apm_dd_url) so a custom
+            // DD_APM_DD_URL is honored; it already falls back to the site-derived URL.
+            target_url: format!(
+                "{}/api/v0.1/pipeline_stats",
+                apm_dd_url.trim_end_matches('/')
+            ),
         }
     }
 
@@ -241,7 +246,7 @@ mod tests {
             "1.0".into(),
             "2.0".into(),
             vec!["team:serverless".into()],
-            "datadoghq.com",
+            "https://trace.agent.datadoghq.com",
             proxy.clone(),
         );
 
@@ -259,6 +264,37 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn target_url_honors_custom_apm_dd_url() {
+        // DD_APM_DD_URL (surfaced as config.apm_dd_url) must be honored so DSM
+        // pipeline stats reach the same endpoint as traces.
+        let proxy = Arc::new(TokioMutex::new(ProxyAggregator::default()));
+        let dsm = DsmProcessor::new(
+            "svc".into(),
+            "env".into(),
+            "1.0".into(),
+            "2.0".into(),
+            Vec::new(),
+            "https://my-proxy.example.com",
+            proxy.clone(),
+        );
+
+        let edge_tags = vec![
+            "direction:in".to_string(),
+            "topic:q".to_string(),
+            "type:sqs".to_string(),
+        ];
+        dsm.record_consume(&edge_tags, &HashMap::new(), 128.0);
+        dsm.drain_into_proxy().await;
+
+        let batch = proxy.lock().await.get_batch();
+        assert_eq!(batch.len(), 1);
+        assert_eq!(
+            batch[0].target_url,
+            "https://my-proxy.example.com/api/v0.1/pipeline_stats"
+        );
+    }
+
+    #[tokio::test]
     async fn drain_is_noop_when_empty() {
         let proxy = Arc::new(TokioMutex::new(ProxyAggregator::default()));
         let dsm = DsmProcessor::new(
@@ -267,7 +303,7 @@ mod tests {
             "1.0".into(),
             "2.0".into(),
             vec!["team:serverless".into()],
-            "datadoghq.com",
+            "https://trace.agent.datadoghq.com",
             proxy.clone(),
         );
         dsm.drain_into_proxy().await;

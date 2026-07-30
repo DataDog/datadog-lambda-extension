@@ -1797,7 +1797,7 @@ mod tests {
             "1.0".into(),
             "2.0".into(),
             Vec::new(),
-            "datadoghq.com",
+            "https://trace.agent.datadoghq.com",
             proxy,
         )));
     }

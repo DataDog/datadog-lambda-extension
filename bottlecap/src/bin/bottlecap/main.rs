@@ -361,12 +361,12 @@ async fn extension_loop_active(
         dsm_tags.sort();
 
         debug!(
-            "DSM startup config: enabled={}, service={}, env={}, version={}, site={}, tags={:?}",
+            "DSM startup config: enabled={}, service={}, env={}, version={}, apm_dd_url={}, tags={:?}",
             config.ext.dsm_consume_enabled,
             dsm_service,
             dsm_env,
             dsm_version,
-            config.site,
+            config.apm_dd_url,
             dsm_tags
         );
 
@@ -377,7 +377,7 @@ async fn extension_loop_active(
                 EXTENSION_VERSION.to_string(),
                 dsm_version,
                 dsm_tags,
-                &config.site,
+                &config.apm_dd_url,
                 Arc::clone(&proxy_aggregator),
             ),
         ))
