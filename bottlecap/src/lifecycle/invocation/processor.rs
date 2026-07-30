@@ -42,6 +42,7 @@ use crate::{
     tags::{lambda::tags::resolve_runtime_from_proc, provider},
     traces::{
         propagation::{DatadogCompositePropagator, carrier::JsonCarrier},
+        span_pointers::SpanPointer,
         trace_processor::SendingTraceProcessor,
     },
 };
@@ -300,9 +301,6 @@ impl Processor {
                 "Found buffered UniversalInstrumentationStart for request_id: {}",
                 request_id
             );
-            // Infer span
-            self.inferrer
-                .infer_span(&buffered_event.payload_value, &self.aws_config);
             self.process_on_universal_instrumentation_start(
                 request_id,
                 buffered_event.headers,
@@ -313,7 +311,6 @@ impl Processor {
             if let Some((headers, payload_value)) =
                 self.context_buffer.pair_invoke_event(&request_id)
             {
-                self.inferrer.infer_span(&payload_value, &self.aws_config);
                 self.process_on_universal_instrumentation_start(request_id, headers, payload_value);
             }
         }
@@ -719,7 +716,7 @@ impl Processor {
             .meta
             .extend(self.dynamic_tags.clone());
 
-        if let Some(trigger_tags) = self.inferrer.get_trigger_tags() {
+        if let Some(trigger_tags) = context.inferred.get_trigger_tags() {
             context.invocation_span.meta.extend(trigger_tags);
         }
 
@@ -737,7 +734,7 @@ impl Processor {
         }
 
         self.inferrer
-            .complete_inferred_spans(&context.invocation_span);
+            .complete_inferred_spans(&mut context.inferred, &context.invocation_span);
 
         // Handle cold start span if present. Timeout handling can synthesize an
         // invocation trace ID even when no tracer is installed; that must not
@@ -769,13 +766,15 @@ impl Processor {
     ) {
         // Capture before `get_ctx_spans` consumes `context`.
         let client_computed_stats = context.client_computed_stats;
-        let (traces, body_size) = self.get_ctx_spans(context);
+        let span_pointers = context.inferred.span_pointers.clone();
+        let (traces, body_size) = Self::get_ctx_spans(context);
         self.send_spans(
             traces,
             body_size,
             tags_provider,
             trace_sender,
             client_computed_stats,
+            span_pointers,
         )
         .await;
     }
@@ -798,16 +797,16 @@ impl Processor {
         );
     }
 
-    fn get_ctx_spans(&mut self, context: Context) -> (Vec<Span>, usize) {
+    fn get_ctx_spans(context: Context) -> (Vec<Span>, usize) {
         let mut body_size = std::mem::size_of_val(&context.invocation_span);
         let mut traces = vec![context.invocation_span.clone()];
 
-        if let Some(inferred_span) = &self.inferrer.inferred_span {
+        if let Some(inferred_span) = &context.inferred.inferred_span {
             body_size += std::mem::size_of_val(inferred_span);
             traces.push(inferred_span.clone());
         }
 
-        if let Some(ws) = &self.inferrer.wrapped_inferred_span {
+        if let Some(ws) = &context.inferred.wrapped_inferred_span {
             body_size += std::mem::size_of_val(ws);
             traces.push(ws.clone());
         }
@@ -862,7 +861,7 @@ impl Processor {
 
             // The cold start span is extension-generated and not tied to a tracer's stats
             // signal, so the backend should compute its stats unless the extension does.
-            self.send_spans(traces, body_size, tags_provider, trace_sender, false)
+            self.send_spans(traces, body_size, tags_provider, trace_sender, false, None)
                 .await;
         }
     }
@@ -877,6 +876,7 @@ impl Processor {
         tags_provider: &Arc<provider::Provider>,
         trace_sender: &Arc<SendingTraceProcessor>,
         client_computed_stats: bool,
+        span_pointers: Option<Vec<SpanPointer>>,
     ) {
         // todo: figure out what to do here
         // `client_computed_stats` is propagated from the tracer's placeholder span so the
@@ -902,7 +902,7 @@ impl Processor {
                 header_tags,
                 vec![traces],
                 body_size,
-                self.inferrer.span_pointers.clone(),
+                span_pointers,
             )
             .await
         {
@@ -1108,8 +1108,6 @@ impl Processor {
     ) {
         self.tracer_detected = true;
 
-        self.inferrer.infer_span(&payload_value, &self.aws_config);
-
         // Both modes: use request_id-based pairing when the tracer sends the header.
         if let Some(req_id) = request_id {
             debug!(
@@ -1168,10 +1166,15 @@ impl Processor {
         headers: HashMap<String, String>,
         payload_value: Value,
     ) {
+        // Infer the span for this specific invocation and store it on its own
+        // Context. Computed before borrowing the context mutably.
+        let inferred = self.inferrer.infer_span(&payload_value, &self.aws_config);
+
         let Some(context) = self.context_buffer.get_mut(&request_id) else {
             debug!("Cannot process on invocation start, no context for request_id: {request_id}");
             return;
         };
+        context.inferred = inferred;
 
         // Tag the invocation span with the request payload
         if self.config.ext.capture_lambda_payload {
@@ -1197,9 +1200,9 @@ impl Processor {
 
             // Set the right data to the correct root level span,
             // If there's an inferred span, then that should be the root.
-            if self.inferrer.inferred_span.is_some() {
-                self.inferrer.set_parent_id(sc.span_id);
-                self.inferrer.extend_meta(sc.tags.clone());
+            if context.inferred.inferred_span.is_some() {
+                context.inferred.set_parent_id(sc.span_id);
+                context.inferred.extend_meta(sc.tags.clone());
             } else {
                 context.invocation_span.meta.extend(sc.tags.clone());
             }
@@ -1207,7 +1210,7 @@ impl Processor {
 
         // If we have an inferred span, set the invocation span parent id
         // to be the inferred span id, even if we don't have an extracted trace context
-        if let Some(inferred_span) = &self.inferrer.inferred_span {
+        if let Some(inferred_span) = &context.inferred.inferred_span {
             context.invocation_span.parent_id = inferred_span.span_id;
         }
 
@@ -1472,7 +1475,7 @@ impl Processor {
             }
 
             // If we have an inferred span, set the status code to it
-            self.inferrer.set_status_code(status_code_as_string);
+            context.inferred.set_status_code(status_code_as_string);
         }
 
         let mut trace_id: u64 = 0;
@@ -1526,8 +1529,8 @@ impl Processor {
         }
         context.invocation_span.trace_id = trace_id;
 
-        if self.inferrer.inferred_span.is_some() {
-            self.inferrer.extend_meta(tags);
+        if context.inferred.inferred_span.is_some() {
+            context.inferred.extend_meta(tags);
         } else {
             context.invocation_span.parent_id = parent_id;
             context.invocation_span.meta.extend(tags);
@@ -1762,6 +1765,28 @@ mod tests {
         })
     }
 
+    fn sqs_payload_for_queue(queue_name: &str) -> Value {
+        json!({
+            "Records": [{
+                "messageId": "msg-1",
+                "receiptHandle": "handle",
+                "attributes": {
+                    "ApproximateFirstReceiveTimestamp": "1700000000000",
+                    "ApproximateReceiveCount": "1",
+                    "SentTimestamp": "1700000000000",
+                    "SenderId": "sender",
+                    "AWSTraceHeader": null
+                },
+                "messageAttributes": {},
+                "md5OfBody": "5d41402abc4b2a76b9719d911017c592",
+                "eventSource": "aws:sqs",
+                "eventSourceARN": format!("arn:aws:sqs:us-east-1:123456789012:{queue_name}"),
+                "awsRegion": "us-east-1",
+                "body": "hello"
+            }]
+        })
+    }
+
     fn attach_test_dsm_processor(processor: &mut Processor) {
         let proxy = Arc::new(tokio::sync::Mutex::new(
             crate::traces::proxy_aggregator::Aggregator::default(),
@@ -1908,6 +1933,53 @@ mod tests {
 
     fn setup() -> Processor {
         setup_with_initialization_type("on-demand")
+    }
+
+    #[tokio::test]
+    async fn test_concurrent_invocations_do_not_share_inferred_span() {
+        // Regression: Managed Instance mode runs concurrent invocations. Inferred
+        // span data must live on each invocation's Context, not on the shared
+        // Processor, otherwise a later invocation's inference overwrites an earlier
+        // one before it is emitted, and the earlier span completes with the wrong
+        // trigger/inference data.
+        let mut p = setup_managed_instance();
+
+        let req_a = String::from("req-a");
+        let req_b = String::from("req-b");
+
+        // Two invocations start; each creates its own context.
+        p.on_invoke_event(req_a.clone());
+        p.on_invoke_event(req_b.clone());
+
+        // Universal instrumentation start arrives for each, with a distinct SQS queue.
+        // B arrives after A, which under the old shared-state design overwrote A.
+        p.on_universal_instrumentation_start(
+            HashMap::new(),
+            sqs_payload_for_queue("queue-a"),
+            Some(req_a.clone()),
+        );
+        p.on_universal_instrumentation_start(
+            HashMap::new(),
+            sqs_payload_for_queue("queue-b"),
+            Some(req_b.clone()),
+        );
+
+        let ctx_a = p.context_buffer.get(&req_a).expect("context a not found");
+        let ctx_b = p.context_buffer.get(&req_b).expect("context b not found");
+
+        let span_a = ctx_a
+            .inferred
+            .inferred_span
+            .as_ref()
+            .expect("inferred span a missing");
+        let span_b = ctx_b
+            .inferred
+            .inferred_span
+            .as_ref()
+            .expect("inferred span b missing");
+
+        assert_eq!(span_a.resource, "queue-a");
+        assert_eq!(span_b.resource, "queue-b");
     }
 
     fn setup_managed_instance() -> Processor {
@@ -2839,7 +2911,6 @@ mod tests {
 
     #[tokio::test]
     async fn test_get_ctx_spans_prioritizes_snapstart_over_cold_start() {
-        let mut processor = setup();
         let request_id = String::from("test-request-id");
 
         // Create invocation span
@@ -2873,7 +2944,7 @@ mod tests {
         context.snapstart_restore_span = Some(snapstart_span.clone());
 
         // Call get_ctx_spans to get the spans that would be sent
-        let (spans, _body_size) = processor.get_ctx_spans(context);
+        let (spans, _body_size) = Processor::get_ctx_spans(context);
 
         // Verify that exactly 2 spans are returned:
         // 1. invocation_span
