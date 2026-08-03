@@ -1,6 +1,9 @@
 // Copyright 2023-Present Datadog, Inc. https://www.datadoghq.com/
 // SPDX-License-Identifier: Apache-2.0
 
+// This helper is `#[path]`-included by several test binaries; not every binary
+// exercises every endpoint/accessor, so unused items here are expected.
+#![allow(dead_code)]
 //! In-process fake Datadog intake for APM payload-level integration tests.
 //!
 //! Spawns an axum server on a random local port that accepts the same APM
@@ -12,6 +15,7 @@
 //!
 //! - `POST /api/v0.2/stats`: msgpack, gzip-compressed, `pb::StatsPayload`
 //! - `POST /api/v0.2/traces`: protobuf (optionally zstd-compressed), `pb::AgentPayload`
+//! - `POST /api/v0.1/pipeline_stats`: msgpack (struct-as-map), gzip-compressed, DSM pipeline stats
 //!
 //! Prototype for APMSVLS-494 phase 1. If the API proves out, this file gets
 //! extracted into the shared `datadog/apm-agent-parity-rs` repo in phase 2.
@@ -28,15 +32,52 @@ use axum::{
 };
 use libdd_trace_protobuf::pb;
 use prost::Message;
+use serde::Deserialize;
 use tokio::net::TcpListener;
 use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
+
+/// A DSM pipeline-stats payload as it lands on `/api/v0.1/pipeline_stats`.
+/// Only the fields tests assert on are decoded; serde ignores the rest
+/// (including the `serde_bytes` latency sketches).
+#[derive(Clone, Deserialize)]
+pub struct PipelineStatsPayload {
+    #[serde(rename = "Env")]
+    pub env: String,
+    #[serde(rename = "Service")]
+    pub service: String,
+    #[serde(rename = "TracerVersion")]
+    pub tracer_version: String,
+    #[serde(rename = "Version")]
+    pub version: String,
+    #[serde(rename = "Tags")]
+    pub tags: Vec<String>,
+    #[serde(rename = "Stats")]
+    pub stats: Vec<PipelineStatsBucket>,
+}
+
+#[derive(Clone, Deserialize)]
+pub struct PipelineStatsBucket {
+    #[serde(rename = "Stats")]
+    pub stats: Vec<PipelineStatsPoint>,
+}
+
+#[derive(Clone, Deserialize)]
+pub struct PipelineStatsPoint {
+    #[serde(rename = "Hash")]
+    pub hash: u64,
+    #[serde(rename = "ParentHash")]
+    pub parent_hash: u64,
+    #[serde(rename = "EdgeTags")]
+    pub edge_tags: Vec<String>,
+}
 
 /// Captured, decoded APM payloads for a single test run.
 #[derive(Default)]
 struct Captured {
     stats: Vec<pb::StatsPayload>,
     traces: Vec<pb::AgentPayload>,
+    pipeline_stats: Vec<PipelineStatsPayload>,
 }
 
 /// Shared server state. The axum handlers write to the mutexes; tests read
@@ -71,6 +112,7 @@ impl FakeIntake {
         let router = Router::new()
             .route("/api/v0.2/stats", post(handle_stats))
             .route("/api/v0.2/traces", post(handle_traces))
+            .route("/api/v0.1/pipeline_stats", post(handle_pipeline_stats))
             .with_state(Arc::clone(&state));
 
         let (shutdown_tx, shutdown_rx) = oneshot::channel::<()>();
@@ -101,6 +143,24 @@ impl FakeIntake {
     #[must_use]
     pub fn traces_url(&self) -> String {
         format!("{}/api/v0.2/traces", self.base_url)
+    }
+
+    /// Base URL (scheme + host + port, no path). Use as the `apm_dd_url` for
+    /// components that build their own endpoint path (e.g. `DsmProcessor`).
+    #[must_use]
+    pub fn base_url(&self) -> String {
+        self.base_url.clone()
+    }
+
+    /// All DSM pipeline-stats payloads captured so far, in arrival order.
+    #[must_use]
+    pub fn pipeline_stats_payloads(&self) -> Vec<PipelineStatsPayload> {
+        self.state
+            .captured
+            .lock()
+            .expect("fake_intake: pipeline_stats mutex poisoned")
+            .pipeline_stats
+            .clone()
     }
 
     /// All `StatsPayload`s captured so far, in arrival order.
@@ -190,6 +250,35 @@ async fn handle_traces(
         }
         Err(err) => {
             eprintln!("fake_intake: failed to decode AgentPayload protobuf: {err}");
+            StatusCode::BAD_REQUEST
+        }
+    }
+}
+
+async fn handle_pipeline_stats(
+    State(state): State<Arc<SharedState>>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> StatusCode {
+    let decoded = match decompress(&headers, &body) {
+        Ok(d) => d,
+        Err(e) => {
+            eprintln!("{e}");
+            return StatusCode::BAD_REQUEST;
+        }
+    };
+    match rmp_serde::from_slice::<PipelineStatsPayload>(&decoded) {
+        Ok(payload) => {
+            state
+                .captured
+                .lock()
+                .expect("fake_intake: pipeline_stats mutex poisoned")
+                .pipeline_stats
+                .push(payload);
+            StatusCode::ACCEPTED
+        }
+        Err(err) => {
+            eprintln!("fake_intake: failed to decode pipeline stats msgpack: {err}");
             StatusCode::BAD_REQUEST
         }
     }

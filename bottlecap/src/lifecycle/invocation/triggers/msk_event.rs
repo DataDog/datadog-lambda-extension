@@ -1,7 +1,9 @@
 use crate::lifecycle::invocation::processor::MS_TO_NS;
 use crate::lifecycle::invocation::triggers::{
-    FUNCTION_TRIGGER_EVENT_SOURCE_TAG, ServiceNameResolver, Trigger,
+    DsmCheckpointInput, FUNCTION_TRIGGER_EVENT_SOURCE_TAG, ServiceNameResolver, Trigger,
 };
+use base64::Engine;
+use base64::engine::general_purpose;
 use libdd_trace_protobuf::pb::Span;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -262,6 +264,51 @@ impl Trigger for MSKEvent {
 
     fn is_async(&self) -> bool {
         true
+    }
+
+    fn get_dsm_checkpoints(&self, payload: &Value) -> Vec<DsmCheckpointInput> {
+        // `new` prunes the records map to a single record, so iterate the full
+        // unparsed payload to capture every Kafka record in the batch. Edge tags
+        // follow the dd-trace Kafka consume convention
+        // (`[direction:in, topic:<topic>, type:kafka]`); the `group:<consumer
+        // group>` tag is not present in the event and is injected from config
+        // (`DD_DSM_KAFKA_GROUP`) by the extraction hook.
+        let Some(records_map) = payload.get("records").and_then(Value::as_object) else {
+            return Vec::new();
+        };
+        let mut checkpoints = Vec::new();
+        for group in records_map.values() {
+            let records: Vec<&Value> = match group {
+                Value::Array(arr) => arr.iter().collect(),
+                Value::Object(obj) => obj.values().collect(),
+                _ => Vec::new(),
+            };
+            for record in records {
+                let Some(topic) = record.get("topic").and_then(Value::as_str) else {
+                    continue;
+                };
+                let carrier = record
+                    .get("headers")
+                    .map_or_else(HashMap::new, headers_to_string_map);
+                // The `value` field is base64-encoded; report the decoded
+                // byte length so the DSM PayloadSize sketch is accurate.
+                let payload_size_bytes = record
+                    .get("value")
+                    .and_then(Value::as_str)
+                    .and_then(|v| general_purpose::STANDARD.decode(v).ok())
+                    .map_or(0.0, |b| b.len() as f64);
+                checkpoints.push(DsmCheckpointInput {
+                    edge_tags: vec![
+                        "direction:in".to_string(),
+                        format!("topic:{topic}"),
+                        "type:kafka".to_string(),
+                    ],
+                    carrier,
+                    payload_size_bytes,
+                });
+            }
+        }
+        checkpoints
     }
 }
 
@@ -615,5 +662,114 @@ mod tests {
         assert_eq!(record.topic, "demo-topic");
         assert_eq!(record.partition, 0);
         assert!(event.get_carrier().is_empty());
+    }
+
+    #[test]
+    fn test_get_dsm_checkpoints_one_per_record() {
+        // Two topic-partitions, each with a record carrying its own pathway
+        // context header. `dd-pathway-ctx-base64` bytes: "ctxA"=[99,116,120,65],
+        // "ctxB"=[99,116,120,66].
+        let payload = serde_json::json!({
+            "eventSource": "aws:kafka",
+            "eventSourceArn": "arn:aws:kafka:us-east-1:123456789012:cluster/demo-cluster/751d2973-a626-431c-9d4e-d7975eb44dd7-2",
+            "records": {
+                "topicA-0": [{
+                    "topic": "topicA", "partition": 0, "timestamp": 1000.0,
+                    "headers": [{ "dd-pathway-ctx-base64": [99, 116, 120, 65] }]
+                }],
+                "topicB-0": [{
+                    "topic": "topicB", "partition": 0, "timestamp": 2000.0,
+                    "headers": [{ "dd-pathway-ctx-base64": [99, 116, 120, 66] }]
+                }]
+            }
+        });
+
+        // `new` prunes to one record; the per-record checkpoints must come from
+        // the full payload, not the pruned trigger.
+        let trigger = MSKEvent::new(payload.clone()).expect("Failed to deserialize MSKEvent");
+        let checkpoints = trigger.get_dsm_checkpoints(&payload);
+
+        assert_eq!(checkpoints.len(), 2, "expected one checkpoint per record");
+
+        for (topic, ctx) in [("topicA", "ctxA"), ("topicB", "ctxB")] {
+            let cp = checkpoints
+                .iter()
+                .find(|c| c.edge_tags.contains(&format!("topic:{topic}")))
+                .unwrap_or_else(|| panic!("missing checkpoint for {topic}"));
+            assert_eq!(
+                cp.edge_tags,
+                vec![
+                    "direction:in".to_string(),
+                    format!("topic:{topic}"),
+                    "type:kafka".to_string(),
+                ]
+            );
+            assert_eq!(
+                cp.carrier.get("dd-pathway-ctx-base64").map(String::as_str),
+                Some(ctx)
+            );
+        }
+    }
+
+    #[test]
+    fn test_get_dsm_checkpoints_payload_size() {
+        // Each record's payload_size_bytes must equal the decoded byte length of
+        // its base64-encoded `value` field. A null value must yield 0.0.
+        //
+        // topic1 records decode to 34 and 33 bytes respectively (see fixture).
+        // topic2 record has a null value → 0.0.
+        let payload = serde_json::json!({
+            "eventSource": "aws:kafka",
+            "eventSourceArn": "arn:aws:kafka:us-east-1:123456789012:cluster/demo-cluster/751d2973-a626-431c-9d4e-d7975eb44dd7-2",
+            "records": {
+                "topic1-0": [
+                    {"topic": "topic1", "partition": 0, "timestamp": 1000.0,
+                     "value": "eyJvcmRlcklkIjoiMTIzNCIsImFtb3VudCI6MTAwLjAxfQ==",
+                     "headers": []},
+                    {"topic": "topic1", "partition": 0, "timestamp": 2000.0,
+                     "value": "eyJvcmRlcklkIjoiNTY3OCIsImFtb3VudCI6NTAuMDB9",
+                     "headers": []}
+                ],
+                "topic2-0": [
+                    {"topic": "topic2", "partition": 0, "timestamp": 3000.0,
+                     "value": serde_json::Value::Null,
+                     "headers": []}
+                ]
+            }
+        });
+
+        let trigger = MSKEvent::new(payload.clone()).expect("Failed to deserialize MSKEvent");
+        let checkpoints = trigger.get_dsm_checkpoints(&payload);
+
+        assert_eq!(checkpoints.len(), 3);
+
+        let topic1_sizes: Vec<f64> = checkpoints
+            .iter()
+            .filter(|c| c.edge_tags.iter().any(|t| t == "topic:topic1"))
+            .map(|c| c.payload_size_bytes)
+            .collect();
+        assert_eq!(topic1_sizes.len(), 2);
+        assert!(
+            topic1_sizes
+                .iter()
+                .any(|&s| (s - 34.0).abs() < f64::EPSILON),
+            "expected a 34-byte record, got {topic1_sizes:?}"
+        );
+        assert!(
+            topic1_sizes
+                .iter()
+                .any(|&s| (s - 33.0).abs() < f64::EPSILON),
+            "expected a 33-byte record, got {topic1_sizes:?}"
+        );
+
+        let topic2_cp = checkpoints
+            .iter()
+            .find(|c| c.edge_tags.iter().any(|t| t == "topic:topic2"))
+            .expect("topic2 checkpoint must exist");
+        assert!(
+            topic2_cp.payload_size_bytes.abs() < f64::EPSILON,
+            "null value must yield 0.0, got {}",
+            topic2_cp.payload_size_bytes
+        );
     }
 }

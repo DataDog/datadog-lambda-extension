@@ -7,7 +7,7 @@ use std::collections::HashMap;
 
 const SPAN_POINTER_HASH_LENGTH: usize = 32;
 
-#[derive(Clone)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SpanPointer {
     pub hash: String,
     pub kind: String,
