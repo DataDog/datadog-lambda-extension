@@ -1,5 +1,6 @@
 use crate::config::aws::get_aws_partition_by_region;
 use crate::lifecycle::invocation::{
+    base64_to_string,
     processor::MS_TO_NS,
     triggers::{
         DATADOG_CARRIER_KEY, DsmCheckpointInput, FUNCTION_TRIGGER_EVENT_SOURCE_TAG,
@@ -178,10 +179,28 @@ impl Trigger for SqsRecord {
     fn get_carrier(&self) -> HashMap<String, String> {
         let carrier = HashMap::new();
 
-        if let Some(ma) = self.message_attributes.get(DATADOG_CARRIER_KEY)
-            && let Some(string_value) = &ma.string_value
-        {
-            return serde_json::from_str(string_value).unwrap_or_default();
+        // SNS -> SQS raw message delivery promotes SNS message attributes to
+        // SQS attributes, where `_datadog` arrives as a Binary attribute whose
+        // `binaryValue` is base64-encoded carrier JSON. Direct SQS producers use
+        // a String attribute. Handle both, mirroring the SNS trigger.
+        if let Some(ma) = self.message_attributes.get(DATADOG_CARRIER_KEY) {
+            match ma.data_type.as_str() {
+                "String" => {
+                    if let Some(string_value) = &ma.string_value {
+                        return serde_json::from_str(string_value).unwrap_or_default();
+                    }
+                }
+                "Binary" => {
+                    if let Some(binary_value) = &ma.binary_value
+                        && let Ok(carrier) = base64_to_string(binary_value)
+                    {
+                        return serde_json::from_str(&carrier).unwrap_or_default();
+                    }
+                }
+                _ => {
+                    debug!("Unsupported type in SQS message attribute");
+                }
+            }
         }
 
         // Check for SNS event sent through SQS
@@ -579,6 +598,31 @@ mod tests {
         ]);
 
         assert_eq!(carrier, expected);
+    }
+
+    #[test]
+    fn test_get_carrier_from_binary_message_attribute() {
+        // SNS -> SQS raw message delivery: `_datadog` is a top-level SQS Binary
+        // attribute whose `binaryValue` is base64-encoded carrier JSON, and the
+        // body is the raw published message (no SNS envelope).
+        let json = read_json_file("sqs_binary_event.json");
+        let payload = serde_json::from_str(&json).expect("Failed to deserialize into Value");
+        let event = SqsRecord::new(payload).expect("Failed to deserialize SqsRecord");
+        let carrier = event.get_carrier();
+
+        assert_eq!(
+            carrier.get("dd-pathway-ctx-base64").map(String::as_str),
+            Some("Ev+XMfNJ31T+hcjp+Gf+hcjp+Gc="),
+            "DSM pathway context must be extracted from the Binary attribute"
+        );
+        assert_eq!(
+            carrier.get("x-datadog-trace-id").map(String::as_str),
+            Some("2522563026513800488")
+        );
+        assert_eq!(
+            carrier.get("x-datadog-parent-id").map(String::as_str),
+            Some("1052921069172192507")
+        );
     }
 
     #[test]
