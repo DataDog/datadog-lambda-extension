@@ -30,6 +30,9 @@ use crate::traces::proxy_aggregator::{Aggregator as ProxyAggregator, ProxyReques
 
 /// gzip level used by the tracer for pipeline stats.
 const GZIP_LEVEL: u32 = 1;
+/// The trace intake path appended to `apm_dd_url` by the upstream config crate.
+/// Must be stripped before deriving non-trace endpoints from that field.
+const TRACE_INTAKE_ROUTE: &str = "/api/v0.2/traces";
 
 pub struct DsmProcessor {
     service: String,
@@ -57,11 +60,15 @@ impl DsmProcessor {
             env,
             aggregator: Mutex::new(aggregator),
             proxy_aggregator,
-            // Mirror the trace pipeline's endpoint (config.apm_dd_url) so a custom
-            // DD_APM_DD_URL is honored; it already falls back to the site-derived URL.
+            // config.apm_dd_url is a fully-resolved trace endpoint that already
+            // ends with TRACE_INTAKE_ROUTE (e.g. ".../api/v0.2/traces"). Strip
+            // that suffix to recover the base URL before appending the DSM route;
+            // without this the target becomes .../api/v0.2/traces/api/v0.1/pipeline_stats.
             target_url: format!(
                 "{}/api/v0.1/pipeline_stats",
-                apm_dd_url.trim_end_matches('/')
+                apm_dd_url
+                    .trim_end_matches('/')
+                    .trim_end_matches(TRACE_INTAKE_ROUTE)
             ),
         }
     }
@@ -240,13 +247,15 @@ mod tests {
     #[tokio::test]
     async fn drain_enqueues_proxy_request_when_data_present() {
         let proxy = Arc::new(TokioMutex::new(ProxyAggregator::default()));
+        // Pass the full apm_dd_url as resolved by config (includes the trace
+        // intake path), mirroring what main.rs supplies in production.
         let dsm = DsmProcessor::new(
             "svc".into(),
             "env".into(),
             "1.0".into(),
             "2.0".into(),
             vec!["team:serverless".into()],
-            "https://trace.agent.datadoghq.com",
+            "https://trace.agent.datadoghq.com/api/v0.2/traces",
             proxy.clone(),
         );
 
@@ -260,13 +269,18 @@ mod tests {
 
         let batch = proxy.lock().await.get_batch();
         assert_eq!(batch.len(), 1);
-        assert!(batch[0].target_url.ends_with("/api/v0.1/pipeline_stats"));
+        assert_eq!(
+            batch[0].target_url,
+            "https://trace.agent.datadoghq.com/api/v0.1/pipeline_stats"
+        );
     }
 
     #[tokio::test]
     async fn target_url_honors_custom_apm_dd_url() {
-        // DD_APM_DD_URL (surfaced as config.apm_dd_url) must be honored so DSM
-        // pipeline stats reach the same endpoint as traces.
+        // config.apm_dd_url for a custom DD_APM_DD_URL is resolved by the
+        // upstream config crate as "{custom_url}/api/v0.2/traces". The
+        // processor must strip that suffix so the DSM endpoint is rooted at
+        // the same host/prefix, not nested under the trace route.
         let proxy = Arc::new(TokioMutex::new(ProxyAggregator::default()));
         let dsm = DsmProcessor::new(
             "svc".into(),
@@ -274,7 +288,7 @@ mod tests {
             "1.0".into(),
             "2.0".into(),
             Vec::new(),
-            "https://my-proxy.example.com",
+            "https://my-proxy.example.com/api/v0.2/traces",
             proxy.clone(),
         );
 
@@ -303,7 +317,7 @@ mod tests {
             "1.0".into(),
             "2.0".into(),
             vec!["team:serverless".into()],
-            "https://trace.agent.datadoghq.com",
+            "https://trace.agent.datadoghq.com/api/v0.2/traces",
             proxy.clone(),
         );
         dsm.drain_into_proxy().await;
