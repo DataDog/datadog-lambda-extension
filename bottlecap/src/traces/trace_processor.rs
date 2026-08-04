@@ -80,8 +80,9 @@ impl ServerlessTraceProcessor {
             return false; // can't identify a root span; drop as before
         };
         // Only errored traces are rescue candidates (matches the Go agent, which
-        // only routes error traces through the ErrorTPS ScoreSampler).
-        if chunk.spans.get(root_idx).map_or(0, |s| s.error) == 0 {
+        // only routes error traces through the ErrorTPS ScoreSampler). An error
+        // anywhere in the chunk counts, not just on the root span.
+        if !chunk.spans.iter().any(|s| s.error != 0) {
             return false;
         }
 
@@ -1446,6 +1447,86 @@ mod tests {
             .expect("rescued trace present");
         assert!(
             rescued_root.metrics.contains_key("_dd.errors_sr"),
+            "_dd.errors_sr stamped on rescued root"
+        );
+    }
+
+    /// An error on a child span (root not errored) still makes the chunk a rescue
+    /// candidate, matching the Go agent's `traceContainsError`.
+    #[test]
+    fn test_error_sampler_rescues_chunk_with_errored_child_span() {
+        use libdd_trace_obfuscation::obfuscation_config::ObfuscationConfig;
+
+        let config = Arc::new(Config {
+            apm_dd_url: "https://trace.agent.datadoghq.com".to_string(),
+            ext: crate::config::LambdaConfig {
+                lambda_extension_compute_stats: true,
+                ..Default::default()
+            },
+            ..Config::default()
+        });
+        let tags_provider = Arc::new(Provider::new(
+            config.clone(),
+            "lambda".to_string(),
+            &std::collections::HashMap::from([(
+                "function_arn".to_string(),
+                "test-arn".to_string(),
+            )]),
+        ));
+        let processor = ServerlessTraceProcessor {
+            obfuscation_config: Arc::new(
+                ObfuscationConfig::new().expect("Failed to create ObfuscationConfig"),
+            ),
+            error_sampler: default_error_sampler(),
+        };
+
+        let header_tags = tracer_header_tags::TracerHeaderTags {
+            lang: "rust",
+            lang_version: "1.0",
+            lang_interpreter: "",
+            lang_vendor: "",
+            tracer_version: "1.0",
+            container_id: "",
+            generic: tracer_header_tags::TracerGenericTags::default(),
+        };
+
+        let make_span = |span_id: u64, parent_id: u64, error: i32| -> pb::Span {
+            let mut metrics = HashMap::new();
+            metrics.insert("_sampling_priority_v1".to_string(), 0.0);
+            pb::Span {
+                trace_id: 1,
+                span_id,
+                parent_id,
+                error,
+                metrics,
+                service: "svc".to_string(),
+                name: "op".to_string(),
+                resource: "res".to_string(),
+                ..Default::default()
+            }
+        };
+
+        // P0 trace whose root is fine but whose child failed (e.g. a caught
+        // downstream call): still an error trace, so it must be rescued.
+        let traces = vec![vec![make_span(1, 0, 0), make_span(2, 1, 1)]];
+
+        let (payload_info, _stats) =
+            processor.process_traces(config, tags_provider, header_tags, traces, 0, None);
+        let payload_info = payload_info.expect("errored-child P0 trace rescued");
+        let backend_send_data = payload_info.builder.build();
+        let TracerPayloadCollection::V07(backend_payloads) = backend_send_data.get_payloads()
+        else {
+            panic!("expected V07");
+        };
+
+        let root = backend_payloads
+            .iter()
+            .flat_map(|tp| tp.chunks.iter())
+            .flat_map(|c| c.spans.iter())
+            .find(|s| s.span_id == 1)
+            .expect("rescued trace present");
+        assert!(
+            root.metrics.contains_key("_dd.errors_sr"),
             "_dd.errors_sr stamped on rescued root"
         );
     }
