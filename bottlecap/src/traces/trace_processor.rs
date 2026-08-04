@@ -64,7 +64,7 @@ impl StatsComputedBy {
 pub struct ServerlessTraceProcessor {
     pub obfuscation_config: Arc<obfuscation_config::ObfuscationConfig>,
     /// Agent-side error sampler. On the `lambda_extension_compute_stats` path,
-    /// errored chunks that would be dropped (priority <= 0) get a second look
+    /// errored chunks that would be dropped (`AutoDrop`) get a second look
     /// and are rescued up to `apm_error_tps` traces/sec. Shared across
     /// invocations (std Mutex, not tokio: consulted from the synchronous
     /// `process_traces`) so its rolling-window rate limiter accumulates.
@@ -73,7 +73,7 @@ pub struct ServerlessTraceProcessor {
 
 impl ServerlessTraceProcessor {
     /// Consult the error sampler for a chunk that would otherwise be dropped
-    /// (priority <= 0). Returns `true` to keep (rescue) the chunk. Only errored
+    /// (`AutoDrop`). Returns `true` to keep (rescue) the chunk. Only errored
     /// traces are candidates; on a keep, stamps `_dd.errors_sr` on the root span.
     fn rescue_error_chunk(&self, chunk: &mut pb::TraceChunk, env: &str, now_secs: i64) -> bool {
         let Ok(root_idx) = trace_utils::get_root_span_index(&chunk.spans) else {
@@ -503,8 +503,8 @@ impl TraceProcessor for ServerlessTraceProcessor {
         // Remove sampled-out chunks so they won't be sent to Datadog.
         // Sampled-out chunks are preserved in payloads_for_stats above so their
         // stats are still counted. SamplerPriority::None (-128) means no explicit priority
-        // was set and the trace is kept; drop priorities are SamplerPriority::AutoDrop (0)
-        // and UserDrop (-1, not represented in SamplerPriority).
+        // was set and the trace is kept. Only SamplerPriority::AutoDrop (0) chunks are
+        // rescue candidates; negative priorities are explicit drops and are honored.
         if config.ext.lambda_extension_compute_stats
             && let TracerPayloadCollection::V07(ref mut tracer_payloads) = payload
         {
@@ -521,8 +521,13 @@ impl TraceProcessor for ServerlessTraceProcessor {
                     if chunk.priority > 0 || chunk.priority == SamplerPriority::None as i32 {
                         return true;
                     }
-                    // Otherwise this chunk would be dropped; give errored ones a
-                    // second look via the error sampler (rescue within budget).
+                    // A negative priority is an explicit drop (a tracer sampling rule
+                    // or MANUAL_DROP): honor it and never rescue, as the Agent does.
+                    if chunk.priority < 0 {
+                        return false;
+                    }
+                    // AutoDrop (0): give errored chunks a second look via the error
+                    // sampler (rescue within budget).
                     self.rescue_error_chunk(chunk, env, now_secs)
                 });
             }
@@ -1356,8 +1361,8 @@ mod tests {
     }
 
     /// On the compute-stats path, the error sampler rescues errored chunks that
-    /// would otherwise be dropped (priority <= 0), stamping `_dd.errors_sr`,
-    /// while non-errored P0 chunks are still dropped.
+    /// would otherwise be dropped (`AutoDrop`), stamping `_dd.errors_sr`, while
+    /// non-errored P0 chunks and explicit user drops are still dropped.
     #[test]
     fn test_error_sampler_rescues_errored_p0_chunks() {
         use libdd_trace_obfuscation::obfuscation_config::ObfuscationConfig;
@@ -1412,11 +1417,12 @@ mod tests {
         };
 
         // trace 1: kept normally (priority 1). trace 2: errored P0 (rescued).
-        // trace 3: non-errored P0 (dropped).
+        // trace 3: non-errored P0 (dropped). trace 4: errored user drop (dropped).
         let traces = vec![
             vec![make_span(1, 1.0, 0)],
             vec![make_span(2, 0.0, 1)],
             vec![make_span(3, 0.0, 0)],
+            vec![make_span(4, -1.0, 1)],
         ];
 
         let (payload_info, _stats) =
@@ -1438,6 +1444,7 @@ mod tests {
         assert!(kept.contains(&1), "priority-1 trace kept");
         assert!(kept.contains(&2), "errored P0 trace rescued");
         assert!(!kept.contains(&3), "non-errored P0 trace dropped");
+        assert!(!kept.contains(&4), "errored user-drop trace not rescued");
 
         let rescued_root = backend_payloads
             .iter()
