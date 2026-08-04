@@ -508,7 +508,6 @@ impl TraceProcessor for ServerlessTraceProcessor {
         if config.ext.lambda_extension_compute_stats
             && let TracerPayloadCollection::V07(ref mut tracer_payloads) = payload
         {
-            let env = config.env.as_deref().unwrap_or_default();
             let now_secs: i64 = std::time::UNIX_EPOCH
                 .elapsed()
                 .expect("unable to poll clock, unrecoverable")
@@ -516,6 +515,9 @@ impl TraceProcessor for ServerlessTraceProcessor {
                 .try_into()
                 .unwrap_or_default();
             for tp in tracer_payloads.iter_mut() {
+                // The sampler keys its per-signature rate limits on the env the
+                // tracer reported for this payload, as the Agent does.
+                let env = tp.env.as_str();
                 tp.chunks.retain_mut(|chunk| {
                     // Explicit keeps and "no priority set" pass through unchanged.
                     if chunk.priority > 0 || chunk.priority == SamplerPriority::None as i32 {
