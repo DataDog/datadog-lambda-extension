@@ -1,5 +1,6 @@
 use crate::config::aws::get_aws_partition_by_region;
 use crate::lifecycle::invocation::{
+    base64_to_string,
     processor::MS_TO_NS,
     triggers::{
         DATADOG_CARRIER_KEY, FUNCTION_TRIGGER_EVENT_SOURCE_TAG, ServiceNameResolver, Trigger,
@@ -177,10 +178,24 @@ impl Trigger for SqsRecord {
     fn get_carrier(&self) -> HashMap<String, String> {
         let carrier = HashMap::new();
 
-        if let Some(ma) = self.message_attributes.get(DATADOG_CARRIER_KEY)
-            && let Some(string_value) = &ma.string_value
-        {
-            return serde_json::from_str(string_value).unwrap_or_default();
+        if let Some(ma) = self.message_attributes.get(DATADOG_CARRIER_KEY) {
+            // dataType may carry a custom label suffix, e.g. "String.foo" or "Binary.foo".
+            if ma.data_type.starts_with("String") {
+                if let Some(string_value) = &ma.string_value {
+                    return serde_json::from_str(string_value).unwrap_or_default();
+                }
+            } else if ma.data_type.starts_with("Binary") {
+                if let Some(binary_value) = &ma.binary_value
+                    && let Ok(carrier) = base64_to_string(binary_value)
+                {
+                    return serde_json::from_str(&carrier).unwrap_or_default();
+                }
+            } else {
+                debug!(
+                    "Unsupported dataType in SQS message attribute: {}",
+                    ma.data_type
+                );
+            }
         }
 
         // Check for SNS event sent through SQS
@@ -412,6 +427,50 @@ mod tests {
             (
                 "x-datadog-parent-id".to_string(),
                 "7431398482019833808".to_string(),
+            ),
+            ("x-datadog-sampling-priority".to_string(), "1".to_string()),
+        ]);
+
+        assert_eq!(carrier, expected);
+    }
+
+    #[test]
+    fn test_get_carrier_binary() {
+        let json = read_json_file("sqs_event_binary.json");
+        let payload = serde_json::from_str(&json).expect("Failed to deserialize into Value");
+        let event = SqsRecord::new(payload).expect("Failed to deserialize SqsRecord");
+        let carrier = event.get_carrier();
+
+        let expected = HashMap::from([
+            (
+                "x-datadog-trace-id".to_string(),
+                "1111111111111111111".to_string(),
+            ),
+            (
+                "x-datadog-parent-id".to_string(),
+                "2222222222222222222".to_string(),
+            ),
+            ("x-datadog-sampling-priority".to_string(), "1".to_string()),
+        ]);
+
+        assert_eq!(carrier, expected);
+    }
+
+    #[test]
+    fn test_get_carrier_binary_custom_label() {
+        let json = read_json_file("sqs_event_binary_custom_label.json");
+        let payload = serde_json::from_str(&json).expect("Failed to deserialize into Value");
+        let event = SqsRecord::new(payload).expect("Failed to deserialize SqsRecord");
+        let carrier = event.get_carrier();
+
+        let expected = HashMap::from([
+            (
+                "x-datadog-trace-id".to_string(),
+                "3333333333333333333".to_string(),
+            ),
+            (
+                "x-datadog-parent-id".to_string(),
+                "4444444444444444444".to_string(),
             ),
             ("x-datadog-sampling-priority".to_string(), "1".to_string()),
         ]);
