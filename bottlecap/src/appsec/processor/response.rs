@@ -94,6 +94,9 @@ impl InvocationPayload for RawPayload {
         HashMap::default()
     }
     fn response_body<'a>(&'a self) -> Option<Box<dyn std::io::Read + 'a>> {
+        if self.data.is_empty() {
+            return None;
+        }
         Some(Box::new(Cursor::new(&self.data)))
     }
 }
@@ -131,5 +134,29 @@ mod test {
         assert!(response.response_body().is_none());
         assert!(response.response_headers_no_cookies().is_empty());
         assert_eq!(response.response_status_code(), Some(0));
+    }
+
+    #[test]
+    fn test_empty_body_in_apigw_response() {
+        let response = r#"{
+            "statusCode": 204,
+            "headers": {},
+            "multiValueHeaders": {},
+            "body": ""
+        }"#;
+        let response = ExpectedResponseFormat::ApiGatewayResponse
+            .parse(response.as_bytes())
+            .expect("response should have parsed cleanly")
+            .expect("response should have been Some");
+        assert!(response.response_body().is_none());
+    }
+
+    #[test]
+    fn test_empty_raw_response() {
+        let response = ExpectedResponseFormat::Raw
+            .parse(b"")
+            .expect("response should have parsed cleanly")
+            .expect("response should have been Some");
+        assert!(response.response_body().is_none());
     }
 }
