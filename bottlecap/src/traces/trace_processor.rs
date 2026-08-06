@@ -518,6 +518,14 @@ impl TraceProcessor for ServerlessTraceProcessor {
                 .as_secs()
                 .try_into()
                 .unwrap_or_default();
+            // Ask the sampler itself whether it is disabled, rather than
+            // re-deriving that from config: one lock here instead of per chunk,
+            // and no second definition of "disabled" to keep in sync.
+            let rescue_enabled = !self
+                .error_sampler
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .is_disabled();
             for tp in tracer_payloads.iter_mut() {
                 // The sampler keys its per-signature rate limits on the env the
                 // tracer reported for this payload, as the Agent does.
@@ -532,9 +540,13 @@ impl TraceProcessor for ServerlessTraceProcessor {
                     if chunk.priority < 0 {
                         return false;
                     }
-                    if config.ext.apm_error_tps <= 0.0 {
+                    // A disabled sampler drops every chunk; skip building views
+                    // for a decision that is already known.
+                    if !rescue_enabled {
                         return false;
                     }
+                    // AutoDrop (0): give errored chunks a second look via the error
+                    // sampler (rescue within budget).
                     self.rescue_error_chunk(chunk, env, now_secs)
                 });
             }
