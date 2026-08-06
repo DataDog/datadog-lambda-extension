@@ -532,8 +532,9 @@ impl TraceProcessor for ServerlessTraceProcessor {
                     if chunk.priority < 0 {
                         return false;
                     }
-                    // AutoDrop (0): give errored chunks a second look via the error
-                    // sampler (rescue within budget).
+                    if config.ext.apm_error_tps <= 0.0 {
+                        return false;
+                    }
                     self.rescue_error_chunk(chunk, env, now_secs)
                 });
             }
