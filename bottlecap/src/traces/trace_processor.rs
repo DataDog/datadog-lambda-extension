@@ -109,10 +109,14 @@ impl ServerlessTraceProcessor {
                 root_global_sample_rate: root.metrics.get("_sample_rate").copied().unwrap_or(1.0),
                 spans: &views,
             };
-            match self.error_sampler.lock() {
-                Ok(mut sampler) => sampler.sample(now_secs, &trace),
-                Err(_) => return false, // poisoned lock: fail safe to the drop
-            }
+            // Recover through poisoning: the sampler holds only rolling-window
+            // counters, so a partially updated bucket is far cheaper than
+            // disabling error rescue for the rest of the sandbox's life.
+            let mut sampler = self
+                .error_sampler
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            sampler.sample(now_secs, &trace)
         };
 
         match decision {
