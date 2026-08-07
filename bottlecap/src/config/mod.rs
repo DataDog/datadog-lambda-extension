@@ -376,7 +376,6 @@ impl LambdaConfig {
 #[cfg_attr(coverage_nightly, coverage(off))] // Test modules skew coverage metrics
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
-#[allow(clippy::float_cmp)] // exact, representable config values (10.0, 1.0, ...) parsed deterministically
 mod lambda_config_tests {
     use datadog_agent_config::{Config as UpstreamConfig, flush_strategy::PeriodicStrategy};
     use figment::Jail;
