@@ -1170,8 +1170,16 @@ fn start_trace_agent(
                     // freeze/thaw breaks the RateLimited mode's 30s wall-clock
                     // window, so AlwaysKeep is the right default. See APMSVLS-469.
                     mode: datadog_agent_trace_sampler::ErrorSamplerMode::AlwaysKeep,
-                    target_tps: config.ext.apm_error_tps,
-                    extra_sample_rate: config.ext.apm_extra_sample_rate,
+                    // AlwaysKeep derives its disabled flag from `target_tps <= 0.0`,
+                    // so the boolean maps onto any positive value vs. zero. The
+                    // magnitude is unused until RateLimited is wired up, which is
+                    // when DD_APM_ERROR_TPS becomes meaningful and gets exposed.
+                    target_tps: if config.ext.apm_error_sampler_enabled {
+                        1.0
+                    } else {
+                        0.0
+                    },
+                    extra_sample_rate: 1.0,
                 },
             ),
         )),

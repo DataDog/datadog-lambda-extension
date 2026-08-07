@@ -66,12 +66,11 @@ pub struct ServerlessTraceProcessor {
     /// Agent-side error sampler. On the `lambda_extension_compute_stats` path,
     /// errored chunks that would be dropped (`AutoDrop`) get a second look and
     /// may be rescued. In the current `AlwaysKeep` mode every errored chunk is
-    /// rescued (`apm_error_tps` only gates on/off); the `apm_error_tps`
-    /// traces/sec budget applies in `RateLimited` mode. Shared across
-    /// invocations (std Mutex, not tokio: consulted from the synchronous
-    /// `process_traces`) so `RateLimited`'s rolling-window rate limiter
-    /// accumulates. `AlwaysKeep` holds no state, so the lock is uncontended
-    /// bookkeeping there.
+    /// rescued, gated only by `apm_error_sampler_enabled`; a traces/sec budget
+    /// applies in `RateLimited` mode. Shared across invocations (std Mutex, not
+    /// tokio: consulted from the synchronous `process_traces`) so
+    /// `RateLimited`'s rolling-window rate limiter accumulates. `AlwaysKeep`
+    /// holds no state, so the lock is uncontended bookkeeping there.
     pub error_sampler: Arc<std::sync::Mutex<ErrorsSampler>>,
 }
 
