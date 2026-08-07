@@ -67,17 +67,10 @@ pub struct LambdaConfig {
     pub capture_lambda_payload_max_depth: u32,
     pub lambda_extension_compute_stats: bool,
 
-    /// `DD_APM_ERROR_SAMPLER_ENABLED` — whether the agent-side error sampler
-    /// rescues errored trace chunks that would otherwise be dropped, on the
-    /// `lambda_extension_compute_stats` path.
-    ///
-    /// Defaults to `false` while the feature rolls out as opt-in; the plan is
-    /// to flip the default to `true` once it has soaked. The sampler runs in
-    /// `AlwaysKeep` mode (hardcoded in `main.rs`), so this is a plain on/off
-    /// switch: enabled rescues every errored chunk. The Go agent's
-    /// rate-limiting knobs (`apm_config.errors_per_second` /
-    /// `extra_sample_rate`) are intentionally not exposed yet — they only have
-    /// meaning in `RateLimited` mode and will be added with it. See APMSVLS-469.
+    /// `DD_APM_ERROR_SAMPLER_ENABLED`: rescue errored trace chunks that would
+    /// otherwise be dropped, on the `lambda_extension_compute_stats` path. The
+    /// sampler runs in `AlwaysKeep` mode, so this is a plain on/off switch:
+    /// enabled rescues every errored chunk. See APMSVLS-469.
     pub apm_error_sampler_enabled: bool,
 
     pub span_dedup_timeout: Option<Duration>,
@@ -168,8 +161,6 @@ pub struct LambdaConfigSource {
     #[serde(deserialize_with = "deser_opt_bool")]
     pub lambda_extension_compute_stats: Option<bool>,
 
-    /// `DD_APM_ERROR_SAMPLER_ENABLED` — toggles the agent-side error sampler.
-    /// Flat env/YAML key (`apm_error_sampler_enabled`).
     #[serde(deserialize_with = "deser_opt_bool")]
     pub apm_error_sampler_enabled: Option<bool>,
 
