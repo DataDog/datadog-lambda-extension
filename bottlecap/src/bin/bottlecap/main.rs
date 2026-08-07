@@ -1228,6 +1228,11 @@ fn start_trace_agent(
         error_sampler: Arc::new(std::sync::Mutex::new(
             datadog_agent_trace_sampler::ErrorsSampler::new(
                 datadog_agent_trace_sampler::ErrorSamplerConfig {
+                    // Hardcoded for now (config wiring via DD_APM_ERROR_SAMPLER_MODE
+                    // is deferred): Lambda's per-invocation trace volume is low and
+                    // freeze/thaw breaks the RateLimited mode's 30s wall-clock
+                    // window, so AlwaysKeep is the right default. See APMSVLS-469.
+                    mode: datadog_agent_trace_sampler::ErrorSamplerMode::AlwaysKeep,
                     target_tps: config.ext.apm_error_tps,
                     extra_sample_rate: config.ext.apm_extra_sample_rate,
                 },

@@ -73,10 +73,19 @@ pub struct LambdaConfig {
     /// agent-side error sampler when the extension computes stats. Matches the
     /// Go trace agent's `apm_config.errors_per_second`. Default 10.0; `0`
     /// disables the sampler (no rescue).
+    ///
+    /// Note: the sampler currently runs in `AlwaysKeep` mode (hardcoded in
+    /// `main.rs`), where this value acts only as an on/off switch — `0` (or
+    /// negative) disables rescue, any positive value rescues every errored
+    /// chunk without a rate cap. The traces/sec budget is only enforced in
+    /// `RateLimited` mode. See APMSVLS-469.
     pub apm_error_tps: f64,
     /// `DD_APM_EXTRA_SAMPLE_RATE` — extra raw sampling rate applied on top of
     /// the computed error-sampler rate. Matches the Go trace agent's
     /// `apm_config.extra_sample_rate`. Default 1.0.
+    ///
+    /// Note: only meaningful in `RateLimited` mode; inert while the sampler is
+    /// hardcoded to `AlwaysKeep`. See APMSVLS-469.
     pub apm_extra_sample_rate: f64,
 
     pub span_dedup_timeout: Option<Duration>,
