@@ -15,7 +15,9 @@ use crate::traces::{
     LAMBDA_RUNTIME_URL_PREFIX, LAMBDA_STATSD_URL_PREFIX,
 };
 use async_trait::async_trait;
-use datadog_agent_trace_sampler::{ErrorsSampler, SampleDecision, SpanView, TraceView};
+use datadog_agent_trace_sampler::{
+    ErrorSamplerConfig, ErrorSamplerMode, ErrorsSampler, SampleDecision, SpanView, TraceView,
+};
 use libdd_common::Endpoint;
 use libdd_trace_obfuscation::obfuscate::obfuscate_span;
 use libdd_trace_obfuscation::obfuscation_config;
@@ -74,7 +76,95 @@ pub struct ServerlessTraceProcessor {
     pub error_sampler: Arc<std::sync::Mutex<ErrorsSampler>>,
 }
 
+/// Borrow-only view of a span for the error sampler.
+fn span_view(span: &Span) -> SpanView<'_> {
+    SpanView {
+        service: &span.service,
+        name: &span.name,
+        resource: &span.resource,
+        error: span.error != 0,
+        http_status_code: span.meta.get("http.status_code").map(String::as_str),
+        error_type: span.meta.get("error.type").map(String::as_str),
+    }
+}
+
+/// Builds the error sampler as the extension ships it, enabled or disabled by
+/// `apm_error_sampler_enabled`. Shared by `main` and the tests so tests
+/// exercise the shipping configuration.
+///
+/// The mode is hardcoded for now (config wiring via `DD_APM_ERROR_SAMPLER_MODE`
+/// is deferred): Lambda's per-invocation trace volume is low and freeze/thaw
+/// breaks the `RateLimited` mode's 30s wall-clock window, so `AlwaysKeep` is
+/// the right default. See APMSVLS-469.
+#[must_use]
+pub fn new_error_sampler(enabled: bool) -> Arc<std::sync::Mutex<ErrorsSampler>> {
+    Arc::new(std::sync::Mutex::new(ErrorsSampler::new(
+        ErrorSamplerConfig {
+            mode: ErrorSamplerMode::AlwaysKeep,
+            // AlwaysKeep derives its disabled flag from `target_tps <= 0.0`, so
+            // the boolean maps onto any positive value vs. zero. The magnitude
+            // is unused until RateLimited is wired up, which is when
+            // DD_APM_ERROR_TPS becomes meaningful and gets exposed.
+            target_tps: if enabled { 1.0 } else { 0.0 },
+            extra_sample_rate: 1.0,
+        },
+    )))
+}
+
 impl ServerlessTraceProcessor {
+    /// Removes sampled-out chunks so they won't be sent to Datadog, then drops
+    /// any payload left without chunks. `SamplerPriority::None` (-128) means no
+    /// explicit priority was set and the trace is kept. Only
+    /// `SamplerPriority::AutoDrop` (0) chunks are rescue candidates; negative
+    /// priorities are explicit drops and are honored.
+    fn drop_sampled_out_chunks(&self, tracer_payloads: &mut Vec<pb::TracerPayload>) {
+        // Ask the sampler itself whether it is disabled, rather than
+        // re-deriving that from config: one lock here instead of per chunk,
+        // and no second definition of "disabled" to keep in sync.
+        let rescue_enabled = !self
+            .error_sampler
+            .lock()
+            .expect("error sampler poisoned")
+            .is_disabled();
+        // Only RateLimited's rolling window reads the clock, and only rescue
+        // candidates reach it.
+        let now_secs: i64 = if rescue_enabled {
+            std::time::UNIX_EPOCH
+                .elapsed()
+                .unwrap_or_default()
+                .as_secs()
+                .try_into()
+                .unwrap_or_default()
+        } else {
+            0
+        };
+        for tp in tracer_payloads.iter_mut() {
+            // The sampler keys its per-signature rate limits on the env the
+            // tracer reported for this payload, as the Agent does.
+            let env = tp.env.as_str();
+            tp.chunks.retain_mut(|chunk| {
+                // Explicit keeps and "no priority set" pass through unchanged.
+                if chunk.priority > 0 || chunk.priority == SamplerPriority::None as i32 {
+                    return true;
+                }
+                // A negative priority is an explicit drop (a tracer sampling rule
+                // or MANUAL_DROP): honor it and never rescue, as the Agent does.
+                if chunk.priority < 0 {
+                    return false;
+                }
+                // A disabled sampler drops every chunk; skip building views
+                // for a decision that is already known.
+                if !rescue_enabled {
+                    return false;
+                }
+                // AutoDrop (0): give errored chunks a second look via the error
+                // sampler (rescue within budget).
+                self.rescue_error_chunk(chunk, env, now_secs)
+            });
+        }
+        tracer_payloads.retain(|tp| !tp.chunks.is_empty());
+    }
+
     /// Consult the error sampler for a chunk that would otherwise be dropped
     /// (`AutoDrop`). Returns `true` to keep (rescue) the chunk. Only errored
     /// traces are candidates; on a keep, stamps `_dd.errors_sr` on the root span.
@@ -92,33 +182,27 @@ impl ServerlessTraceProcessor {
         // Build the borrow-only views in a scope so they (and their immutable
         // borrow of chunk.spans) drop before the `_dd.errors_sr` mutation below.
         let decision = {
-            let views: Vec<SpanView> = chunk
-                .spans
-                .iter()
-                .map(|s| SpanView {
-                    service: &s.service,
-                    name: &s.name,
-                    resource: &s.resource,
-                    error: s.error != 0,
-                    http_status_code: s.meta.get("http.status_code").map(String::as_str),
-                    error_type: s.meta.get("error.type").map(String::as_str),
-                })
-                .collect();
+            let mut sampler = self.error_sampler.lock().expect("error sampler poisoned");
             let root = &chunk.spans[root_idx];
+            // AlwaysKeep ignores the spans apart from a bounds check on
+            // root_index, so only the root view is built there. RateLimited
+            // needs every span to compute the trace signature.
+            let root_view;
+            let all_views;
+            let (spans, root_index) = if matches!(*sampler, ErrorsSampler::AlwaysKeep { .. }) {
+                root_view = [span_view(root)];
+                (&root_view[..], 0)
+            } else {
+                all_views = chunk.spans.iter().map(span_view).collect::<Vec<SpanView>>();
+                (&all_views[..], root_idx)
+            };
             let trace = TraceView {
                 env,
                 trace_id: root.trace_id,
-                root_index: root_idx,
+                root_index,
                 root_global_sample_rate: root.metrics.get("_sample_rate").copied().unwrap_or(1.0),
-                spans: &views,
+                spans,
             };
-            // Recover through poisoning: the sampler holds only rolling-window
-            // counters, so a partially updated bucket is far cheaper than
-            // disabling error rescue for the rest of the sandbox's life.
-            let mut sampler = self
-                .error_sampler
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner);
             sampler.sample(now_secs, &trace)
         };
 
@@ -507,53 +591,12 @@ impl TraceProcessor for ServerlessTraceProcessor {
             }
         };
 
-        // Remove sampled-out chunks so they won't be sent to Datadog.
-        // Sampled-out chunks are preserved in payloads_for_stats above so their
-        // stats are still counted. SamplerPriority::None (-128) means no explicit priority
-        // was set and the trace is kept. Only SamplerPriority::AutoDrop (0) chunks are
-        // rescue candidates; negative priorities are explicit drops and are honored.
+        // Sampled-out chunks are preserved in payloads_for_stats above, so their
+        // stats are still counted after they are removed here.
         if config.ext.lambda_extension_compute_stats
             && let TracerPayloadCollection::V07(ref mut tracer_payloads) = payload
         {
-            let now_secs: i64 = std::time::UNIX_EPOCH
-                .elapsed()
-                .expect("unable to poll clock, unrecoverable")
-                .as_secs()
-                .try_into()
-                .unwrap_or_default();
-            // Ask the sampler itself whether it is disabled, rather than
-            // re-deriving that from config: one lock here instead of per chunk,
-            // and no second definition of "disabled" to keep in sync.
-            let rescue_enabled = !self
-                .error_sampler
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .is_disabled();
-            for tp in tracer_payloads.iter_mut() {
-                // The sampler keys its per-signature rate limits on the env the
-                // tracer reported for this payload, as the Agent does.
-                let env = tp.env.as_str();
-                tp.chunks.retain_mut(|chunk| {
-                    // Explicit keeps and "no priority set" pass through unchanged.
-                    if chunk.priority > 0 || chunk.priority == SamplerPriority::None as i32 {
-                        return true;
-                    }
-                    // A negative priority is an explicit drop (a tracer sampling rule
-                    // or MANUAL_DROP): honor it and never rescue, as the Agent does.
-                    if chunk.priority < 0 {
-                        return false;
-                    }
-                    // A disabled sampler drops every chunk; skip building views
-                    // for a decision that is already known.
-                    if !rescue_enabled {
-                        return false;
-                    }
-                    // AutoDrop (0): give errored chunks a second look via the error
-                    // sampler (rescue within budget).
-                    self.rescue_error_chunk(chunk, env, now_secs)
-                });
-            }
-            tracer_payloads.retain(|tp| !tp.chunks.is_empty());
+            self.drop_sampled_out_chunks(tracer_payloads);
             if tracer_payloads.is_empty() {
                 return (None, payloads_for_stats);
             }
@@ -702,14 +745,12 @@ impl SendingTraceProcessor {
     }
 }
 
-/// Default error sampler for constructing `ServerlessTraceProcessor` in tests
+/// Enabled error sampler for constructing `ServerlessTraceProcessor` in tests
 /// (sampler behavior itself is unit-tested in the `datadog-agent-trace-sampler`
 /// crate; these call sites just need a value).
 #[cfg(test)]
 pub(crate) fn default_error_sampler() -> Arc<std::sync::Mutex<ErrorsSampler>> {
-    Arc::new(std::sync::Mutex::new(ErrorsSampler::new(
-        datadog_agent_trace_sampler::ErrorSamplerConfig::default(),
-    )))
+    new_error_sampler(true)
 }
 
 #[cfg(test)]
@@ -1557,6 +1598,68 @@ mod tests {
         assert!(
             root.metrics.contains_key("_dd.errors_sr"),
             "_dd.errors_sr stamped on rescued root"
+        );
+    }
+
+    /// With the error sampler disabled (the shipping default,
+    /// `apm_error_sampler_enabled: false`), errored P0 chunks are dropped as
+    /// before: no rescue, no `_dd.errors_sr`.
+    #[test]
+    fn test_disabled_error_sampler_drops_errored_p0_chunks() {
+        use libdd_trace_obfuscation::obfuscation_config::ObfuscationConfig;
+
+        let config = Arc::new(Config {
+            apm_dd_url: "https://trace.agent.datadoghq.com".to_string(),
+            ext: crate::config::LambdaConfig {
+                lambda_extension_compute_stats: true,
+                ..Default::default()
+            },
+            ..Config::default()
+        });
+        let tags_provider = Arc::new(Provider::new(
+            config.clone(),
+            "lambda".to_string(),
+            &std::collections::HashMap::from([(
+                "function_arn".to_string(),
+                "test-arn".to_string(),
+            )]),
+        ));
+        let processor = ServerlessTraceProcessor {
+            obfuscation_config: Arc::new(
+                ObfuscationConfig::new().expect("Failed to create ObfuscationConfig"),
+            ),
+            error_sampler: new_error_sampler(false),
+        };
+
+        let header_tags = tracer_header_tags::TracerHeaderTags {
+            lang: "rust",
+            lang_version: "1.0",
+            lang_interpreter: "",
+            lang_vendor: "",
+            tracer_version: "1.0",
+            container_id: "",
+            generic: tracer_header_tags::TracerGenericTags::default(),
+        };
+
+        let mut metrics = HashMap::new();
+        metrics.insert("_sampling_priority_v1".to_string(), 0.0);
+        let traces = vec![vec![pb::Span {
+            trace_id: 1,
+            span_id: 1,
+            parent_id: 0,
+            error: 1,
+            metrics,
+            service: "svc".to_string(),
+            name: "op".to_string(),
+            resource: "res".to_string(),
+            ..Default::default()
+        }]];
+
+        let (payload_info, _stats) =
+            processor.process_traces(config, tags_provider, header_tags, traces, 0, None);
+        assert!(
+            payload_info.is_none(),
+            "errored P0 trace must stay dropped when the error sampler is disabled"
         );
     }
 

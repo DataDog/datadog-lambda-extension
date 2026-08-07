@@ -1162,27 +1162,7 @@ fn start_trace_agent(
 
     let trace_processor = Arc::new(trace_processor::ServerlessTraceProcessor {
         obfuscation_config: Arc::new(obfuscation_config),
-        error_sampler: Arc::new(std::sync::Mutex::new(
-            datadog_agent_trace_sampler::ErrorsSampler::new(
-                datadog_agent_trace_sampler::ErrorSamplerConfig {
-                    // Hardcoded for now (config wiring via DD_APM_ERROR_SAMPLER_MODE
-                    // is deferred): Lambda's per-invocation trace volume is low and
-                    // freeze/thaw breaks the RateLimited mode's 30s wall-clock
-                    // window, so AlwaysKeep is the right default. See APMSVLS-469.
-                    mode: datadog_agent_trace_sampler::ErrorSamplerMode::AlwaysKeep,
-                    // AlwaysKeep derives its disabled flag from `target_tps <= 0.0`,
-                    // so the boolean maps onto any positive value vs. zero. The
-                    // magnitude is unused until RateLimited is wired up, which is
-                    // when DD_APM_ERROR_TPS becomes meaningful and gets exposed.
-                    target_tps: if config.ext.apm_error_sampler_enabled {
-                        1.0
-                    } else {
-                        0.0
-                    },
-                    extra_sample_rate: 1.0,
-                },
-            ),
-        )),
+        error_sampler: trace_processor::new_error_sampler(config.ext.apm_error_sampler_enabled),
     });
 
     let (span_dedup_service, span_dedup_handle) = span_dedup_service::DedupService::new();
