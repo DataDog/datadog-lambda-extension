@@ -8,9 +8,6 @@ variables:
   PIPELINE_LAYER_SUFFIX:
     description: "Suffix to be appended to the layer name (default empty)."
     value: ""
-  REBUILD_CI_IMAGE:
-    description: "Set to 'true' to rebuild and re-sign the CI image without a .gitlab/Dockerfile change."
-    value: ""
 
 stages:
   - prepare
@@ -22,10 +19,6 @@ ci image:
   image: registry.ddbuild.io/images/docker:20.10
   tags: ["arch:arm64"]
   rules:
-    # Signatures live on the image digest, so re-signing means rebuilding and
-    # pushing. Without this knob that requires a no-op Dockerfile commit.
-    - if: '$REBUILD_CI_IMAGE == "true"'
-      when: on_success
     - if: '$CI_COMMIT_BRANCH == "main" && $CI_PIPELINE_SOURCE == "push"'
       changes:
         - .gitlab/Dockerfile
