@@ -247,10 +247,18 @@ pub(crate) fn extract_trace_context_from_aws_trace_header(
     let mut trace_id = String::new();
     let mut parent_id = String::new();
     let mut sampled = String::new();
+    // Datadog libraries that plant context in this header zero the high 32 bits of the ID
+    // section; an AWS-generated ID has random hex there. dd-trace-java asserts the same shape
+    // (`XRayHttpCodec.TRACE_ID_PADDING`) and so did the Go extension (`rootRegex`).
+    let mut datadog_planted = false;
 
     for part in value.split(';') {
         if part.starts_with("Root=") {
-            trace_id = part[24..].to_string();
+            // `Root=1-<8 hex epoch>-<24 hex id>`: the ID section starts at 16, and the trace ID
+            // Datadog uses is its low 16 hex digits.
+            let id_section = part.get(16..)?;
+            datadog_planted = id_section.starts_with("00000000");
+            trace_id = id_section.get(8..).unwrap_or_default().to_string();
         } else if let Some(parent_part) = part.strip_prefix("Parent=") {
             parent_id = parent_part.to_string();
         } else if part.starts_with("Sampled=") && sampled.is_empty() {
@@ -269,7 +277,16 @@ pub(crate) fn extract_trace_context_from_aws_trace_header(
         return None;
     }
 
-    let sampling_priority = i8::from(sampled == "1");
+    // `Sampled=0` only means "Datadog decided to drop" when a Datadog library wrote the header.
+    // On an AWS-generated ID the flag carries X-Ray's decision — or, when X-Ray tracing is off,
+    // no decision at all — so turning it into an explicit priority of 0 would drop the tracer's
+    // spans on X-Ray's behalf. Keep the IDs for correlation and leave the priority unset instead.
+    let sampling_priority = match (datadog_planted, sampled.as_str()) {
+        (_, "1") => Some("1"),
+        (true, _) => Some("0"),
+        (false, _) => None,
+    }
+    .and_then(|priority| priority.parse().ok());
 
     Some(SpanContext {
         // the context from AWS Header is used by Datadog only and does not contain the upper
@@ -277,7 +294,7 @@ pub(crate) fn extract_trace_context_from_aws_trace_header(
         trace_id: u128::from(trace_id),
         span_id: parent_id,
         sampling: Sampling {
-            priority: sampling_priority.to_string().parse().ok(),
+            priority: sampling_priority,
             mechanism: None,
         },
         origin: None,
@@ -672,8 +689,10 @@ mod tests {
             SpanContext {
                 trace_id: 130_944_522_478_755_159,
                 span_id: 9_032_698_535_745_367_362,
+                // This fixture's root ID has non-zero high bits, i.e. AWS generated it rather
+                // than a Datadog library, so its `Sampled=0` is not propagated as a drop.
                 sampling: Sampling {
-                    priority: "0".parse().ok(),
+                    priority: None,
                     mechanism: None,
                 },
                 origin: None,
@@ -681,5 +700,60 @@ mod tests {
                 ..Default::default()
             }
         );
+    }
+
+    #[test]
+    fn aws_generated_root_id_not_sampled_leaves_priority_unset() {
+        let context = extract_trace_context_from_aws_trace_header(Some(
+            "Root=1-64cc2edd-112fbf1701d1355973a11d57;Parent=7d5a9776024b2d42;Sampled=0"
+                .to_string(),
+        ))
+        .expect("failed to extract context");
+
+        // X-Ray's decision, not Datadog's: keep the IDs, let the tracer sample.
+        assert_eq!(context.sampling.priority, None);
+        assert_eq!(context.trace_id, 130_944_522_478_755_159);
+    }
+
+    #[test]
+    fn datadog_planted_root_id_not_sampled_drops() {
+        let context = extract_trace_context_from_aws_trace_header(Some(
+            "Root=1-68029e8a-0000000035578e774943fd9d;Parent=76c040bdc454a7ac;Sampled=0"
+                .to_string(),
+        ))
+        .expect("failed to extract context");
+
+        // Zeroed high bits mean a Datadog library wrote this, so `Sampled=0` is our own decision.
+        assert_eq!(context.sampling.priority, "0".parse().ok());
+    }
+
+    #[test]
+    fn datadog_planted_root_id_sampled_keeps() {
+        let context = extract_trace_context_from_aws_trace_header(Some(
+            "Root=1-68029e8a-0000000035578e774943fd9d;Parent=76c040bdc454a7ac;Sampled=1"
+                .to_string(),
+        ))
+        .expect("failed to extract context");
+
+        assert_eq!(context.sampling.priority, "1".parse().ok());
+    }
+
+    #[test]
+    fn truncated_root_does_not_panic() {
+        assert!(
+            extract_trace_context_from_aws_trace_header(Some("Root=1-64cc".to_string())).is_none()
+        );
+    }
+
+    #[test]
+    fn aws_generated_root_id_sampled_keeps_priority() {
+        let context = extract_trace_context_from_aws_trace_header(Some(
+            "Root=1-64cc2edd-112fbf1701d1355973a11d57;Parent=7d5a9776024b2d42;Sampled=1"
+                .to_string(),
+        ))
+        .expect("failed to extract context");
+
+        assert_eq!(context.sampling.priority, "1".parse().ok());
+        assert_eq!(context.trace_id, 130_944_522_478_755_159);
     }
 }
