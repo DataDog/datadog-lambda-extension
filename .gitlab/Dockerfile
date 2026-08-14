@@ -26,5 +26,3 @@ ENV PATH=$PATH:/root/.cargo/bin/
 ENV LIBCLANG_PATH=/usr/lib/x86_64-linux-gnu
 
 RUN rustup component add rust-src --toolchain stable
-
-
