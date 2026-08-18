@@ -1918,7 +1918,7 @@ mod tests {
                         appsec: None,
                         processor: Arc::new(trace_processor::ServerlessTraceProcessor {
                             obfuscation_config: Arc::new(ObfuscationConfig::new().expect("Failed to create ObfuscationConfig")),
-                            error_sampler: trace_processor::default_error_sampler(),
+                            error_sampler: trace_processor::enabled_error_sampler(),
                         }),
                         trace_tx: tokio::sync::mpsc::channel(1).0,
                         stats_generator: Arc::new(StatsGenerator::new(stats_concentrator_handle)),
@@ -2029,7 +2029,7 @@ mod tests {
                 obfuscation_config: Arc::new(
                     ObfuscationConfig::new().expect("Failed to create ObfuscationConfig"),
                 ),
-                error_sampler: trace_processor::default_error_sampler(),
+                error_sampler: trace_processor::enabled_error_sampler(),
             }),
             trace_tx: tokio::sync::mpsc::channel(1).0,
             stats_generator: Arc::new(StatsGenerator::new(stats_concentrator_handle)),
@@ -2669,7 +2669,7 @@ mod tests {
                 obfuscation_config: Arc::new(
                     ObfuscationConfig::new().expect("Failed to create ObfuscationConfig"),
                 ),
-                error_sampler: trace_processor::default_error_sampler(),
+                error_sampler: trace_processor::enabled_error_sampler(),
             }),
             trace_tx: tokio::sync::mpsc::channel(1).0,
             stats_generator: Arc::new(StatsGenerator::new(stats_concentrator_handle)),
@@ -3179,7 +3179,7 @@ mod tests {
                 obfuscation_config: Arc::new(
                     ObfuscationConfig::new().expect("Failed to create ObfuscationConfig"),
                 ),
-                error_sampler: trace_processor::default_error_sampler(),
+                error_sampler: trace_processor::enabled_error_sampler(),
             }),
             trace_tx,
             stats_generator: Arc::new(StatsGenerator::new(stats_concentrator_handle)),

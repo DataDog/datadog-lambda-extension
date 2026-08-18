@@ -737,7 +737,7 @@ impl SendingTraceProcessor {
 
 /// Enabled error sampler for constructing `ServerlessTraceProcessor` in tests.
 #[cfg(test)]
-pub(crate) fn default_error_sampler() -> Arc<std::sync::Mutex<ErrorsSampler>> {
+pub(crate) fn enabled_error_sampler() -> Arc<std::sync::Mutex<ErrorsSampler>> {
     new_error_sampler(true)
 }
 
@@ -863,7 +863,7 @@ mod tests {
             obfuscation_config: Arc::new(
                 ObfuscationConfig::new().expect("Failed to create ObfuscationConfig"),
             ),
-            error_sampler: default_error_sampler(),
+            error_sampler: enabled_error_sampler(),
         };
         let config = create_test_config();
         let tags_provider = create_tags_provider(config.clone());
@@ -1342,7 +1342,7 @@ mod tests {
             obfuscation_config: Arc::new(
                 ObfuscationConfig::new().expect("Failed to create ObfuscationConfig"),
             ),
-            error_sampler: default_error_sampler(),
+            error_sampler: enabled_error_sampler(),
         };
 
         let header_tags = tracer_header_tags::TracerHeaderTags {
@@ -1438,7 +1438,7 @@ mod tests {
             obfuscation_config: Arc::new(
                 ObfuscationConfig::new().expect("Failed to create ObfuscationConfig"),
             ),
-            error_sampler: default_error_sampler(),
+            error_sampler: enabled_error_sampler(),
         };
 
         let header_tags = tracer_header_tags::TracerHeaderTags {
@@ -1535,7 +1535,7 @@ mod tests {
             obfuscation_config: Arc::new(
                 ObfuscationConfig::new().expect("Failed to create ObfuscationConfig"),
             ),
-            error_sampler: default_error_sampler(),
+            error_sampler: enabled_error_sampler(),
         };
 
         let header_tags = tracer_header_tags::TracerHeaderTags {
@@ -1676,7 +1676,7 @@ mod tests {
             obfuscation_config: Arc::new(
                 ObfuscationConfig::new().expect("Failed to create ObfuscationConfig"),
             ),
-            error_sampler: default_error_sampler(),
+            error_sampler: enabled_error_sampler(),
         };
         let header_tags = tracer_header_tags::TracerHeaderTags {
             lang: "rust",
@@ -1755,7 +1755,7 @@ mod tests {
             obfuscation_config: Arc::new(
                 ObfuscationConfig::new().expect("Failed to create ObfuscationConfig"),
             ),
-            error_sampler: default_error_sampler(),
+            error_sampler: enabled_error_sampler(),
         };
         let header_tags = tracer_header_tags::TracerHeaderTags {
             lang: "rust",
@@ -1861,7 +1861,7 @@ mod tests {
             obfuscation_config: Arc::new(
                 ObfuscationConfig::new().expect("Failed to create ObfuscationConfig"),
             ),
-            error_sampler: default_error_sampler(),
+            error_sampler: enabled_error_sampler(),
         };
         let header_tags = tracer_header_tags::TracerHeaderTags {
             lang: "rust",
@@ -2230,7 +2230,7 @@ mod tests {
                     obfuscation_config: Arc::new(
                         ObfuscationConfig::new().expect("Failed to create ObfuscationConfig"),
                     ),
-                    error_sampler: default_error_sampler(),
+                    error_sampler: enabled_error_sampler(),
                 }),
                 trace_tx,
                 stats_generator: Arc::new(StatsGenerator::new(concentrator_handle.clone())),
