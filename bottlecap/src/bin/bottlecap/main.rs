@@ -1225,10 +1225,16 @@ fn start_trace_agent(
 
     // The Agent's error sampler knob has no effect here: the extension's
     // sampler is a plain on/off switch, not a TPS budget.
-    if env::var("DD_APM_ERROR_TPS").is_ok() {
-        warn!(
-            "DD_APM_ERROR_TPS is not supported by the Lambda extension; set DD_SERVERLESS_ERROR_SAMPLER_ENABLED=true to rescue errored traces"
-        );
+    if env::var("DD_APM_ERROR_TPS").is_ok_and(|v| !v.trim().is_empty()) {
+        if config.ext.serverless_error_sampler_enabled {
+            warn!(
+                "DD_APM_ERROR_TPS is not supported by the Lambda extension; error trace rescue is on/off only and is already enabled"
+            );
+        } else {
+            warn!(
+                "DD_APM_ERROR_TPS is not supported by the Lambda extension; set DD_SERVERLESS_ERROR_SAMPLER_ENABLED=true to rescue errored traces"
+            );
+        }
     }
 
     let trace_processor = Arc::new(trace_processor::ServerlessTraceProcessor {
