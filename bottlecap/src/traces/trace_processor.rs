@@ -66,8 +66,8 @@ impl StatsComputedBy {
 pub struct ServerlessTraceProcessor {
     pub obfuscation_config: Arc<obfuscation_config::ObfuscationConfig>,
     /// Rescues errored `AutoDrop` chunks on the `lambda_extension_compute_stats`
-    /// path. Shared across invocations so `RateLimited`'s rolling-window rate
-    /// limiter accumulates; a std Mutex rather than tokio because
+    /// path. Shared across invocations so a stateful mode (`RateLimited`) would
+    /// keep its rolling window; a std Mutex rather than tokio because
     /// `process_traces` is synchronous.
     pub error_sampler: Arc<std::sync::Mutex<ErrorsSampler>>,
 }
@@ -110,10 +110,10 @@ impl ServerlessTraceProcessor {
     /// `SamplerPriority::AutoDrop` (0) chunks are rescue candidates; negative
     /// priorities are explicit drops and are honored.
     fn drop_sampled_out_chunks(&self, tracer_payloads: &mut Vec<pb::TracerPayload>) {
-        // Hoisted out of the loop: one lock instead of one per chunk.
-        // Recover through poisoning: the sampler holds only rolling-window
-        // counters, so a partially updated bucket is far cheaper than disabling
-        // error rescue for the rest of the sandbox's life.
+        // Read once up front so non-errored and explicitly-dropped chunks never
+        // touch the lock. Recover through poisoning: the sampler holds only
+        // rolling-window counters, so a partially updated bucket is far cheaper
+        // than disabling error rescue for the rest of the sandbox's life.
         let rescue_enabled = !self
             .error_sampler
             .lock()
@@ -157,44 +157,34 @@ impl ServerlessTraceProcessor {
     /// (`AutoDrop`). Returns `true` to keep (rescue) the chunk. Only errored
     /// traces are candidates; on a keep, stamps `_dd.errors_sr` on the root span.
     fn rescue_error_chunk(&self, chunk: &mut pb::TraceChunk, env: &str, now_secs: i64) -> bool {
-        let Ok(root_idx) = trace_utils::get_root_span_index(&chunk.spans) else {
-            return false; // no identifiable root span
-        };
         // Only errored traces are rescue candidates (matches the Go agent, which
         // only routes error traces through the ErrorTPS ScoreSampler). An error
-        // anywhere in the chunk counts, not just on the root span.
+        // anywhere in the chunk counts, not just on the root span. Checked before
+        // the root-span search because non-errored chunks are the common case on
+        // this path.
         if !chunk.spans.iter().any(|s| s.error != 0) {
             return false;
         }
+        let Ok(root_idx) = trace_utils::get_root_span_index(&chunk.spans) else {
+            return false; // no identifiable root span
+        };
 
         // Scoped so the views release their borrow of chunk.spans before the
         // `_dd.errors_sr` mutation below.
         let decision = {
-            let mut sampler = self
-                .error_sampler
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner);
             let root = &chunk.spans[root_idx];
-            // AlwaysKeep only bounds-checks root_index, so building the root
-            // view alone is enough. RateLimited needs every span to compute
-            // the trace signature.
-            let root_view;
-            let all_views;
-            let (spans, root_index) = if matches!(*sampler, ErrorsSampler::AlwaysKeep { .. }) {
-                root_view = [span_view(root)];
-                (&root_view[..], 0)
-            } else {
-                all_views = chunk.spans.iter().map(span_view).collect::<Vec<SpanView>>();
-                (&all_views[..], root_idx)
-            };
+            let views = chunk.spans.iter().map(span_view).collect::<Vec<SpanView>>();
             let trace = TraceView {
                 env,
                 trace_id: root.trace_id,
-                root_index,
+                root_index: root_idx,
                 root_global_sample_rate: root.metrics.get("_sample_rate").copied().unwrap_or(1.0),
-                spans,
+                spans: &views,
             };
-            sampler.sample(now_secs, &trace)
+            self.error_sampler
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .sample(now_secs, &trace)
         };
 
         match decision {
