@@ -30,7 +30,7 @@
     "@types/node": "^24.10.1",
     "@types/uuid": "^9.0.0",
     "aws-cdk": "^2.1111.0",
-    "aws-cdk-lib": "^2.237.1",
+    "aws-cdk-lib": "^2.265.0",
     "constructs": "^10.4.5",
     "jest": "^29.7.0",
     "jest-html-reporters": "^3.1.7",
@@ -59,13 +59,15 @@
   },
   "overrides": {
     "@opentelemetry/exporter-trace-otlp-http": {
-      "@opentelemetry/core": "^1.30.1"
-    },
-    "@opentelemetry/propagator-b3": {
-      "@opentelemetry/core": "^1.30.1"
-    },
-    "@opentelemetry/propagator-jaeger": {
-      "@opentelemetry/core": "^1.30.1"
+      "@opentelemetry/core": "^1.30.1",
+      "@opentelemetry/otlp-exporter-base": {
+        "@opentelemetry/otlp-transformer": {
+          "protobufjs": "^7.6.5"
+        }
+      },
+      "@opentelemetry/otlp-transformer": {
+        "protobufjs": "^7.6.5"
+      }
     },
     "@opentelemetry/resources": {
       "@opentelemetry/core": "^1.30.1"
@@ -73,36 +75,706 @@
     "@opentelemetry/sdk-trace-base": {
       "@opentelemetry/core": "^1.30.1"
     },
-    "@opentelemetry/sdk-trace-node": {
-      "@opentelemetry/core": "^1.30.1"
-    },
     "@aws-sdk/client-cloudformation": {
-      "fast-xml-parser": "^5.8.0",
-      "fast-xml-builder": "^1.1.9"
+      "fast-xml-parser": "^5.8.0"
     },
     "@aws-sdk/client-cloudwatch-logs": {
-      "fast-xml-parser": "^5.8.0",
-      "fast-xml-builder": "^1.1.9"
+      "fast-xml-parser": "^5.8.0"
     },
     "@aws-sdk/client-lambda": {
-      "fast-xml-parser": "^5.8.0",
-      "fast-xml-builder": "^1.1.9"
+      "fast-xml-parser": "^5.8.0"
     },
     "@aws-sdk/client-sns": {
-      "fast-xml-parser": "^5.8.0",
-      "fast-xml-builder": "^1.1.9"
+      "fast-xml-parser": "^5.8.0"
     },
     "@aws-sdk/client-sqs": {
-      "fast-xml-parser": "^5.8.0",
-      "fast-xml-builder": "^1.1.9"
+      "fast-xml-parser": "^5.8.0"
     },
     "@aws-sdk/client-sts": {
-      "fast-xml-parser": "^5.8.0",
-      "fast-xml-builder": "^1.1.9"
+      "fast-xml-parser": "^5.8.0"
     },
-    "aws-cdk-lib": {
-      "brace-expansion": "^5.0.6",
-      "fast-uri": "^3.1.2"
+    "jest": {
+      "@jest/core": {
+        "@jest/reporters": {
+          "@jest/transform": {
+            "babel-plugin-istanbul": {
+              "@istanbuljs/load-nyc-config": {
+                "js-yaml": "^3.15.1"
+              }
+            }
+          }
+        },
+        "@jest/transform": {
+          "babel-plugin-istanbul": {
+            "@istanbuljs/load-nyc-config": {
+              "js-yaml": "^3.15.1"
+            }
+          }
+        },
+        "jest-config": {
+          "babel-jest": {
+            "@jest/transform": {
+              "babel-plugin-istanbul": {
+                "@istanbuljs/load-nyc-config": {
+                  "js-yaml": "^3.15.1"
+                }
+              }
+            },
+            "babel-plugin-istanbul": {
+              "@istanbuljs/load-nyc-config": {
+                "js-yaml": "^3.15.1"
+              }
+            }
+          },
+          "jest-circus": {
+            "@jest/expect": {
+              "jest-snapshot": {
+                "@jest/transform": {
+                  "babel-plugin-istanbul": {
+                    "@istanbuljs/load-nyc-config": {
+                      "js-yaml": "^3.15.1"
+                    }
+                  }
+                }
+              }
+            },
+            "jest-runtime": {
+              "@jest/globals": {
+                "@jest/expect": {
+                  "jest-snapshot": {
+                    "@jest/transform": {
+                      "babel-plugin-istanbul": {
+                        "@istanbuljs/load-nyc-config": {
+                          "js-yaml": "^3.15.1"
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              "@jest/transform": {
+                "babel-plugin-istanbul": {
+                  "@istanbuljs/load-nyc-config": {
+                    "js-yaml": "^3.15.1"
+                  }
+                }
+              },
+              "jest-snapshot": {
+                "@jest/transform": {
+                  "babel-plugin-istanbul": {
+                    "@istanbuljs/load-nyc-config": {
+                      "js-yaml": "^3.15.1"
+                    }
+                  }
+                }
+              }
+            },
+            "jest-snapshot": {
+              "@jest/transform": {
+                "babel-plugin-istanbul": {
+                  "@istanbuljs/load-nyc-config": {
+                    "js-yaml": "^3.15.1"
+                  }
+                }
+              }
+            }
+          },
+          "jest-runner": {
+            "@jest/transform": {
+              "babel-plugin-istanbul": {
+                "@istanbuljs/load-nyc-config": {
+                  "js-yaml": "^3.15.1"
+                }
+              }
+            },
+            "jest-runtime": {
+              "@jest/globals": {
+                "@jest/expect": {
+                  "jest-snapshot": {
+                    "@jest/transform": {
+                      "babel-plugin-istanbul": {
+                        "@istanbuljs/load-nyc-config": {
+                          "js-yaml": "^3.15.1"
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              "@jest/transform": {
+                "babel-plugin-istanbul": {
+                  "@istanbuljs/load-nyc-config": {
+                    "js-yaml": "^3.15.1"
+                  }
+                }
+              },
+              "jest-snapshot": {
+                "@jest/transform": {
+                  "babel-plugin-istanbul": {
+                    "@istanbuljs/load-nyc-config": {
+                      "js-yaml": "^3.15.1"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "jest-resolve-dependencies": {
+          "jest-snapshot": {
+            "@jest/transform": {
+              "babel-plugin-istanbul": {
+                "@istanbuljs/load-nyc-config": {
+                  "js-yaml": "^3.15.1"
+                }
+              }
+            }
+          }
+        },
+        "jest-runner": {
+          "@jest/transform": {
+            "babel-plugin-istanbul": {
+              "@istanbuljs/load-nyc-config": {
+                "js-yaml": "^3.15.1"
+              }
+            }
+          },
+          "jest-runtime": {
+            "@jest/globals": {
+              "@jest/expect": {
+                "jest-snapshot": {
+                  "@jest/transform": {
+                    "babel-plugin-istanbul": {
+                      "@istanbuljs/load-nyc-config": {
+                        "js-yaml": "^3.15.1"
+                      }
+                    }
+                  }
+                }
+              }
+            },
+            "@jest/transform": {
+              "babel-plugin-istanbul": {
+                "@istanbuljs/load-nyc-config": {
+                  "js-yaml": "^3.15.1"
+                }
+              }
+            },
+            "jest-snapshot": {
+              "@jest/transform": {
+                "babel-plugin-istanbul": {
+                  "@istanbuljs/load-nyc-config": {
+                    "js-yaml": "^3.15.1"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "jest-runtime": {
+          "@jest/globals": {
+            "@jest/expect": {
+              "jest-snapshot": {
+                "@jest/transform": {
+                  "babel-plugin-istanbul": {
+                    "@istanbuljs/load-nyc-config": {
+                      "js-yaml": "^3.15.1"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "@jest/transform": {
+            "babel-plugin-istanbul": {
+              "@istanbuljs/load-nyc-config": {
+                "js-yaml": "^3.15.1"
+              }
+            }
+          },
+          "jest-snapshot": {
+            "@jest/transform": {
+              "babel-plugin-istanbul": {
+                "@istanbuljs/load-nyc-config": {
+                  "js-yaml": "^3.15.1"
+                }
+              }
+            }
+          }
+        },
+        "jest-snapshot": {
+          "@jest/transform": {
+            "babel-plugin-istanbul": {
+              "@istanbuljs/load-nyc-config": {
+                "js-yaml": "^3.15.1"
+              }
+            }
+          }
+        }
+      },
+      "jest-cli": {
+        "@jest/core": {
+          "@jest/reporters": {
+            "@jest/transform": {
+              "babel-plugin-istanbul": {
+                "@istanbuljs/load-nyc-config": {
+                  "js-yaml": "^3.15.1"
+                }
+              }
+            }
+          },
+          "@jest/transform": {
+            "babel-plugin-istanbul": {
+              "@istanbuljs/load-nyc-config": {
+                "js-yaml": "^3.15.1"
+              }
+            }
+          },
+          "jest-config": {
+            "babel-jest": {
+              "@jest/transform": {
+                "babel-plugin-istanbul": {
+                  "@istanbuljs/load-nyc-config": {
+                    "js-yaml": "^3.15.1"
+                  }
+                }
+              },
+              "babel-plugin-istanbul": {
+                "@istanbuljs/load-nyc-config": {
+                  "js-yaml": "^3.15.1"
+                }
+              }
+            },
+            "jest-circus": {
+              "@jest/expect": {
+                "jest-snapshot": {
+                  "@jest/transform": {
+                    "babel-plugin-istanbul": {
+                      "@istanbuljs/load-nyc-config": {
+                        "js-yaml": "^3.15.1"
+                      }
+                    }
+                  }
+                }
+              },
+              "jest-runtime": {
+                "@jest/globals": {
+                  "@jest/expect": {
+                    "jest-snapshot": {
+                      "@jest/transform": {
+                        "babel-plugin-istanbul": {
+                          "@istanbuljs/load-nyc-config": {
+                            "js-yaml": "^3.15.1"
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
+                "@jest/transform": {
+                  "babel-plugin-istanbul": {
+                    "@istanbuljs/load-nyc-config": {
+                      "js-yaml": "^3.15.1"
+                    }
+                  }
+                },
+                "jest-snapshot": {
+                  "@jest/transform": {
+                    "babel-plugin-istanbul": {
+                      "@istanbuljs/load-nyc-config": {
+                        "js-yaml": "^3.15.1"
+                      }
+                    }
+                  }
+                }
+              },
+              "jest-snapshot": {
+                "@jest/transform": {
+                  "babel-plugin-istanbul": {
+                    "@istanbuljs/load-nyc-config": {
+                      "js-yaml": "^3.15.1"
+                    }
+                  }
+                }
+              }
+            },
+            "jest-runner": {
+              "@jest/transform": {
+                "babel-plugin-istanbul": {
+                  "@istanbuljs/load-nyc-config": {
+                    "js-yaml": "^3.15.1"
+                  }
+                }
+              },
+              "jest-runtime": {
+                "@jest/globals": {
+                  "@jest/expect": {
+                    "jest-snapshot": {
+                      "@jest/transform": {
+                        "babel-plugin-istanbul": {
+                          "@istanbuljs/load-nyc-config": {
+                            "js-yaml": "^3.15.1"
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
+                "@jest/transform": {
+                  "babel-plugin-istanbul": {
+                    "@istanbuljs/load-nyc-config": {
+                      "js-yaml": "^3.15.1"
+                    }
+                  }
+                },
+                "jest-snapshot": {
+                  "@jest/transform": {
+                    "babel-plugin-istanbul": {
+                      "@istanbuljs/load-nyc-config": {
+                        "js-yaml": "^3.15.1"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "jest-resolve-dependencies": {
+            "jest-snapshot": {
+              "@jest/transform": {
+                "babel-plugin-istanbul": {
+                  "@istanbuljs/load-nyc-config": {
+                    "js-yaml": "^3.15.1"
+                  }
+                }
+              }
+            }
+          },
+          "jest-runner": {
+            "@jest/transform": {
+              "babel-plugin-istanbul": {
+                "@istanbuljs/load-nyc-config": {
+                  "js-yaml": "^3.15.1"
+                }
+              }
+            },
+            "jest-runtime": {
+              "@jest/globals": {
+                "@jest/expect": {
+                  "jest-snapshot": {
+                    "@jest/transform": {
+                      "babel-plugin-istanbul": {
+                        "@istanbuljs/load-nyc-config": {
+                          "js-yaml": "^3.15.1"
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              "@jest/transform": {
+                "babel-plugin-istanbul": {
+                  "@istanbuljs/load-nyc-config": {
+                    "js-yaml": "^3.15.1"
+                  }
+                }
+              },
+              "jest-snapshot": {
+                "@jest/transform": {
+                  "babel-plugin-istanbul": {
+                    "@istanbuljs/load-nyc-config": {
+                      "js-yaml": "^3.15.1"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "jest-runtime": {
+            "@jest/globals": {
+              "@jest/expect": {
+                "jest-snapshot": {
+                  "@jest/transform": {
+                    "babel-plugin-istanbul": {
+                      "@istanbuljs/load-nyc-config": {
+                        "js-yaml": "^3.15.1"
+                      }
+                    }
+                  }
+                }
+              }
+            },
+            "@jest/transform": {
+              "babel-plugin-istanbul": {
+                "@istanbuljs/load-nyc-config": {
+                  "js-yaml": "^3.15.1"
+                }
+              }
+            },
+            "jest-snapshot": {
+              "@jest/transform": {
+                "babel-plugin-istanbul": {
+                  "@istanbuljs/load-nyc-config": {
+                    "js-yaml": "^3.15.1"
+                  }
+                }
+              }
+            }
+          },
+          "jest-snapshot": {
+            "@jest/transform": {
+              "babel-plugin-istanbul": {
+                "@istanbuljs/load-nyc-config": {
+                  "js-yaml": "^3.15.1"
+                }
+              }
+            }
+          }
+        },
+        "create-jest": {
+          "jest-config": {
+            "babel-jest": {
+              "@jest/transform": {
+                "babel-plugin-istanbul": {
+                  "@istanbuljs/load-nyc-config": {
+                    "js-yaml": "^3.15.1"
+                  }
+                }
+              },
+              "babel-plugin-istanbul": {
+                "@istanbuljs/load-nyc-config": {
+                  "js-yaml": "^3.15.1"
+                }
+              }
+            },
+            "jest-circus": {
+              "@jest/expect": {
+                "jest-snapshot": {
+                  "@jest/transform": {
+                    "babel-plugin-istanbul": {
+                      "@istanbuljs/load-nyc-config": {
+                        "js-yaml": "^3.15.1"
+                      }
+                    }
+                  }
+                }
+              },
+              "jest-runtime": {
+                "@jest/globals": {
+                  "@jest/expect": {
+                    "jest-snapshot": {
+                      "@jest/transform": {
+                        "babel-plugin-istanbul": {
+                          "@istanbuljs/load-nyc-config": {
+                            "js-yaml": "^3.15.1"
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
+                "@jest/transform": {
+                  "babel-plugin-istanbul": {
+                    "@istanbuljs/load-nyc-config": {
+                      "js-yaml": "^3.15.1"
+                    }
+                  }
+                },
+                "jest-snapshot": {
+                  "@jest/transform": {
+                    "babel-plugin-istanbul": {
+                      "@istanbuljs/load-nyc-config": {
+                        "js-yaml": "^3.15.1"
+                      }
+                    }
+                  }
+                }
+              },
+              "jest-snapshot": {
+                "@jest/transform": {
+                  "babel-plugin-istanbul": {
+                    "@istanbuljs/load-nyc-config": {
+                      "js-yaml": "^3.15.1"
+                    }
+                  }
+                }
+              }
+            },
+            "jest-runner": {
+              "@jest/transform": {
+                "babel-plugin-istanbul": {
+                  "@istanbuljs/load-nyc-config": {
+                    "js-yaml": "^3.15.1"
+                  }
+                }
+              },
+              "jest-runtime": {
+                "@jest/globals": {
+                  "@jest/expect": {
+                    "jest-snapshot": {
+                      "@jest/transform": {
+                        "babel-plugin-istanbul": {
+                          "@istanbuljs/load-nyc-config": {
+                            "js-yaml": "^3.15.1"
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
+                "@jest/transform": {
+                  "babel-plugin-istanbul": {
+                    "@istanbuljs/load-nyc-config": {
+                      "js-yaml": "^3.15.1"
+                    }
+                  }
+                },
+                "jest-snapshot": {
+                  "@jest/transform": {
+                    "babel-plugin-istanbul": {
+                      "@istanbuljs/load-nyc-config": {
+                        "js-yaml": "^3.15.1"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "jest-config": {
+          "babel-jest": {
+            "@jest/transform": {
+              "babel-plugin-istanbul": {
+                "@istanbuljs/load-nyc-config": {
+                  "js-yaml": "^3.15.1"
+                }
+              }
+            },
+            "babel-plugin-istanbul": {
+              "@istanbuljs/load-nyc-config": {
+                "js-yaml": "^3.15.1"
+              }
+            }
+          },
+          "jest-circus": {
+            "@jest/expect": {
+              "jest-snapshot": {
+                "@jest/transform": {
+                  "babel-plugin-istanbul": {
+                    "@istanbuljs/load-nyc-config": {
+                      "js-yaml": "^3.15.1"
+                    }
+                  }
+                }
+              }
+            },
+            "jest-runtime": {
+              "@jest/globals": {
+                "@jest/expect": {
+                  "jest-snapshot": {
+                    "@jest/transform": {
+                      "babel-plugin-istanbul": {
+                        "@istanbuljs/load-nyc-config": {
+                          "js-yaml": "^3.15.1"
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              "@jest/transform": {
+                "babel-plugin-istanbul": {
+                  "@istanbuljs/load-nyc-config": {
+                    "js-yaml": "^3.15.1"
+                  }
+                }
+              },
+              "jest-snapshot": {
+                "@jest/transform": {
+                  "babel-plugin-istanbul": {
+                    "@istanbuljs/load-nyc-config": {
+                      "js-yaml": "^3.15.1"
+                    }
+                  }
+                }
+              }
+            },
+            "jest-snapshot": {
+              "@jest/transform": {
+                "babel-plugin-istanbul": {
+                  "@istanbuljs/load-nyc-config": {
+                    "js-yaml": "^3.15.1"
+                  }
+                }
+              }
+            }
+          },
+          "jest-runner": {
+            "@jest/transform": {
+              "babel-plugin-istanbul": {
+                "@istanbuljs/load-nyc-config": {
+                  "js-yaml": "^3.15.1"
+                }
+              }
+            },
+            "jest-runtime": {
+              "@jest/globals": {
+                "@jest/expect": {
+                  "jest-snapshot": {
+                    "@jest/transform": {
+                      "babel-plugin-istanbul": {
+                        "@istanbuljs/load-nyc-config": {
+                          "js-yaml": "^3.15.1"
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              "@jest/transform": {
+                "babel-plugin-istanbul": {
+                  "@istanbuljs/load-nyc-config": {
+                    "js-yaml": "^3.15.1"
+                  }
+                }
+              },
+              "jest-snapshot": {
+                "@jest/transform": {
+                  "babel-plugin-istanbul": {
+                    "@istanbuljs/load-nyc-config": {
+                      "js-yaml": "^3.15.1"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "ts-jest": {
+      "@jest/transform": {
+        "babel-plugin-istanbul": {
+          "@istanbuljs/load-nyc-config": {
+            "js-yaml": "^3.15.1"
+          }
+        }
+      },
+      "babel-jest": {
+        "@jest/transform": {
+          "babel-plugin-istanbul": {
+            "@istanbuljs/load-nyc-config": {
+              "js-yaml": "^3.15.1"
+            }
+          }
+        },
+        "babel-plugin-istanbul": {
+          "@istanbuljs/load-nyc-config": {
+            "js-yaml": "^3.15.1"
+          }
+        }
+      }
     }
   }
 }
