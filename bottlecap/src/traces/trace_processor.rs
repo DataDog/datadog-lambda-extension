@@ -110,10 +110,13 @@ impl ServerlessTraceProcessor {
     /// priorities are explicit drops and are honored.
     fn drop_sampled_out_chunks(&self, tracer_payloads: &mut Vec<pb::TracerPayload>) {
         // Hoisted out of the loop: one lock instead of one per chunk.
+        // Recover through poisoning: the sampler holds only rolling-window
+        // counters, so a partially updated bucket is far cheaper than disabling
+        // error rescue for the rest of the sandbox's life.
         let rescue_enabled = !self
             .error_sampler
             .lock()
-            .expect("error sampler poisoned")
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .is_disabled();
         // Only RateLimited's rolling window reads the clock, and only rescue
         // candidates reach it.
@@ -166,7 +169,10 @@ impl ServerlessTraceProcessor {
         // Scoped so the views release their borrow of chunk.spans before the
         // `_dd.errors_sr` mutation below.
         let decision = {
-            let mut sampler = self.error_sampler.lock().expect("error sampler poisoned");
+            let mut sampler = self
+                .error_sampler
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
             let root = &chunk.spans[root_idx];
             // AlwaysKeep only bounds-checks root_index, so building the root
             // view alone is enough. RateLimited needs every span to compute
