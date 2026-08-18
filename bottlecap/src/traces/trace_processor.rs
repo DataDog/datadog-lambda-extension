@@ -85,10 +85,11 @@ fn span_view(span: &Span) -> SpanView<'_> {
 }
 
 /// Builds the error sampler as the extension ships it, enabled or disabled by
-/// `apm_error_sampler_enabled`.
+/// `serverless_error_sampler_enabled`.
 ///
 /// The mode is hardcoded to `AlwaysKeep`: Lambda's per-invocation trace volume
-/// is low, and freeze/thaw breaks `RateLimited`'s 30s wall-clock window.
+/// is low, and freeze/thaw breaks `RateLimited`'s 30s wall-clock window. There
+/// is therefore no rate ceiling when enabled: every errored chunk is rescued.
 #[must_use]
 pub fn new_error_sampler(enabled: bool) -> Arc<std::sync::Mutex<ErrorsSampler>> {
     Arc::new(std::sync::Mutex::new(ErrorsSampler::new(
