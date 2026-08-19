@@ -539,16 +539,7 @@ impl SendingTraceProcessor {
                         tags_provider:Arc::clone(&tags_provider),
                         body_size,
                         span_pointers:span_pointers.clone(),
-                        tracer_header_tags_lang: header_tags.lang.to_string(),
-                        tracer_header_tags_lang_version: header_tags.lang_version.to_string(),
-                        tracer_header_tags_lang_interpreter: header_tags.lang_interpreter.to_string(),
-                        tracer_header_tags_lang_vendor: header_tags.lang_vendor.to_string(),
-                        tracer_header_tags_tracer_version: header_tags.tracer_version.to_string(),
-                        tracer_header_tags_container_id: header_tags.container_id.to_string(),
-                        tracer_header_tags_client_computed_top_level: header_tags.client_computed_top_level,
-                        tracer_header_tags_client_computed_stats: header_tags.client_computed_stats,
-                        tracer_header_tags_dropped_p0_traces: header_tags.dropped_p0_traces,
-                        tracer_header_tags_dropped_p0_spans: header_tags.dropped_p0_spans,
+                        header_tags: OwnedTracerHeaderTags::from(header_tags.clone()),
                     });
                     None
                 } else {
