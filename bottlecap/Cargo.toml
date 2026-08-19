@@ -74,6 +74,12 @@ indexmap = {version = "2.11.0", default-features = false}
 # be found in the clippy.toml file adjacent to this Cargo.toml.
 datadog-protos = { version = "0.1.0", default-features = false, git = "https://github.com/DataDog/saluki/", rev = "f863626dbfe3c59bb390985fa6530b0621c2a0a2"}
 ddsketch-agent = { version = "0.1.0", default-features = false, git = "https://github.com/DataDog/saluki/", rev = "f863626dbfe3c59bb390985fa6530b0621c2a0a2"}
+# dd-trace-rs (datadog-opentelemetry) resolves libdd-* from crates.io, so ~11 of these
+# crates are compiled twice. A `[patch.crates-io]` section used to collapse them, but it
+# cannot be restored while this rev's versions trail the published ones (libdd-common 5.1.0
+# here vs the ^5.2.0 that published libdd-data-pipeline requires) and while the rev carries
+# an unreleased breaking libdd-telemetry change under an unchanged version. Re-check with
+# `cargo tree --duplicates | grep ^libdd-` when bumping either side.
 libdd-capabilities = { git = "https://github.com/DataDog/libdatadog", rev = "72fa86854c823361b7d234545f1a2f2d21f944fe" }
 libdd-common = { git = "https://github.com/DataDog/libdatadog", rev = "72fa86854c823361b7d234545f1a2f2d21f944fe", default-features = false }
 libdd-trace-protobuf = { git = "https://github.com/DataDog/libdatadog", rev = "72fa86854c823361b7d234545f1a2f2d21f944fe" }

@@ -536,11 +536,11 @@ impl SendingTraceProcessor {
                     debug!(
                         "TRACE_PROCESSOR | Holding trace for App & API Protection additional data"
                     );
+                    // Same sender, minus the App & API Protection processor, so the held
+                    // trace is not re-held when it is flushed.
                     let sender = SendingTraceProcessor {
                         appsec: None,
-                        processor: self.processor.clone(),
-                        trace_tx: self.trace_tx.clone(),
-                        stats_generator: self.stats_generator.clone(),
+                        ..self.clone()
                     };
                     let args = HoldArguments {
                         config: Arc::clone(&config),
