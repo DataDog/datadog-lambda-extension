@@ -399,7 +399,7 @@ impl TraceProcessor for ServerlessTraceProcessor {
                 obfuscation_config: self.obfuscation_config.clone(),
                 tags_provider: tags_provider.clone(),
                 span_pointers,
-                client_computed_stats: header_tags.client_computed_stats,
+                client_computed_stats: header_tags.generic.client_computed_stats,
             },
             true, // send agentless since we are the agent
         )
@@ -556,7 +556,7 @@ impl SendingTraceProcessor {
         }
 
         // Capture before `header_tags` is moved into process_traces below.
-        let client_computed_stats = header_tags.client_computed_stats;
+        let client_computed_stats = header_tags.generic.client_computed_stats;
 
         let (payload, processed_traces) = self.processor.process_traces(
             config.clone(),
@@ -704,10 +704,7 @@ mod tests {
             lang_vendor: "vendor",
             tracer_version: "4.0.0",
             container_id: "33",
-            client_computed_top_level: false,
-            client_computed_stats: false,
-            dropped_p0_traces: 0,
-            dropped_p0_spans: 0,
+            generic: tracer_header_tags::TracerGenericTags::default(),
         };
 
         let trace_processor = ServerlessTraceProcessor {
@@ -1201,10 +1198,7 @@ mod tests {
             lang_vendor: "",
             tracer_version: "1.0",
             container_id: "",
-            client_computed_top_level: false,
-            client_computed_stats: false,
-            dropped_p0_traces: 0,
-            dropped_p0_spans: 0,
+            generic: tracer_header_tags::TracerGenericTags::default(),
         };
 
         let make_span = |trace_id: u64, priority: Option<f64>| -> pb::Span {
@@ -1297,10 +1291,7 @@ mod tests {
             lang_vendor: "",
             tracer_version: "1.0",
             container_id: "",
-            client_computed_top_level: false,
-            client_computed_stats: false,
-            dropped_p0_traces: 0,
-            dropped_p0_spans: 0,
+            generic: tracer_header_tags::TracerGenericTags::default(),
         };
 
         let make_dropped_span = |trace_id: u64| -> pb::Span {
@@ -1378,10 +1369,7 @@ mod tests {
             lang_vendor: "",
             tracer_version: "1.0",
             container_id: "",
-            client_computed_top_level: false,
-            client_computed_stats: false,
-            dropped_p0_traces: 0,
-            dropped_p0_spans: 0,
+            generic: tracer_header_tags::TracerGenericTags::default(),
         };
 
         let make_span = |trace_id: u64, priority: f64| -> pb::Span {
@@ -1486,10 +1474,7 @@ mod tests {
             lang_vendor: "",
             tracer_version: "1.0",
             container_id: "",
-            client_computed_top_level: false,
-            client_computed_stats: false,
-            dropped_p0_traces: 0,
-            dropped_p0_spans: 0,
+            generic: tracer_header_tags::TracerGenericTags::default(),
         };
 
         let span = pb::Span {
@@ -1864,10 +1849,10 @@ mod tests {
                 lang_vendor: "vendor",
                 tracer_version: "4.0.0",
                 container_id: "33",
-                client_computed_top_level: false,
-                client_computed_stats,
-                dropped_p0_traces: 0,
-                dropped_p0_spans: 0,
+                generic: tracer_header_tags::TracerGenericTags {
+                    client_computed_stats,
+                    ..Default::default()
+                },
             };
 
             sender
