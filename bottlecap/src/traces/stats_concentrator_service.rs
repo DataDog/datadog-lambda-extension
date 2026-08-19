@@ -3,7 +3,7 @@ use tokio::sync::{mpsc, oneshot};
 use crate::config::Config;
 use libdd_trace_protobuf::pb;
 use libdd_trace_protobuf::pb::{ClientStatsPayload, TracerPayload};
-use libdd_trace_stats::span_concentrator::{CardinalityLimitConfig, SpanConcentrator};
+use libdd_trace_stats::span_concentrator::SpanConcentrator;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, SystemTime};
@@ -186,22 +186,12 @@ impl StatsConcentratorService {
                 .iter()
                 .map(ToString::to_string)
                 .collect(),
-            // Keep stats cardinality unbounded, matching bottlecap's behavior before
-            // libdatadog gained per-field cardinality limits. Passing `None` would opt
-            // into CardinalityLimitConfig::default(): 7000 whole-key, 1024 resource,
-            // 512 http endpoint, 512 peer tags, 100 additional tags, which would
-            // silently collapse high-cardinality Lambda stats into the
-            // `tracer_blocked_value` overflow bucket. Every field is pinned instead.
-            // Per-field limits are `usize::MAX - 1` rather than `usize::MAX` only
-            // because the constructor warns when whole_key_limit is not strictly
-            // greater than every per-field limit; both values are unreachable.
-            Some(CardinalityLimitConfig {
-                whole_key_limit: usize::MAX,
-                resource_limit: usize::MAX - 1,
-                http_endpoint_limit: usize::MAX - 1,
-                peer_tags_limit: usize::MAX - 1,
-                additional_tags_limit: usize::MAX - 1,
-            }),
+            // Use libdatadog's default cardinality limits, matching the trace agent and
+            // the Serverless Compatibility Layer: 7000 whole-key, 1024 resource, 512 http
+            // endpoint, 512 peer tags, 100 additional tags. Keys beyond a limit collapse
+            // into the `tracer_blocked_value` overflow bucket, which bounds concentrator
+            // memory and the /v0.6/stats payload inside a memory-capped Lambda.
+            None,
             // No additional stats tag keys: aggregate on the default key fields only.
             Vec::new(),
         );
@@ -412,14 +402,12 @@ mod tests {
         );
     }
 
-    /// The concentrator is configured with all five `CardinalityLimitConfig` limits pinned to
-    /// effectively unbounded values, so exceeding `libdd_trace_stats`' defaults must not collapse
-    /// any aggregation keys into the `tracer_blocked_value` overflow key. This exercises two
-    /// limits at once: 7,001 distinct resources exceeds both the default `whole_key_limit`
-    /// (7,000) and `resource_limit` (1,024), so a regression back to `None` (which would opt
-    /// into `CardinalityLimitConfig::default()`) fails this test twice over.
+    /// The concentrator uses `CardinalityLimitConfig::default()`, so exceeding those limits must
+    /// collapse the excess aggregation keys into the `tracer_blocked_value` overflow key instead
+    /// of growing without bound. 7,001 distinct resources exceeds both the default
+    /// `whole_key_limit` (7,000) and `resource_limit` (1,024).
     #[tokio::test]
-    async fn test_no_cardinality_limit_applied() {
+    async fn test_cardinality_limit_applied() {
         use libdd_trace_stats::span_concentrator::CardinalityLimitConfig;
 
         const OVERFLOW_KEY: &str = "tracer_blocked_value";
@@ -439,14 +427,16 @@ mod tests {
 
         let payload = result.expect("Expected stats for the generated spans, but got None.");
         let all_stats: Vec<_> = payload.stats.iter().flat_map(|b| &b.stats).collect();
-        assert_eq!(
-            all_stats.len(),
-            span_count,
-            "Expected one stats entry per distinct resource with no cardinality limit applied."
+        assert!(
+            all_stats.len() < span_count,
+            "Expected fewer stats entries than distinct resources once the resource limit \
+             collapses the excess, got {} for {span_count} resources.",
+            all_stats.len()
         );
         assert!(
-            all_stats.iter().all(|s| s.resource != OVERFLOW_KEY),
-            "Expected no stats entries collapsed into the '{OVERFLOW_KEY}' overflow key."
+            all_stats.iter().any(|s| s.resource == OVERFLOW_KEY),
+            "Expected the resources beyond the limit to collapse into the '{OVERFLOW_KEY}' \
+             overflow key."
         );
     }
 }
