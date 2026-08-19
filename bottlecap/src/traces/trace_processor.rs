@@ -530,22 +530,32 @@ impl SendingTraceProcessor {
                 };
 
                 let (finalized, ctx) = appsec.process_span(span);
-                if  finalized {
+                if finalized {
                     Some(trace)
-                } else if let Some(ctx) = ctx{
-                    debug!("TRACE_PROCESSOR | Holding trace for App & API Protection additional data");
-                    ctx.hold_trace(trace, SendingTraceProcessor{ appsec:  None, processor: self.processor.clone(), trace_tx: self.trace_tx.clone(), stats_generator: self.stats_generator.clone() }, HoldArguments{
-                        config:Arc::clone(&config),
-                        tags_provider:Arc::clone(&tags_provider),
+                } else if let Some(ctx) = ctx {
+                    debug!(
+                        "TRACE_PROCESSOR | Holding trace for App & API Protection additional data"
+                    );
+                    let sender = SendingTraceProcessor {
+                        appsec: None,
+                        processor: self.processor.clone(),
+                        trace_tx: self.trace_tx.clone(),
+                        stats_generator: self.stats_generator.clone(),
+                    };
+                    let args = HoldArguments {
+                        config: Arc::clone(&config),
+                        tags_provider: Arc::clone(&tags_provider),
                         body_size,
-                        span_pointers:span_pointers.clone(),
+                        span_pointers: span_pointers.clone(),
                         header_tags: OwnedTracerHeaderTags::from(header_tags.clone()),
-                    });
+                    };
+                    ctx.hold_trace(trace, sender, args);
                     None
                 } else {
                     Some(trace)
                 }
-            }).collect()
+            })
+            .collect()
         } else {
             traces
         };
