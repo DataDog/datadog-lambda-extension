@@ -803,7 +803,7 @@ mod tests {
     use axum::http::{HeaderMap, HeaderName, HeaderValue};
     use libdd_trace_utils::trace_utils::TracerHeaderTags;
 
-    use super::{EVP_PROXY_V2_ENDPOINT_PATH, TraceAgent};
+    use super::{EVP_PROXY_V2_ENDPOINT_PATH, MAX_CONTENT_LENGTH, TraceAgent};
 
     /// Build a `HeaderMap` with `name: value` (or no header when `value` is `None`), convert it the
     /// same way `handle_traces` does, and return `(client_computed_stats, client_computed_top_level)`.
@@ -889,7 +889,7 @@ mod tests {
     #[tokio::test]
     async fn info_advertises_the_bare_evp_proxy_v2_prefix() {
         let body = TraceAgent::info().await.into_body();
-        let bytes = axum::body::to_bytes(body, usize::MAX)
+        let bytes = axum::body::to_bytes(body, MAX_CONTENT_LENGTH)
             .await
             .expect("info() body should be readable");
         let json: serde_json::Value =
