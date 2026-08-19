@@ -19,7 +19,7 @@ use crate::traces::span_pointers::SpanPointer;
 use crate::traces::trace_aggregator::OwnedTracerHeaderTags;
 use crate::traces::trace_processor::SendingTraceProcessor;
 
-/// Holds inforamtion gathered about an invocation.
+/// Holds information gathered about an invocation.
 #[must_use]
 pub struct Context {
     /// The request ID of the invocation.
