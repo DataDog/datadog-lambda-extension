@@ -107,7 +107,8 @@ mod tests {
     use crate::traces::trace_aggregator::OwnedTracerHeaderTags;
     use libdd_common::Endpoint;
     use libdd_trace_utils::{
-        send_data::SendDataBuilder, trace_utils::TracerHeaderTags,
+        send_data::SendDataBuilder,
+        trace_utils::{TracerGenericTags, TracerHeaderTags},
         tracer_payload::TracerPayloadCollection,
     };
 
@@ -126,10 +127,11 @@ mod tests {
             lang_vendor: "lang_vendor",
             tracer_version: "tracer_version",
             container_id: "container_id",
-            client_computed_top_level: true,
-            client_computed_stats: true,
-            dropped_p0_traces: 0,
-            dropped_p0_spans: 0,
+            generic: TracerGenericTags {
+                client_computed_top_level: true,
+                client_computed_stats: true,
+                ..Default::default()
+            },
         };
         let size = 1;
         let owned_tags = OwnedTracerHeaderTags::from(tracer_header_tags.clone());
