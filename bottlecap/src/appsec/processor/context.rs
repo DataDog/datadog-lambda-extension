@@ -5,7 +5,6 @@ use std::time::Duration;
 
 use bytes::{Buf, Bytes};
 use libdd_trace_protobuf::pb::Span;
-use libdd_trace_utils::tracer_header_tags;
 use libddwaf::object::{Keyed, WafMap, WafObject};
 use libddwaf::{Context as WafContext, Handle, RunError, RunOutput, RunResult, waf_map};
 use mime::Mime;
@@ -17,6 +16,7 @@ use crate::appsec::processor::{InvocationPayload, Processor};
 use crate::config::Config;
 use crate::tags::provider::Provider;
 use crate::traces::span_pointers::SpanPointer;
+use crate::traces::trace_aggregator::OwnedTracerHeaderTags;
 use crate::traces::trace_processor::SendingTraceProcessor;
 
 /// Holds inforamtion gathered about an invocation.
@@ -116,19 +116,7 @@ impl Context {
                 .send_processed_traces(
                     args.config,
                     args.tags_provider,
-                    tracer_header_tags::TracerHeaderTags {
-                        lang: &args.tracer_header_tags_lang,
-                        lang_version: &args.tracer_header_tags_lang_version,
-                        lang_interpreter: &args.tracer_header_tags_lang_interpreter,
-                        lang_vendor: &args.tracer_header_tags_lang_vendor,
-                        tracer_version: &args.tracer_header_tags_tracer_version,
-                        container_id: &args.tracer_header_tags_container_id,
-                        client_computed_top_level: args
-                            .tracer_header_tags_client_computed_top_level,
-                        client_computed_stats: args.tracer_header_tags_client_computed_stats,
-                        dropped_p0_traces: args.tracer_header_tags_dropped_p0_traces,
-                        dropped_p0_spans: args.tracer_header_tags_dropped_p0_spans,
-                    },
+                    args.header_tags.to_tracer_header_tags(),
                     vec![trace],
                     args.body_size,
                     args.span_pointers,
@@ -547,16 +535,7 @@ pub struct HoldArguments {
     pub body_size: usize,
     pub span_pointers: Option<Vec<SpanPointer>>,
 
-    pub tracer_header_tags_lang: String,
-    pub tracer_header_tags_lang_version: String,
-    pub tracer_header_tags_lang_interpreter: String,
-    pub tracer_header_tags_lang_vendor: String,
-    pub tracer_header_tags_tracer_version: String,
-    pub tracer_header_tags_container_id: String,
-    pub tracer_header_tags_client_computed_top_level: bool,
-    pub tracer_header_tags_client_computed_stats: bool,
-    pub tracer_header_tags_dropped_p0_traces: usize,
-    pub tracer_header_tags_dropped_p0_spans: usize,
+    pub header_tags: OwnedTracerHeaderTags,
 }
 
 /// Names of tags that can be emitted by the WAF.
