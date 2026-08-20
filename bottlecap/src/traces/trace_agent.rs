@@ -179,8 +179,26 @@ impl TraceAgent {
         }
     }
 
+    /// Binds the trace agent's listening socket synchronously, before the trace agent's async
+    /// task is spawned. Tracer clients (e.g. dd-trace-java) can probe `/info` as early as their
+    /// own process's cold-start init, potentially before the Lambda Extensions API `/next` call
+    /// that triggers the invocation even returns. Binding (and thus starting the kernel's
+    /// listen/accept backlog) here, before `main` proceeds to call `/next`, guarantees that
+    /// early probe connects successfully instead of being refused and permanently caching a
+    /// "no EVP proxy support" decision for the life of the execution environment.
     #[allow(clippy::cast_possible_truncation)]
-    pub async fn start(&self) -> Result<(), Box<dyn std::error::Error>> {
+    pub fn bind() -> std::io::Result<std::net::TcpListener> {
+        let port = u16::try_from(TRACE_AGENT_PORT).expect("TRACE_AGENT_PORT is too large");
+        let socket = SocketAddr::from(([127, 0, 0, 1], port));
+        let listener = std::net::TcpListener::bind(socket)?;
+        listener.set_nonblocking(true)?;
+        Ok(listener)
+    }
+
+    pub async fn start(
+        &self,
+        listener: std::net::TcpListener,
+    ) -> Result<(), Box<dyn std::error::Error>> {
         let now = Instant::now();
 
         // Set up a channel to send processed stats to our stats aggregator.
@@ -199,10 +217,7 @@ impl TraceAgent {
         });
 
         let router = self.make_router(stats_tx);
-
-        let port = u16::try_from(TRACE_AGENT_PORT).expect("TRACE_AGENT_PORT is too large");
-        let socket = SocketAddr::from(([127, 0, 0, 1], port));
-        let listener = tokio::net::TcpListener::bind(&socket).await?;
+        let listener = tokio::net::TcpListener::from_std(listener)?;
 
         debug!("TRACE AGENT | Listening on port {TRACE_AGENT_PORT}");
         debug!(
