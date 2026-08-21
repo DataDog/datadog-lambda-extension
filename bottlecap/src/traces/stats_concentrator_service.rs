@@ -175,13 +175,6 @@ fn is_sentinel_tag(tag: &str) -> bool {
     tag.split_once(':').map_or(tag, |(key, _)| key) == TRACER_BLOCKED_VALUE
 }
 
-/// Maximum number of additional metric tag keys libdatadog will aggregate on.
-///
-/// TODO: mirrors `ADDITIONAL_METRIC_TAGS_MAX_KEYS` in libdatadog's
-/// `libdd-trace-stats/src/span_concentrator/mod.rs`, which is private. Hand-copied here only to
-/// warn about excess keys in bottlecap's own terms; libdatadog still owns the actual truncation.
-const MAX_ADDITIONAL_METRIC_TAG_KEYS: usize = 4;
-
 /// Build the `CardinalityLimitConfig` override for a user-supplied
 /// `DD_TRACE_STATS_ADDITIONAL_TAGS_CARDINALITY_LIMIT`, or `None` to keep libdatadog's defaults.
 ///
@@ -190,8 +183,8 @@ const MAX_ADDITIONAL_METRIC_TAG_KEYS: usize = 4;
 /// `0` is the dangerous one: libdatadog would collapse *every* additional tag into the
 /// `tracer_blocked_value` sentinel. Note the Go trace agent reads `0` as "no cap" instead, so a
 /// user carrying that setting over would otherwise silently lose every tag value. Falling back to
-/// the default keeps aggregation working; "unbounded" is deliberately not offered, since #1332
-/// bounded this precisely to cap concentrator memory in a memory-capped Lambda.
+/// the default keeps aggregation working; "unbounded" is deliberately not offered, since these
+/// limits exist precisely to cap concentrator memory inside a memory-capped Lambda.
 ///
 /// Values at or above `whole_key_limit` are clamped mainly to silence libdatadog's
 /// misconfiguration warning. Per-field limits are applied *before* the whole-key limit, so such a
@@ -233,39 +226,34 @@ fn resolve_cardinality_limits(configured_limit: Option<usize>) -> Option<Cardina
 
 /// Warn when `DD_TRACE_STATS_ADDITIONAL_TAGS` lists more keys than libdatadog will aggregate on.
 ///
-/// libdatadog sorts alphabetically and keeps only the first
-/// [`MAX_ADDITIONAL_METRIC_TAG_KEYS`], so excess keys are dropped by alphabetical accident
-/// rather than by anything the user expressed. Its own warning names the dropped keys but not
-/// the kept ones, the selection rule, or the env var, so restate all three here. Truncation
-/// itself is left to libdatadog; this only reports it.
-fn warn_on_excess_additional_metric_tag_keys(keys: &[String]) {
-    if let Some((kept, dropped)) = split_additional_metric_tag_keys(keys) {
-        warn!(
-            "DD_TRACE_STATS_ADDITIONAL_TAGS lists {} unique keys but at most {} are aggregated \
-             on. Keys are sorted alphabetically and the rest dropped, so stats will use {kept:?} \
-             and ignore {dropped:?}. Reduce the list to at most {} keys to choose explicitly.",
-            kept.len() + dropped.len(),
-            MAX_ADDITIONAL_METRIC_TAG_KEYS,
-            MAX_ADDITIONAL_METRIC_TAG_KEYS,
-        );
+/// libdatadog normalizes the requested keys (sort, dedup, truncate to its own private cap) and
+/// exposes the survivors via `SpanConcentrator::additional_metric_tag_keys()`, so `kept` is asked
+/// for rather than recomputed — no hand-copied cap and no mirrored normalization to drift out of
+/// sync with upstream. Excess keys are dropped by alphabetical accident rather than by anything
+/// the user expressed, and libdatadog's own warning names the dropped keys but not the kept ones,
+/// the selection rule, or the env var, so restate all three here. Truncation itself is left to
+/// libdatadog; this only reports it.
+fn warn_on_excess_additional_metric_tag_keys(requested: &[String], kept: &[String]) {
+    let mut dropped: Vec<&str> = requested
+        .iter()
+        .map(String::as_str)
+        .filter(|key| !kept.iter().any(|k| k == key))
+        .collect();
+    if dropped.is_empty() {
+        return;
     }
-}
+    // The request may repeat a dropped key; report each once, ordered as libdatadog sorts them.
+    dropped.sort_unstable();
+    dropped.dedup();
 
-/// Split `keys` into the keys libdatadog will keep and the ones it will drop, or `None` when the
-/// list is within [`MAX_ADDITIONAL_METRIC_TAG_KEYS`].
-///
-/// Mirrors libdatadog's `normalize_additional_metric_tag_keys` (sort, dedup, truncate) so the
-/// split reported matches the split it will actually apply.
-fn split_additional_metric_tag_keys(keys: &[String]) -> Option<(Vec<&str>, Vec<&str>)> {
-    let mut normalized: Vec<&str> = keys.iter().map(String::as_str).collect();
-    normalized.sort_unstable();
-    normalized.dedup();
-
-    if normalized.len() <= MAX_ADDITIONAL_METRIC_TAG_KEYS {
-        return None;
-    }
-    let dropped = normalized.split_off(MAX_ADDITIONAL_METRIC_TAG_KEYS);
-    Some((normalized, dropped))
+    warn!(
+        "DD_TRACE_STATS_ADDITIONAL_TAGS lists {} unique keys but at most {} are aggregated on. \
+         Keys are sorted alphabetically and the rest dropped, so stats will use {kept:?} and \
+         ignore {dropped:?}. Reduce the list to at most {} keys to choose explicitly.",
+        kept.len() + dropped.len(),
+        kept.len(),
+        kept.len(),
+    );
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -378,7 +366,6 @@ impl StatsConcentratorService {
     pub fn new(config: Arc<Config>) -> (Self, StatsConcentratorHandle) {
         let (tx, rx) = mpsc::unbounded_channel();
         let handle = StatsConcentratorHandle::new(tx);
-        warn_on_excess_additional_metric_tag_keys(&config.ext.additional_metric_tags);
         // Resolved once, here, so the limits the collapse warnings quote are the same values the
         // concentrator enforces. `unwrap_or_default()` mirrors what libdatadog does with a `None`
         // override.
@@ -411,6 +398,12 @@ impl StatsConcentratorService {
             // Span meta keys included as additional aggregation dimensions, from
             // DD_TRACE_STATS_ADDITIONAL_TAGS (only set when experimental_features_enabled).
             config.ext.additional_metric_tags.clone(),
+        );
+        // After construction, so the kept keys can be read back off the concentrator rather than
+        // predicted.
+        warn_on_excess_additional_metric_tag_keys(
+            &config.ext.additional_metric_tags,
+            concentrator.additional_metric_tag_keys(),
         );
         let service: StatsConcentratorService = Self {
             concentrator,
@@ -769,40 +762,54 @@ mod tests {
         );
     }
 
-    /// libdatadog silently keeps only the first `MAX_ADDITIONAL_METRIC_TAG_KEYS` keys after
-    /// sorting alphabetically, so which keys survive is an alphabetical accident rather than
-    /// anything the user expressed. Verify the split we report matches that rule.
+    /// The dropped keys are derived by diffing the request against what the concentrator actually
+    /// kept, so this asserts on libdatadog's real normalization rather than on a mirrored copy of
+    /// it: build a concentrator with the requested keys and check which survive.
+    ///
+    /// Which keys survive is an alphabetical accident rather than anything the user expressed,
+    /// which is the whole reason the warning exists.
     #[test]
-    fn test_split_additional_metric_tag_keys() {
-        let keys =
-            |keys: &[&str]| -> Vec<String> { keys.iter().map(ToString::to_string).collect() };
+    fn test_kept_and_dropped_additional_metric_tag_keys() {
+        let concentrator_keys = |requested: &[&str]| -> Vec<String> {
+            let concentrator = SpanConcentrator::new(
+                Duration::from_nanos(BUCKET_DURATION_NS),
+                SystemTime::now(),
+                Vec::new(),
+                Vec::new(),
+                None,
+                requested.iter().map(ToString::to_string).collect(),
+            );
+            concentrator.additional_metric_tag_keys().to_vec()
+        };
 
-        // Within the cap: nothing is dropped.
-        assert_eq!(split_additional_metric_tag_keys(&[]), None);
+        // Within the cap: everything is kept, so nothing is dropped.
+        assert!(concentrator_keys(&[]).is_empty());
         assert_eq!(
-            split_additional_metric_tag_keys(&keys(&["region", "shard", "zone", "tenant_id"])),
-            None
+            concentrator_keys(&["region", "shard", "zone", "tenant_id"]),
+            vec!["region", "shard", "tenant_id", "zone"],
+            "Within the cap every key is kept, sorted."
         );
 
-        // Duplicates collapse first, so this stays within the cap.
+        // Duplicates collapse, so this stays within the cap.
         assert_eq!(
-            split_additional_metric_tag_keys(&keys(&["region", "region", "shard"])),
-            None
+            concentrator_keys(&["region", "region", "shard"]),
+            vec!["region", "shard"]
         );
 
         // Over the cap: alphabetical order decides, so `zone` loses despite being listed first.
+        let requested = ["zone", "tenant_id", "region", "shard", "customer"];
+        let kept = concentrator_keys(&requested);
+        assert_eq!(kept, vec!["customer", "region", "shard", "tenant_id"]);
+
+        let dropped: Vec<&str> = requested
+            .iter()
+            .copied()
+            .filter(|key| !kept.iter().any(|k| k == key))
+            .collect();
         assert_eq!(
-            split_additional_metric_tag_keys(&keys(&[
-                "zone",
-                "tenant_id",
-                "region",
-                "shard",
-                "customer"
-            ])),
-            Some((
-                vec!["customer", "region", "shard", "tenant_id"],
-                vec!["zone"]
-            ))
+            dropped,
+            vec!["zone"],
+            "The warning reports exactly the keys the concentrator did not keep."
         );
     }
 
