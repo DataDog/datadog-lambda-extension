@@ -3,7 +3,7 @@ use tokio::sync::{mpsc, oneshot};
 use crate::config::Config;
 use libdd_trace_protobuf::pb;
 use libdd_trace_protobuf::pb::{ClientStatsPayload, TracerPayload};
-use libdd_trace_stats::span_concentrator::SpanConcentrator;
+use libdd_trace_stats::span_concentrator::{CardinalityLimitConfig, SpanConcentrator};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, SystemTime};
@@ -186,10 +186,24 @@ impl StatsConcentratorService {
                 .iter()
                 .map(ToString::to_string)
                 .collect(),
-            // Disable the cardinality limit to match pre-existing (unbounded) behavior.
-            Some(usize::MAX),
-            // Bottlecap does not perform agent-side stats obfuscation.
-            None,
+            // Keep stats cardinality unbounded, matching bottlecap's behavior before
+            // libdatadog gained per-field cardinality limits. Passing `None` would opt
+            // into CardinalityLimitConfig::default(): 7000 whole-key, 1024 resource,
+            // 512 http endpoint, 512 peer tags, 100 additional tags, which would
+            // silently collapse high-cardinality Lambda stats into the
+            // `tracer_blocked_value` overflow bucket. Every field is pinned instead.
+            // Per-field limits are `usize::MAX - 1` rather than `usize::MAX` only
+            // because the constructor warns when whole_key_limit is not strictly
+            // greater than every per-field limit; both values are unreachable.
+            Some(CardinalityLimitConfig {
+                whole_key_limit: usize::MAX,
+                resource_limit: usize::MAX - 1,
+                http_endpoint_limit: usize::MAX - 1,
+                peer_tags_limit: usize::MAX - 1,
+                additional_tags_limit: usize::MAX - 1,
+            }),
+            // No additional stats tag keys: aggregate on the default key fields only.
+            Vec::new(),
         );
         let service: StatsConcentratorService = Self {
             concentrator,
@@ -221,8 +235,9 @@ impl StatsConcentratorService {
         response_tx: oneshot::Sender<Option<ClientStatsPayload>>,
     ) {
         let flush_result = self.concentrator.flush(SystemTime::now(), force_flush);
-        // Obfuscation is disabled (see `SpanConcentrator::new` above), so every bucket ends up
-        // in `unobfuscated_buckets`; combine both to stay correct if that ever changes. Start
+        // Obfuscation is excluded at the feature level: bottlecap's `libdd-trace-stats`
+        // dependency does not enable `stats-obfuscation`, so every bucket ends up in
+        // `unobfuscated_buckets`; combine both to stay correct if that ever changes. Start
         // from `unobfuscated_buckets` since it's normally the only non-empty one, avoiding a
         // reallocation to grow the (usually empty) `obfuscated_buckets` vec.
         let mut stats_buckets = flush_result.unobfuscated_buckets;
@@ -397,15 +412,18 @@ mod tests {
         );
     }
 
-    /// The concentrator is configured with no cardinality limit (`Some(usize::MAX)`), so
-    /// exceeding `libdd_trace_stats`' default limit of 7,000 distinct aggregation keys per
-    /// bucket must not collapse any of them into the `tracer_blocked_value` overflow key.
+    /// The concentrator is configured with all five `CardinalityLimitConfig` limits pinned to
+    /// effectively unbounded values, so exceeding `libdd_trace_stats`' defaults must not collapse
+    /// any aggregation keys into the `tracer_blocked_value` overflow key. This exercises two
+    /// limits at once: 7,001 distinct resources exceeds both the default `whole_key_limit`
+    /// (7,000) and `resource_limit` (1,024), so a regression back to `None` (which would opt
+    /// into `CardinalityLimitConfig::default()`) fails this test twice over.
     #[tokio::test]
     async fn test_no_cardinality_limit_applied() {
-        use libdd_trace_stats::span_concentrator::DEFAULT_MAX_ENTRIES_PER_BUCKET;
+        use libdd_trace_stats::span_concentrator::CardinalityLimitConfig;
 
         const OVERFLOW_KEY: &str = "tracer_blocked_value";
-        let span_count = DEFAULT_MAX_ENTRIES_PER_BUCKET + 1;
+        let span_count = CardinalityLimitConfig::default().whole_key_limit + 1;
 
         let config = Arc::new(Config::default());
         let (service, handle) = StatsConcentratorService::new(config);
