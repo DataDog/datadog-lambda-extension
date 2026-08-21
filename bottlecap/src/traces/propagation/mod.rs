@@ -43,6 +43,14 @@ impl DatadogCompositePropagator {
         Self { inner, config }
     }
 
+    /// Whether the user opted into X-Ray's own sampling decision driving Datadog's
+    /// (`DD_MERGE_XRAY_TRACES`). Read from here because this is the config-bearing object already
+    /// threaded to every trace-extraction site.
+    #[must_use]
+    pub fn merge_xray_traces(&self) -> bool {
+        self.config.ext.merge_xray_traces
+    }
+
     pub fn extract(&self, carrier: &dyn Extractor) -> Option<SpanContext> {
         let mut context = match self.inner.extract(carrier) {
             ExtractResult::Continue(context) => context,
