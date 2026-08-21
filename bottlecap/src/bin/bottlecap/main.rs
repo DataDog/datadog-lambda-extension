@@ -1193,8 +1193,16 @@ fn start_trace_agent(
     let trace_agent_channel = trace_agent.get_sender_copy();
     let shutdown_token = trace_agent.shutdown_token();
 
+    // Bind the trace agent's socket synchronously, before spawning its async task and before
+    // this function returns to the caller (which proceeds to call the Lambda Extensions API's
+    // `/next`, triggering the runtime to invoke the handler). This closes the race where a
+    // tracer's very early `/info` probe on cold start could hit a not-yet-listening socket and
+    // permanently cache a "no EVP proxy support" decision. See TraceAgent::bind() for details.
+    let trace_agent_listener =
+        trace_agent::TraceAgent::bind().expect("Failed to bind trace agent socket");
+
     tokio::spawn(async move {
-        if let Err(e) = trace_agent.start().await {
+        if let Err(e) = trace_agent.start(trace_agent_listener).await {
             error!("Error starting trace agent: {e:?}");
         }
     });

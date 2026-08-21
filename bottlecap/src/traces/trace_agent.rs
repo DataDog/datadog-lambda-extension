@@ -61,6 +61,12 @@ const LLM_OBS_EVAL_METRIC_ENDPOINT_PATH: &str = "/evp_proxy/v2/api/intake/llm-ob
 const LLM_OBS_EVAL_METRIC_ENDPOINT_PATH_V2: &str =
     "/evp_proxy/v2/api/intake/llm-obs/v2/eval-metric";
 const LLM_OBS_SPANS_ENDPOINT_PATH: &str = "/evp_proxy/v2/api/v2/llmobs";
+// Bare prefix, not a route: tracer clients check for this exact string in `/info`'s
+// `endpoints` list to decide whether the local agent supports EVP proxying at all
+// (e.g. `DDAgentFeaturesDiscovery.containsEndpoint` in dd-trace-java). Without it they
+// silently fall back to agentless LLM Obs submission even though the concrete
+// `/evp_proxy/v2/...` routes above are served.
+const EVP_PROXY_V2_ENDPOINT_PATH: &str = "/evp_proxy/v2/";
 const INFO_ENDPOINT_PATH: &str = "/info";
 const V1_DEBUGGER_ENDPOINT_PATH: &str = "/debugger/v1/input";
 const V2_DEBUGGER_ENDPOINT_PATH: &str = "/debugger/v2/input";
@@ -173,8 +179,26 @@ impl TraceAgent {
         }
     }
 
+    /// Binds the trace agent's listening socket synchronously, before the trace agent's async
+    /// task is spawned. Tracer clients (e.g. dd-trace-java) can probe `/info` as early as their
+    /// own process's cold-start init, potentially before the Lambda Extensions API `/next` call
+    /// that triggers the invocation even returns. Binding (and thus starting the kernel's
+    /// listen/accept backlog) here, before `main` proceeds to call `/next`, guarantees that
+    /// early probe connects successfully instead of being refused and permanently caching a
+    /// "no EVP proxy support" decision for the life of the execution environment.
     #[allow(clippy::cast_possible_truncation)]
-    pub async fn start(&self) -> Result<(), Box<dyn std::error::Error>> {
+    pub fn bind() -> std::io::Result<std::net::TcpListener> {
+        let port = u16::try_from(TRACE_AGENT_PORT).expect("TRACE_AGENT_PORT is too large");
+        let socket = SocketAddr::from(([127, 0, 0, 1], port));
+        let listener = std::net::TcpListener::bind(socket)?;
+        listener.set_nonblocking(true)?;
+        Ok(listener)
+    }
+
+    pub async fn start(
+        &self,
+        listener: std::net::TcpListener,
+    ) -> Result<(), Box<dyn std::error::Error>> {
         let now = Instant::now();
 
         // Set up a channel to send processed stats to our stats aggregator.
@@ -193,10 +217,7 @@ impl TraceAgent {
         });
 
         let router = self.make_router(stats_tx);
-
-        let port = u16::try_from(TRACE_AGENT_PORT).expect("TRACE_AGENT_PORT is too large");
-        let socket = SocketAddr::from(([127, 0, 0, 1], port));
-        let listener = tokio::net::TcpListener::bind(&socket).await?;
+        let listener = tokio::net::TcpListener::from_std(listener)?;
 
         debug!("TRACE AGENT | Listening on port {TRACE_AGENT_PORT}");
         debug!(
@@ -454,6 +475,7 @@ impl TraceAgent {
                     LLM_OBS_EVAL_METRIC_ENDPOINT_PATH,
                     LLM_OBS_EVAL_METRIC_ENDPOINT_PATH_V2,
                     LLM_OBS_SPANS_ENDPOINT_PATH,
+                    EVP_PROXY_V2_ENDPOINT_PATH,
                     V1_DEBUGGER_ENDPOINT_PATH,
                     V2_DEBUGGER_ENDPOINT_PATH,
                     DEBUGGER_DIAGNOSTICS_ENDPOINT_PATH,
@@ -796,6 +818,8 @@ mod tests {
     use axum::http::{HeaderMap, HeaderName, HeaderValue};
     use libdd_trace_utils::trace_utils::TracerHeaderTags;
 
+    use super::{EVP_PROXY_V2_ENDPOINT_PATH, MAX_CONTENT_LENGTH, TraceAgent};
+
     /// Build a `HeaderMap` with `name: value` (or no header when `value` is `None`), convert it the
     /// same way `handle_traces` does, and return `(client_computed_stats, client_computed_top_level)`.
     fn parse(name: &str, value: Option<&str>) -> (bool, bool) {
@@ -870,5 +894,30 @@ mod tests {
                 "expected client_computed_top_level == true for {value:?}"
             );
         }
+    }
+
+    /// Tracer clients (e.g. dd-trace-java's `DDAgentFeaturesDiscovery`) look for this exact
+    /// string in `/info`'s `endpoints` list to decide whether EVP proxying is supported at
+    /// all, separately from any of the concrete `/evp_proxy/v2/...` routes also advertised
+    /// there. Losing it silently reintroduces the agentless LLM Obs fallback this constant
+    /// was added to prevent.
+    #[tokio::test]
+    async fn info_advertises_the_bare_evp_proxy_v2_prefix() {
+        let body = TraceAgent::info().await.into_body();
+        let bytes = axum::body::to_bytes(body, MAX_CONTENT_LENGTH)
+            .await
+            .expect("info() body should be readable");
+        let json: serde_json::Value =
+            serde_json::from_slice(&bytes).expect("info() body should be valid JSON");
+        let endpoints = json["endpoints"]
+            .as_array()
+            .expect("info() response should have an `endpoints` array");
+
+        assert!(
+            endpoints
+                .iter()
+                .any(|endpoint| endpoint == EVP_PROXY_V2_ENDPOINT_PATH),
+            "expected {EVP_PROXY_V2_ENDPOINT_PATH:?} in {endpoints:?}"
+        );
     }
 }
