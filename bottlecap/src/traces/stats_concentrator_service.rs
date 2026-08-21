@@ -184,6 +184,45 @@ fn is_sentinel_tag(tag: &str) -> bool {
     tag.split_once(':').map_or(tag, |(key, _)| key) == TRACER_BLOCKED_VALUE
 }
 
+/// Build the `CardinalityLimitConfig` override for a user-supplied
+/// `DD_TRACE_STATS_ADDITIONAL_TAGS_CARDINALITY_LIMIT`, or `None` to keep libdatadog's defaults.
+///
+/// libdatadog only warns about out-of-range limits, it still applies them, so validate here:
+/// `0` would collapse *every* additional tag into the `tracer_blocked_value` sentinel, and any
+/// value at or above `whole_key_limit` is inert because the whole-key limit collapses the key
+/// first. Both are almost certainly misconfigurations rather than intent.
+fn resolve_cardinality_limits(configured_limit: Option<usize>) -> Option<CardinalityLimitConfig> {
+    let defaults = CardinalityLimitConfig::default();
+    // `saturating_sub` keeps the clamp below the whole-key limit so it stays effective.
+    let max_effective_limit = defaults.whole_key_limit.saturating_sub(1);
+
+    let additional_tags_limit = match configured_limit? {
+        0 => {
+            warn!(
+                "DD_TRACE_STATS_ADDITIONAL_TAGS_CARDINALITY_LIMIT=0 would collapse all additional \
+                 metric tags into `tracer_blocked_value`; using the default of {} instead.",
+                defaults.additional_tags_limit
+            );
+            return None;
+        }
+        limit if limit > max_effective_limit => {
+            warn!(
+                "DD_TRACE_STATS_ADDITIONAL_TAGS_CARDINALITY_LIMIT={limit} is at or above the \
+                 whole-key cardinality limit ({}), which would make it ineffective; clamping to \
+                 {max_effective_limit}.",
+                defaults.whole_key_limit
+            );
+            max_effective_limit
+        }
+        limit => limit,
+    };
+
+    Some(CardinalityLimitConfig {
+        additional_tags_limit,
+        ..defaults
+    })
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum StatsError {
     #[error("Failed to send command to concentrator: {0}")]
@@ -296,17 +335,12 @@ impl StatsConcentratorService {
     pub fn new(config: Arc<Config>) -> (Self, StatsConcentratorHandle) {
         let (tx, rx) = mpsc::unbounded_channel();
         let handle = StatsConcentratorHandle::new(tx);
-        // Overriding `additional_tags_limit` from `DD_TRACE_STATS_ADDITIONAL_TAGS_CARDINALITY_LIMIT`
-        // is resolved here, once, so the limits the collapse warnings quote are the same values
-        // the concentrator enforces.
-        let cardinality_limits = config
-            .ext
-            .additional_metric_tags_cardinality_limit
-            .map(|additional_tags_limit| CardinalityLimitConfig {
-                additional_tags_limit,
-                ..Default::default()
-            })
-            .unwrap_or_default();
+        // Resolved once, here, so the limits the collapse warnings quote are the same values the
+        // concentrator enforces. `unwrap_or_default()` mirrors what libdatadog does with a `None`
+        // override.
+        let cardinality_limits =
+            resolve_cardinality_limits(config.ext.additional_metric_tags_cardinality_limit)
+                .unwrap_or_default();
         let additional_metric_tag_keys = config.ext.additional_metric_tags.clone();
         let possible_collapsed_fields =
             CollapsedFields::possible(!additional_metric_tag_keys.is_empty());
@@ -662,6 +696,38 @@ mod tests {
                 .iter()
                 .map(|s| &s.additional_metric_tags)
                 .collect::<Vec<_>>()
+        );
+    }
+
+    /// libdatadog only warns about out-of-range cardinality limits and still applies them, so
+    /// `resolve_cardinality_limits` has to reject the two misconfigurations that would silently
+    /// break stats: `0` (collapses every additional tag) and any value at or above the whole-key
+    /// limit (inert, because the whole-key limit collapses the key first).
+    #[test]
+    fn test_resolve_cardinality_limits() {
+        let defaults = CardinalityLimitConfig::default();
+
+        // Unset: keep libdatadog's defaults entirely.
+        assert_eq!(resolve_cardinality_limits(None), None);
+
+        // 0 would collapse everything, fall back to the defaults.
+        assert_eq!(resolve_cardinality_limits(Some(0)), None);
+
+        // In-range values are applied, leaving the other limits at their defaults.
+        let resolved = resolve_cardinality_limits(Some(5)).expect("expected an override");
+        assert_eq!(resolved.additional_tags_limit, 5);
+        assert_eq!(resolved.whole_key_limit, defaults.whole_key_limit);
+        assert_eq!(resolved.resource_limit, defaults.resource_limit);
+
+        // At or above the whole-key limit is clamped so it stays effective.
+        let clamped = resolve_cardinality_limits(Some(defaults.whole_key_limit))
+            .expect("expected an override");
+        assert_eq!(clamped.additional_tags_limit, defaults.whole_key_limit - 1);
+        let clamped_high =
+            resolve_cardinality_limits(Some(usize::MAX)).expect("expected an override");
+        assert_eq!(
+            clamped_high.additional_tags_limit,
+            defaults.whole_key_limit - 1
         );
     }
 
