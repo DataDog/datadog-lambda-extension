@@ -280,7 +280,17 @@ impl StatsConcentratorService {
     pub fn new(config: Arc<Config>) -> (Self, StatsConcentratorHandle) {
         let (tx, rx) = mpsc::unbounded_channel();
         let handle = StatsConcentratorHandle::new(tx);
-        let cardinality_limits = CardinalityLimitConfig::default();
+        // Overriding `additional_tags_limit` from `DD_TRACE_STATS_ADDITIONAL_TAGS_CARDINALITY_LIMIT`
+        // is resolved here, once, so the limits the collapse warnings quote are the same values
+        // the concentrator enforces.
+        let cardinality_limits = config
+            .ext
+            .additional_metric_tags_cardinality_limit
+            .map(|additional_tags_limit| CardinalityLimitConfig {
+                additional_tags_limit,
+                ..Default::default()
+            })
+            .unwrap_or_default();
         let concentrator = SpanConcentrator::new(
             Duration::from_nanos(BUCKET_DURATION_NS),
             SystemTime::now(),
@@ -292,18 +302,21 @@ impl StatsConcentratorService {
                 .iter()
                 .map(ToString::to_string)
                 .collect(),
-            // Use libdatadog's default cardinality limits, matching the trace agent and
-            // the Serverless Compatibility Layer: 7000 whole-key, 1024 resource, 512 http
-            // endpoint, 512 peer tags, 100 additional tags. Keys beyond a limit collapse
-            // into the `tracer_blocked_value` overflow bucket, which bounds concentrator
-            // memory and the /v0.6/stats payload inside a memory-capped Lambda.
+            // Use libdatadog's default cardinality limits except for `additional_tags_limit`,
+            // which is overridden by `DD_TRACE_STATS_ADDITIONAL_TAGS_CARDINALITY_LIMIT` when
+            // set (matching the Serverless Compatibility Layer / `datadog-trace-agent`).
+            // Defaults: 7000 whole-key, 1024 resource, 512 http endpoint, 512 peer tags, 100
+            // additional tags. Keys beyond a limit collapse into the `tracer_blocked_value`
+            // overflow bucket, which bounds concentrator memory and the /v0.6/stats payload
+            // inside a memory-capped Lambda.
             //
-            // Passed explicitly rather than as `None` (which libdatadog resolves with
-            // `unwrap_or_default()`, so the two are equivalent) so that the limits the
-            // collapse warnings quote are provably the ones in force.
+            // Passed as `Some` of the resolved value rather than the raw `Option` (which
+            // libdatadog would resolve with `unwrap_or_default()`, so the two are equivalent)
+            // so that the limits the collapse warnings quote are provably the ones in force.
             Some(cardinality_limits),
-            // No additional stats tag keys: aggregate on the default key fields only.
-            Vec::new(),
+            // Span meta keys included as additional aggregation dimensions, from
+            // DD_TRACE_STATS_ADDITIONAL_TAGS (only set when experimental_features_enabled).
+            config.ext.additional_metric_tags.clone(),
         );
         let service: StatsConcentratorService = Self {
             concentrator,
@@ -572,6 +585,62 @@ mod tests {
         assert!(
             peer_tags.iter().any(|t| t.starts_with("db.system:")),
             "Expected peer_tags to contain db.system, got: {peer_tags:?}"
+        );
+    }
+
+    /// `additional_metric_tags` (populated from `DD_TRACE_STATS_ADDITIONAL_TAGS`, gated on
+    /// `DD_TRACE_EXPERIMENTAL_FEATURES_ENABLED`) should surface matching span `meta` keys as
+    /// `ClientGroupedStats.additional_metric_tags` on export.
+    #[tokio::test]
+    async fn test_additional_metric_tags_populated_when_configured() {
+        let mut config = Config::default();
+        config.ext.additional_metric_tags = vec!["datacenter".to_string()];
+        let config = Arc::new(config);
+        let (service, handle) = StatsConcentratorService::new(config);
+        tokio::spawn(service.run());
+
+        let span = create_span_kind_span("client", vec![("datacenter", "us-east-1")]);
+        handle.add(&span).unwrap();
+
+        let result = handle.flush(true).await.unwrap();
+        let payload = result.expect("Expected stats for the client span, but got None.");
+        let all_stats: Vec<_> = payload.stats.iter().flat_map(|b| &b.stats).collect();
+        assert!(
+            all_stats
+                .iter()
+                .any(|s| s.additional_metric_tags == vec!["datacenter:us-east-1".to_string()]),
+            "Expected additional_metric_tags to contain datacenter:us-east-1, got: {:?}",
+            all_stats
+                .iter()
+                .map(|s| &s.additional_metric_tags)
+                .collect::<Vec<_>>()
+        );
+    }
+
+    /// When `additional_metric_tags` is unset (the default), `additional_metric_tags` on the
+    /// exported stats must remain empty even if the span has a meta key that would otherwise
+    /// match a commonly-used tag name.
+    #[tokio::test]
+    async fn test_additional_metric_tags_empty_by_default() {
+        let config = Arc::new(Config::default());
+        let (service, handle) = StatsConcentratorService::new(config);
+        tokio::spawn(service.run());
+
+        let span = create_span_kind_span("client", vec![("datacenter", "us-east-1")]);
+        handle.add(&span).unwrap();
+
+        let result = handle.flush(true).await.unwrap();
+        let payload = result.expect("Expected stats for the client span, but got None.");
+        let all_stats: Vec<_> = payload.stats.iter().flat_map(|b| &b.stats).collect();
+        assert!(
+            all_stats
+                .iter()
+                .all(|s| s.additional_metric_tags.is_empty()),
+            "Expected additional_metric_tags to be empty by default, got: {:?}",
+            all_stats
+                .iter()
+                .map(|s| &s.additional_metric_tags)
+                .collect::<Vec<_>>()
         );
     }
 
