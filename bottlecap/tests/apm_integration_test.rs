@@ -30,7 +30,9 @@ use bottlecap::traces::stats_generator::StatsGenerator;
 use bottlecap::traces::trace_aggregator::SendDataBuilderInfo;
 use bottlecap::traces::trace_aggregator_service::AggregatorService;
 use bottlecap::traces::trace_flusher::TraceFlusher;
-use bottlecap::traces::trace_processor::{SendingTraceProcessor, ServerlessTraceProcessor};
+use bottlecap::traces::trace_processor::{
+    SendingTraceProcessor, ServerlessTraceProcessor, new_error_sampler,
+};
 use dogstatsd::api_key::ApiKeyFactory;
 use libdd_common::Endpoint;
 use libdd_trace_obfuscation::obfuscation_config::ObfuscationConfig;
@@ -343,6 +345,7 @@ async fn run_processor_pipeline_with_traces(
             obfuscation_config: Arc::new(
                 ObfuscationConfig::new().expect("Failed to create ObfuscationConfig"),
             ),
+            error_sampler: new_error_sampler(true),
         }),
         trace_tx,
         stats_generator: Arc::new(StatsGenerator::new(concentrator_handle.clone())),

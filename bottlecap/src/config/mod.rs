@@ -66,6 +66,16 @@ pub struct LambdaConfig {
     pub capture_lambda_payload: bool,
     pub capture_lambda_payload_max_depth: u32,
     pub lambda_extension_compute_stats: bool,
+
+    /// `DD_SERVERLESS_ERROR_SAMPLER_ENABLED`: rescue errored trace chunks that would
+    /// otherwise be dropped, on the `lambda_extension_compute_stats` path. The
+    /// sampler runs in `AlwaysKeep` mode, so this is a plain on/off switch with
+    /// no volume ceiling: enabled rescues every errored chunk, whatever the
+    /// tracer's sampling rate. A function that errors on most invocations under
+    /// `DD_TRACE_SAMPLE_RATE=0.01` will ingest close to every trace, not 1%.
+    /// See APMSVLS-469.
+    pub serverless_error_sampler_enabled: bool,
+
     pub span_dedup_timeout: Option<Duration>,
     pub api_key_secret_reload_interval: Option<Duration>,
     pub serverless_appsec_enabled: bool,
@@ -95,6 +105,7 @@ impl Default for LambdaConfig {
             capture_lambda_payload: false,
             capture_lambda_payload_max_depth: 10,
             lambda_extension_compute_stats: false,
+            serverless_error_sampler_enabled: false,
             span_dedup_timeout: None,
             api_key_secret_reload_interval: None,
             serverless_appsec_enabled: false,
@@ -153,6 +164,9 @@ pub struct LambdaConfigSource {
     #[serde(deserialize_with = "deser_opt_bool")]
     pub lambda_extension_compute_stats: Option<bool>,
 
+    #[serde(deserialize_with = "deser_opt_bool")]
+    pub serverless_error_sampler_enabled: Option<bool>,
+
     #[serde(deserialize_with = "deser_dur_secs_ignore_zero")]
     pub span_dedup_timeout: Option<Duration>,
     #[serde(deserialize_with = "deser_dur_secs_ignore_zero")]
@@ -199,6 +213,7 @@ impl DatadogConfigExtension for LambdaConfig {
                 capture_lambda_payload,
                 capture_lambda_payload_max_depth,
                 lambda_extension_compute_stats,
+                serverless_error_sampler_enabled,
                 serverless_appsec_enabled,
                 appsec_waf_timeout,
                 api_security_enabled,
@@ -534,6 +549,32 @@ mod lambda_config_tests {
     fn lambda_extension_compute_stats_defaults_false() {
         let config = load(|_| Ok(()));
         assert!(!config.ext.lambda_extension_compute_stats);
+    }
+
+    // ---- error sampler (serverless_error_sampler_enabled) ----
+
+    #[test]
+    fn serverless_error_sampler_enabled_defaults_to_false() {
+        let config = load(|_| Ok(()));
+        assert!(!config.ext.serverless_error_sampler_enabled);
+    }
+
+    #[test]
+    fn serverless_error_sampler_enabled_from_env() {
+        let config = load(|jail| {
+            jail.set_env("DD_SERVERLESS_ERROR_SAMPLER_ENABLED", "true");
+            Ok(())
+        });
+        assert!(config.ext.serverless_error_sampler_enabled);
+    }
+
+    #[test]
+    fn serverless_error_sampler_enabled_from_yaml() {
+        let config = load(|jail| {
+            jail.create_file("datadog.yaml", "serverless_error_sampler_enabled: true\n")?;
+            Ok(())
+        });
+        assert!(config.ext.serverless_error_sampler_enabled);
     }
 
     // ---- Duration fields ----
