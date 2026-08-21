@@ -3,14 +3,22 @@ use tokio::sync::{mpsc, oneshot};
 use crate::config::Config;
 use libdd_trace_protobuf::pb;
 use libdd_trace_protobuf::pb::{ClientStatsPayload, TracerPayload};
-use libdd_trace_stats::span_concentrator::SpanConcentrator;
+use libdd_trace_stats::span_concentrator::{CardinalityLimitConfig, SpanConcentrator};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, SystemTime};
-use tracing::error;
+use tracing::{error, warn};
 
 const S_TO_NS: u64 = 1_000_000_000;
 const BUCKET_DURATION_NS: u64 = 10 * S_TO_NS; // 10 seconds
+
+/// Sentinel libdatadog rewrites collapsed aggregation key fields to.
+///
+/// Hand-copied: upstream declares `pub const TRACER_BLOCKED_VALUE` in
+/// `libdd-trace-stats/src/span_concentrator/aggregation.rs`, but `mod aggregation` is private and
+/// the constant is not re-exported, so it cannot be imported. A one-line upstream `pub use` would
+/// remove this copy.
+const TRACER_BLOCKED_VALUE: &str = "tracer_blocked_value";
 
 /// Span kinds eligible for stats computation, matching the Go agent's default
 /// `ComputeStatsBySpanKind: true` behavior.
@@ -73,6 +81,94 @@ const DEFAULT_PEER_TAG_KEYS: &[&str] = &[
     "tablename",
     "topicname",
 ];
+
+/// Bitset of aggregation key fields that libdatadog collapsed into [`TRACER_BLOCKED_VALUE`]
+/// because they exceeded their per-bucket cardinality limit.
+///
+/// A bitset rather than four `bool`s both to satisfy `clippy::struct_excessive_bools` and to
+/// mirror libdatadog's own `CollapsedFieldSet`, which tracks the same four fields but is not
+/// readable from outside its crate.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+struct CollapsedFields(u8);
+
+impl CollapsedFields {
+    const RESOURCE: u8 = 1 << 0;
+    const HTTP_ENDPOINT: u8 = 1 << 1;
+    const PEER_TAGS: u8 = 1 << 2;
+    const ADDITIONAL_TAGS: u8 = 1 << 3;
+
+    fn add(&mut self, field: u8) {
+        self.0 |= field;
+    }
+
+    fn contains(self, field: u8) -> bool {
+        self.0 & field != 0
+    }
+
+    /// Each field's bit, the noun to use when reporting it, and the limit that governs it.
+    fn reportable(limits: &CardinalityLimitConfig) -> [(u8, &'static str, usize); 4] {
+        [
+            (Self::RESOURCE, "resource names", limits.resource_limit),
+            (
+                Self::HTTP_ENDPOINT,
+                "HTTP endpoints",
+                limits.http_endpoint_limit,
+            ),
+            (Self::PEER_TAGS, "peer tag sets", limits.peer_tags_limit),
+            (
+                Self::ADDITIONAL_TAGS,
+                "additional metric tag sets",
+                limits.additional_tags_limit,
+            ),
+        ]
+    }
+}
+
+/// Scan a flushed payload for per-field cardinality collapse.
+///
+/// This is the only way bottlecap can see per-field collapse today: `FlushResult.collapsed_spans`
+/// counts *whole-key* overflow exclusively, and the per-field counters
+/// (`StatsBucket::collapsed_fields_metrics`) have no public reader without the `dogstatsd`/
+/// `telemetry` features, which bottlecap does not enable. The payload itself carries the signal,
+/// because collapse is visible in the emitted field values.
+///
+/// Per-field collapse rewrites *only* the field that exceeded its limit, whereas the whole-key
+/// overflow entry has *every* field set to the sentinel. `service` is never rewritten by per-field
+/// collapse, so it identifies that overflow entry and lets us skip it — otherwise a single
+/// whole-key overflow would masquerade as all four fields collapsing at once.
+fn observe_collapsed_fields(buckets: &[pb::ClientStatsBucket]) -> CollapsedFields {
+    let mut observed = CollapsedFields::default();
+    for stats in buckets.iter().flat_map(|bucket| &bucket.stats) {
+        if stats.service == TRACER_BLOCKED_VALUE {
+            continue;
+        }
+        if stats.resource == TRACER_BLOCKED_VALUE {
+            observed.add(CollapsedFields::RESOURCE);
+        }
+        if stats.http_endpoint == TRACER_BLOCKED_VALUE {
+            observed.add(CollapsedFields::HTTP_ENDPOINT);
+        }
+        if stats.peer_tags.iter().any(|tag| is_sentinel_tag(tag)) {
+            observed.add(CollapsedFields::PEER_TAGS);
+        }
+        if stats
+            .additional_metric_tags
+            .iter()
+            .any(|tag| is_sentinel_tag(tag))
+        {
+            observed.add(CollapsedFields::ADDITIONAL_TAGS);
+        }
+    }
+    observed
+}
+
+/// Whether an encoded tag carries the collapse sentinel as its key.
+///
+/// The two tag lists encode differently: `peer_tags` emits a valueless tag as the bare key, while
+/// `additional_metric_tags` always appends `:`. Comparing the key half handles both.
+fn is_sentinel_tag(tag: &str) -> bool {
+    tag.split_once(':').map_or(tag, |(key, _)| key) == TRACER_BLOCKED_VALUE
+}
 
 #[derive(Debug, thiserror::Error)]
 pub enum StatsError {
@@ -166,6 +262,15 @@ pub struct StatsConcentratorService {
     rx: mpsc::UnboundedReceiver<ConcentratorCommand>,
     tracer_metadata: TracerMetadata,
     config: Arc<Config>,
+    /// The limits the concentrator was built with, so collapse warnings can name the limit that
+    /// fired instead of re-deriving it.
+    cardinality_limits: CardinalityLimitConfig,
+    /// Whether whole-key overflow has already been warned about, so it warns at most once per
+    /// sandbox. A plain `bool` rather than an `AtomicBool` because `handle_flush` takes
+    /// `&mut self`; only `StatsConcentratorHandle` is cloned and shared.
+    whole_key_collapse_reported: bool,
+    /// Same, per collapsed field.
+    reported_collapsed_fields: CollapsedFields,
 }
 
 // A service that handles add() and flush() requests in the same queue,
@@ -175,6 +280,7 @@ impl StatsConcentratorService {
     pub fn new(config: Arc<Config>) -> (Self, StatsConcentratorHandle) {
         let (tx, rx) = mpsc::unbounded_channel();
         let handle = StatsConcentratorHandle::new(tx);
+        let cardinality_limits = CardinalityLimitConfig::default();
         let concentrator = SpanConcentrator::new(
             Duration::from_nanos(BUCKET_DURATION_NS),
             SystemTime::now(),
@@ -191,7 +297,11 @@ impl StatsConcentratorService {
             // endpoint, 512 peer tags, 100 additional tags. Keys beyond a limit collapse
             // into the `tracer_blocked_value` overflow bucket, which bounds concentrator
             // memory and the /v0.6/stats payload inside a memory-capped Lambda.
-            None,
+            //
+            // Passed explicitly rather than as `None` (which libdatadog resolves with
+            // `unwrap_or_default()`, so the two are equivalent) so that the limits the
+            // collapse warnings quote are provably the ones in force.
+            Some(cardinality_limits),
             // No additional stats tag keys: aggregate on the default key fields only.
             Vec::new(),
         );
@@ -201,6 +311,9 @@ impl StatsConcentratorService {
             // To be set when the first trace is received
             tracer_metadata: TracerMetadata::default(),
             config,
+            cardinality_limits,
+            whole_key_collapse_reported: false,
+            reported_collapsed_fields: CollapsedFields::default(),
         };
         (service, handle)
     }
@@ -225,6 +338,7 @@ impl StatsConcentratorService {
         response_tx: oneshot::Sender<Option<ClientStatsPayload>>,
     ) {
         let flush_result = self.concentrator.flush(SystemTime::now(), force_flush);
+        let collapsed_spans = flush_result.collapsed_spans;
         // Obfuscation is excluded at the feature level: bottlecap's `libdd-trace-stats`
         // dependency does not enable `stats-obfuscation`, so every bucket ends up in
         // `unobfuscated_buckets`; combine both to stay correct if that ever changes. Start
@@ -232,6 +346,7 @@ impl StatsConcentratorService {
         // reallocation to grow the (usually empty) `obfuscated_buckets` vec.
         let mut stats_buckets = flush_result.unobfuscated_buckets;
         stats_buckets.extend(flush_result.obfuscated_buckets);
+        self.report_collapse(&stats_buckets, collapsed_spans);
         let stats = if stats_buckets.is_empty() {
             None
         } else {
@@ -271,6 +386,64 @@ impl StatsConcentratorService {
         let response = response_tx.send(stats);
         if let Err(e) = response {
             error!("Failed to return trace stats: {e:?}");
+        }
+    }
+
+    /// Warn, at most once per sandbox per signal, when cardinality limits collapsed stats keys.
+    ///
+    /// Two independent signals, because they fail in opposite directions:
+    ///
+    /// - **whole-key** overflow, from `collapsed_spans`, which carries a span count;
+    /// - **per-field** collapse, from scanning the payload, which does not.
+    ///
+    /// Both are needed. Per-field limits are applied *before* the whole-key limit
+    /// (`aggregation.rs:589` runs ahead of the check at `:603`), so a single-dimension explosion —
+    /// request ids in resource names, the canonical Lambda failure — collapses resources first,
+    /// which shrinks the distinct whole-key space and can stop `collapsed_spans` ever leaving 0.
+    /// Relying on `collapsed_spans` alone would therefore be silent for exactly the case this
+    /// reporting exists to surface.
+    ///
+    /// No per-flush `debug!`: libdatadog already emits one for whole-key overflow at
+    /// `span_concentrator/mod.rs:442`.
+    ///
+    /// `StatsBucket::collapsed_fields_metrics()` is intentionally not consulted. It is reachable
+    /// and `Copy`, but its per-combination counts have no public accessor without the
+    /// `dogstatsd`/`telemetry` features, so it can only report *that* something collapsed — which
+    /// the payload scan already does. It becomes worth reading once upstream exposes the counts,
+    /// at which point this can report how many keys collapsed rather than only which fields.
+    fn report_collapse(&mut self, buckets: &[pb::ClientStatsBucket], collapsed_spans: u64) {
+        if collapsed_spans > 0 && !self.whole_key_collapse_reported {
+            self.whole_key_collapse_reported = true;
+            warn!(
+                "Trace stats exceeded the per-bucket limit of {} distinct aggregation keys; \
+                 {collapsed_spans} span(s) in this flush were aggregated under the \
+                 '{TRACER_BLOCKED_VALUE}' overflow key and are no longer attributable to a \
+                 service, resource or endpoint. This limit is not configurable; reduce span \
+                 resource and endpoint cardinality to keep trace stats accurate. Warned once per \
+                 sandbox.",
+                self.cardinality_limits.whole_key_limit
+            );
+        }
+
+        // Names no environment variable, deliberately: the per-field limits are not
+        // customer-tunable in bottlecap, and both candidate knobs would mislead. libdatadog's own
+        // message blames `DD_TRACE_STATS_CARDINALITY_LIMIT`, which bottlecap does not read at all,
+        // and `DD_TRACE_STATS_ADDITIONAL_TAGS_CARDINALITY_LIMIT` governs only `additional_tags`
+        // (and only once the additional-tags feature is enabled). Reducing cardinality in the
+        // application is the only real remediation, so that is what this recommends.
+        let observed = observe_collapsed_fields(buckets);
+        for (field, noun, limit) in CollapsedFields::reportable(&self.cardinality_limits) {
+            if !observed.contains(field) || self.reported_collapsed_fields.contains(field) {
+                continue;
+            }
+            self.reported_collapsed_fields.add(field);
+            warn!(
+                "Trace stats saw more than {limit} distinct {noun} in a 10s bucket; the excess is \
+                 aggregated under '{TRACER_BLOCKED_VALUE}', so those stats are no longer \
+                 attributable. Reduce cardinality — request ids or path parameters embedded in \
+                 resource names are the usual cause — to keep trace stats accurate. Warned once \
+                 per sandbox."
+            );
         }
     }
 }
@@ -408,9 +581,7 @@ mod tests {
     /// `whole_key_limit` (7,000) and `resource_limit` (1,024).
     #[tokio::test]
     async fn test_cardinality_limit_applied() {
-        use libdd_trace_stats::span_concentrator::CardinalityLimitConfig;
-
-        const OVERFLOW_KEY: &str = "tracer_blocked_value";
+        const OVERFLOW_KEY: &str = TRACER_BLOCKED_VALUE;
         let span_count = CardinalityLimitConfig::default().whole_key_limit + 1;
 
         let config = Arc::new(Config::default());
@@ -437,6 +608,197 @@ mod tests {
             all_stats.iter().any(|s| s.resource == OVERFLOW_KEY),
             "Expected the resources beyond the limit to collapse into the '{OVERFLOW_KEY}' \
              overflow key."
+        );
+    }
+
+    /// `(service, resource, http_endpoint, peer_tags, additional_metric_tags)`
+    type StatsEntry<'a> = (&'a str, &'a str, &'a str, Vec<&'a str>, Vec<&'a str>);
+
+    /// Build a payload bucket from [`StatsEntry`] tuples.
+    fn bucket(entries: Vec<StatsEntry<'_>>) -> pb::ClientStatsBucket {
+        pb::ClientStatsBucket {
+            stats: entries
+                .into_iter()
+                .map(
+                    |(service, resource, http_endpoint, peer_tags, additional_metric_tags)| {
+                        pb::ClientGroupedStats {
+                            service: service.to_string(),
+                            resource: resource.to_string(),
+                            http_endpoint: http_endpoint.to_string(),
+                            peer_tags: peer_tags.into_iter().map(ToString::to_string).collect(),
+                            additional_metric_tags: additional_metric_tags
+                                .into_iter()
+                                .map(ToString::to_string)
+                                .collect(),
+                            ..Default::default()
+                        }
+                    },
+                )
+                .collect(),
+            ..Default::default()
+        }
+    }
+
+    /// Per-field collapse rewrites only the field that overflowed, so each field is detected
+    /// independently — and the whole-key overflow entry, which sets *every* field to the sentinel,
+    /// must not be mistaken for all four collapsing at once.
+    #[test]
+    fn test_observe_collapsed_fields() {
+        const S: &str = TRACER_BLOCKED_VALUE;
+
+        // Nothing collapsed.
+        assert_eq!(
+            observe_collapsed_fields(&[bucket(vec![(
+                "svc",
+                "GET /users",
+                "/users",
+                vec!["peer.service:db"],
+                vec!["region:ca-central-1"]
+            )])]),
+            CollapsedFields::default()
+        );
+
+        // Resource collapsed on its own: the field that overflowed, and only that field.
+        assert_eq!(
+            observe_collapsed_fields(&[bucket(vec![("svc", S, "/users", vec![], vec![])])]),
+            CollapsedFields(CollapsedFields::RESOURCE)
+        );
+
+        // The whole-key overflow entry is identified by `service` — never rewritten per-field —
+        // and skipped, so it reports no per-field collapse at all.
+        assert_eq!(
+            observe_collapsed_fields(&[bucket(vec![(
+                S,
+                S,
+                S,
+                vec![S],
+                vec!["tracer_blocked_value:"]
+            )])]),
+            CollapsedFields::default()
+        );
+
+        // Both tag lists, which encode a valueless sentinel differently: `peer_tags` as the bare
+        // key, `additional_metric_tags` with a trailing colon.
+        assert_eq!(
+            observe_collapsed_fields(&[bucket(vec![(
+                "svc",
+                "GET /users",
+                S,
+                vec![S],
+                vec!["tracer_blocked_value:"]
+            )])]),
+            CollapsedFields(
+                CollapsedFields::HTTP_ENDPOINT
+                    | CollapsedFields::PEER_TAGS
+                    | CollapsedFields::ADDITIONAL_TAGS
+            )
+        );
+
+        // Collapse in any bucket of the flush counts.
+        assert_eq!(
+            observe_collapsed_fields(&[
+                bucket(vec![("svc", "GET /users", "/users", vec![], vec![])]),
+                bucket(vec![("svc", S, "/users", vec![], vec![])]),
+            ]),
+            CollapsedFields(CollapsedFields::RESOURCE)
+        );
+    }
+
+    /// Regression test for the observability trap: a single-dimension resource explosion collapses
+    /// per-field, which shrinks the whole-key space so `collapsed_spans` never fires. Exceeding
+    /// `resource_limit` (1,024) while staying well under `whole_key_limit` (7,000) must therefore
+    /// still be observable — via the payload scan, and *not* via a whole-key overflow entry.
+    #[tokio::test]
+    async fn test_resource_collapse_observed_without_whole_key_overflow() {
+        let limits = CardinalityLimitConfig::default();
+        let span_count = limits.resource_limit + 1;
+        assert!(
+            span_count < limits.whole_key_limit,
+            "This test is only meaningful below the whole-key limit."
+        );
+
+        let config = Arc::new(Config::default());
+        let (service, handle) = StatsConcentratorService::new(config);
+        tokio::spawn(service.run());
+
+        for i in 0..span_count {
+            let resource = format!("GET /users/{i}");
+            let span = create_span_kind_span_with_resource("client", &resource, vec![]);
+            handle.add(&span).unwrap();
+        }
+
+        let payload = handle
+            .flush(true)
+            .await
+            .unwrap()
+            .expect("Expected stats for the generated spans, but got None.");
+
+        assert_eq!(
+            observe_collapsed_fields(&payload.stats),
+            CollapsedFields(CollapsedFields::RESOURCE),
+            "Exceeding the resource limit must be observable as a resource collapse."
+        );
+        assert!(
+            !payload
+                .stats
+                .iter()
+                .flat_map(|bucket| &bucket.stats)
+                .any(|stats| stats.service == TRACER_BLOCKED_VALUE),
+            "No whole-key overflow entry should exist here; if one does, this test no longer \
+             covers the per-field-only case."
+        );
+    }
+
+    /// Each signal warns at most once per sandbox, and the two are independent — whole-key
+    /// overflow must not suppress a later per-field collapse or vice versa. Asserted on the
+    /// service's own state rather than on log output; `report_collapse` logs iff it flips a flag.
+    ///
+    /// This also covers the whole-key branch, which is otherwise unreachable in tests: `new()`
+    /// always builds the concentrator with libdatadog's defaults, and driving distinct keys past
+    /// `whole_key_limit` (7,000) is impossible without first tripping `resource_limit` (1,024),
+    /// which collapses per-field and keeps `collapsed_spans` at 0.
+    #[tokio::test]
+    async fn test_collapse_warns_once_per_signal() {
+        let config = Arc::new(Config::default());
+        let (mut service, _handle) = StatsConcentratorService::new(config);
+
+        assert!(!service.whole_key_collapse_reported);
+        assert_eq!(
+            service.reported_collapsed_fields,
+            CollapsedFields::default()
+        );
+
+        // No collapse at all: nothing is reported.
+        service.report_collapse(&[], 0);
+        assert!(!service.whole_key_collapse_reported);
+
+        // Whole-key overflow, reported from the span count, with no per-field collapse present.
+        service.report_collapse(&[], 3);
+        assert!(service.whole_key_collapse_reported);
+        assert_eq!(
+            service.reported_collapsed_fields,
+            CollapsedFields::default()
+        );
+
+        // A per-field collapse in a later flush is still reported, independently.
+        let collapsed = [bucket(vec![(
+            "svc",
+            TRACER_BLOCKED_VALUE,
+            "/users",
+            vec![],
+            vec![],
+        )])];
+        service.report_collapse(&collapsed, 9);
+        assert_eq!(
+            service.reported_collapsed_fields,
+            CollapsedFields(CollapsedFields::RESOURCE)
+        );
+
+        // Repeat flushes take the early return, leaving state untouched.
+        service.report_collapse(&collapsed, 9);
+        assert_eq!(
+            service.reported_collapsed_fields,
+            CollapsedFields(CollapsedFields::RESOURCE)
         );
     }
 }
