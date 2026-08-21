@@ -199,14 +199,17 @@ impl SpanInferrer {
     }
 
     #[must_use]
-    fn should_skip_inferred_span(identified_trigger: &IdentifiedTrigger) -> bool {
+    fn should_skip_inferred_span(
+        identified_trigger: &IdentifiedTrigger,
+        merge_xray_traces: bool,
+    ) -> bool {
         match identified_trigger {
             // There is no inferred span for ALB events
             IdentifiedTrigger::ALBEvent(_) => true,
             // There is no inferred span for Step Functions events
             // if the `SpanContext` is generated
             IdentifiedTrigger::StepFunctionEvent(_) => {
-                extract_generated_span_context(identified_trigger).is_some()
+                extract_generated_span_context(identified_trigger, merge_xray_traces).is_some()
             }
             _ => false,
         }
@@ -231,7 +234,8 @@ impl SpanInferrer {
 
         let identified_trigger = IdentifiedTrigger::from_value(payload_value);
         let should_enrich_span = Self::should_enrich_span(&identified_trigger);
-        let should_skip_inferred_span = Self::should_skip_inferred_span(&identified_trigger);
+        let should_skip_inferred_span =
+            Self::should_skip_inferred_span(&identified_trigger, self.config.ext.merge_xray_traces);
         let wrapped_inferred_span =
             Self::get_wrapped_inferred_span(&identified_trigger, &mut inferred_span, &self.config);
         let span_pointers = Self::get_span_pointers(&identified_trigger);
@@ -396,7 +400,8 @@ pub fn extract_span_context(
     propagator: Arc<DatadogCompositePropagator>,
 ) -> Option<SpanContext> {
     let identified_trigger = IdentifiedTrigger::from_value(payload_value);
-    let generated_span_context = extract_generated_span_context(&identified_trigger);
+    let generated_span_context =
+        extract_generated_span_context(&identified_trigger, propagator.merge_xray_traces());
     let trigger = SpanInferrer::get_trigger_type(identified_trigger);
 
     // Order matters here: check inferred span for trace context first, then fallback to generated span context.
@@ -421,12 +426,14 @@ pub fn extract_span_context(
 #[must_use]
 pub fn extract_generated_span_context(
     identified_trigger: &IdentifiedTrigger,
+    merge_xray_traces: bool,
 ) -> Option<SpanContext> {
     match identified_trigger {
         IdentifiedTrigger::StepFunctionEvent(t) => Some(t.get_span_context()),
-        IdentifiedTrigger::SqsRecord(t) => {
-            extract_trace_context_from_aws_trace_header(t.attributes.aws_trace_header.clone())
-        }
+        IdentifiedTrigger::SqsRecord(t) => extract_trace_context_from_aws_trace_header(
+            t.attributes.aws_trace_header.clone(),
+            merge_xray_traces,
+        ),
         _ => None,
     }
 }

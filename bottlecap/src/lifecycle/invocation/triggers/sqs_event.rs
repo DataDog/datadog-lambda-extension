@@ -238,6 +238,7 @@ impl ServiceNameResolver for SqsRecord {
 // not be passed to the tracer.Propagator, instead extracting context directly.
 pub(crate) fn extract_trace_context_from_aws_trace_header(
     headers_string: Option<String>,
+    merge_xray_traces: bool,
 ) -> Option<SpanContext> {
     let value = headers_string?;
     if !value.starts_with("Root=") {
@@ -277,11 +278,13 @@ pub(crate) fn extract_trace_context_from_aws_trace_header(
         return None;
     }
 
-    // Whether `Sampled` is a decision we can act on depends on who wrote the header.
-    let sampling_priority = match (datadog_planted, sampled.as_str()) {
+    // Whether `Sampled` is a decision we can act on depends on who wrote the header, and on
+    // whether the user opted into X-Ray driving their sampling.
+    let honor_sampled_flag = datadog_planted || merge_xray_traces;
+    let sampling_priority = match (honor_sampled_flag, sampled.as_str()) {
         // A keep is safe to honor whoever wrote it: the cost is over-retention, not lost spans.
         (_, "1") => Some("1"),
-        // Datadog planted this header, so the drop is Datadog's own decision.
+        // Datadog planted this header, or the user asked for X-Ray's decisions to count.
         (true, _) => Some("0"),
         // X-Ray's drop, or no decision at all when its tracing is off. Leaving the priority
         // unset lets the tracer sample; sending 0 would drop its spans on X-Ray's behalf.
@@ -683,9 +686,10 @@ mod tests {
         let event = SqsRecord::new(payload).expect("Failed to deserialize EventBridgeEvent");
 
         assert_eq!(
-            extract_trace_context_from_aws_trace_header(Some(
-                event.attributes.aws_trace_header.unwrap().clone()
-            ))
+            extract_trace_context_from_aws_trace_header(
+                Some(event.attributes.aws_trace_header.unwrap().clone()),
+                false
+            )
             .unwrap(),
             SpanContext {
                 trace_id: 130_944_522_478_755_159,
@@ -705,10 +709,13 @@ mod tests {
 
     #[test]
     fn aws_generated_root_id_not_sampled_leaves_priority_unset() {
-        let context = extract_trace_context_from_aws_trace_header(Some(
-            "Root=1-64cc2edd-112fbf1701d1355973a11d57;Parent=7d5a9776024b2d42;Sampled=0"
-                .to_string(),
-        ))
+        let context = extract_trace_context_from_aws_trace_header(
+            Some(
+                "Root=1-64cc2edd-112fbf1701d1355973a11d57;Parent=7d5a9776024b2d42;Sampled=0"
+                    .to_string(),
+            ),
+            false,
+        )
         .expect("failed to extract context");
 
         // X-Ray's decision, not Datadog's: keep the IDs, let the tracer sample.
@@ -718,10 +725,13 @@ mod tests {
 
     #[test]
     fn datadog_planted_root_id_not_sampled_drops() {
-        let context = extract_trace_context_from_aws_trace_header(Some(
-            "Root=1-68029e8a-0000000035578e774943fd9d;Parent=76c040bdc454a7ac;Sampled=0"
-                .to_string(),
-        ))
+        let context = extract_trace_context_from_aws_trace_header(
+            Some(
+                "Root=1-68029e8a-0000000035578e774943fd9d;Parent=76c040bdc454a7ac;Sampled=0"
+                    .to_string(),
+            ),
+            false,
+        )
         .expect("failed to extract context");
 
         // Zeroed high bits mean a Datadog library wrote this, so `Sampled=0` is our own decision.
@@ -730,28 +740,84 @@ mod tests {
 
     #[test]
     fn datadog_planted_root_id_sampled_keeps() {
-        let context = extract_trace_context_from_aws_trace_header(Some(
-            "Root=1-68029e8a-0000000035578e774943fd9d;Parent=76c040bdc454a7ac;Sampled=1"
-                .to_string(),
-        ))
+        let context = extract_trace_context_from_aws_trace_header(
+            Some(
+                "Root=1-68029e8a-0000000035578e774943fd9d;Parent=76c040bdc454a7ac;Sampled=1"
+                    .to_string(),
+            ),
+            false,
+        )
         .expect("failed to extract context");
 
         assert_eq!(context.sampling.priority, "1".parse().ok());
     }
 
     #[test]
+    fn aws_generated_root_id_not_sampled_drops_when_merging_is_on() {
+        let context = extract_trace_context_from_aws_trace_header(
+            Some(
+                "Root=1-64cc2edd-112fbf1701d1355973a11d57;Parent=7d5a9776024b2d42;Sampled=0"
+                    .to_string(),
+            ),
+            true,
+        )
+        .expect("failed to extract context");
+
+        // Opting in means X-Ray's decision counts, drops included.
+        assert_eq!(context.sampling.priority, "0".parse().ok());
+    }
+
+    #[test]
+    fn merging_does_not_change_datadog_planted_headers() {
+        for merge in [false, true] {
+            let context = extract_trace_context_from_aws_trace_header(
+                Some(
+                    "Root=1-68029e8a-0000000035578e774943fd9d;Parent=76c040bdc454a7ac;Sampled=0"
+                        .to_string(),
+                ),
+                merge,
+            )
+            .expect("failed to extract context");
+
+            assert_eq!(context.sampling.priority, "0".parse().ok(), "merge={merge}");
+        }
+    }
+
+    #[test]
+    fn merging_leaves_correlation_ids_alone() {
+        for merge in [false, true] {
+            let context = extract_trace_context_from_aws_trace_header(
+                Some(
+                    "Root=1-64cc2edd-112fbf1701d1355973a11d57;Parent=7d5a9776024b2d42;Sampled=0"
+                        .to_string(),
+                ),
+                merge,
+            )
+            .expect("failed to extract context");
+
+            // The flag gates the sampling verdict only; the IDs are taken either way.
+            assert_eq!(context.trace_id, 130_944_522_478_755_159, "merge={merge}");
+            assert_eq!(context.span_id, 9_032_698_535_745_367_362, "merge={merge}");
+        }
+    }
+
+    #[test]
     fn truncated_root_does_not_panic() {
         assert!(
-            extract_trace_context_from_aws_trace_header(Some("Root=1-64cc".to_string())).is_none()
+            extract_trace_context_from_aws_trace_header(Some("Root=1-64cc".to_string()), false)
+                .is_none()
         );
     }
 
     #[test]
     fn aws_generated_root_id_sampled_keeps_priority() {
-        let context = extract_trace_context_from_aws_trace_header(Some(
-            "Root=1-64cc2edd-112fbf1701d1355973a11d57;Parent=7d5a9776024b2d42;Sampled=1"
-                .to_string(),
-        ))
+        let context = extract_trace_context_from_aws_trace_header(
+            Some(
+                "Root=1-64cc2edd-112fbf1701d1355973a11d57;Parent=7d5a9776024b2d42;Sampled=1"
+                    .to_string(),
+            ),
+            false,
+        )
         .expect("failed to extract context");
 
         assert_eq!(context.sampling.priority, "1".parse().ok());

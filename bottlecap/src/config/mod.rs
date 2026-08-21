@@ -80,6 +80,11 @@ pub struct LambdaConfig {
     /// without durable execution context enrichment. Defaults to 0 until the tracer-side
     /// durable execution support is released; set to 50 to re-enable enrichment.
     pub lambda_durable_function_log_buffer_size: usize,
+
+    /// `DD_MERGE_XRAY_TRACES` — opt in to letting X-Ray's own sampling decision drive Datadog's.
+    /// Off by default, matching the tracer libraries. Only affects headers X-Ray generated: a
+    /// header a Datadog library planted carries a Datadog decision and is never gated by this.
+    pub merge_xray_traces: bool,
 }
 
 impl Default for LambdaConfig {
@@ -104,6 +109,7 @@ impl Default for LambdaConfig {
             api_security_sample_delay: Duration::from_secs(30),
             custom_metrics_exclude_tags: Vec::new(),
             lambda_durable_function_log_buffer_size: 0,
+            merge_xray_traces: false,
         }
     }
 }
@@ -180,6 +186,9 @@ pub struct LambdaConfigSource {
     /// 0 (hold mechanism disabled).
     #[serde(deserialize_with = "deser_opt_lossless")]
     pub lambda_durable_function_log_buffer_size: Option<usize>,
+
+    #[serde(deserialize_with = "deser_opt_bool")]
+    pub merge_xray_traces: Option<bool>,
 }
 
 impl DatadogConfigExtension for LambdaConfig {
@@ -204,6 +213,7 @@ impl DatadogConfigExtension for LambdaConfig {
                 api_security_enabled,
                 api_security_sample_delay,
                 lambda_durable_function_log_buffer_size,
+                merge_xray_traces,
             ],
             option: [span_dedup_timeout, api_key_secret_reload_interval, appsec_rules],
         );
