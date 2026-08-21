@@ -77,8 +77,8 @@ pub struct LambdaConfig {
 
     /// Maximum number of request IDs whose logs are held in `held_logs` waiting for durable
     /// execution context. Set to 0 to disable log holding; logs will be flushed immediately
-    /// without durable execution context enrichment. Defaults to 0 until the tracer-side
-    /// durable execution support is released; set to 50 to re-enable enrichment.
+    /// without durable execution context enrichment. Only affects durable functions: once the
+    /// extension learns the function is not durable, logs bypass holding regardless of this value.
     pub lambda_durable_function_log_buffer_size: usize,
 }
 
@@ -103,7 +103,7 @@ impl Default for LambdaConfig {
             api_security_enabled: true,
             api_security_sample_delay: Duration::from_secs(30),
             custom_metrics_exclude_tags: Vec::new(),
-            lambda_durable_function_log_buffer_size: 0,
+            lambda_durable_function_log_buffer_size: 5,
         }
     }
 }
@@ -177,7 +177,7 @@ pub struct LambdaConfigSource {
 
     /// `DD_LAMBDA_DURABLE_FUNCTION_LOG_BUFFER_SIZE` — max number of request IDs
     /// whose logs are held waiting for durable execution context. Defaults to
-    /// 0 (hold mechanism disabled).
+    /// 5; set to 0 to disable the hold mechanism.
     #[serde(deserialize_with = "deser_opt_lossless")]
     pub lambda_durable_function_log_buffer_size: Option<usize>,
 }
