@@ -96,9 +96,14 @@ impl CollapsedFields {
     const HTTP_ENDPOINT: u8 = 1 << 1;
     const PEER_TAGS: u8 = 1 << 2;
     const ADDITIONAL_TAGS: u8 = 1 << 3;
+    const ALL: u8 = Self::RESOURCE | Self::HTTP_ENDPOINT | Self::PEER_TAGS | Self::ADDITIONAL_TAGS;
 
     fn add(&mut self, field: u8) {
         self.0 |= field;
+    }
+
+    fn is_saturated(self) -> bool {
+        self.0 == Self::ALL
     }
 
     fn contains(self, field: u8) -> bool {
@@ -412,6 +417,13 @@ impl StatsConcentratorService {
     /// the payload scan already does. It becomes worth reading once upstream exposes the counts,
     /// at which point this can report how many keys collapsed rather than only which fields.
     fn report_collapse(&mut self, buckets: &[pb::ClientStatsBucket], collapsed_spans: u64) {
+        // Every signal has already warned, so nothing below can produce output. Worth an early
+        // return because the payload scan is not free: a bucket can hold thousands of entries and
+        // flushes are frequent under continuous flushing.
+        if self.whole_key_collapse_reported && self.reported_collapsed_fields.is_saturated() {
+            return;
+        }
+
         if collapsed_spans > 0 && !self.whole_key_collapse_reported {
             self.whole_key_collapse_reported = true;
             warn!(
