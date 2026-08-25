@@ -83,8 +83,9 @@ pub struct LambdaConfig {
 
     /// Maximum number of request IDs whose logs are held in `held_logs` waiting for durable
     /// execution context. Set to 0 to disable log holding; logs will be flushed immediately
-    /// without durable execution context enrichment. Only affects durable functions: once the
-    /// extension learns the function is not durable, logs bypass holding regardless of this value.
+    /// without durable execution context enrichment. Holding begins at cold start, before the
+    /// extension knows whether the function is durable, and stops for non-durable functions
+    /// once `PlatformInitStart` resolves that.
     pub lambda_durable_function_log_buffer_size: usize,
 
     // Data Streams Monitoring
