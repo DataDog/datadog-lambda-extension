@@ -396,26 +396,17 @@ impl StatsConcentratorService {
 
     /// Warn, at most once per sandbox per signal, when cardinality limits collapsed stats keys.
     ///
-    /// Two independent signals, because they fail in opposite directions:
+    /// Two independent signals are needed because they fail in opposite directions: per-field
+    /// limits are applied before the whole-key limit, so a single-dimension explosion (for
+    /// example request ids in resource names) can collapse resources without `collapsed_spans`
+    /// ever leaving 0. Relying on `collapsed_spans` alone would be silent for exactly the case
+    /// this reporting exists to surface, so per-field collapse is also detected by scanning the
+    /// payload for the sentinel value.
     ///
-    /// - **whole-key** overflow, from `collapsed_spans`, which carries a span count;
-    /// - **per-field** collapse, from scanning the payload, which does not.
-    ///
-    /// Both are needed. Per-field limits are applied *before* the whole-key limit
-    /// (`aggregation.rs:589` runs ahead of the check at `:603`), so a single-dimension explosion
-    /// (request ids in resource names, the canonical Lambda failure) collapses resources first,
-    /// which shrinks the distinct whole-key space and can stop `collapsed_spans` ever leaving 0.
-    /// Relying on `collapsed_spans` alone would therefore be silent for exactly the case this
-    /// reporting exists to surface.
-    ///
-    /// No per-flush `debug!`: libdatadog already emits one for whole-key overflow at
-    /// `span_concentrator/mod.rs:442`.
-    ///
-    /// `StatsBucket::collapsed_fields_metrics()` is intentionally not consulted. It is reachable
-    /// and `Copy`, but its per-combination counts have no public accessor without the
-    /// `dogstatsd`/`telemetry` features, so it can only report *that* something collapsed, which
-    /// the payload scan already does. It becomes worth reading once upstream exposes the counts,
-    /// at which point this can report how many keys collapsed rather than only which fields.
+    /// No per-flush `debug!`: libdatadog already emits one for whole-key overflow.
+    /// `StatsBucket::collapsed_fields_metrics()` is not consulted because its per-combination
+    /// counts have no public accessor without the `dogstatsd`/`telemetry` features; it can only
+    /// report that something collapsed, which the payload scan already does.
     fn report_collapse(&mut self, buckets: &[pb::ClientStatsBucket], collapsed_spans: u64) {
         // Every signal has already warned, so nothing below can produce output. Worth an early
         // return because the payload scan is not free: a bucket can hold thousands of entries and
