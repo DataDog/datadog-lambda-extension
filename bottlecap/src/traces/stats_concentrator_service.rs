@@ -110,20 +110,42 @@ impl CollapsedFields {
         self.0 & field != 0
     }
 
-    /// Each field's bit, the noun to use when reporting it, and the limit that governs it.
-    fn reportable(limits: &CardinalityLimitConfig) -> [(u8, &'static str, usize); 4] {
+    /// Each field's bit, the noun to use when reporting it, the limit that governs it, and the
+    /// remediation to recommend.
+    ///
+    /// `additional_tags` is the only field with a customer-facing knob, so it is the only one
+    /// whose message names an environment variable. The rest name none deliberately: libdatadog's
+    /// own message blames `DD_TRACE_STATS_CARDINALITY_LIMIT`, which bottlecap does not read at
+    /// all, so reducing cardinality in the application is the only real remediation.
+    fn reportable(limits: &CardinalityLimitConfig) -> [(u8, &'static str, usize, &'static str); 4] {
+        const REDUCE_CARDINALITY: &str = "Reduce cardinality to keep trace stats accurate; \
+             request ids or path parameters embedded in resource names are the usual cause.";
+        const TUNE_ADDITIONAL_TAGS: &str = "List fewer keys in DD_TRACE_STATS_ADDITIONAL_TAGS, pick keys with fewer distinct \
+             values, or raise DD_TRACE_STATS_ADDITIONAL_TAGS_CARDINALITY_LIMIT.";
         [
-            (Self::RESOURCE, "resource names", limits.resource_limit),
+            (
+                Self::RESOURCE,
+                "resource names",
+                limits.resource_limit,
+                REDUCE_CARDINALITY,
+            ),
             (
                 Self::HTTP_ENDPOINT,
                 "HTTP endpoints",
                 limits.http_endpoint_limit,
+                REDUCE_CARDINALITY,
             ),
-            (Self::PEER_TAGS, "peer tag sets", limits.peer_tags_limit),
+            (
+                Self::PEER_TAGS,
+                "peer tag sets",
+                limits.peer_tags_limit,
+                REDUCE_CARDINALITY,
+            ),
             (
                 Self::ADDITIONAL_TAGS,
                 "additional metric tag sets",
                 limits.additional_tags_limit,
+                TUNE_ADDITIONAL_TAGS,
             ),
         ]
     }
@@ -523,15 +545,11 @@ impl StatsConcentratorService {
             );
         }
 
-        // Names no environment variable, deliberately: the per-field limits are not
-        // customer-tunable in bottlecap, and both candidate knobs would mislead. libdatadog's own
-        // message blames `DD_TRACE_STATS_CARDINALITY_LIMIT`, which bottlecap does not read at all,
-        // and `DD_TRACE_STATS_ADDITIONAL_TAGS_CARDINALITY_LIMIT` governs only `additional_tags`
-        // (and only once the additional-tags feature is enabled). Reducing cardinality in the
-        // application is the only real remediation, so that is what this recommends.
+        // The remediation is per field: see `CollapsedFields::reportable` for which fields name
+        // an environment variable and why the others do not.
         let bucket_secs = Duration::from_nanos(BUCKET_DURATION_NS).as_secs();
         let observed = observe_collapsed_fields(buckets);
-        for (field, noun, limit) in CollapsedFields::reportable(&self.cardinality_limits) {
+        for (field, noun, limit, remedy) in CollapsedFields::reportable(&self.cardinality_limits) {
             if !observed.contains(field) || self.reported_collapsed_fields.contains(field) {
                 continue;
             }
@@ -539,9 +557,7 @@ impl StatsConcentratorService {
             warn!(
                 "Trace stats saw more than {limit} distinct {noun} in a {bucket_secs}s bucket; \
                  the excess is aggregated under '{TRACER_BLOCKED_VALUE}', so those stats are no \
-                 longer attributable. Reduce cardinality to keep trace stats accurate; request \
-                 ids or path parameters embedded in resource names are the usual cause. Warned \
-                 once per sandbox."
+                 longer attributable. {remedy} Warned once per sandbox."
             );
         }
     }
