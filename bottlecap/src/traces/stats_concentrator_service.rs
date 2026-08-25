@@ -134,7 +134,7 @@ impl CollapsedFields {
 ///
 /// Per-field collapse rewrites *only* the field that exceeded its limit, whereas the whole-key
 /// overflow entry has *every* field set to the sentinel. `service` is never rewritten by per-field
-/// collapse, so it identifies that overflow entry and lets us skip it — otherwise a single
+/// collapse, so it identifies that overflow entry and lets us skip it; otherwise a single
 /// whole-key overflow would masquerade as all four fields collapsing at once.
 fn observe_collapsed_fields(buckets: &[pb::ClientStatsBucket]) -> CollapsedFields {
     let mut observed = CollapsedFields::default();
@@ -397,8 +397,8 @@ impl StatsConcentratorService {
     /// - **per-field** collapse, from scanning the payload, which does not.
     ///
     /// Both are needed. Per-field limits are applied *before* the whole-key limit
-    /// (`aggregation.rs:589` runs ahead of the check at `:603`), so a single-dimension explosion —
-    /// request ids in resource names, the canonical Lambda failure — collapses resources first,
+    /// (`aggregation.rs:589` runs ahead of the check at `:603`), so a single-dimension explosion
+    /// (request ids in resource names, the canonical Lambda failure) collapses resources first,
     /// which shrinks the distinct whole-key space and can stop `collapsed_spans` ever leaving 0.
     /// Relying on `collapsed_spans` alone would therefore be silent for exactly the case this
     /// reporting exists to surface.
@@ -408,7 +408,7 @@ impl StatsConcentratorService {
     ///
     /// `StatsBucket::collapsed_fields_metrics()` is intentionally not consulted. It is reachable
     /// and `Copy`, but its per-combination counts have no public accessor without the
-    /// `dogstatsd`/`telemetry` features, so it can only report *that* something collapsed — which
+    /// `dogstatsd`/`telemetry` features, so it can only report *that* something collapsed, which
     /// the payload scan already does. It becomes worth reading once upstream exposes the counts,
     /// at which point this can report how many keys collapsed rather than only which fields.
     fn report_collapse(&mut self, buckets: &[pb::ClientStatsBucket], collapsed_spans: u64) {
@@ -440,9 +440,9 @@ impl StatsConcentratorService {
             warn!(
                 "Trace stats saw more than {limit} distinct {noun} in a 10s bucket; the excess is \
                  aggregated under '{TRACER_BLOCKED_VALUE}', so those stats are no longer \
-                 attributable. Reduce cardinality — request ids or path parameters embedded in \
-                 resource names are the usual cause — to keep trace stats accurate. Warned once \
-                 per sandbox."
+                 attributable. Reduce cardinality to keep trace stats accurate; request ids or \
+                 path parameters embedded in resource names are the usual cause. Warned once per \
+                 sandbox."
             );
         }
     }
@@ -640,8 +640,8 @@ mod tests {
     }
 
     /// Per-field collapse rewrites only the field that overflowed, so each field is detected
-    /// independently — and the whole-key overflow entry, which sets *every* field to the sentinel,
-    /// must not be mistaken for all four collapsing at once.
+    /// independently. The whole-key overflow entry, which sets *every* field to the sentinel, must
+    /// not be mistaken for all four collapsing at once.
     #[test]
     fn test_observe_collapsed_fields() {
         const S: &str = TRACER_BLOCKED_VALUE;
@@ -664,7 +664,7 @@ mod tests {
             CollapsedFields(CollapsedFields::RESOURCE)
         );
 
-        // The whole-key overflow entry is identified by `service` — never rewritten per-field —
+        // The whole-key overflow entry is identified by `service` (never rewritten per-field)
         // and skipped, so it reports no per-field collapse at all.
         assert_eq!(
             observe_collapsed_fields(&[bucket(vec![(
@@ -707,7 +707,7 @@ mod tests {
     /// Regression test for the observability trap: a single-dimension resource explosion collapses
     /// per-field, which shrinks the whole-key space so `collapsed_spans` never fires. Exceeding
     /// `resource_limit` (1,024) while staying well under `whole_key_limit` (7,000) must therefore
-    /// still be observable — via the payload scan, and *not* via a whole-key overflow entry.
+    /// still be observable: via the payload scan, and *not* via a whole-key overflow entry.
     #[tokio::test]
     async fn test_resource_collapse_observed_without_whole_key_overflow() {
         let limits = CardinalityLimitConfig::default();
@@ -749,7 +749,7 @@ mod tests {
         );
     }
 
-    /// Each signal warns at most once per sandbox, and the two are independent — whole-key
+    /// Each signal warns at most once per sandbox, and the two are independent: whole-key
     /// overflow must not suppress a later per-field collapse or vice versa. Asserted on the
     /// service's own state rather than on log output; `report_collapse` logs iff it flips a flag.
     ///
