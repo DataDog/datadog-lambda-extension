@@ -259,7 +259,7 @@ fn resolve_cardinality_limits(configured_limit: Option<usize>) -> Option<Cardina
 ///
 /// libdatadog normalizes the requested keys (sort, dedup, truncate to its own private cap) and
 /// exposes the survivors via `SpanConcentrator::additional_metric_tag_keys()`, so `kept` is asked
-/// for rather than recomputed — no hand-copied cap and no mirrored normalization to drift out of
+/// for rather than recomputed: no hand-copied cap and no mirrored normalization to drift out of
 /// sync with upstream. Excess keys are dropped by alphabetical accident rather than by anything
 /// the user expressed, and libdatadog's own warning names the dropped keys but not the kept ones,
 /// the selection rule, or the env var, so restate all three here. Truncation itself is left to
