@@ -431,6 +431,7 @@ impl StatsConcentratorService {
         // and `DD_TRACE_STATS_ADDITIONAL_TAGS_CARDINALITY_LIMIT` governs only `additional_tags`
         // (and only once the additional-tags feature is enabled). Reducing cardinality in the
         // application is the only real remediation, so that is what this recommends.
+        let bucket_secs = Duration::from_nanos(BUCKET_DURATION_NS).as_secs();
         let observed = observe_collapsed_fields(buckets);
         for (field, noun, limit) in CollapsedFields::reportable(&self.cardinality_limits) {
             if !observed.contains(field) || self.reported_collapsed_fields.contains(field) {
@@ -438,11 +439,11 @@ impl StatsConcentratorService {
             }
             self.reported_collapsed_fields.add(field);
             warn!(
-                "Trace stats saw more than {limit} distinct {noun} in a 10s bucket; the excess is \
-                 aggregated under '{TRACER_BLOCKED_VALUE}', so those stats are no longer \
-                 attributable. Reduce cardinality to keep trace stats accurate; request ids or \
-                 path parameters embedded in resource names are the usual cause. Warned once per \
-                 sandbox."
+                "Trace stats saw more than {limit} distinct {noun} in a {bucket_secs}s bucket; \
+                 the excess is aggregated under '{TRACER_BLOCKED_VALUE}', so those stats are no \
+                 longer attributable. Reduce cardinality to keep trace stats accurate; request \
+                 ids or path parameters embedded in resource names are the usual cause. Warned \
+                 once per sandbox."
             );
         }
     }
