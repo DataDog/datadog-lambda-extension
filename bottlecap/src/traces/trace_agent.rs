@@ -112,11 +112,10 @@ pub struct ProxyState {
 /// route to [`TraceAgent`].
 ///
 /// Returning `Err` propagates out of [`TraceAgent::start`], aborting the
-/// HTTP listener task. Note that the production convenience entry point
-/// [`crate::startup::start_trace_agent`] spawns `start` and only logs its
-/// error; the surrounding pipeline does not observe the failure. Callers
-/// that need to react to startup errors must use
-/// [`crate::startup::build_trace_agent`] and spawn the agent themselves.
+/// HTTP listener task. Note that the Lambda binary's `start_trace_agent`
+/// helper spawns `start` and only logs its error; the surrounding pipeline
+/// does not observe the failure. Callers that need to react to startup
+/// errors must spawn the agent themselves.
 ///
 /// Implementors that carry state must call `.with_state(...)` on their
 /// sub-router before merging, because `Router::merge` requires both
