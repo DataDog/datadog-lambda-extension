@@ -46,7 +46,7 @@ use tikv_jemallocator::Jemalloc;
 #[global_allocator]
 static GLOBAL: Jemalloc = Jemalloc;
 
-use std::{collections::HashMap, env, path::Path, str::FromStr, sync::Arc};
+use std::{collections::HashMap, env, path::Path, str::FromStr, sync::Arc, time::Duration};
 
 use axum::{Router, http::StatusCode, routing::post};
 use bottlecap::{
@@ -188,6 +188,11 @@ struct FlushRouterExtension {
     flushing_service: Arc<FlushingService>,
 }
 
+/// Upper bound on a single `POST /flush`. The flushers already bound their own
+/// HTTP calls via `flush_timeout`, but retries across the five flushers can
+/// stack, so this caps total wall-clock time for the harness.
+const FLUSH_REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
+
 impl RouterExtension for FlushRouterExtension {
     fn extend(&self, router: Router) -> Result<Router, Box<dyn std::error::Error + Send + Sync>> {
         let fs = Arc::clone(&self.flushing_service);
@@ -196,8 +201,28 @@ impl RouterExtension for FlushRouterExtension {
             post(move || {
                 let fs = Arc::clone(&fs);
                 async move {
-                    fs.flush_blocking_final().await;
-                    StatusCode::NO_CONTENT
+                    // Isolate panics and bound execution time. flush_blocking_final
+                    // expects on the metrics aggregator handle, so a dead aggregator
+                    // task would otherwise panic the connection task instead of
+                    // returning a status the harness can act on.
+                    let mut task = tokio::task::spawn(async move {
+                        fs.flush_blocking_final().await;
+                    });
+                    match tokio::time::timeout(FLUSH_REQUEST_TIMEOUT, &mut task).await {
+                        Ok(Ok(())) => StatusCode::NO_CONTENT,
+                        Ok(Err(e)) => {
+                            error!("Flush task failed: {e:?}");
+                            StatusCode::INTERNAL_SERVER_ERROR
+                        }
+                        Err(_) => {
+                            task.abort();
+                            error!(
+                                "Flush timed out after {}s, aborting",
+                                FLUSH_REQUEST_TIMEOUT.as_secs()
+                            );
+                            StatusCode::GATEWAY_TIMEOUT
+                        }
+                    }
                 }
             }),
         ))
