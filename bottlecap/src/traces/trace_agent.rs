@@ -120,8 +120,14 @@ pub struct ProxyState {
 /// Implementors that carry state must call `.with_state(...)` on their
 /// sub-router before merging, because `Router::merge` requires both
 /// routers to share the same state type.
+///
+/// Extension routes are merged *after* the per-router
+/// `RequestBodyLimitLayer`s and sit under the outer
+/// `DefaultBodyLimit::disable()`, so they have no request body limit at all.
+/// An extension route that reads a body should layer its own
+/// `RequestBodyLimitLayer` on its sub-router.
 pub trait RouterExtension: Send + Sync {
-    fn extend(&self, router: Router) -> Result<Router, Box<dyn std::error::Error>>;
+    fn extend(&self, router: Router) -> Result<Router, Box<dyn std::error::Error + Send + Sync>>;
 }
 
 pub struct TraceAgent {
@@ -207,7 +213,7 @@ impl TraceAgent {
     }
 
     #[allow(clippy::cast_possible_truncation)]
-    pub async fn start(&self) -> Result<(), Box<dyn std::error::Error>> {
+    pub async fn start(&self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let now = Instant::now();
 
         // Set up a channel to send processed stats to our stats aggregator.
@@ -248,7 +254,7 @@ impl TraceAgent {
     fn make_router(
         &self,
         stats_tx: Sender<pb::ClientStatsPayload>,
-    ) -> Result<Router, Box<dyn std::error::Error>> {
+    ) -> Result<Router, Box<dyn std::error::Error + Send + Sync>> {
         let stats_generator = Arc::new(StatsGenerator::new(self.stats_concentrator.clone()));
         let trace_state = TraceState {
             config: Arc::clone(&self.config),
@@ -823,7 +829,6 @@ fn success_response(message: &str) -> Response {
 }
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used)]
 mod tests {
     //! Behavioral coverage for the `libdatadog` bump (`db05e1f` -> `48da0d8`), which pulls in
     //! [`DataDog/libdatadog#2071`](https://github.com/DataDog/libdatadog/pull/2071). That PR makes
@@ -940,7 +945,10 @@ mod tests {
     }
 
     impl RouterExtension for SpyExtension {
-        fn extend(&self, router: Router) -> Result<Router, Box<dyn std::error::Error>> {
+        fn extend(
+            &self,
+            router: Router,
+        ) -> Result<Router, Box<dyn std::error::Error + Send + Sync>> {
             Ok(router.merge(
                 Router::new()
                     .route(
@@ -960,7 +968,10 @@ mod tests {
     struct FailingExtension;
 
     impl RouterExtension for FailingExtension {
-        fn extend(&self, _router: Router) -> Result<Router, Box<dyn std::error::Error>> {
+        fn extend(
+            &self,
+            _router: Router,
+        ) -> Result<Router, Box<dyn std::error::Error + Send + Sync>> {
             Err("extension failed during make_router".into())
         }
     }
