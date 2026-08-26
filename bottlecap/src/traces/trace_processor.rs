@@ -1674,6 +1674,45 @@ mod tests {
         );
     }
 
+    /// `processor.rs` builds the invocation span with
+    /// `get_default_service_name(.., "aws.lambda", representation_enabled)`, so when
+    /// AWS service representation is disabled the invocation span starts out named
+    /// `aws.lambda` even though `DD_SERVICE` is set. This normalization step is what
+    /// puts it back on `DD_SERVICE`, and it is the reason the inferred-span base
+    /// service override in `span_inferrer.rs` stays consistent with the invocation
+    /// span in that configuration rather than diverging from it.
+    #[test]
+    fn test_invocation_span_normalized_to_dd_service_when_representation_disabled() {
+        let config = Arc::new(Config {
+            service: Some("My-Payments-API".to_string()),
+            trace_aws_service_representation_enabled: false,
+            ..Config::default()
+        });
+        let mut processor = create_chunk_processor(config);
+
+        let invocation_span = pb::Span {
+            name: "aws.lambda".to_string(),
+            service: "aws.lambda".to_string(),
+            resource: "my-function".to_string(),
+            ..create_inferred_span()
+        };
+        let mut chunk = pb::TraceChunk {
+            priority: 1,
+            origin: "lambda".to_string(),
+            spans: vec![invocation_span],
+            tags: HashMap::new(),
+            dropped_trace: false,
+        };
+
+        processor.process(&mut chunk, 0);
+
+        assert_eq!(
+            chunk.spans[0].service, "my-payments-api",
+            "invocation span should be normalized to the lowercased DD_SERVICE, \
+             matching what apply_base_service_override puts on inferred spans"
+        );
+    }
+
     #[test]
     fn test_base_service_not_set_on_non_inferred_spans() {
         let config = Arc::new(Config {

@@ -31,8 +31,14 @@ use datadog_opentelemetry::propagation::context::SpanContext;
 /// `DD_SERVICE_MAPPING` entry per trigger type.
 ///
 /// An explicit `DD_SERVICE_MAPPING` entry still wins, preserving the precedence
-/// in [`Trigger::resolve_service_name`]. The value is lowercased to match the
-/// invocation span built in `processor.rs`, so both spans land on one service.
+/// in [`Trigger::resolve_service_name`].
+///
+/// The value is lowercased so both spans land on one service. That matches the
+/// invocation span directly when AWS service representation is enabled, since
+/// `processor.rs` lowercases `DD_SERVICE` there too. When it is disabled the
+/// invocation span is initially named `aws.lambda`, and `ChunkProcessor::process`
+/// rewrites any `aws.lambda` span to the lowercased `DD_SERVICE` from the tags
+/// map, so the two still converge. Both paths are pinned by tests.
 fn apply_base_service_override(span: &mut Span, trigger: &dyn Trigger, config: &Config) {
     if !config.ext.trace_remove_integration_service_names_enabled {
         return;
@@ -893,6 +899,28 @@ mod tests {
         };
 
         assert_eq!(inferred_service(&sqs_payload(), config), "mylambdaservice");
+    }
+
+    /// With AWS service representation disabled the trigger would resolve to the
+    /// generic fallback (`sqs`). The override still applies, and the invocation
+    /// span converges on the same value via `ChunkProcessor::process` — see
+    /// `test_invocation_span_normalized_to_dd_service_when_representation_disabled`.
+    #[test]
+    fn test_base_service_override_applies_when_representation_disabled() {
+        let config = Config {
+            service: Some("my-lambda-service".to_string()),
+            trace_aws_service_representation_enabled: false,
+            ext: LambdaConfig {
+                trace_remove_integration_service_names_enabled: true,
+                ..LambdaConfig::default()
+            },
+            ..Config::default()
+        };
+
+        assert_eq!(
+            inferred_service(&sqs_payload(), config),
+            "my-lambda-service"
+        );
     }
 
     #[test]
