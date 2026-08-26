@@ -112,10 +112,11 @@ pub struct ProxyState {
 /// route to [`TraceAgent`].
 ///
 /// Returning `Err` propagates out of [`TraceAgent::start`], aborting the
-/// HTTP listener task. Note that the Lambda binary's `start_trace_agent`
-/// helper spawns `start` and only logs its error; the surrounding pipeline
-/// does not observe the failure. Callers that need to react to startup
-/// errors must spawn the agent themselves.
+/// HTTP listener task. Note that the production convenience entry point
+/// [`crate::startup::start_trace_agent`] spawns `start` and only logs its
+/// error; the surrounding pipeline does not observe the failure. Callers
+/// that need to react to startup errors must use
+/// [`crate::startup::build_trace_agent`] and spawn the agent themselves.
 ///
 /// Note that a path collision is not an `Err`: `Router::merge` panics when
 /// both routers define the same path, so a colliding extension aborts the
