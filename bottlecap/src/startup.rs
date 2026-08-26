@@ -1,6 +1,17 @@
 // Copyright 2023-Present Datadog, Inc. https://www.datadoghq.com/
 // SPDX-License-Identifier: Apache-2.0
 
+//! Cross-cutting startup assembly for the trace-processing pipeline.
+//!
+//! Lives in the library crate rather than under `src/bin/` because it is
+//! shared by the Lambda extension binary (`bottlecap`) and the upcoming
+//! test-mode binary (`bottlecap-test-mode`), which builds the same pipeline
+//! but attaches its own router extension before spawning the agent.
+//!
+//! Placed at the crate root rather than under `traces/` because it wires
+//! together trace, stats, proxy, lifecycle, tags, appsec, and flushing
+//! pieces: it is orchestration, not a trace-domain API.
+
 use std::sync::Arc;
 
 use dogstatsd::api_key::ApiKeyFactory;
