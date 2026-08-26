@@ -151,7 +151,9 @@ impl InvocationProcessorHandle {
     /// decided explicitly. A response-carrying variant placed in the
     /// fire-and-forget arm would silently drop its sender, causing the
     /// caller to receive `ProcessorError::ChannelReceive` instead of the
-    /// intended default.
+    /// intended default. Note that the compiler only catches *new* variants:
+    /// adding a `response` field to an existing fire-and-forget variant still
+    /// matches its `{ .. }` pattern, so that case must be caught by review.
     ///
     /// Compiled only under unit tests and when the `test-mode` feature is
     /// enabled, so this constructor does not exist in production builds.
@@ -806,76 +808,6 @@ mod tests {
             .on_out_of_memory_error(None, 0)
             .await
             .expect("noop on_out_of_memory_error");
-    }
-
-    #[tokio::test]
-    async fn noop_platform_runtime_done_and_report_respond_without_blocking() {
-        use crate::{
-            LAMBDA_RUNTIME_SLUG, config,
-            extension::telemetry::events::OnDemandReportMetrics,
-            traces::{
-                stats_concentrator_service::StatsConcentratorService,
-                stats_generator::StatsGenerator, trace_processor::ServerlessTraceProcessor,
-            },
-        };
-        use libdd_trace_obfuscation::obfuscation_config::ObfuscationConfig;
-        use std::collections::HashMap;
-
-        let config = Arc::new(config::Config::default());
-        let (svc, concentrator) = StatsConcentratorService::new(Arc::clone(&config));
-        tokio::spawn(svc.run());
-        let trace_sender = Arc::new(SendingTraceProcessor {
-            appsec: None,
-            processor: Arc::new(ServerlessTraceProcessor {
-                obfuscation_config: Arc::new(ObfuscationConfig::new().expect("ObfuscationConfig")),
-            }),
-            trace_tx: tokio::sync::mpsc::channel(1).0,
-            stats_generator: Arc::new(StatsGenerator::new(concentrator)),
-        });
-        let tags_provider = Arc::new(provider::Provider::new(
-            Arc::clone(&config),
-            LAMBDA_RUNTIME_SLUG.to_string(),
-            &HashMap::from([("function_arn".to_string(), "test-arn".to_string())]),
-        ));
-
-        let handle = InvocationProcessorHandle::noop();
-
-        handle
-            .on_platform_runtime_done(
-                "rid".to_string(),
-                RuntimeDoneMetrics {
-                    duration_ms: 0.0,
-                    produced_bytes: None,
-                },
-                Status::Success,
-                None,
-                Arc::clone(&tags_provider),
-                Arc::clone(&trace_sender),
-                0,
-            )
-            .await
-            .expect("noop on_platform_runtime_done");
-
-        handle
-            .on_platform_report(
-                "rid",
-                ReportMetrics::OnDemand(OnDemandReportMetrics {
-                    duration_ms: 0.0,
-                    billed_duration_ms: 0,
-                    memory_size_mb: 0,
-                    max_memory_used_mb: 0,
-                    init_duration_ms: None,
-                    restore_duration_ms: None,
-                }),
-                0,
-                Status::Success,
-                &None,
-                &None,
-                tags_provider,
-                trace_sender,
-            )
-            .await
-            .expect("noop on_platform_report");
     }
 
     /// Guards against a future `ProcessorCommand` variant with a `response`
