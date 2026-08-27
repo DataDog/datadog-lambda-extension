@@ -26,7 +26,9 @@ pub fn should_start_proxy(config: &Arc<Config>, aws_config: Arc<AwsConfig>) -> b
 
     lwa_proxy_set
         || (datadog_wrapper_set
-            && (config.ext.serverless_appsec_enabled || experimental_proxy_enabled))
+            && (config.ext.serverless_appsec_enabled
+                || config.ext.dsm_consume_enabled
+                || experimental_proxy_enabled))
 }
 
 #[cfg(test)]
@@ -110,6 +112,54 @@ mod tests {
             runtime_api: String::new(),
             sandbox_init_time: Instant::now(),
             exec_wrapper: Some("/opt/datadog_wrapper".to_string()),
+            initialization_type: "on-demand".into(),
+        });
+        assert!(!should_start_proxy(&config, aws_config));
+    }
+
+    #[test]
+    fn test_should_start_proxy_dsm_enabled_and_datadog_wrapper_set() {
+        // DSM enabled with the datadog wrapper must start the proxy so the
+        // interceptor's DsmOnly path can run, even when AppSec is disabled.
+        let config = Arc::new(Config {
+            ext: crate::config::LambdaConfig {
+                serverless_appsec_enabled: false,
+                dsm_consume_enabled: true,
+                ..Default::default()
+            },
+            ..Default::default()
+        });
+        let aws_config = Arc::new(AwsConfig {
+            region: "us-east-1".to_string(),
+            aws_lwa_proxy_lambda_runtime_api: None,
+            function_name: String::new(),
+            runtime_api: String::new(),
+            sandbox_init_time: Instant::now(),
+            exec_wrapper: Some("/opt/datadog_wrapper".to_string()),
+            initialization_type: "on-demand".into(),
+        });
+        assert!(should_start_proxy(&config, aws_config));
+    }
+
+    #[test]
+    fn test_should_start_proxy_dsm_enabled_datadog_wrapper_not_set() {
+        // DSM enabled without LWA or the datadog wrapper must not start the proxy:
+        // the runtime API is not intercepted, so there is nothing to extract from.
+        let config = Arc::new(Config {
+            ext: crate::config::LambdaConfig {
+                serverless_appsec_enabled: false,
+                dsm_consume_enabled: true,
+                ..Default::default()
+            },
+            ..Default::default()
+        });
+        let aws_config = Arc::new(AwsConfig {
+            region: "us-east-1".to_string(),
+            aws_lwa_proxy_lambda_runtime_api: None,
+            function_name: String::new(),
+            runtime_api: String::new(),
+            sandbox_init_time: Instant::now(),
+            exec_wrapper: Some("/opt/not_datadog".to_string()),
             initialization_type: "on-demand".into(),
         });
         assert!(!should_start_proxy(&config, aws_config));

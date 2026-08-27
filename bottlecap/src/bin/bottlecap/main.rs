@@ -105,6 +105,16 @@ use tracing::{debug, error, warn};
 use tracing_subscriber::EnvFilter;
 use ustr::Ustr;
 
+fn resolve_dsm_service(
+    configured_service: Option<&str>,
+    canonical_resource_name: Option<&str>,
+) -> String {
+    configured_service
+        .map(std::string::ToString::to_string)
+        .or_else(|| canonical_resource_name.map(std::string::ToString::to_string))
+        .unwrap_or_else(|| "aws.lambda".to_string())
+}
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let start_time = Instant::now();
@@ -330,6 +340,53 @@ async fn extension_loop_active(
     .await;
 
     let propagator = Arc::new(DatadogCompositePropagator::new(Arc::clone(config)));
+
+    // Shared proxy aggregator (used by the trace agent's proxy endpoints and,
+    // when enabled, the extension-side DSM processor).
+    let proxy_aggregator = Arc::new(TokioMutex::new(proxy_aggregator::Aggregator::default()));
+
+    // Extension-side Data Streams Monitoring (consume checkpoints), gated by
+    // DD_DATA_STREAMS_ENABLED.
+    let dsm_processor = if config.ext.dsm_consume_enabled {
+        let canonical_resource_name = tags_provider.get_canonical_resource_name();
+        let dsm_service = resolve_dsm_service(
+            config.service.as_deref(),
+            canonical_resource_name.as_deref(),
+        );
+        let dsm_env = config.env.clone().unwrap_or_default();
+        let dsm_version = config.version.clone().unwrap_or_default();
+        let mut dsm_tags: Vec<String> = config
+            .tags
+            .iter()
+            .map(|(key, value)| format!("{key}:{value}"))
+            .collect();
+        dsm_tags.sort();
+
+        debug!(
+            "DSM startup config: enabled={}, service={}, env={}, version={}, apm_dd_url={}, tags={:?}",
+            config.ext.dsm_consume_enabled,
+            dsm_service,
+            dsm_env,
+            dsm_version,
+            config.apm_dd_url,
+            dsm_tags
+        );
+
+        Some(Arc::new(
+            bottlecap::traces::data_streams::DsmProcessor::new(
+                dsm_service,
+                dsm_env,
+                EXTENSION_VERSION.to_string(),
+                dsm_version,
+                dsm_tags,
+                &config.apm_dd_url,
+                Arc::clone(&proxy_aggregator),
+            ),
+        ))
+    } else {
+        None
+    };
+
     // Lifecycle Invocation Processor
     let (invocation_processor_handle, invocation_processor_service) =
         InvocationProcessorService::new(
@@ -339,6 +396,7 @@ async fn extension_loop_active(
             metrics_aggregator_handle.clone(),
             Arc::clone(&propagator),
             durable_context_tx,
+            dsm_processor.clone(),
         );
     tokio::spawn(async move {
         invocation_processor_service.run().await;
@@ -372,6 +430,7 @@ async fn extension_loop_active(
         invocation_processor_handle.clone(),
         appsec_processor.clone(),
         &shared_client,
+        Arc::clone(&proxy_aggregator),
     );
 
     let api_runtime_proxy_shutdown_signal = start_api_runtime_proxy(
@@ -430,6 +489,7 @@ async fn extension_loop_active(
         let stats_flusher_clone = Arc::clone(&stats_flusher);
         let proxy_flusher_clone = proxy_flusher.clone();
         let metrics_aggr_handle_clone = metrics_aggregator_handle.clone();
+        let dsm_processor_clone = dsm_processor.clone();
 
         // In Managed Instance mode, create a separate interval for the background flusher task.
         // We don't reuse race_flush_interval because we need to configure the missed tick
@@ -460,6 +520,7 @@ async fn extension_loop_active(
                 proxy_flusher_clone,
                 metrics_flushers_clone,
                 metrics_aggr_handle_clone,
+                dsm_processor_clone,
             );
 
             loop {
@@ -634,6 +695,7 @@ async fn extension_loop_active(
         proxy_flusher.clone(),
         Arc::clone(&metrics_flushers),
         metrics_aggregator_handle.clone(),
+        dsm_processor.clone(),
     );
     handle_next_invocation(next_lambda_response, &invocation_processor_handle).await;
     loop {
@@ -1104,6 +1166,7 @@ fn start_trace_agent(
     invocation_processor_handle: InvocationProcessorHandle,
     appsec_processor: Option<Arc<TokioMutex<AppSecProcessor>>>,
     client: &Client,
+    proxy_aggregator: Arc<TokioMutex<proxy_aggregator::Aggregator>>,
 ) -> (
     Sender<SendDataBuilderInfo>,
     Arc<trace_flusher::TraceFlusher>,
@@ -1168,7 +1231,6 @@ fn start_trace_agent(
     tokio::spawn(span_dedup_service.run());
 
     // Proxy
-    let proxy_aggregator = Arc::new(TokioMutex::new(proxy_aggregator::Aggregator::default()));
     let proxy_flusher = Arc::new(ProxyFlusher::new(
         api_key_factory.clone(),
         Arc::clone(&proxy_aggregator),
@@ -1444,6 +1506,7 @@ fn start_api_runtime_proxy(
         invocation_processor_handle.clone(),
         appsec_processor,
         propagator,
+        config.ext.dsm_consume_enabled,
     )
     .ok()
 }
@@ -1467,5 +1530,31 @@ mod flush_handles_tests {
         sleep(Duration::from_millis(10)).await;
 
         assert!(!handles.has_pending());
+    }
+}
+
+#[cfg(test)]
+mod dsm_config_tests {
+    use super::resolve_dsm_service;
+
+    #[test]
+    fn preserves_explicit_service_case() {
+        assert_eq!(
+            resolve_dsm_service(Some("MyMixedCaseService"), Some("function-name")),
+            "MyMixedCaseService"
+        );
+    }
+
+    #[test]
+    fn falls_back_to_canonical_resource_name() {
+        assert_eq!(
+            resolve_dsm_service(None, Some("FunctionName")),
+            "FunctionName"
+        );
+    }
+
+    #[test]
+    fn falls_back_to_aws_lambda_when_unset() {
+        assert_eq!(resolve_dsm_service(None, None), "aws.lambda");
     }
 }
