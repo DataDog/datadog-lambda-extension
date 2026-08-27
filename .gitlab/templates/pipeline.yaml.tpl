@@ -20,6 +20,22 @@ variables:
   CI_DOCKER_TARGET_IMAGE: registry.ddbuild.io/ci/datadog-lambda-extension
   CI_DOCKER_TARGET_VERSION: latest
 
+.dd-pkg-publish:
+  image: registry.ddbuild.io/agent-delivery/dd-pkg:v0.9.3
+  tags: ["arch:arm64"]
+  variables:
+    IMG_SIGNING: "false"
+    PUBLIC_IMAGES_PUBLISH_TIMEOUT: "1800"
+  script:
+    - |
+      set -eu
+      dd-pkg version
+      set -- publish-image --timeout "${PUBLIC_IMAGES_PUBLISH_TIMEOUT}" --poll-interval 30 --signing="${IMG_SIGNING}"
+      [ -n "${IMG_REGISTRIES:-}" ] && set -- "$@" --registries "${IMG_REGISTRIES}"
+      [ -n "${IMG_SOURCES:-}" ] && set -- "$@" --sources "${IMG_SOURCES}"
+      [ -n "${IMG_DESTINATIONS:-}" ] && set -- "$@" --destinations "${IMG_DESTINATIONS}"
+      dd-pkg "$@"
+
 cargo fmt:
   stage: test
   tags: ["arch:amd64"]
@@ -363,21 +379,17 @@ image ({{ $multi_arch_image_flavor.name }}):
     - .gitlab/scripts/build_image.sh
 
 publish image ({{ $multi_arch_image_flavor.name }}):
+  extends: .dd-pkg-publish
   stage: publish
   rules:
     - if: '$CI_COMMIT_TAG =~ /^v.*/'
   needs:
     - image ({{ $multi_arch_image_flavor.name }})
   when: manual
-  trigger:
-    project: DataDog/public-images
-    branch: main
-    strategy: depend
   variables:
     IMG_SOURCES: ${CI_DOCKER_TARGET_IMAGE}:v${CI_PIPELINE_ID}-${CI_COMMIT_SHORT_SHA}{{ $multi_arch_image_flavor.suffix }}
     IMG_DESTINATIONS: lambda-extension:${VERSION}{{ $multi_arch_image_flavor.suffix }},lambda-extension:latest{{ $multi_arch_image_flavor.suffix }}
     IMG_REGISTRIES: public
-    IMG_SIGNING: false
 
 {{ end }} # end multi_arch_image_flavors
 
