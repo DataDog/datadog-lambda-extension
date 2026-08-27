@@ -75,6 +75,12 @@ pub struct LambdaConfig {
     pub api_security_sample_delay: Duration,
     pub custom_metrics_exclude_tags: Vec<String>,
 
+    /// When true, inferred (synthetic) event-source spans report the function's
+    /// base service (`DD_SERVICE`) instead of the AWS resource/instance
+    /// representation. An explicit `DD_SERVICE_MAPPING` entry still wins.
+    /// Defaults to `false`.
+    pub trace_remove_integration_service_names_enabled: bool,
+
     /// Maximum number of request IDs whose logs are held in `held_logs` waiting for durable
     /// execution context. Set to 0 to disable log holding; logs will be flushed immediately
     /// without durable execution context enrichment. Defaults to 0 until the tracer-side
@@ -120,6 +126,7 @@ impl Default for LambdaConfig {
             api_security_enabled: true,
             api_security_sample_delay: Duration::from_secs(30),
             custom_metrics_exclude_tags: Vec::new(),
+            trace_remove_integration_service_names_enabled: false,
             lambda_durable_function_log_buffer_size: 0,
             dsm_consume_enabled: false,
             dsm_exchange_name: None,
@@ -195,6 +202,12 @@ pub struct LambdaConfigSource {
     #[serde(deserialize_with = "deser_csv")]
     pub lambda_customer_metrics_exclude_tags: Vec<String>,
 
+    /// `DD_TRACE_REMOVE_INTEGRATION_SERVICE_NAMES_ENABLED` — when true, inferred
+    /// (synthetic) event-source spans use `DD_SERVICE` rather than the AWS
+    /// resource/instance name. Defaults to `false`.
+    #[serde(deserialize_with = "deser_opt_bool")]
+    pub trace_remove_integration_service_names_enabled: Option<bool>,
+
     /// `DD_LAMBDA_DURABLE_FUNCTION_LOG_BUFFER_SIZE` — max number of request IDs
     /// whose logs are held waiting for durable execution context. Defaults to
     /// 0 (hold mechanism disabled).
@@ -235,6 +248,7 @@ impl DatadogConfigExtension for LambdaConfig {
                 appsec_waf_timeout,
                 api_security_enabled,
                 api_security_sample_delay,
+                trace_remove_integration_service_names_enabled,
                 lambda_durable_function_log_buffer_size,
             ],
             option: [span_dedup_timeout, api_key_secret_reload_interval, appsec_rules, dsm_exchange_name, dsm_kafka_group],
@@ -575,6 +589,33 @@ mod lambda_config_tests {
     fn lambda_extension_compute_stats_defaults_false() {
         let config = load(|_| Ok(()));
         assert!(!config.ext.lambda_extension_compute_stats);
+    }
+
+    #[test]
+    fn trace_remove_integration_service_names_defaults_false() {
+        let config = load(|_| Ok(()));
+        assert!(!config.ext.trace_remove_integration_service_names_enabled);
+    }
+
+    #[test]
+    fn trace_remove_integration_service_names_from_env() {
+        let config = load(|jail| {
+            jail.set_env("DD_TRACE_REMOVE_INTEGRATION_SERVICE_NAMES_ENABLED", "true");
+            Ok(())
+        });
+        assert!(config.ext.trace_remove_integration_service_names_enabled);
+    }
+
+    #[test]
+    fn trace_remove_integration_service_names_from_yaml() {
+        let config = load(|jail| {
+            jail.create_file(
+                "datadog.yaml",
+                "trace_remove_integration_service_names_enabled: true\n",
+            )?;
+            Ok(())
+        });
+        assert!(config.ext.trace_remove_integration_service_names_enabled);
     }
 
     #[test]

@@ -205,6 +205,15 @@ pub trait Trigger: ServiceNameResolver {
         None
     }
 
+    /// Whether an explicit `DD_SERVICE_MAPPING` entry targets this trigger,
+    /// under either its specific or its generic key. Callers that override the
+    /// resolved service name use this to preserve the precedence established by
+    /// [`Trigger::resolve_service_name`]: an explicit mapping always wins.
+    fn has_service_mapping_entry(&self, service_mapping: &HashMap<String, String>) -> bool {
+        service_mapping.contains_key(&self.get_specific_identifier())
+            || service_mapping.contains_key(self.get_generic_identifier())
+    }
+
     /// Default implementation for service name resolution
     fn resolve_service_name(
         &self,
