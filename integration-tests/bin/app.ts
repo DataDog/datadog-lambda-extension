@@ -10,6 +10,7 @@ import {Oom} from '../lib/stacks/oom';
 import {LmiOom} from '../lib/stacks/lmi-oom';
 import {CustomMetrics} from '../lib/stacks/custom-metrics';
 import {PayloadSize} from '../lib/stacks/payload-size';
+import {Dsm} from '../lib/stacks/dsm';
 import {DurableColdStart} from '../lib/stacks/durable-cold-start';
 import {AuthRoleStack} from '../lib/auth-role';
 import {ACCOUNT, IDENTIFIER, REGION} from '../config';
@@ -56,6 +57,9 @@ const stacks = [
         env,
     }),
     new DurableColdStart(app, `${IDENTIFIER}-durable-cold-start`, {
+        env,
+    }),
+    new Dsm(app, `${IDENTIFIER}-dsm`, {
         env,
     }),
 ]

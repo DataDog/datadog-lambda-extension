@@ -1,5 +1,7 @@
 use crate::{
-    lifecycle::invocation::processor::MS_TO_NS, metrics::enhanced::lambda::EnhancedMetricData,
+    lifecycle::invocation::processor::MS_TO_NS,
+    lifecycle::invocation::span_inferrer::InferredSpanData,
+    metrics::enhanced::lambda::EnhancedMetricData,
 };
 use datadog_opentelemetry::propagation::context::SpanContext;
 use std::{
@@ -55,6 +57,11 @@ pub struct Context {
     /// Used when generating the extension-side `aws.lambda` span (Path B) so the backend
     /// stats directive (`_dd.compute_stats`) is stamped consistently with Path A.
     pub client_computed_stats: bool,
+    /// Per-invocation inferred span / trigger data produced by the span inferrer.
+    ///
+    /// Kept on the context (not the shared `Processor`) so concurrent Managed
+    /// Instance invocations don't overwrite each other's inference output.
+    pub inferred: InferredSpanData,
 }
 
 /// Struct containing the information needed to reparent a span.
@@ -108,6 +115,7 @@ impl Default for Context {
             extracted_span_context: None,
             oom_emitted: false,
             client_computed_stats: false,
+            inferred: InferredSpanData::default(),
         }
     }
 }

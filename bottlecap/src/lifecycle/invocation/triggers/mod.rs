@@ -112,6 +112,43 @@ pub fn get_default_service_name(
     instance_name.to_string()
 }
 
+/// DSM consume inputs for a single record: the source-specific edge tags plus
+/// the record's carrier (which may contain the inbound pathway context).
+#[derive(Debug, Clone, PartialEq)]
+pub struct DsmCheckpointInput {
+    pub edge_tags: Vec<String>,
+    pub carrier: HashMap<String, String>,
+    /// Byte length of the record payload (message body / decoded data).
+    /// Used to populate the DSM `PayloadSize` sketch; 0.0 when not applicable.
+    pub payload_size_bytes: f64,
+}
+
+/// Build per-record DSM consume inputs for a batched event by deserializing
+/// every entry in the `Records` array into `T` and reading its edge tags and
+/// carrier. Records that fail to deserialize or are not DSM-eligible (no edge
+/// tags) are skipped. Returns empty when there is no `Records` array.
+pub(crate) fn dsm_checkpoints_from_records<T>(payload: &Value) -> Vec<DsmCheckpointInput>
+where
+    T: Trigger + serde::de::DeserializeOwned,
+{
+    let Some(records) = payload.get("Records").and_then(Value::as_array) else {
+        return Vec::new();
+    };
+    records
+        .iter()
+        .filter_map(|record| {
+            let record: T = serde_json::from_value(record.clone()).ok()?;
+            let edge_tags = record.get_dsm_edge_tags()?;
+            let payload_size_bytes = record.get_payload_size_bytes();
+            Some(DsmCheckpointInput {
+                edge_tags,
+                carrier: record.get_carrier(),
+                payload_size_bytes,
+            })
+        })
+        .collect()
+}
+
 pub trait Trigger: ServiceNameResolver {
     fn new(payload: Value) -> Option<Self>
     where
@@ -129,6 +166,40 @@ pub trait Trigger: ServiceNameResolver {
     fn get_arn(&self, region: &str) -> String;
     fn get_carrier(&self) -> HashMap<String, String>;
     fn is_async(&self) -> bool;
+
+    /// Data Streams Monitoring consume-side edge tags for this trigger, with the
+    /// `direction:in` tag first. Returns `None` for sources that are not
+    /// DSM-eligible. Default: `None`.
+    fn get_dsm_edge_tags(&self) -> Option<Vec<String>> {
+        None
+    }
+
+    /// Byte length of this record's payload (message body / decoded data).
+    /// Used to populate the DSM `PayloadSize` sketch. Default: `0.0`.
+    fn get_payload_size_bytes(&self) -> f64 {
+        0.0
+    }
+
+    /// Per-record DSM consume inputs for this (possibly batched) event.
+    ///
+    /// Each Lambda invocation can deliver multiple records (e.g. an SQS/SNS/
+    /// Kinesis batch), and every record can carry its own inbound pathway
+    /// context. The default implementation yields a single entry derived from
+    /// the representative record this trigger was parsed from; batched sources
+    /// override it to yield one entry per record so no message is dropped.
+    ///
+    /// `payload` is the full, unparsed event so overrides can re-read every
+    /// record. Records that are not DSM-eligible are omitted.
+    fn get_dsm_checkpoints(&self, _payload: &Value) -> Vec<DsmCheckpointInput> {
+        match self.get_dsm_edge_tags() {
+            Some(edge_tags) => vec![DsmCheckpointInput {
+                edge_tags,
+                carrier: self.get_carrier(),
+                payload_size_bytes: self.get_payload_size_bytes(),
+            }],
+            None => Vec::new(),
+        }
+    }
 
     fn get_dd_resource_key(&self, _region: &str) -> Option<String> {
         None

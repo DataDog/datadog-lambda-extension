@@ -86,6 +86,23 @@ pub struct LambdaConfig {
     /// without durable execution context enrichment. Defaults to 0 until the tracer-side
     /// durable execution support is released; set to 50 to re-enable enrichment.
     pub lambda_durable_function_log_buffer_size: usize,
+
+    // Data Streams Monitoring
+    /// Enable extension-side DSM consume checkpoints. Gated by the same
+    /// `DD_DATA_STREAMS_ENABLED` flag the tracer libraries use; the extension
+    /// and tracer never emit checkpoints for the same runtime, so sharing the
+    /// flag cannot double-count.
+    /// Java/.NET/Go - Datadog Lambda supports calls to '/start-invocation', no tracer support for parsing Lambda payloads
+    /// Python - Wrapper script in datadog-lambda-python extracts context and DSM, but does not call `/start-invocation`
+    /// JS - Wrapper script in datadog-lambda-js extracts context and DSM, but does not call `/start-invocation`
+    pub dsm_consume_enabled: bool,
+    /// Fallback DSM `exchange` (event bus name) used for `EventBridge` consume
+    /// checkpoints when it cannot be derived from the event payload
+    /// (`DD_DSM_EXCHANGE_NAME`).
+    pub dsm_exchange_name: Option<String>,
+    /// Consumer group used for `MSK`/Kafka DSM consume checkpoints, which is not
+    /// present in the Lambda event payload (`DD_DSM_KAFKA_GROUP`).
+    pub dsm_kafka_group: Option<String>,
 }
 
 impl Default for LambdaConfig {
@@ -111,6 +128,9 @@ impl Default for LambdaConfig {
             custom_metrics_exclude_tags: Vec::new(),
             trace_remove_integration_service_names_enabled: false,
             lambda_durable_function_log_buffer_size: 0,
+            dsm_consume_enabled: false,
+            dsm_exchange_name: None,
+            dsm_kafka_group: None,
         }
     }
 }
@@ -193,6 +213,18 @@ pub struct LambdaConfigSource {
     /// 0 (hold mechanism disabled).
     #[serde(deserialize_with = "deser_opt_lossless")]
     pub lambda_durable_function_log_buffer_size: Option<usize>,
+
+    /// `DD_DATA_STREAMS_ENABLED` — enable extension-side DSM consume
+    /// checkpoints. Shared with the tracer libraries; merges into the
+    /// `dsm_consume_enabled` config field.
+    #[serde(deserialize_with = "deser_opt_bool")]
+    pub data_streams_enabled: Option<bool>,
+    /// `DD_DSM_EXCHANGE_NAME` — fallback exchange name for `EventBridge` DSM checkpoints.
+    #[serde(deserialize_with = "deser_opt_str")]
+    pub dsm_exchange_name: Option<String>,
+    /// `DD_DSM_KAFKA_GROUP` — consumer group for MSK/Kafka DSM consume checkpoints.
+    #[serde(deserialize_with = "deser_opt_str")]
+    pub dsm_kafka_group: Option<String>,
 }
 
 impl DatadogConfigExtension for LambdaConfig {
@@ -219,7 +251,16 @@ impl DatadogConfigExtension for LambdaConfig {
                 trace_remove_integration_service_names_enabled,
                 lambda_durable_function_log_buffer_size,
             ],
-            option: [span_dedup_timeout, api_key_secret_reload_interval, appsec_rules],
+            option: [span_dedup_timeout, api_key_secret_reload_interval, appsec_rules, dsm_exchange_name, dsm_kafka_group],
+        );
+
+        // data_streams_enabled (source / DD_DATA_STREAMS_ENABLED) →
+        // dsm_consume_enabled (config)
+        datadog_agent_config::merge_option_to_value!(
+            self,
+            dsm_consume_enabled,
+            source,
+            data_streams_enabled
         );
 
         // Preserve legacy OR-merge semantics: when either env var is
@@ -575,6 +616,21 @@ mod lambda_config_tests {
             Ok(())
         });
         assert!(config.ext.trace_remove_integration_service_names_enabled);
+    }
+
+    #[test]
+    fn dsm_consume_enabled_from_data_streams_env() {
+        let config = load(|jail| {
+            jail.set_env("DD_DATA_STREAMS_ENABLED", "true");
+            Ok(())
+        });
+        assert!(config.ext.dsm_consume_enabled);
+    }
+
+    #[test]
+    fn dsm_consume_enabled_defaults_false() {
+        let config = load(|_| Ok(()));
+        assert!(!config.ext.dsm_consume_enabled);
     }
 
     // ---- Duration fields ----
