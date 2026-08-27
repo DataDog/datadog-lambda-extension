@@ -76,6 +76,16 @@ pub enum NextEventResponse {
     },
 }
 
+impl NextEventResponse {
+    #[must_use]
+    pub fn deadline_ms(&self) -> u64 {
+        match self {
+            NextEventResponse::Invoke { deadline_ms, .. }
+            | NextEventResponse::Shutdown { deadline_ms, .. } => *deadline_ms,
+        }
+    }
+}
+
 /// Return the base URL for the Lambda Runtime API
 ///
 #[must_use]
