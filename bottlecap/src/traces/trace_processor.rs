@@ -399,7 +399,7 @@ impl TraceProcessor for ServerlessTraceProcessor {
                 obfuscation_config: self.obfuscation_config.clone(),
                 tags_provider: tags_provider.clone(),
                 span_pointers,
-                client_computed_stats: header_tags.client_computed_stats,
+                client_computed_stats: header_tags.generic.client_computed_stats,
             },
             true, // send agentless since we are the agent
         )
@@ -530,31 +530,32 @@ impl SendingTraceProcessor {
                 };
 
                 let (finalized, ctx) = appsec.process_span(span);
-                if  finalized {
+                if finalized {
                     Some(trace)
-                } else if let Some(ctx) = ctx{
-                    debug!("TRACE_PROCESSOR | Holding trace for App & API Protection additional data");
-                    ctx.hold_trace(trace, SendingTraceProcessor{ appsec:  None, processor: self.processor.clone(), trace_tx: self.trace_tx.clone(), stats_generator: self.stats_generator.clone() }, HoldArguments{
-                        config:Arc::clone(&config),
-                        tags_provider:Arc::clone(&tags_provider),
+                } else if let Some(ctx) = ctx {
+                    debug!(
+                        "TRACE_PROCESSOR | Holding trace for App & API Protection additional data"
+                    );
+                    // Same sender, minus the App & API Protection processor, so the held
+                    // trace is not re-held when it is flushed.
+                    let sender = SendingTraceProcessor {
+                        appsec: None,
+                        ..self.clone()
+                    };
+                    let args = HoldArguments {
+                        config: Arc::clone(&config),
+                        tags_provider: Arc::clone(&tags_provider),
                         body_size,
-                        span_pointers:span_pointers.clone(),
-                        tracer_header_tags_lang: header_tags.lang.to_string(),
-                        tracer_header_tags_lang_version: header_tags.lang_version.to_string(),
-                        tracer_header_tags_lang_interpreter: header_tags.lang_interpreter.to_string(),
-                        tracer_header_tags_lang_vendor: header_tags.lang_vendor.to_string(),
-                        tracer_header_tags_tracer_version: header_tags.tracer_version.to_string(),
-                        tracer_header_tags_container_id: header_tags.container_id.to_string(),
-                        tracer_header_tags_client_computed_top_level: header_tags.client_computed_top_level,
-                        tracer_header_tags_client_computed_stats: header_tags.client_computed_stats,
-                        tracer_header_tags_dropped_p0_traces: header_tags.dropped_p0_traces,
-                        tracer_header_tags_dropped_p0_spans: header_tags.dropped_p0_spans,
-                    });
+                        span_pointers: span_pointers.clone(),
+                        header_tags: OwnedTracerHeaderTags::from(header_tags.clone()),
+                    };
+                    ctx.hold_trace(trace, sender, args);
                     None
                 } else {
                     Some(trace)
                 }
-            }).collect()
+            })
+            .collect()
         } else {
             traces
         };
@@ -565,7 +566,7 @@ impl SendingTraceProcessor {
         }
 
         // Capture before `header_tags` is moved into process_traces below.
-        let client_computed_stats = header_tags.client_computed_stats;
+        let client_computed_stats = header_tags.generic.client_computed_stats;
 
         let (payload, processed_traces) = self.processor.process_traces(
             config.clone(),
@@ -713,10 +714,7 @@ mod tests {
             lang_vendor: "vendor",
             tracer_version: "4.0.0",
             container_id: "33",
-            client_computed_top_level: false,
-            client_computed_stats: false,
-            dropped_p0_traces: 0,
-            dropped_p0_spans: 0,
+            generic: tracer_header_tags::TracerGenericTags::default(),
         };
 
         let trace_processor = ServerlessTraceProcessor {
@@ -1210,10 +1208,7 @@ mod tests {
             lang_vendor: "",
             tracer_version: "1.0",
             container_id: "",
-            client_computed_top_level: false,
-            client_computed_stats: false,
-            dropped_p0_traces: 0,
-            dropped_p0_spans: 0,
+            generic: tracer_header_tags::TracerGenericTags::default(),
         };
 
         let make_span = |trace_id: u64, priority: Option<f64>| -> pb::Span {
@@ -1306,10 +1301,7 @@ mod tests {
             lang_vendor: "",
             tracer_version: "1.0",
             container_id: "",
-            client_computed_top_level: false,
-            client_computed_stats: false,
-            dropped_p0_traces: 0,
-            dropped_p0_spans: 0,
+            generic: tracer_header_tags::TracerGenericTags::default(),
         };
 
         let make_dropped_span = |trace_id: u64| -> pb::Span {
@@ -1387,10 +1379,7 @@ mod tests {
             lang_vendor: "",
             tracer_version: "1.0",
             container_id: "",
-            client_computed_top_level: false,
-            client_computed_stats: false,
-            dropped_p0_traces: 0,
-            dropped_p0_spans: 0,
+            generic: tracer_header_tags::TracerGenericTags::default(),
         };
 
         let make_span = |trace_id: u64, priority: f64| -> pb::Span {
@@ -1495,10 +1484,7 @@ mod tests {
             lang_vendor: "",
             tracer_version: "1.0",
             container_id: "",
-            client_computed_top_level: false,
-            client_computed_stats: false,
-            dropped_p0_traces: 0,
-            dropped_p0_spans: 0,
+            generic: tracer_header_tags::TracerGenericTags::default(),
         };
 
         let span = pb::Span {
@@ -1912,10 +1898,10 @@ mod tests {
                 lang_vendor: "vendor",
                 tracer_version: "4.0.0",
                 container_id: "33",
-                client_computed_top_level: false,
-                client_computed_stats,
-                dropped_p0_traces: 0,
-                dropped_p0_spans: 0,
+                generic: tracer_header_tags::TracerGenericTags {
+                    client_computed_stats,
+                    ..Default::default()
+                },
             };
 
             sender

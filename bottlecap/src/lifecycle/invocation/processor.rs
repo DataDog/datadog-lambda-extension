@@ -889,10 +889,10 @@ impl Processor {
             lang_vendor: "",
             tracer_version: "",
             container_id: "",
-            client_computed_top_level: false,
-            client_computed_stats,
-            dropped_p0_traces: 0,
-            dropped_p0_spans: 0,
+            generic: tracer_header_tags::TracerGenericTags {
+                client_computed_stats,
+                ..Default::default()
+            },
         };
 
         if let Err(e) = trace_sender
