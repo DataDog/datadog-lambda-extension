@@ -89,12 +89,38 @@ pub struct LambdaConfig {
     pub trace_experimental_features_enabled: bool,
     /// `DD_TRACE_STATS_ADDITIONAL_TAGS` — comma-separated span `meta` keys included as
     /// additional dimensions on trace stats aggregation (`ClientGroupedStats.additional_metric_tags`).
-    /// Only honored when `trace_experimental_features_enabled` is true.
+    /// Defaults to `DEFAULT_ADDITIONAL_METRIC_TAGS`; an explicit setting replaces that default
+    /// wholesale. User-configured keys are honored only when `trace_experimental_features_enabled`
+    /// is true, but the default survives a disabled gate.
     pub additional_metric_tags: Vec<String>,
     /// `DD_TRACE_STATS_ADDITIONAL_TAGS_CARDINALITY_LIMIT` — per-bucket cap on distinct
     /// `additional_metric_tags` value combinations; `None` uses libdatadog's default (100).
     /// Only honored when `trace_experimental_features_enabled` is true.
     pub additional_metric_tags_cardinality_limit: Option<usize>,
+}
+
+/// Span `meta` keys used as additional trace-stats aggregation dimensions by default on Lambda.
+///
+/// `region` is intrinsic to the sandbox (parsed from the function ARN in `tags::lambda`) and is
+/// designated a span-derived primary tag at the org level. When the backend computes stats it
+/// applies that designation itself; when `DD_LAMBDA_EXTENSION_COMPUTE_STATS` moves aggregation
+/// into the extension, the backend only sees `ClientGroupedStats.additional_metric_tags`, so the
+/// dimension has to be sent from here or it disappears.
+///
+/// A default, not a floor: an explicit `DD_TRACE_STATS_ADDITIONAL_TAGS` replaces it, so a user who
+/// wants `region` alongside their own keys lists it themselves. That keeps the list clear of
+/// libdatadog's 4-key cap, which drops keys by alphabetical order rather than by intent.
+///
+/// Exempt from `DD_TRACE_EXPERIMENTAL_FEATURES_ENABLED`: the gate exists to keep user-configured
+/// keys of unknown cardinality behind a flag, and this key is neither user-configured nor
+/// unbounded (one value per function).
+const DEFAULT_ADDITIONAL_METRIC_TAGS: &[&str] = &["region"];
+
+fn default_additional_metric_tags() -> Vec<String> {
+    DEFAULT_ADDITIONAL_METRIC_TAGS
+        .iter()
+        .map(ToString::to_string)
+        .collect()
 }
 
 impl Default for LambdaConfig {
@@ -120,7 +146,7 @@ impl Default for LambdaConfig {
             custom_metrics_exclude_tags: Vec::new(),
             lambda_durable_function_log_buffer_size: 0,
             trace_experimental_features_enabled: false,
-            additional_metric_tags: Vec::new(),
+            additional_metric_tags: default_additional_metric_tags(),
             additional_metric_tags_cardinality_limit: None,
         }
     }
@@ -282,15 +308,19 @@ impl DatadogConfigExtension for LambdaConfig {
 }
 
 impl LambdaConfig {
-    /// Drop `additional_metric_tags` / `additional_metric_tags_cardinality_limit` unless
-    /// `trace_experimental_features_enabled` is set, matching the Serverless Compatibility
+    /// Drop user-configured `additional_metric_tags` / `additional_metric_tags_cardinality_limit`
+    /// unless `trace_experimental_features_enabled` is set, matching the Serverless Compatibility
     /// Layer (`datadog-trace-agent`).
     ///
     /// Applied after all config sources have merged, not inside `merge_from`, so that the gate
     /// and the values it gates can come from different sources in either order.
     fn apply_experimental_features_gate(&mut self) {
         if !self.trace_experimental_features_enabled {
-            self.additional_metric_tags.clear();
+            // Reset to the Lambda default rather than clearing: the gate governs user-configured
+            // keys, and `region` is a platform default that must survive a disabled gate. This is
+            // the only reset path, and it runs on every `get_config`, so clearing here would make
+            // the default unreachable in production.
+            self.additional_metric_tags = default_additional_metric_tags();
             self.additional_metric_tags_cardinality_limit = None;
         }
     }
@@ -780,14 +810,59 @@ mod lambda_config_tests {
     // trace_experimental_features_enabled, matching the Serverless Compatibility Layer
     // (datadog-trace-agent) ----
 
+    /// The gate drops the user-supplied keys but leaves the Lambda default in place.
     #[test]
-    fn additional_metric_tags_ignored_when_experimental_features_disabled() {
+    fn additional_metric_tags_reset_to_default_when_experimental_features_disabled() {
         let config = load(|jail| {
             jail.set_env("DD_TRACE_STATS_ADDITIONAL_TAGS", "region,tenant_id");
             Ok(())
         });
         assert!(!config.ext.trace_experimental_features_enabled);
-        assert!(config.ext.additional_metric_tags.is_empty());
+        assert_eq!(
+            config.ext.additional_metric_tags,
+            vec!["region".to_string()]
+        );
+    }
+
+    /// No env vars at all: the default still reaches the resolved config.
+    #[test]
+    fn additional_metric_tags_defaults_to_region() {
+        let config = load(|_| Ok(()));
+        assert_eq!(
+            config.ext.additional_metric_tags,
+            vec!["region".to_string()]
+        );
+    }
+
+    /// The production path. `apply_experimental_features_gate` is the only reset path and runs on
+    /// every `get_config`, so a default set on `LambdaConfig::default()` alone would be correct in
+    /// tests built from `Config::default()` and wrong here. Must go through `load()`.
+    #[test]
+    fn additional_metric_tags_default_survives_disabled_experimental_gate() {
+        let config = load(|jail| {
+            jail.set_env("DD_TRACE_EXPERIMENTAL_FEATURES_ENABLED", "false");
+            Ok(())
+        });
+        assert_eq!(
+            config.ext.additional_metric_tags,
+            vec!["region".to_string()]
+        );
+    }
+
+    /// `region` is a default, not a floor: an explicit list replaces it wholesale rather than
+    /// merging, so a user's keys are never evicted by libdatadog's alphabetical 4-key cap to make
+    /// room for one they did not ask for.
+    #[test]
+    fn explicit_additional_metric_tags_replace_the_default() {
+        let config = load(|jail| {
+            jail.set_env("DD_TRACE_EXPERIMENTAL_FEATURES_ENABLED", "true");
+            jail.set_env("DD_TRACE_STATS_ADDITIONAL_TAGS", "tenant_id");
+            Ok(())
+        });
+        assert_eq!(
+            config.ext.additional_metric_tags,
+            vec!["tenant_id".to_string()]
+        );
     }
 
     #[test]
@@ -870,7 +945,10 @@ mod lambda_config_tests {
             jail.set_env("DD_TRACE_EXPERIMENTAL_FEATURES_ENABLED", "false");
             Ok(())
         });
-        assert!(config.ext.additional_metric_tags.is_empty());
+        assert_eq!(
+            config.ext.additional_metric_tags,
+            vec!["region".to_string()]
+        );
         assert_eq!(config.ext.additional_metric_tags_cardinality_limit, None);
     }
 }

@@ -719,11 +719,10 @@ mod tests {
         );
     }
 
-    /// When `additional_metric_tags` is unset (the default), `additional_metric_tags` on the
-    /// exported stats must remain empty even if the span has a meta key that would otherwise
-    /// match a commonly-used tag name.
+    /// Only configured keys are surfaced: a span meta key that is not in `additional_metric_tags`
+    /// must not appear on the exported stats, even when it matches a commonly-used tag name.
     #[tokio::test]
-    async fn test_additional_metric_tags_empty_by_default() {
+    async fn test_additional_metric_tags_exclude_unconfigured_keys() {
         let config = Arc::new(Config::default());
         let (service, handle) = StatsConcentratorService::new(config);
         tokio::spawn(service.run());
@@ -738,7 +737,34 @@ mod tests {
             all_stats
                 .iter()
                 .all(|s| s.additional_metric_tags.is_empty()),
-            "Expected additional_metric_tags to be empty by default, got: {:?}",
+            "Expected unconfigured keys to be excluded, got: {:?}",
+            all_stats
+                .iter()
+                .map(|s| &s.additional_metric_tags)
+                .collect::<Vec<_>>()
+        );
+    }
+
+    /// `region` defaults into `additional_metric_tags`, so a span carrying it surfaces the
+    /// dimension without any user configuration. This is the whole point of the default: with
+    /// `DD_LAMBDA_EXTENSION_COMPUTE_STATS` the backend sees no spans, only this field.
+    #[tokio::test]
+    async fn test_region_surfaces_as_additional_metric_tag_by_default() {
+        let config = Arc::new(Config::default());
+        let (service, handle) = StatsConcentratorService::new(config);
+        tokio::spawn(service.run());
+
+        let span = create_span_kind_span("client", vec![("region", "us-west-2")]);
+        handle.add(&span).unwrap();
+
+        let result = handle.flush(true).await.unwrap();
+        let payload = result.expect("Expected stats for the client span, but got None.");
+        let all_stats: Vec<_> = payload.stats.iter().flat_map(|b| &b.stats).collect();
+        assert!(
+            all_stats
+                .iter()
+                .any(|s| s.additional_metric_tags == vec!["region:us-west-2".to_string()]),
+            "Expected additional_metric_tags to contain region:us-west-2, got: {:?}",
             all_stats
                 .iter()
                 .map(|s| &s.additional_metric_tags)
