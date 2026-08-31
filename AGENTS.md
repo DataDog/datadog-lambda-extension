@@ -18,6 +18,7 @@ All Rust code lives under `bottlecap/`. Run these from that directory unless not
 ## Pull Requests
 
 - When creating a PR, follow the PR template at `.github/pull_request_template.md`.
+- Try to keep PRs small to make review easier: usually no more than 300 lines of core code, excluding tests, dependency updates, and other generated changes.
 - When making a change on a PR, update the PR title and summary if necessary.
 - When reviewing a PR, make sure the PR summary accurately describes the code changes.
 

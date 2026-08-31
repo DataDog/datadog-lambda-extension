@@ -36,7 +36,7 @@ use libdd_common::Endpoint;
 use libdd_trace_obfuscation::obfuscation_config::ObfuscationConfig;
 use libdd_trace_protobuf::pb;
 use libdd_trace_utils::send_data::SendDataBuilder;
-use libdd_trace_utils::trace_utils::TracerHeaderTags;
+use libdd_trace_utils::trace_utils::{TracerGenericTags, TracerHeaderTags};
 use libdd_trace_utils::tracer_payload::TracerPayloadCollection;
 use tokio::sync::Mutex;
 
@@ -55,10 +55,11 @@ fn header_tags() -> TracerHeaderTags<'static> {
         lang_vendor: "datadog",
         tracer_version: "test",
         container_id: "",
-        client_computed_top_level: true,
-        client_computed_stats: true,
-        dropped_p0_traces: 0,
-        dropped_p0_spans: 0,
+        generic: TracerGenericTags {
+            client_computed_top_level: true,
+            client_computed_stats: true,
+            ..Default::default()
+        },
     }
 }
 
@@ -289,7 +290,10 @@ async fn trace_payload_roundtrip_through_fake_intake() {
 
 fn header_tags_with(client_computed_stats: bool) -> TracerHeaderTags<'static> {
     TracerHeaderTags {
-        client_computed_stats,
+        generic: TracerGenericTags {
+            client_computed_stats,
+            ..header_tags().generic
+        },
         ..header_tags()
     }
 }

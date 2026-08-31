@@ -1,5 +1,5 @@
 use std::{
-    collections::{HashMap, VecDeque},
+    collections::{HashMap, HashSet, VecDeque},
     sync::Arc,
     time::{SystemTime, UNIX_EPOCH},
 };
@@ -42,6 +42,7 @@ use crate::{
     tags::{lambda::tags::resolve_runtime_from_proc, provider},
     traces::{
         propagation::{DatadogCompositePropagator, carrier::JsonCarrier},
+        span_pointers::SpanPointer,
         trace_processor::SendingTraceProcessor,
     },
 };
@@ -111,6 +112,16 @@ pub struct Processor {
     /// on `platform.report`. This flag ensures whichever event arrives first wins and the other is skipped,
     /// preventing double counting.
     init_duration_metric_emitted: bool,
+    /// Optional extension-side DSM consume processor. `Some` only when
+    /// `DD_DATA_STREAMS_ENABLED` is set; records `direction:in` checkpoints from
+    /// inbound event payloads.
+    #[allow(clippy::struct_field_names)]
+    dsm_processor: Option<Arc<crate::traces::data_streams::DsmProcessor>>,
+    /// Request IDs whose extension-side DSM consume checkpoints have already
+    /// been recorded. This prevents double-counting when the same invocation
+    /// payload is observed through both the runtime API proxy and tracer-driven
+    /// `/lambda/start-invocation`.
+    dsm_processed_request_ids: HashSet<String>,
     /// How the cold-start invocation metric in On-Demand mode has been resolved relative to
     /// `platform.initStart`, since either the first invocation or `platform.initStart` can
     /// arrive first (the Extensions API's `next()` call is unbuffered, while Telemetry API
@@ -175,8 +186,19 @@ impl Processor {
             durable_context_tx,
             restore_time: None,
             init_duration_metric_emitted: false,
+            dsm_processor: None,
+            dsm_processed_request_ids: HashSet::new(),
             first_invocation_metric_status: FirstInvocationMetricStatus::Pending,
         }
+    }
+
+    /// Attach an extension-side DSM consume processor. Called during startup only
+    /// when `DD_DATA_STREAMS_ENABLED` is set.
+    pub fn set_dsm_processor(
+        &mut self,
+        dsm_processor: Arc<crate::traces::data_streams::DsmProcessor>,
+    ) {
+        self.dsm_processor = Some(dsm_processor);
     }
 
     /// Given a `request_id`, creates the context and adds the enhanced metric offsets to the context buffer.
@@ -279,9 +301,6 @@ impl Processor {
                 "Found buffered UniversalInstrumentationStart for request_id: {}",
                 request_id
             );
-            // Infer span
-            self.inferrer
-                .infer_span(&buffered_event.payload_value, &self.aws_config);
             self.process_on_universal_instrumentation_start(
                 request_id,
                 buffered_event.headers,
@@ -292,7 +311,6 @@ impl Processor {
             if let Some((headers, payload_value)) =
                 self.context_buffer.pair_invoke_event(&request_id)
             {
-                self.inferrer.infer_span(&payload_value, &self.aws_config);
                 self.process_on_universal_instrumentation_start(request_id, headers, payload_value);
             }
         }
@@ -698,7 +716,7 @@ impl Processor {
             .meta
             .extend(self.dynamic_tags.clone());
 
-        if let Some(trigger_tags) = self.inferrer.get_trigger_tags() {
+        if let Some(trigger_tags) = context.inferred.get_trigger_tags() {
             context.invocation_span.meta.extend(trigger_tags);
         }
 
@@ -716,7 +734,7 @@ impl Processor {
         }
 
         self.inferrer
-            .complete_inferred_spans(&context.invocation_span);
+            .complete_inferred_spans(&mut context.inferred, &context.invocation_span);
 
         // Handle cold start span if present. Timeout handling can synthesize an
         // invocation trace ID even when no tracer is installed; that must not
@@ -748,27 +766,47 @@ impl Processor {
     ) {
         // Capture before `get_ctx_spans` consumes `context`.
         let client_computed_stats = context.client_computed_stats;
-        let (traces, body_size) = self.get_ctx_spans(context);
+        let span_pointers = context.inferred.span_pointers.clone();
+        let (traces, body_size) = Self::get_ctx_spans(context);
         self.send_spans(
             traces,
             body_size,
             tags_provider,
             trace_sender,
             client_computed_stats,
+            span_pointers,
         )
         .await;
     }
 
-    fn get_ctx_spans(&mut self, context: Context) -> (Vec<Span>, usize) {
+    fn release_invocation_context(&mut self, request_id: &String) {
+        // Release the context now that all processing for this invocation is complete.
+        // This prevents unbounded memory growth across warm invocations.
+        self.context_buffer.remove(request_id);
+        // Prune DSM idempotency state at the same lifecycle boundary as the context,
+        // not on flush. A flush can happen while an invocation is still active.
+        self.dsm_processed_request_ids.remove(request_id);
+        // Prune the corresponding reparenting entry so that update_reparenting does not
+        // warn about a missing context for already-completed invocations.
+        self.context_buffer
+            .sorted_reparenting_info
+            .retain(|info| info.request_id != *request_id);
+        trace!(
+            "Context released (buffer size after remove: {})",
+            self.context_buffer.size()
+        );
+    }
+
+    fn get_ctx_spans(context: Context) -> (Vec<Span>, usize) {
         let mut body_size = std::mem::size_of_val(&context.invocation_span);
         let mut traces = vec![context.invocation_span.clone()];
 
-        if let Some(inferred_span) = &self.inferrer.inferred_span {
+        if let Some(inferred_span) = &context.inferred.inferred_span {
             body_size += std::mem::size_of_val(inferred_span);
             traces.push(inferred_span.clone());
         }
 
-        if let Some(ws) = &self.inferrer.wrapped_inferred_span {
+        if let Some(ws) = &context.inferred.wrapped_inferred_span {
             body_size += std::mem::size_of_val(ws);
             traces.push(ws.clone());
         }
@@ -823,7 +861,7 @@ impl Processor {
 
             // The cold start span is extension-generated and not tied to a tracer's stats
             // signal, so the backend should compute its stats unless the extension does.
-            self.send_spans(traces, body_size, tags_provider, trace_sender, false)
+            self.send_spans(traces, body_size, tags_provider, trace_sender, false, None)
                 .await;
         }
     }
@@ -838,6 +876,7 @@ impl Processor {
         tags_provider: &Arc<provider::Provider>,
         trace_sender: &Arc<SendingTraceProcessor>,
         client_computed_stats: bool,
+        span_pointers: Option<Vec<SpanPointer>>,
     ) {
         // todo: figure out what to do here
         // `client_computed_stats` is propagated from the tracer's placeholder span so the
@@ -850,10 +889,10 @@ impl Processor {
             lang_vendor: "",
             tracer_version: "",
             container_id: "",
-            client_computed_top_level: false,
-            client_computed_stats,
-            dropped_p0_traces: 0,
-            dropped_p0_spans: 0,
+            generic: tracer_header_tags::TracerGenericTags {
+                client_computed_stats,
+                ..Default::default()
+            },
         };
 
         if let Err(e) = trace_sender
@@ -863,7 +902,7 @@ impl Processor {
                 header_tags,
                 vec![traces],
                 body_size,
-                self.inferrer.span_pointers.clone(),
+                span_pointers,
             )
             .await
         {
@@ -922,18 +961,7 @@ impl Processor {
                 .set_cpu_time_enhanced_metrics(offsets.cpu_offset.clone());
         }
 
-        // Release the context now that all processing for this invocation is complete.
-        // This prevents unbounded memory growth across warm invocations.
-        self.context_buffer.remove(request_id);
-        // Prune the corresponding reparenting entry so that update_reparenting does not
-        // warn about a missing context for already-completed invocations.
-        self.context_buffer
-            .sorted_reparenting_info
-            .retain(|info| info.request_id != *request_id);
-        trace!(
-            "Context released (buffer size after remove: {})",
-            self.context_buffer.size()
-        );
+        self.release_invocation_context(request_id);
     }
 
     /// Handles Managed Instance mode platform report processing.
@@ -1080,15 +1108,21 @@ impl Processor {
     ) {
         self.tracer_detected = true;
 
-        self.inferrer.infer_span(&payload_value, &self.aws_config);
-
         // Both modes: use request_id-based pairing when the tracer sends the header.
         if let Some(req_id) = request_id {
             debug!(
                 "Processing UniversalInstrumentationStart for request_id: {}",
                 req_id
             );
-            if self
+            if self.aws_config.is_managed_instance_mode()
+                && self.context_buffer.get(&req_id).is_some()
+            {
+                // Managed Instance mode creates the invocation context from the
+                // platform invoke event without enqueueing the request id in the
+                // FIFO pairing queue. If the request-id-addressed context already
+                // exists, process immediately instead of buffering forever.
+                self.process_on_universal_instrumentation_start(req_id, headers, payload_value);
+            } else if self
                 .context_buffer
                 .pair_universal_instrumentation_start_with_request_id(
                     &req_id,
@@ -1132,10 +1166,15 @@ impl Processor {
         headers: HashMap<String, String>,
         payload_value: Value,
     ) {
+        // Infer the span for this specific invocation and store it on its own
+        // Context. Computed before borrowing the context mutably.
+        let inferred = self.inferrer.infer_span(&payload_value, &self.aws_config);
+
         let Some(context) = self.context_buffer.get_mut(&request_id) else {
             debug!("Cannot process on invocation start, no context for request_id: {request_id}");
             return;
         };
+        context.inferred = inferred;
 
         // Tag the invocation span with the request payload
         if self.config.ext.capture_lambda_payload {
@@ -1161,9 +1200,9 @@ impl Processor {
 
             // Set the right data to the correct root level span,
             // If there's an inferred span, then that should be the root.
-            if self.inferrer.inferred_span.is_some() {
-                self.inferrer.set_parent_id(sc.span_id);
-                self.inferrer.extend_meta(sc.tags.clone());
+            if context.inferred.inferred_span.is_some() {
+                context.inferred.set_parent_id(sc.span_id);
+                context.inferred.extend_meta(sc.tags.clone());
             } else {
                 context.invocation_span.meta.extend(sc.tags.clone());
             }
@@ -1171,8 +1210,66 @@ impl Processor {
 
         // If we have an inferred span, set the invocation span parent id
         // to be the inferred span id, even if we don't have an extracted trace context
-        if let Some(inferred_span) = &self.inferrer.inferred_span {
+        if let Some(inferred_span) = &context.inferred.inferred_span {
             context.invocation_span.parent_id = inferred_span.span_id;
+        }
+
+        self.record_dsm_consume_from_payload(request_id, &payload_value);
+    }
+
+    pub fn record_dsm_consume_from_payload(&mut self, request_id: String, payload_value: &Value) {
+        // Extension-side DSM: record a consume (`direction:in`) checkpoint for
+        // DSM-eligible event sources, continuing any inbound pathway context.
+        if let Some(dsm) = self.dsm_processor.as_ref() {
+            if self.dsm_processed_request_ids.insert(request_id.clone()) {
+                debug!("DSM: extraction hook fired for request {request_id}");
+                let identified =
+                    crate::lifecycle::invocation::triggers::IdentifiedTrigger::from_value(
+                        payload_value,
+                    );
+                if let Some(trigger) = SpanInferrer::get_trigger_type(identified) {
+                    // Batched sources (SQS/SNS/Kinesis) yield one checkpoint per
+                    // record so every message's pathway context is captured.
+                    let checkpoints = trigger.get_dsm_checkpoints(payload_value);
+                    if checkpoints.is_empty() {
+                        debug!(
+                            "DSM: identified trigger is not DSM-eligible, skipping consume checkpoint"
+                        );
+                    } else {
+                        debug!(
+                            "DSM: trigger is DSM-eligible, {} record(s)",
+                            checkpoints.len()
+                        );
+                        for mut checkpoint in checkpoints {
+                            resolve_dsm_eventbridge_exchange(
+                                &mut checkpoint.edge_tags,
+                                self.config.ext.dsm_exchange_name.as_deref(),
+                            );
+                            apply_dsm_kafka_group_fallback(
+                                &mut checkpoint.edge_tags,
+                                self.config.ext.dsm_kafka_group.as_deref(),
+                            );
+                            debug!(
+                                "DSM: recording consume checkpoint edge_tags={:?}",
+                                checkpoint.edge_tags
+                            );
+                            dsm.record_consume(
+                                &checkpoint.edge_tags,
+                                &checkpoint.carrier,
+                                checkpoint.payload_size_bytes,
+                            );
+                        }
+                    }
+                } else {
+                    debug!("DSM: no trigger identified for payload, skipping consume checkpoint");
+                }
+            } else {
+                debug!(
+                    "DSM: consume checkpoint already recorded for request {request_id}, skipping"
+                );
+            }
+        } else {
+            debug!("DSM: no DSM processor available, skipping consume checkpoint");
         }
     }
 
@@ -1378,7 +1475,7 @@ impl Processor {
             }
 
             // If we have an inferred span, set the status code to it
-            self.inferrer.set_status_code(status_code_as_string);
+            context.inferred.set_status_code(status_code_as_string);
         }
 
         let mut trace_id: u64 = 0;
@@ -1432,8 +1529,8 @@ impl Processor {
         }
         context.invocation_span.trace_id = trace_id;
 
-        if self.inferrer.inferred_span.is_some() {
-            self.inferrer.extend_meta(tags);
+        if context.inferred.inferred_span.is_some() {
+            context.inferred.extend_meta(tags);
         } else {
             context.invocation_span.parent_id = parent_id;
             context.invocation_span.meta.extend(tags);
@@ -1597,6 +1694,41 @@ impl Processor {
     }
 }
 
+/// Resolve the `exchange` (event bus) tag for `EventBridge` (`type:eventbridge`)
+/// DSM consume edge tags, with precedence: configured `DD_DSM_EXCHANGE_NAME` >
+/// payload-derived bus (rule ARN) > `default`. The resolved tag always replaces
+/// any payload-derived `exchange:` tag; other sources are never affected.
+fn resolve_dsm_eventbridge_exchange(edge_tags: &mut Vec<String>, configured: Option<&str>) {
+    if !edge_tags.iter().any(|t| t == "type:eventbridge") {
+        return;
+    }
+    // Precedence: configured `DD_DSM_EXCHANGE_NAME` > payload-derived bus (rule
+    // ARN) > `default`. EventBridge consume checkpoints always carry an
+    // `exchange:` tag so the node hashes consistently across invocations.
+    let payload_exchange = edge_tags
+        .iter()
+        .find_map(|t| t.strip_prefix("exchange:").map(ToString::to_string));
+    let exchange = configured
+        .map(ToString::to_string)
+        .or(payload_exchange)
+        .unwrap_or_else(|| "default".to_string());
+    edge_tags.retain(|t| !t.starts_with("exchange:"));
+    edge_tags.push(format!("exchange:{exchange}"));
+}
+
+/// Apply the configured `DD_DSM_KAFKA_GROUP` fallback to DSM consume edge tags.
+/// The Kafka/`MSK` consumer group is not present in the Lambda event payload, so
+/// it can only be supplied via config. Applies only to `type:kafka` tags that do
+/// not already carry a `group:` tag.
+fn apply_dsm_kafka_group_fallback(edge_tags: &mut Vec<String>, group: Option<&str>) {
+    if let Some(group) = group
+        && edge_tags.iter().any(|t| t == "type:kafka")
+        && !edge_tags.iter().any(|t| t.starts_with("group:"))
+    {
+        edge_tags.push(format!("group:{group}"));
+    }
+}
+
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
 mod tests {
@@ -1611,7 +1743,250 @@ mod tests {
     use dogstatsd::metric::EMPTY_TAGS;
     use serde_json::json;
 
+    fn sqs_payload() -> Value {
+        json!({
+            "Records": [{
+                "messageId": "msg-1",
+                "receiptHandle": "handle",
+                "attributes": {
+                    "ApproximateFirstReceiveTimestamp": "1700000000000",
+                    "ApproximateReceiveCount": "1",
+                    "SentTimestamp": "1700000000000",
+                    "SenderId": "sender",
+                    "AWSTraceHeader": null
+                },
+                "messageAttributes": {},
+                "md5OfBody": "5d41402abc4b2a76b9719d911017c592",
+                "eventSource": "aws:sqs",
+                "eventSourceARN": "arn:aws:sqs:us-east-1:123456789012:test-queue",
+                "awsRegion": "us-east-1",
+                "body": "hello"
+            }]
+        })
+    }
+
+    fn sqs_payload_for_queue(queue_name: &str) -> Value {
+        json!({
+            "Records": [{
+                "messageId": "msg-1",
+                "receiptHandle": "handle",
+                "attributes": {
+                    "ApproximateFirstReceiveTimestamp": "1700000000000",
+                    "ApproximateReceiveCount": "1",
+                    "SentTimestamp": "1700000000000",
+                    "SenderId": "sender",
+                    "AWSTraceHeader": null
+                },
+                "messageAttributes": {},
+                "md5OfBody": "5d41402abc4b2a76b9719d911017c592",
+                "eventSource": "aws:sqs",
+                "eventSourceARN": format!("arn:aws:sqs:us-east-1:123456789012:{queue_name}"),
+                "awsRegion": "us-east-1",
+                "body": "hello"
+            }]
+        })
+    }
+
+    fn attach_test_dsm_processor(processor: &mut Processor) {
+        let proxy = Arc::new(tokio::sync::Mutex::new(
+            crate::traces::proxy_aggregator::Aggregator::default(),
+        ));
+        processor.set_dsm_processor(Arc::new(crate::traces::data_streams::DsmProcessor::new(
+            "svc".into(),
+            "env".into(),
+            "1.0".into(),
+            "2.0".into(),
+            Vec::new(),
+            "https://trace.agent.datadoghq.com",
+            proxy,
+        )));
+    }
+
+    #[test]
+    fn dsm_exchange_config_takes_priority_over_payload() {
+        // Priority 1: configured DD_DSM_EXCHANGE_NAME overrides a payload-derived bus.
+        let mut tags = vec![
+            "direction:in".to_string(),
+            "type:eventbridge".to_string(),
+            "exchange:payload-bus".to_string(),
+            "topic:OrderPlaced".to_string(),
+        ];
+        resolve_dsm_eventbridge_exchange(&mut tags, Some("config-bus"));
+        assert!(tags.contains(&"exchange:config-bus".to_string()));
+        assert!(!tags.contains(&"exchange:payload-bus".to_string()));
+        // Exactly one exchange tag remains.
+        assert_eq!(
+            tags.iter().filter(|t| t.starts_with("exchange:")).count(),
+            1
+        );
+    }
+
+    #[test]
+    fn dsm_exchange_uses_payload_bus_when_unconfigured() {
+        // Priority 2: payload-derived bus is kept when no config is set.
+        let mut tags = vec![
+            "direction:in".to_string(),
+            "type:eventbridge".to_string(),
+            "exchange:payload-bus".to_string(),
+            "topic:OrderPlaced".to_string(),
+        ];
+        resolve_dsm_eventbridge_exchange(&mut tags, None);
+        assert!(tags.contains(&"exchange:payload-bus".to_string()));
+        assert_eq!(
+            tags.iter().filter(|t| t.starts_with("exchange:")).count(),
+            1
+        );
+    }
+
+    #[test]
+    fn dsm_exchange_uses_config_when_no_payload_bus() {
+        let mut tags = vec![
+            "direction:in".to_string(),
+            "type:eventbridge".to_string(),
+            "topic:OrderPlaced".to_string(),
+        ];
+        resolve_dsm_eventbridge_exchange(&mut tags, Some("config-bus"));
+        assert!(tags.contains(&"exchange:config-bus".to_string()));
+    }
+
+    #[test]
+    fn dsm_exchange_defaults_when_nothing_found() {
+        // Priority 3: no config and no payload bus => `default` floor.
+        let mut tags = vec![
+            "direction:in".to_string(),
+            "type:eventbridge".to_string(),
+            "topic:OrderPlaced".to_string(),
+        ];
+        resolve_dsm_eventbridge_exchange(&mut tags, None);
+        assert!(tags.contains(&"exchange:default".to_string()));
+    }
+
+    #[test]
+    fn dsm_exchange_ignored_for_non_eventbridge_sources() {
+        // SQS consume tags must never receive an exchange.
+        let mut tags = vec![
+            "direction:in".to_string(),
+            "topic:my-queue".to_string(),
+            "type:sqs".to_string(),
+        ];
+        let before = tags.clone();
+        resolve_dsm_eventbridge_exchange(&mut tags, Some("config-bus"));
+        assert_eq!(tags, before);
+    }
+
+    #[test]
+    fn dsm_kafka_group_fallback_injects_for_kafka_without_group() {
+        let mut tags = vec![
+            "direction:in".to_string(),
+            "topic:my-topic".to_string(),
+            "type:kafka".to_string(),
+        ];
+        apply_dsm_kafka_group_fallback(&mut tags, Some("my-group"));
+        assert_eq!(
+            tags,
+            vec![
+                "direction:in".to_string(),
+                "topic:my-topic".to_string(),
+                "type:kafka".to_string(),
+                "group:my-group".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn dsm_kafka_group_fallback_does_not_override_existing_group() {
+        let mut tags = vec![
+            "direction:in".to_string(),
+            "group:payload-group".to_string(),
+            "topic:my-topic".to_string(),
+            "type:kafka".to_string(),
+        ];
+        let before = tags.clone();
+        apply_dsm_kafka_group_fallback(&mut tags, Some("my-group"));
+        assert_eq!(tags, before);
+    }
+
+    #[test]
+    fn dsm_kafka_group_fallback_ignored_for_non_kafka_sources() {
+        // SQS consume tags must never receive an injected group.
+        let mut tags = vec![
+            "direction:in".to_string(),
+            "topic:my-queue".to_string(),
+            "type:sqs".to_string(),
+        ];
+        let before = tags.clone();
+        apply_dsm_kafka_group_fallback(&mut tags, Some("my-group"));
+        assert_eq!(tags, before);
+    }
+
+    #[test]
+    fn dsm_kafka_group_fallback_noop_when_unconfigured() {
+        let mut tags = vec![
+            "direction:in".to_string(),
+            "topic:my-topic".to_string(),
+            "type:kafka".to_string(),
+        ];
+        let before = tags.clone();
+        apply_dsm_kafka_group_fallback(&mut tags, None);
+        assert_eq!(tags, before);
+    }
+
     fn setup() -> Processor {
+        setup_with_initialization_type("on-demand")
+    }
+
+    #[tokio::test]
+    async fn test_concurrent_invocations_do_not_share_inferred_span() {
+        // Regression: Managed Instance mode runs concurrent invocations. Inferred
+        // span data must live on each invocation's Context, not on the shared
+        // Processor, otherwise a later invocation's inference overwrites an earlier
+        // one before it is emitted, and the earlier span completes with the wrong
+        // trigger/inference data.
+        let mut p = setup_managed_instance();
+
+        let req_a = String::from("req-a");
+        let req_b = String::from("req-b");
+
+        // Two invocations start; each creates its own context.
+        p.on_invoke_event(req_a.clone());
+        p.on_invoke_event(req_b.clone());
+
+        // Universal instrumentation start arrives for each, with a distinct SQS queue.
+        // B arrives after A, which under the old shared-state design overwrote A.
+        p.on_universal_instrumentation_start(
+            HashMap::new(),
+            sqs_payload_for_queue("queue-a"),
+            Some(req_a.clone()),
+        );
+        p.on_universal_instrumentation_start(
+            HashMap::new(),
+            sqs_payload_for_queue("queue-b"),
+            Some(req_b.clone()),
+        );
+
+        let ctx_a = p.context_buffer.get(&req_a).expect("context a not found");
+        let ctx_b = p.context_buffer.get(&req_b).expect("context b not found");
+
+        let span_a = ctx_a
+            .inferred
+            .inferred_span
+            .as_ref()
+            .expect("inferred span a missing");
+        let span_b = ctx_b
+            .inferred
+            .inferred_span
+            .as_ref()
+            .expect("inferred span b missing");
+
+        assert_eq!(span_a.resource, "queue-a");
+        assert_eq!(span_b.resource, "queue-b");
+    }
+
+    fn setup_managed_instance() -> Processor {
+        setup_with_initialization_type(config::aws::LAMBDA_MANAGED_INSTANCES_INIT_TYPE)
+    }
+
+    fn setup_with_initialization_type(initialization_type: &str) -> Processor {
         let aws_config = Arc::new(AwsConfig {
             region: "us-east-1".into(),
             aws_lwa_proxy_lambda_runtime_api: Some("***".into()),
@@ -1619,7 +1994,7 @@ mod tests {
             sandbox_init_time: Instant::now(),
             runtime_api: "***".into(),
             exec_wrapper: None,
-            initialization_type: "on-demand".into(),
+            initialization_type: initialization_type.into(),
         });
 
         let config = Arc::new(config::Config {
@@ -2536,7 +2911,6 @@ mod tests {
 
     #[tokio::test]
     async fn test_get_ctx_spans_prioritizes_snapstart_over_cold_start() {
-        let mut processor = setup();
         let request_id = String::from("test-request-id");
 
         // Create invocation span
@@ -2570,7 +2944,7 @@ mod tests {
         context.snapstart_restore_span = Some(snapstart_span.clone());
 
         // Call get_ctx_spans to get the spans that would be sent
-        let (spans, _body_size) = processor.get_ctx_spans(context);
+        let (spans, _body_size) = Processor::get_ctx_spans(context);
 
         // Verify that exactly 2 spans are returned:
         // 1. invocation_span
@@ -2991,6 +3365,78 @@ mod tests {
             Some(&0.0),
             "pre-existing _dd.appsec.enabled value must not be overwritten"
         );
+    }
+
+    #[tokio::test]
+    async fn managed_instance_start_processes_immediately_when_context_exists() {
+        let mut p = setup_managed_instance();
+        attach_test_dsm_processor(&mut p);
+        let request_id = String::from("req-lmi-dsm");
+
+        p.on_invoke_event(request_id.clone());
+        p.on_universal_instrumentation_start(
+            HashMap::new(),
+            sqs_payload(),
+            Some(request_id.clone()),
+        );
+
+        assert!(
+            p.dsm_processed_request_ids.contains(&request_id),
+            "LMI UniversalInstrumentationStart must process immediately when the context already exists"
+        );
+    }
+
+    #[tokio::test]
+    async fn dsm_proxy_payload_extraction_does_not_mark_tracer_detected_or_reparent() {
+        let mut p = setup();
+        attach_test_dsm_processor(&mut p);
+        let request_id = String::from("req-dsm-proxy-only");
+
+        p.record_dsm_consume_from_payload(request_id.clone(), &sqs_payload());
+
+        assert!(p.dsm_processed_request_ids.contains(&request_id));
+        assert!(
+            !p.tracer_detected,
+            "DSM-only proxy extraction must not be treated as tracer universal instrumentation"
+        );
+        assert!(
+            p.context_buffer.sorted_reparenting_info.is_empty(),
+            "DSM-only proxy extraction must not add LWA reparenting"
+        );
+    }
+
+    #[tokio::test]
+    async fn dsm_consume_is_idempotent_per_request_id() {
+        let mut p = setup();
+        attach_test_dsm_processor(&mut p);
+        let request_id = String::from("req-dsm-dedupe");
+        p.context_buffer.start_context(&request_id, Span::default());
+
+        p.process_on_universal_instrumentation_start(
+            request_id.clone(),
+            HashMap::new(),
+            sqs_payload(),
+        );
+        p.process_on_universal_instrumentation_start(
+            request_id.clone(),
+            HashMap::new(),
+            sqs_payload(),
+        );
+
+        assert_eq!(p.dsm_processed_request_ids.len(), 1);
+        assert!(p.dsm_processed_request_ids.contains(&request_id));
+    }
+
+    #[tokio::test]
+    async fn dsm_idempotency_state_is_cleared_with_invocation_context() {
+        let mut p = setup();
+        let request_id = String::from("req-dsm-cleanup");
+        p.context_buffer.start_context(&request_id, Span::default());
+        p.dsm_processed_request_ids.insert(request_id.clone());
+
+        p.release_invocation_context(&request_id);
+
+        assert!(!p.dsm_processed_request_ids.contains(&request_id));
     }
 
     /// Two OOM signals for the same `request_id` increment the metric exactly once.

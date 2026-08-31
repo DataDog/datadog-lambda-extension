@@ -23,35 +23,94 @@ use crate::{
 };
 use datadog_opentelemetry::propagation::context::SpanContext;
 
-#[derive(Default)]
-pub struct SpanInferrer {
-    config: Arc<Config>,
+/// Point an inferred (synthetic) span at the function's base service when
+/// `DD_TRACE_REMOVE_INTEGRATION_SERVICE_NAMES_ENABLED` is set and `DD_SERVICE`
+/// is configured, instead of the AWS resource/instance representation the
+/// trigger resolved. This gives a single setting that consolidates every
+/// event-source span onto the function's service, rather than requiring one
+/// `DD_SERVICE_MAPPING` entry per trigger type.
+///
+/// An explicit `DD_SERVICE_MAPPING` entry still wins, preserving the precedence
+/// in [`Trigger::resolve_service_name`].
+///
+/// The value is lowercased so both spans land on one service. That matches the
+/// invocation span directly when AWS service representation is enabled, since
+/// `processor.rs` lowercases `DD_SERVICE` there too. When it is disabled the
+/// invocation span is initially named `aws.lambda`, and `ChunkProcessor::process`
+/// rewrites any `aws.lambda` span to the lowercased `DD_SERVICE` from the tags
+/// map, so the two still converge. Both paths are pinned by tests.
+fn apply_base_service_override(span: &mut Span, trigger: &dyn Trigger, config: &Config) {
+    if !config.ext.trace_remove_integration_service_names_enabled {
+        return;
+    }
+
+    let Some(service) = config.service.as_deref() else {
+        return;
+    };
+
+    if service.is_empty() || trigger.has_service_mapping_entry(&config.service_mapping) {
+        return;
+    }
+
+    span.service = service.to_lowercase();
+}
+
+/// Per-invocation inference output produced by [`SpanInferrer::infer_span`].
+///
+/// This lives on each invocation's `Context` (not on the shared `Processor`) so
+/// that concurrent Managed Instance invocations do not overwrite each other's
+/// inferred span/trigger data before it is emitted.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct InferredSpanData {
     // Span inferred from the Lambda incoming request payload
     pub inferred_span: Option<Span>,
     // Nested span inferred from the Lambda incoming request payload
     pub wrapped_inferred_span: Option<Span>,
     // If the inferred span is async
-    is_async_span: bool,
+    pub is_async_span: bool,
     // Generated Span Context from Step Functions or context taken from `AWSTraceHeader` when java->sqs->java
-    generated_span_context: Option<SpanContext>,
+    pub generated_span_context: Option<SpanContext>,
     // Tags generated from the trigger
-    trigger_tags: Option<HashMap<String, String>>,
+    pub trigger_tags: Option<HashMap<String, String>>,
     // Span pointers from S3 or DynamoDB streams
     pub span_pointers: Option<Vec<SpanPointer>>,
+}
+
+impl InferredSpanData {
+    /// If an `inferred_span` exists, set its `parent_id`.
+    pub fn set_parent_id(&mut self, parent_id: u64) {
+        if let Some(s) = &mut self.inferred_span {
+            s.parent_id = parent_id;
+        }
+    }
+
+    pub fn extend_meta(&mut self, iter: HashMap<String, String>) {
+        if let Some(s) = &mut self.inferred_span {
+            s.meta.extend(iter);
+        }
+    }
+
+    pub fn set_status_code(&mut self, status_code: String) {
+        if let Some(s) = &mut self.inferred_span {
+            s.meta.insert("http.status_code".to_string(), status_code);
+        }
+    }
+
+    /// Returns a clone of the tags associated with the inferred span
+    #[must_use]
+    pub fn get_trigger_tags(&self) -> Option<HashMap<String, String>> {
+        self.trigger_tags.clone()
+    }
+}
+
+pub struct SpanInferrer {
+    config: Arc<Config>,
 }
 
 impl SpanInferrer {
     #[must_use]
     pub fn new(config: Arc<Config>) -> Self {
-        Self {
-            config,
-            inferred_span: None,
-            wrapped_inferred_span: None,
-            is_async_span: false,
-            generated_span_context: None,
-            trigger_tags: None,
-            span_pointers: None,
-        }
+        Self { config }
     }
 
     #[must_use]
@@ -84,6 +143,7 @@ impl SpanInferrer {
         )
     }
 
+    #[allow(clippy::too_many_lines)]
     fn get_wrapped_inferred_span(
         identified_trigger: &IdentifiedTrigger,
         inferred_span: &mut Span,
@@ -107,6 +167,11 @@ impl SpanInferrer {
                         &mut wrapped_inferred_span,
                         &config.service_mapping,
                         config.trace_aws_service_representation_enabled,
+                    );
+                    apply_base_service_override(
+                        &mut wrapped_inferred_span,
+                        &wrapped_trigger,
+                        config,
                     );
                     inferred_span.meta.extend(wrapped_trigger.get_tags());
 
@@ -133,6 +198,11 @@ impl SpanInferrer {
                         &mut wrapped_inferred_span,
                         &config.service_mapping,
                         config.trace_aws_service_representation_enabled,
+                    );
+                    apply_base_service_override(
+                        &mut wrapped_inferred_span,
+                        &event_bridge_entity,
+                        config,
                     );
                     inferred_span.meta.extend(event_bridge_entity.get_tags());
 
@@ -165,6 +235,11 @@ impl SpanInferrer {
                         &mut wrapped_inferred_span,
                         &config.service_mapping,
                         config.trace_aws_service_representation_enabled,
+                    );
+                    apply_base_service_override(
+                        &mut wrapped_inferred_span,
+                        &event_bridge_wrapper_message,
+                        config,
                     );
                     inferred_span
                         .meta
@@ -217,12 +292,9 @@ impl SpanInferrer {
     /// an inferred span and set it to `self.inferred_span`
     ///
     #[allow(clippy::too_many_lines)]
-    pub fn infer_span(&mut self, payload_value: &Value, aws_config: &AwsConfig) {
-        self.inferred_span = None;
-        self.wrapped_inferred_span = None;
-        self.is_async_span = false;
-        self.generated_span_context = None;
-        self.trigger_tags = None;
+    #[must_use]
+    pub fn infer_span(&self, payload_value: &Value, aws_config: &AwsConfig) -> InferredSpanData {
+        let mut data = InferredSpanData::default();
 
         let mut inferred_span = Span {
             span_id: generate_span_id(),
@@ -246,6 +318,7 @@ impl SpanInferrer {
                     &self.config.service_mapping,
                     self.config.trace_aws_service_representation_enabled,
                 );
+                apply_base_service_override(&mut inferred_span, t.as_ref(), &self.config);
             }
 
             if let Some(dd_resource_key) = t.get_dd_resource_key(&aws_config.region) {
@@ -254,8 +327,8 @@ impl SpanInferrer {
                     .insert("dd_resource_key".to_string(), dd_resource_key);
             }
 
-            self.wrapped_inferred_span = wrapped_inferred_span;
-            self.span_pointers = span_pointers;
+            data.wrapped_inferred_span = wrapped_inferred_span;
+            data.span_pointers = span_pointers;
 
             let mut trigger_tags = t.get_tags();
             trigger_tags.insert(
@@ -263,12 +336,10 @@ impl SpanInferrer {
                 t.get_arn(&aws_config.region),
             );
 
-            self.trigger_tags = Some(trigger_tags);
-            self.is_async_span = t.is_async();
+            data.trigger_tags = Some(trigger_tags);
+            data.is_async_span = t.is_async();
 
-            if should_skip_inferred_span {
-                self.inferred_span = None;
-            } else {
+            if !should_skip_inferred_span {
                 let synchronicity = if t.is_async() { "async" } else { "sync" };
                 inferred_span
                     .meta
@@ -277,35 +348,17 @@ impl SpanInferrer {
                     "_inferred_span.synchronicity".to_string(),
                     synchronicity.to_string(),
                 );
-                self.inferred_span = Some(inferred_span);
+                data.inferred_span = Some(inferred_span);
             }
         }
-    }
 
-    /// If a `self.inferred_span` exist, set the `parent_id` to
-    /// the span.
-    ///
-    pub fn set_parent_id(&mut self, parent_id: u64) {
-        if let Some(s) = &mut self.inferred_span {
-            s.parent_id = parent_id;
-        }
-    }
-
-    pub fn extend_meta(&mut self, iter: HashMap<String, String>) {
-        if let Some(s) = &mut self.inferred_span {
-            s.meta.extend(iter);
-        }
-    }
-
-    pub fn set_status_code(&mut self, status_code: String) {
-        if let Some(s) = &mut self.inferred_span {
-            s.meta.insert("http.status_code".to_string(), status_code);
-        }
+        data
     }
 
     // TODO: add status tag and other info from response
-    pub fn complete_inferred_spans(&mut self, invocation_span: &Span) {
-        if let Some(s) = &mut self.inferred_span {
+    pub fn complete_inferred_spans(&self, data: &mut InferredSpanData, invocation_span: &Span) {
+        let is_async_span = data.is_async_span;
+        if let Some(s) = &mut data.inferred_span {
             s.trace_id = invocation_span.trace_id;
             s.error = invocation_span.error;
             s.meta.insert(
@@ -316,7 +369,7 @@ impl SpanInferrer {
             let appsec_enabled = self.config.ext.serverless_appsec_enabled;
             propagate_appsec(appsec_enabled, invocation_span, s);
 
-            if let Some(ws) = &mut self.wrapped_inferred_span {
+            if let Some(ws) = &mut data.wrapped_inferred_span {
                 ws.trace_id = invocation_span.trace_id;
                 ws.error = invocation_span.error;
                 ws.meta
@@ -330,7 +383,7 @@ impl SpanInferrer {
                 s.parent_id = ws.span_id;
 
                 // TODO: clean this logic
-                if self.is_async_span {
+                if is_async_span {
                     // SNS to SQS span duration will be set
                     if ws.duration == 0 {
                         let duration = s.start - ws.start;
@@ -342,7 +395,7 @@ impl SpanInferrer {
                 }
             }
 
-            if self.is_async_span {
+            if is_async_span {
                 // SNS to SQS span duration will be set
                 if s.duration == 0 {
                     let duration = invocation_span.start - s.start;
@@ -353,13 +406,6 @@ impl SpanInferrer {
                 s.duration = duration;
             }
         }
-    }
-
-    /// Returns a clone of the tags associated with the inferred span
-    ///
-    #[must_use]
-    pub fn get_trigger_tags(&self) -> Option<HashMap<String, String>> {
-        self.trigger_tags.clone()
     }
 }
 
@@ -434,6 +480,7 @@ pub fn extract_generated_span_context(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::LambdaConfig;
     use crate::lifecycle::invocation::triggers::test_utils::read_json_file;
     use crate::traces::propagation::DatadogCompositePropagator;
     use datadog_opentelemetry::propagation::TracePropagationStyle;
@@ -584,7 +631,7 @@ mod tests {
     #[test]
     fn test_span_inferrer_infer_span() {
         let config = Arc::new(Config::default());
-        let mut inferrer = SpanInferrer::new(config);
+        let inferrer = SpanInferrer::new(config);
 
         // Create a payload with AWSTraceHeader from Java->SQS->Java
         let payload = json!({
@@ -617,20 +664,20 @@ mod tests {
             initialization_type: "on-demand".into(),
         });
 
-        inferrer.infer_span(&payload, &aws_config);
+        let data = inferrer.infer_span(&payload, &aws_config);
 
         // Test that the inferrer processed the SQS event correctly
         assert!(
-            inferrer.inferred_span.is_some(),
+            data.inferred_span.is_some(),
             "Should have inferred span from SQS event"
         );
         assert!(
-            inferrer.trigger_tags.is_some(),
+            data.trigger_tags.is_some(),
             "Should have trigger tags from SQS event"
         );
 
         // Verify the trigger tags contain the expected SQS information
-        let trigger_tags = inferrer.trigger_tags.expect("Should have trigger tags");
+        let trigger_tags = data.trigger_tags.expect("Should have trigger tags");
         assert!(
             trigger_tags.contains_key("function_trigger.event_source"),
             "Should have event source in trigger tags"
@@ -665,9 +712,9 @@ mod tests {
     fn test_complete_inferred_spans_propagates_appsec_from_invocation() {
         let payload = api_gateway_rest_payload();
         let aws_config = aws_config("us-east-1");
-        let mut inferrer = SpanInferrer::new(Arc::new(Config::default()));
+        let inferrer = SpanInferrer::new(Arc::new(Config::default()));
 
-        inferrer.infer_span(&payload, &aws_config);
+        let mut data = inferrer.infer_span(&payload, &aws_config);
 
         let mut invocation_span = Span {
             trace_id: 42,
@@ -675,7 +722,7 @@ mod tests {
             service: "lambda-service".to_string(),
             ..Span::default()
         };
-        if let Some(inferred_span) = &inferrer.inferred_span {
+        if let Some(inferred_span) = &data.inferred_span {
             invocation_span.start = inferred_span.start;
         }
         invocation_span.duration = 1;
@@ -687,9 +734,9 @@ mod tests {
             r#"{"triggers":["rule"]}"#.to_string(),
         );
 
-        inferrer.complete_inferred_spans(&invocation_span);
+        inferrer.complete_inferred_spans(&mut data, &invocation_span);
 
-        let inferred_span = inferrer
+        let inferred_span = data
             .inferred_span
             .as_ref()
             .expect("Inferred span should still be present");
@@ -722,25 +769,25 @@ mod tests {
             },
             ..Config::default()
         };
-        let mut inferrer = SpanInferrer::new(Arc::new(config));
+        let inferrer = SpanInferrer::new(Arc::new(config));
 
         let payload = api_gateway_rest_payload();
         let aws_config = aws_config("us-east-1");
-        inferrer.infer_span(&payload, &aws_config);
+        let mut data = inferrer.infer_span(&payload, &aws_config);
 
         let mut invocation_span = Span {
             trace_id: 7,
             service: "lambda-service".to_string(),
             ..Span::default()
         };
-        if let Some(inferred_span) = &inferrer.inferred_span {
+        if let Some(inferred_span) = &data.inferred_span {
             invocation_span.start = inferred_span.start;
         }
         invocation_span.duration = 1;
 
-        inferrer.complete_inferred_spans(&invocation_span);
+        inferrer.complete_inferred_spans(&mut data, &invocation_span);
 
-        let inferred_span = inferrer
+        let inferred_span = data
             .inferred_span
             .as_ref()
             .expect("Inferred span should still be present");
@@ -757,6 +804,151 @@ mod tests {
         assert!(
             !inferred_span.meta.contains_key("_dd.appsec.json"),
             "AppSec JSON should not be added when invocation span has none"
+        );
+    }
+
+    fn sqs_payload() -> Value {
+        let json = read_json_file("sqs_event.json");
+        serde_json::from_str(&json).expect("Failed to deserialize SQS payload")
+    }
+
+    /// Infer a span from `payload` and return the resolved inferred-span service.
+    fn inferred_service(payload: &Value, config: Config) -> String {
+        let inferrer = SpanInferrer::new(Arc::new(config));
+        inferrer
+            .infer_span(payload, &aws_config("us-east-1"))
+            .inferred_span
+            .expect("Should have inferred a span")
+            .service
+    }
+
+    #[test]
+    fn test_base_service_override_uses_dd_service() {
+        let config = Config {
+            service: Some("my-lambda-service".to_string()),
+            ext: LambdaConfig {
+                trace_remove_integration_service_names_enabled: true,
+                ..LambdaConfig::default()
+            },
+            ..Config::default()
+        };
+
+        assert_eq!(
+            inferred_service(&sqs_payload(), config),
+            "my-lambda-service"
+        );
+    }
+
+    #[test]
+    fn test_base_service_override_disabled_by_default() {
+        let config = Config {
+            service: Some("my-lambda-service".to_string()),
+            ..Config::default()
+        };
+
+        // Default behavior is unchanged: the AWS resource name is preserved.
+        assert_eq!(inferred_service(&sqs_payload(), config), "MyQueue");
+    }
+
+    #[test]
+    fn test_base_service_override_yields_to_service_mapping() {
+        let config = Config {
+            service: Some("my-lambda-service".to_string()),
+            service_mapping: HashMap::from([(
+                "lambda_sqs".to_string(),
+                "remapped-queue".to_string(),
+            )]),
+            ext: LambdaConfig {
+                trace_remove_integration_service_names_enabled: true,
+                ..LambdaConfig::default()
+            },
+            ..Config::default()
+        };
+
+        assert_eq!(inferred_service(&sqs_payload(), config), "remapped-queue");
+    }
+
+    #[test]
+    fn test_base_service_override_noop_without_dd_service() {
+        let config = Config {
+            service: None,
+            ext: LambdaConfig {
+                trace_remove_integration_service_names_enabled: true,
+                ..LambdaConfig::default()
+            },
+            ..Config::default()
+        };
+
+        assert_eq!(inferred_service(&sqs_payload(), config), "MyQueue");
+    }
+
+    #[test]
+    fn test_base_service_override_lowercases_dd_service() {
+        // The invocation span in processor.rs lowercases DD_SERVICE, so the
+        // inferred span must too or the two land on different services.
+        let config = Config {
+            service: Some("MyLambdaService".to_string()),
+            ext: LambdaConfig {
+                trace_remove_integration_service_names_enabled: true,
+                ..LambdaConfig::default()
+            },
+            ..Config::default()
+        };
+
+        assert_eq!(inferred_service(&sqs_payload(), config), "mylambdaservice");
+    }
+
+    /// With AWS service representation disabled the trigger would resolve to the
+    /// generic fallback (`sqs`). The override still applies, and the invocation
+    /// span converges on the same value via `ChunkProcessor::process` — see
+    /// `test_invocation_span_normalized_to_dd_service_when_representation_disabled`.
+    #[test]
+    fn test_base_service_override_applies_when_representation_disabled() {
+        let config = Config {
+            service: Some("my-lambda-service".to_string()),
+            trace_aws_service_representation_enabled: false,
+            ext: LambdaConfig {
+                trace_remove_integration_service_names_enabled: true,
+                ..LambdaConfig::default()
+            },
+            ..Config::default()
+        };
+
+        assert_eq!(
+            inferred_service(&sqs_payload(), config),
+            "my-lambda-service"
+        );
+    }
+
+    #[test]
+    fn test_base_service_override_applies_to_wrapped_span() {
+        let json = read_json_file("sns_sqs_event.json");
+        let payload: Value =
+            serde_json::from_str(&json).expect("Failed to deserialize SNS-in-SQS payload");
+
+        let config = Arc::new(Config {
+            service: Some("my-lambda-service".to_string()),
+            ext: LambdaConfig {
+                trace_remove_integration_service_names_enabled: true,
+                ..LambdaConfig::default()
+            },
+            ..Config::default()
+        });
+
+        let inferrer = SpanInferrer::new(config);
+        let data = inferrer.infer_span(&payload, &aws_config("us-east-1"));
+
+        assert_eq!(
+            data.inferred_span
+                .expect("Should have inferred an SQS span")
+                .service,
+            "my-lambda-service"
+        );
+        assert_eq!(
+            data.wrapped_inferred_span
+                .expect("Should have inferred a wrapped SNS span")
+                .service,
+            "my-lambda-service"
         );
     }
 }
