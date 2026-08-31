@@ -28,6 +28,10 @@ regex = { version = "1.10", default-features = false }
 reqwest = { version = "0.12.11", features = ["json", "http2"], default-features = false }
 serde = { version = "1.0", default-features = false, features = ["derive"] }
 serde_json = { version = "1.0", default-features = false, features = ["alloc"] }
+serde_bytes = { version = "0.11", default-features = false, features = ["std"] }
+# DSM pipeline-stats serialization (msgpack + gzip) for extension-side checkpoints.
+rmp-serde = { version = "1.3.1", default-features = false }
+flate2 = { version = "1.1", default-features = false, features = ["rust_backend"] }
 thiserror = { version = "1.0", default-features = false }
 # Transitive dependency (pulled in via cookie). Pinned to >=0.3.47 so cargo audit / CI passes (RUSTSEC-2026-0009).
 time = { version = "0.3.47", default-features = false }
@@ -74,17 +78,23 @@ indexmap = {version = "2.11.0", default-features = false}
 # be found in the clippy.toml file adjacent to this Cargo.toml.
 datadog-protos = { version = "0.1.0", default-features = false, git = "https://github.com/DataDog/saluki/", rev = "f863626dbfe3c59bb390985fa6530b0621c2a0a2"}
 ddsketch-agent = { version = "0.1.0", default-features = false, git = "https://github.com/DataDog/saluki/", rev = "f863626dbfe3c59bb390985fa6530b0621c2a0a2"}
-libdd-capabilities = { git = "https://github.com/DataDog/libdatadog", rev = "85ce322a1dcb1eda7df9bcc021223b2d1a236783" }
-libdd-common = { git = "https://github.com/DataDog/libdatadog", rev = "85ce322a1dcb1eda7df9bcc021223b2d1a236783", default-features = false }
-libdd-trace-protobuf = { git = "https://github.com/DataDog/libdatadog", rev = "85ce322a1dcb1eda7df9bcc021223b2d1a236783" }
-libdd-trace-utils = { git = "https://github.com/DataDog/libdatadog", rev = "85ce322a1dcb1eda7df9bcc021223b2d1a236783", default-features = false, features = ["mini_agent"] }
-libdd-trace-normalization = { git = "https://github.com/DataDog/libdatadog", rev = "85ce322a1dcb1eda7df9bcc021223b2d1a236783" }
-libdd-trace-obfuscation = { git = "https://github.com/DataDog/libdatadog", rev = "85ce322a1dcb1eda7df9bcc021223b2d1a236783", default-features = false }
-libdd-trace-stats = { git = "https://github.com/DataDog/libdatadog", rev = "85ce322a1dcb1eda7df9bcc021223b2d1a236783", default-features = false }
+# dd-trace-rs (datadog-opentelemetry) resolves libdd-* from crates.io, so ~11 of these
+# crates are compiled twice. A `[patch.crates-io]` section used to collapse them, but it
+# cannot be restored while this rev's versions trail the published ones (libdd-common 5.1.0
+# here vs the ^5.2.0 that published libdd-data-pipeline requires) and while the rev carries
+# an unreleased breaking libdd-telemetry change under an unchanged version. Re-check with
+# `cargo tree --duplicates | grep ^libdd-` when bumping either side.
+libdd-capabilities = { git = "https://github.com/DataDog/libdatadog", rev = "72fa86854c823361b7d234545f1a2f2d21f944fe" }
+libdd-common = { git = "https://github.com/DataDog/libdatadog", rev = "72fa86854c823361b7d234545f1a2f2d21f944fe", default-features = false }
+libdd-trace-protobuf = { git = "https://github.com/DataDog/libdatadog", rev = "72fa86854c823361b7d234545f1a2f2d21f944fe" }
+libdd-trace-utils = { git = "https://github.com/DataDog/libdatadog", rev = "72fa86854c823361b7d234545f1a2f2d21f944fe", default-features = false, features = ["mini_agent"] }
+libdd-trace-normalization = { git = "https://github.com/DataDog/libdatadog", rev = "72fa86854c823361b7d234545f1a2f2d21f944fe" }
+libdd-trace-obfuscation = { git = "https://github.com/DataDog/libdatadog", rev = "72fa86854c823361b7d234545f1a2f2d21f944fe", default-features = false }
+libdd-trace-stats = { git = "https://github.com/DataDog/libdatadog", rev = "72fa86854c823361b7d234545f1a2f2d21f944fe", default-features = false }
 datadog-opentelemetry = { git = "https://github.com/DataDog/dd-trace-rs", rev = "50bfea8755b75e448a80ac04d53fa7edd414eefe", default-features = false, features = ["_unstable_propagation"] }
-dogstatsd = { git = "https://github.com/DataDog/serverless-components", rev = "d0c7f44191445e20d309734675d5e8b91d2a5d51", default-features = false }
-datadog-fips = { git = "https://github.com/DataDog/serverless-components", rev = "d0c7f44191445e20d309734675d5e8b91d2a5d51", default-features = false }
-datadog-agent-config = { git = "https://github.com/DataDog/serverless-components", rev = "d0c7f44191445e20d309734675d5e8b91d2a5d51", default-features = false }
+dogstatsd = { git = "https://github.com/DataDog/serverless-components", rev = "9daae40afa87f52fad1489f4d7cfd4a579037d2d", default-features = false }
+datadog-fips = { git = "https://github.com/DataDog/serverless-components", rev = "9daae40afa87f52fad1489f4d7cfd4a579037d2d", default-features = false }
+datadog-agent-config = { git = "https://github.com/DataDog/serverless-components", rev = "9daae40afa87f52fad1489f4d7cfd4a579037d2d", default-features = false }
 libddwaf = { version = "1.28.1", git = "https://github.com/DataDog/libddwaf-rust", rev = "d1534a158d976bd4f747bf9fcc58e0712d2d17fc", default-features = false, features = ["serde"] }
 
 [dev-dependencies]
@@ -169,26 +179,3 @@ fips = [
 
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(coverage,coverage_nightly)'] }
-
-# datadog-opentelemetry (dd-trace-rs) depends on these libdatadog crates via
-# crates.io, while we depend on them directly via a git rev. Without this,
-# both copies get compiled. Pointing the crates.io versions at the same git
-# rev pinned above collapses them back to one. Verify with
-# `cargo tree --duplicates | grep ^libdd-` after bumping either side.
-[patch.crates-io]
-libdd-capabilities = { git = "https://github.com/DataDog/libdatadog", rev = "85ce322a1dcb1eda7df9bcc021223b2d1a236783" }
-libdd-capabilities-impl = { git = "https://github.com/DataDog/libdatadog", rev = "85ce322a1dcb1eda7df9bcc021223b2d1a236783" }
-libdd-common = { git = "https://github.com/DataDog/libdatadog", rev = "85ce322a1dcb1eda7df9bcc021223b2d1a236783" }
-libdd-data-pipeline = { git = "https://github.com/DataDog/libdatadog", rev = "85ce322a1dcb1eda7df9bcc021223b2d1a236783" }
-libdd-ddsketch = { git = "https://github.com/DataDog/libdatadog", rev = "85ce322a1dcb1eda7df9bcc021223b2d1a236783" }
-libdd-dogstatsd-client = { git = "https://github.com/DataDog/libdatadog", rev = "85ce322a1dcb1eda7df9bcc021223b2d1a236783" }
-libdd-library-config = { git = "https://github.com/DataDog/libdatadog", rev = "85ce322a1dcb1eda7df9bcc021223b2d1a236783" }
-libdd-sampling = { git = "https://github.com/DataDog/libdatadog", rev = "85ce322a1dcb1eda7df9bcc021223b2d1a236783" }
-libdd-shared-runtime = { git = "https://github.com/DataDog/libdatadog", rev = "85ce322a1dcb1eda7df9bcc021223b2d1a236783" }
-libdd-telemetry = { git = "https://github.com/DataDog/libdatadog", rev = "85ce322a1dcb1eda7df9bcc021223b2d1a236783" }
-libdd-tinybytes = { git = "https://github.com/DataDog/libdatadog", rev = "85ce322a1dcb1eda7df9bcc021223b2d1a236783" }
-libdd-trace-normalization = { git = "https://github.com/DataDog/libdatadog", rev = "85ce322a1dcb1eda7df9bcc021223b2d1a236783" }
-libdd-trace-obfuscation = { git = "https://github.com/DataDog/libdatadog", rev = "85ce322a1dcb1eda7df9bcc021223b2d1a236783" }
-libdd-trace-protobuf = { git = "https://github.com/DataDog/libdatadog", rev = "85ce322a1dcb1eda7df9bcc021223b2d1a236783" }
-libdd-trace-stats = { git = "https://github.com/DataDog/libdatadog", rev = "85ce322a1dcb1eda7df9bcc021223b2d1a236783" }
-libdd-trace-utils = { git = "https://github.com/DataDog/libdatadog", rev = "85ce322a1dcb1eda7df9bcc021223b2d1a236783" }

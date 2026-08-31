@@ -3,7 +3,8 @@ use crate::lifecycle::invocation::{
     base64_to_string,
     processor::MS_TO_NS,
     triggers::{
-        DATADOG_CARRIER_KEY, FUNCTION_TRIGGER_EVENT_SOURCE_TAG, ServiceNameResolver, Trigger,
+        DATADOG_CARRIER_KEY, DsmCheckpointInput, FUNCTION_TRIGGER_EVENT_SOURCE_TAG,
+        ServiceNameResolver, Trigger, dsm_checkpoints_from_records,
         event_bridge_event::EventBridgeEvent,
         sns_event::{SnsEntity, SnsRecord},
     },
@@ -217,6 +218,28 @@ impl Trigger for SqsRecord {
     fn is_async(&self) -> bool {
         true
     }
+
+    fn get_dsm_edge_tags(&self) -> Option<Vec<String>> {
+        // queue name = last `:` segment of the event source ARN.
+        let queue = self
+            .event_source_arn
+            .split(':')
+            .next_back()
+            .unwrap_or_default();
+        Some(vec![
+            "direction:in".to_string(),
+            format!("topic:{queue}"),
+            "type:sqs".to_string(),
+        ])
+    }
+
+    fn get_payload_size_bytes(&self) -> f64 {
+        self.body.len() as f64
+    }
+
+    fn get_dsm_checkpoints(&self, payload: &Value) -> Vec<DsmCheckpointInput> {
+        dsm_checkpoints_from_records::<SqsRecord>(payload)
+    }
 }
 
 impl ServiceNameResolver for SqsRecord {
@@ -413,6 +436,89 @@ mod tests {
     }
 
     #[test]
+    fn test_get_dsm_checkpoints_one_per_record() {
+        // Build a two-record batch from the single-record fixture, giving each
+        // record a distinct queue and a distinct pathway carrier.
+        let json = read_json_file("sqs_event.json");
+        let mut payload: Value =
+            serde_json::from_str(&json).expect("Failed to deserialize into Value");
+        let records = payload["Records"].as_array().expect("Records array");
+        let mut first = records[0].clone();
+        let mut second = records[0].clone();
+
+        first["eventSourceARN"] = Value::from("arn:aws:sqs:us-east-1:123456789012:QueueA");
+        first["messageAttributes"]["_datadog"]["stringValue"] =
+            Value::from("{\"x-datadog-trace-id\":\"111\",\"dd-pathway-ctx-base64\":\"ctxA\"}");
+
+        second["eventSourceARN"] = Value::from("arn:aws:sqs:us-east-1:123456789012:QueueB");
+        second["messageAttributes"]["_datadog"]["stringValue"] =
+            Value::from("{\"x-datadog-trace-id\":\"222\",\"dd-pathway-ctx-base64\":\"ctxB\"}");
+
+        payload["Records"] = Value::from(vec![first, second]);
+
+        let trigger = SqsRecord::new(payload.clone()).expect("Failed to deserialize SqsRecord");
+        let checkpoints = trigger.get_dsm_checkpoints(&payload);
+
+        assert_eq!(checkpoints.len(), 2, "expected one checkpoint per record");
+
+        assert_eq!(
+            checkpoints[0].edge_tags,
+            vec![
+                "direction:in".to_string(),
+                "topic:QueueA".to_string(),
+                "type:sqs".to_string(),
+            ]
+        );
+        assert_eq!(
+            checkpoints[0].carrier.get("dd-pathway-ctx-base64"),
+            Some(&"ctxA".to_string())
+        );
+
+        assert_eq!(
+            checkpoints[1].edge_tags,
+            vec![
+                "direction:in".to_string(),
+                "topic:QueueB".to_string(),
+                "type:sqs".to_string(),
+            ]
+        );
+        assert_eq!(
+            checkpoints[1].carrier.get("dd-pathway-ctx-base64"),
+            Some(&"ctxB".to_string())
+        );
+    }
+
+    #[test]
+    fn test_get_dsm_checkpoints_payload_size() {
+        // Each checkpoint's payload_size_bytes must equal the UTF-8 byte length
+        // of its record's `body` field.
+        let json = read_json_file("sqs_event.json");
+        let mut payload: Value =
+            serde_json::from_str(&json).expect("Failed to deserialize into Value");
+        let records = payload["Records"].as_array().expect("Records array");
+        let mut first = records[0].clone();
+        let mut second = records[0].clone();
+        first["body"] = Value::from("hello"); // 5 bytes
+        second["body"] = Value::from("world!"); // 6 bytes
+        payload["Records"] = Value::from(vec![first, second]);
+
+        let trigger = SqsRecord::new(payload.clone()).expect("Failed to deserialize SqsRecord");
+        let checkpoints = trigger.get_dsm_checkpoints(&payload);
+
+        assert_eq!(checkpoints.len(), 2);
+        assert!(
+            (checkpoints[0].payload_size_bytes - 5.0).abs() < f64::EPSILON,
+            "expected 5.0, got {}",
+            checkpoints[0].payload_size_bytes
+        );
+        assert!(
+            (checkpoints[1].payload_size_bytes - 6.0).abs() < f64::EPSILON,
+            "expected 6.0, got {}",
+            checkpoints[1].payload_size_bytes
+        );
+    }
+
+    #[test]
     fn test_get_carrier() {
         let json = read_json_file("sqs_event.json");
         let payload = serde_json::from_str(&json).expect("Failed to deserialize into Value");
@@ -532,6 +638,31 @@ mod tests {
         ]);
 
         assert_eq!(carrier, expected);
+    }
+
+    #[test]
+    fn test_get_carrier_from_binary_message_attribute() {
+        // SNS -> SQS raw message delivery: `_datadog` is a top-level SQS Binary
+        // attribute whose `binaryValue` is base64-encoded carrier JSON, and the
+        // body is the raw published message (no SNS envelope).
+        let json = read_json_file("sqs_binary_event.json");
+        let payload = serde_json::from_str(&json).expect("Failed to deserialize into Value");
+        let event = SqsRecord::new(payload).expect("Failed to deserialize SqsRecord");
+        let carrier = event.get_carrier();
+
+        assert_eq!(
+            carrier.get("dd-pathway-ctx-base64").map(String::as_str),
+            Some("Ev+XMfNJ31T+hcjp+Gf+hcjp+Gc="),
+            "DSM pathway context must be extracted from the Binary attribute"
+        );
+        assert_eq!(
+            carrier.get("x-datadog-trace-id").map(String::as_str),
+            Some("2522563026513800488")
+        );
+        assert_eq!(
+            carrier.get("x-datadog-parent-id").map(String::as_str),
+            Some("1052921069172192507")
+        );
     }
 
     #[test]

@@ -29,6 +29,11 @@ pub struct FlushingService {
     proxy_flusher: Arc<ProxyFlusher>,
     metrics_flushers: Arc<Vec<MetricsFlusher>>,
 
+    /// Optional extension-side DSM processor. When present, its aggregated
+    /// pipeline-stats payload is drained into the proxy aggregator immediately
+    /// before each proxy flush. `None` unless `DD_DATA_STREAMS_ENABLED` is set.
+    dsm_processor: Option<Arc<crate::traces::data_streams::DsmProcessor>>,
+
     // Metrics aggregator handle for getting data to flush
     metrics_aggr_handle: MetricsAggregatorHandle,
 
@@ -46,6 +51,7 @@ impl FlushingService {
         proxy_flusher: Arc<ProxyFlusher>,
         metrics_flushers: Arc<Vec<MetricsFlusher>>,
         metrics_aggr_handle: MetricsAggregatorHandle,
+        dsm_processor: Option<Arc<crate::traces::data_streams::DsmProcessor>>,
     ) -> Self {
         Self {
             logs_flusher,
@@ -53,6 +59,7 @@ impl FlushingService {
             stats_flusher,
             proxy_flusher,
             metrics_flushers,
+            dsm_processor,
             metrics_aggr_handle,
             handles: FlushHandles::new(),
         }
@@ -122,6 +129,11 @@ impl FlushingService {
             .push(tokio::spawn(async move {
                 sf.flush(false, None).await.unwrap_or_default()
             }));
+
+        // Drain DSM pipeline stats into the proxy aggregator before flushing.
+        if let Some(dsm) = &self.dsm_processor {
+            dsm.drain_into_proxy().await;
+        }
 
         // Spawn proxy flush
         let pf = self.proxy_flusher.clone();
@@ -323,6 +335,11 @@ impl FlushingService {
                 )
             })
             .collect();
+
+        // Drain DSM pipeline stats into the proxy aggregator before flushing.
+        if let Some(dsm) = &self.dsm_processor {
+            dsm.drain_into_proxy().await;
+        }
 
         tokio::join!(
             self.logs_flusher.flush(None),

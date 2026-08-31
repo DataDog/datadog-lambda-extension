@@ -10,7 +10,8 @@ use tracing::debug;
 use crate::lifecycle::invocation::{
     processor::S_TO_NS,
     triggers::{
-        DATADOG_CARRIER_KEY, FUNCTION_TRIGGER_EVENT_SOURCE_TAG, ServiceNameResolver, Trigger,
+        DATADOG_CARRIER_KEY, DsmCheckpointInput, FUNCTION_TRIGGER_EVENT_SOURCE_TAG,
+        ServiceNameResolver, Trigger, dsm_checkpoints_from_records,
     },
 };
 
@@ -131,6 +132,35 @@ impl Trigger for KinesisRecord {
 
     fn is_async(&self) -> bool {
         true
+    }
+
+    fn get_dsm_edge_tags(&self) -> Option<Vec<String>> {
+        // stream name = last `/` segment of the event source ARN.
+        let stream = self
+            .event_source_arn
+            .split('/')
+            .next_back()
+            .unwrap_or_default();
+        if stream.is_empty() {
+            return Some(vec!["direction:in".to_string(), "type:kinesis".to_string()]);
+        }
+        Some(vec![
+            "direction:in".to_string(),
+            format!("topic:{stream}"),
+            "type:kinesis".to_string(),
+        ])
+    }
+
+    fn get_payload_size_bytes(&self) -> f64 {
+        // The `data` field is base64-encoded; report the decoded byte length
+        // so the DSM PayloadSize sketch reflects the actual message size.
+        general_purpose::STANDARD
+            .decode(&self.kinesis.data)
+            .map_or(0.0, |b| b.len() as f64)
+    }
+
+    fn get_dsm_checkpoints(&self, payload: &Value) -> Vec<DsmCheckpointInput> {
+        dsm_checkpoints_from_records::<KinesisRecord>(payload)
     }
 }
 
@@ -368,6 +398,25 @@ mod tests {
                 false // aws_service_representation_enabled = false
             ),
             "kinesis" // fallback value
+        );
+    }
+
+    #[test]
+    fn test_get_dsm_checkpoints_payload_size() {
+        // The checkpoint payload_size_bytes must equal the decoded byte length
+        // of the base64-encoded `kinesis.data` field for each record.
+        let json = read_json_file("kinesis_event.json");
+        let payload: Value = serde_json::from_str(&json).expect("Failed to deserialize into Value");
+
+        let event = KinesisRecord::new(payload.clone()).expect("Failed to deserialize");
+        let checkpoints = event.get_dsm_checkpoints(&payload);
+
+        assert_eq!(checkpoints.len(), 1);
+        // The fixture data field decodes to 155 bytes.
+        assert!(
+            (checkpoints[0].payload_size_bytes - 155.0).abs() < f64::EPSILON,
+            "expected 155.0, got {}",
+            checkpoints[0].payload_size_bytes
         );
     }
 }

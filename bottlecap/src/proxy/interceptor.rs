@@ -34,14 +34,23 @@ type InterceptorState = (
     InvocationProcessorHandle,
     Option<Arc<Mutex<AppSecProcessor>>>,
     Arc<DatadogCompositePropagator>,
+    bool,
     Arc<Mutex<JoinSet<()>>>,
 );
+
+#[derive(Debug, PartialEq, Eq)]
+enum InvocationNextProcessingMode {
+    UniversalInstrumentation,
+    DsmOnly,
+    None,
+}
 
 pub fn start(
     aws_config: Arc<AwsConfig>,
     invocation_processor_handle: InvocationProcessorHandle,
     appsec_processor: Option<Arc<Mutex<AppSecProcessor>>>,
     propagator: Arc<DatadogCompositePropagator>,
+    dsm_consume_enabled: bool,
 ) -> Result<CancellationToken, Box<dyn std::error::Error>> {
     let socket = get_proxy_socket_address(aws_config.aws_lwa_proxy_lambda_runtime_api.as_ref());
     let shutdown_token = CancellationToken::new();
@@ -61,6 +70,7 @@ pub fn start(
         invocation_processor_handle,
         appsec_processor,
         propagator,
+        dsm_consume_enabled,
         tasks.clone(),
     );
 
@@ -112,6 +122,45 @@ async fn graceful_shutdown(tasks: Arc<Mutex<JoinSet<()>>>, shutdown_token: Cance
     }
 }
 
+async fn record_dsm_consume_from_invocation_next(
+    invocation_processor: &InvocationProcessorHandle,
+    parts: &http::response::Parts,
+    body: &Bytes,
+) {
+    let Some(request_id) = parts
+        .headers
+        .get("Lambda-Runtime-Aws-Request-Id")
+        .and_then(|v| v.to_str().ok())
+        .map(std::string::ToString::to_string)
+    else {
+        debug!("PROXY | invocation_next_proxy | missing request id for DSM consume extraction");
+        return;
+    };
+
+    let payload_value = serde_json::from_slice(body).unwrap_or_else(|e| {
+        debug!("PROXY | invocation_next_proxy | error parsing DSM payload as JSON: {e}");
+        serde_json::json!({})
+    });
+
+    let _ = invocation_processor
+        .record_dsm_consume_from_payload(request_id, payload_value)
+        .await;
+}
+
+fn get_invocation_next_processing_mode(
+    aws_config: &AwsConfig,
+    experimental_proxy_enabled: bool,
+    dsm_consume_enabled: bool,
+) -> InvocationNextProcessingMode {
+    if aws_config.aws_lwa_proxy_lambda_runtime_api.is_some() || experimental_proxy_enabled {
+        InvocationNextProcessingMode::UniversalInstrumentation
+    } else if dsm_consume_enabled {
+        InvocationNextProcessingMode::DsmOnly
+    } else {
+        InvocationNextProcessingMode::None
+    }
+}
+
 /// Given an optional String representing the LWA proxy lambda runtime API,
 /// return a `SocketAddr` that can be used to bind the proxy server.
 ///
@@ -133,9 +182,15 @@ fn get_proxy_socket_address(aws_lwa_proxy_lambda_runtime_api: Option<&String>) -
 
 async fn invocation_next_proxy(
     Path(api_version): Path<String>,
-    State((aws_config, client, invocation_processor, appsec_processor, propagator, tasks)): State<
-        InterceptorState,
-    >,
+    State((
+        aws_config,
+        client,
+        invocation_processor,
+        appsec_processor,
+        propagator,
+        dsm_consume_enabled,
+        tasks,
+    )): State<InterceptorState>,
     request: Request,
 ) -> Response {
     debug!("PROXY | invocation_next_proxy | api_version: {api_version}");
@@ -196,14 +251,43 @@ async fn invocation_next_proxy(
                 }
             }
 
-            if aws_config.aws_lwa_proxy_lambda_runtime_api.is_some() {
-                lwa::process_invocation_next(
-                    &invocation_processor,
-                    &intercepted_parts_clone,
-                    &body,
-                    Arc::clone(&propagator),
-                )
-                .await;
+            // Drive full LWA universal instrumentation only for LWA and the
+            // experimental wrapper proxy. DSM-only proxy support must not reuse
+            // `lwa::process_invocation_next`, because that path also queues LWA
+            // reparenting with a synthetic invocation span id. In tracer runtimes
+            // that still call `/lambda/start-invocation`, that synthetic id can
+            // conflict with the tracer-provided invocation span id.
+            let experimental_proxy_enabled = std::env::var("DD_EXPERIMENTAL_ENABLE_PROXY")
+                .is_ok_and(|v| v.eq_ignore_ascii_case("true"));
+            match get_invocation_next_processing_mode(
+                &aws_config,
+                experimental_proxy_enabled,
+                dsm_consume_enabled,
+            ) {
+                InvocationNextProcessingMode::UniversalInstrumentation => {
+                    debug!(
+                        "PROXY | invocation_next_proxy | driving universal instrumentation from intercepted payload"
+                    );
+                    lwa::process_invocation_next(
+                        &invocation_processor,
+                        &intercepted_parts_clone,
+                        &body,
+                        Arc::clone(&propagator),
+                    )
+                    .await;
+                }
+                InvocationNextProcessingMode::DsmOnly => {
+                    debug!(
+                        "PROXY | invocation_next_proxy | recording DSM consume from intercepted payload"
+                    );
+                    record_dsm_consume_from_invocation_next(
+                        &invocation_processor,
+                        &intercepted_parts_clone,
+                        &body,
+                    )
+                    .await;
+                }
+                InvocationNextProcessingMode::None => {}
             }
         }
     });
@@ -223,7 +307,7 @@ async fn invocation_next_proxy(
 
 async fn invocation_response_proxy(
     Path((api_version, request_id)): Path<(String, String)>,
-    State((aws_config, client, invocation_processor, appsec_processor, _, tasks)): State<
+    State((aws_config, client, invocation_processor, appsec_processor, _, _, tasks)): State<
         InterceptorState,
     >,
     request: Request,
@@ -304,7 +388,7 @@ async fn invocation_error_proxy(
     request: Request,
 ) -> Response {
     debug!("PROXY | invocation_error_proxy | api_version: {api_version}, request_id: {request_id}");
-    let State((_, _, _, appsec_processor, _, _)) = &state;
+    let State((_, _, _, appsec_processor, _, _, _)) = &state;
     if let Some(appsec_processor) = appsec_processor {
         // Marking any outstanding security context as finalized by sending a blank response.
         appsec_processor
@@ -318,7 +402,7 @@ async fn invocation_error_proxy(
 }
 
 async fn passthrough_proxy(
-    State((aws_config, client, _, _, _, _)): State<InterceptorState>,
+    State((aws_config, client, _, _, _, _, _)): State<InterceptorState>,
     request: Request,
 ) -> Response {
     let (parts, body) = request.into_parts();
@@ -448,7 +532,48 @@ mod tests {
         config::Config, tags::provider::Provider, traces::propagation::DatadogCompositePropagator,
     };
 
+    fn test_aws_config(aws_lwa_proxy_lambda_runtime_api: Option<String>) -> AwsConfig {
+        AwsConfig {
+            region: "us-east-1".to_string(),
+            function_name: "arn:some-function".to_string(),
+            sandbox_init_time: Instant::now(),
+            runtime_api: "127.0.0.1:12344".to_string(),
+            aws_lwa_proxy_lambda_runtime_api,
+            exec_wrapper: None,
+            initialization_type: "on-demand".into(),
+        }
+    }
+
+    #[test]
+    fn invocation_next_processing_mode_uses_resolved_dsm_flag() {
+        let aws_config = test_aws_config(None);
+
+        assert_eq!(
+            get_invocation_next_processing_mode(&aws_config, false, true),
+            InvocationNextProcessingMode::DsmOnly
+        );
+        assert_eq!(
+            get_invocation_next_processing_mode(&aws_config, false, false),
+            InvocationNextProcessingMode::None
+        );
+    }
+
+    #[test]
+    fn invocation_next_processing_mode_prefers_universal_instrumentation() {
+        let aws_config = test_aws_config(Some("127.0.0.1:9000".to_string()));
+
+        assert_eq!(
+            get_invocation_next_processing_mode(&aws_config, false, true),
+            InvocationNextProcessingMode::UniversalInstrumentation
+        );
+        assert_eq!(
+            get_invocation_next_processing_mode(&test_aws_config(None), true, true),
+            InvocationNextProcessingMode::UniversalInstrumentation
+        );
+    }
+
     #[tokio::test]
+    #[allow(clippy::too_many_lines)]
     async fn test_noop_proxy() {
         let aws_lwa_lambda_runtime_api = "127.0.0.1:12345";
         let aws_lambda_runtime_api = "127.0.0.1:12344";
@@ -489,15 +614,9 @@ mod tests {
         tokio::spawn(service.run());
 
         let metrics_aggregator = handle;
-        let aws_config = Arc::new(AwsConfig {
-            region: "us-east-1".to_string(),
-            function_name: "arn:some-function".to_string(),
-            sandbox_init_time: Instant::now(),
-            runtime_api: aws_lambda_runtime_api.to_string(),
-            aws_lwa_proxy_lambda_runtime_api: Some(aws_lwa_lambda_runtime_api.to_string()),
-            exec_wrapper: None,
-            initialization_type: "on-demand".into(),
-        });
+        let mut aws_config_data = test_aws_config(Some(aws_lwa_lambda_runtime_api.to_string()));
+        aws_config_data.runtime_api = aws_lambda_runtime_api.to_string();
+        let aws_config = Arc::new(aws_config_data);
         let propagator = Arc::new(DatadogCompositePropagator::new(Arc::clone(&config)));
         let (durable_context_tx, _durable_context_rx) = tokio::sync::mpsc::channel(1);
         let (invocation_processor_handle, invocation_processor_service) =
@@ -508,6 +627,7 @@ mod tests {
                 metrics_aggregator,
                 Arc::clone(&propagator),
                 durable_context_tx,
+                None,
             );
         tokio::spawn(async move {
             invocation_processor_service.run().await;
@@ -529,6 +649,7 @@ mod tests {
             invocation_processor_handle,
             appsec_processor,
             propagator,
+            config.ext.dsm_consume_enabled,
         )
         .expect("Failed to start API runtime proxy");
         let https = HttpConnector::new();
