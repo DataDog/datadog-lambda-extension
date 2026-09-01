@@ -96,14 +96,23 @@ impl CollapsedFields {
     const HTTP_ENDPOINT: u8 = 1 << 1;
     const PEER_TAGS: u8 = 1 << 2;
     const ADDITIONAL_TAGS: u8 = 1 << 3;
-    const ALL: u8 = Self::RESOURCE | Self::HTTP_ENDPOINT | Self::PEER_TAGS | Self::ADDITIONAL_TAGS;
+    const CORE_FIELDS: u8 = Self::RESOURCE | Self::HTTP_ENDPOINT | Self::PEER_TAGS;
+
+    fn possible(additional_tags_enabled: bool) -> Self {
+        let fields = if additional_tags_enabled {
+            Self::CORE_FIELDS | Self::ADDITIONAL_TAGS
+        } else {
+            Self::CORE_FIELDS
+        };
+        Self(fields)
+    }
 
     fn add(&mut self, field: u8) {
         self.0 |= field;
     }
 
-    fn is_saturated(self) -> bool {
-        self.0 == Self::ALL
+    fn contains_all(self, fields: Self) -> bool {
+        self.0 & fields.0 == fields.0
     }
 
     fn contains(self, field: u8) -> bool {
@@ -276,6 +285,8 @@ pub struct StatsConcentratorService {
     whole_key_collapse_reported: bool,
     /// Same, per collapsed field.
     reported_collapsed_fields: CollapsedFields,
+    /// Fields that can collapse with the concentrator's configured aggregation dimensions.
+    possible_collapsed_fields: CollapsedFields,
 }
 
 // A service that handles add() and flush() requests in the same queue,
@@ -286,6 +297,9 @@ impl StatsConcentratorService {
         let (tx, rx) = mpsc::unbounded_channel();
         let handle = StatsConcentratorHandle::new(tx);
         let cardinality_limits = CardinalityLimitConfig::default();
+        let additional_metric_tag_keys = Vec::new();
+        let possible_collapsed_fields =
+            CollapsedFields::possible(!additional_metric_tag_keys.is_empty());
         let concentrator = SpanConcentrator::new(
             Duration::from_nanos(BUCKET_DURATION_NS),
             SystemTime::now(),
@@ -308,7 +322,7 @@ impl StatsConcentratorService {
             // collapse warnings quote are provably the ones in force.
             Some(cardinality_limits),
             // No additional stats tag keys: aggregate on the default key fields only.
-            Vec::new(),
+            additional_metric_tag_keys,
         );
         let service: StatsConcentratorService = Self {
             concentrator,
@@ -319,6 +333,7 @@ impl StatsConcentratorService {
             cardinality_limits,
             whole_key_collapse_reported: false,
             reported_collapsed_fields: CollapsedFields::default(),
+            possible_collapsed_fields,
         };
         (service, handle)
     }
@@ -408,13 +423,6 @@ impl StatsConcentratorService {
     /// counts have no public accessor without the `dogstatsd`/`telemetry` features; it can only
     /// report that something collapsed, which the payload scan already does.
     fn report_collapse(&mut self, buckets: &[pb::ClientStatsBucket], collapsed_spans: u64) {
-        // Every signal has already warned, so nothing below can produce output. Worth an early
-        // return because the payload scan is not free: a bucket can hold thousands of entries and
-        // flushes are frequent under continuous flushing.
-        if self.whole_key_collapse_reported && self.reported_collapsed_fields.is_saturated() {
-            return;
-        }
-
         if collapsed_spans > 0 && !self.whole_key_collapse_reported {
             self.whole_key_collapse_reported = true;
             warn!(
@@ -426,6 +434,15 @@ impl StatsConcentratorService {
                  sandbox.",
                 self.cardinality_limits.whole_key_limit
             );
+        }
+
+        // Every payload-derived signal has already warned, so scanning cannot produce output.
+        // The whole-key signal above remains cheap to check independently on every flush.
+        if self
+            .reported_collapsed_fields
+            .contains_all(self.possible_collapsed_fields)
+        {
+            return;
         }
 
         // Names no environment variable, deliberately: the per-field limits are not
@@ -773,6 +790,10 @@ mod tests {
             service.reported_collapsed_fields,
             CollapsedFields::default()
         );
+        assert_eq!(
+            service.possible_collapsed_fields,
+            CollapsedFields(CollapsedFields::CORE_FIELDS)
+        );
 
         // No collapse at all: nothing is reported.
         service.report_collapse(&[], 0);
@@ -786,25 +807,26 @@ mod tests {
             CollapsedFields::default()
         );
 
-        // A per-field collapse in a later flush is still reported, independently.
+        // Per-field collapses in a later flush are still reported, independently. Include every
+        // field that can collapse with the current configuration to saturate the reporting mask.
         let collapsed = [bucket(vec![(
             "svc",
             TRACER_BLOCKED_VALUE,
-            "/users",
-            vec![],
+            TRACER_BLOCKED_VALUE,
+            vec![TRACER_BLOCKED_VALUE],
             vec![],
         )])];
         service.report_collapse(&collapsed, 9);
         assert_eq!(
             service.reported_collapsed_fields,
-            CollapsedFields(CollapsedFields::RESOURCE)
+            CollapsedFields(CollapsedFields::CORE_FIELDS)
         );
 
         // Repeat flushes take the early return, leaving state untouched.
         service.report_collapse(&collapsed, 9);
         assert_eq!(
             service.reported_collapsed_fields,
-            CollapsedFields(CollapsedFields::RESOURCE)
+            CollapsedFields(CollapsedFields::CORE_FIELDS)
         );
     }
 }
