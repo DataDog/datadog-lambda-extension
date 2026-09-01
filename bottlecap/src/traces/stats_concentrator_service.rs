@@ -725,9 +725,11 @@ mod tests {
         let (service, handle) = StatsConcentratorService::new(config);
         tokio::spawn(service.run());
 
+        // Reuse one timestamp so all spans land in the same cardinality bucket, even if this
+        // loop crosses a wall-clock bucket boundary.
+        let mut span = create_span_kind_span_with_resource("client", "", vec![]);
         for i in 0..span_count {
-            let resource = format!("GET /users/{i}");
-            let span = create_span_kind_span_with_resource("client", &resource, vec![]);
+            span.resource = format!("GET /users/{i}");
             handle.add(&span).unwrap();
         }
 
