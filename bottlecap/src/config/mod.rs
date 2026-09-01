@@ -107,15 +107,15 @@ pub struct LambdaConfig {
     /// present in the Lambda event payload (`DD_DSM_KAFKA_GROUP`).
     pub dsm_kafka_group: Option<String>,
 
-    /// `DD_TRACE_EXPERIMENTAL_FEATURES_ENABLED` — gates `additional_metric_tags` and
+    /// `DD_TRACE_EXPERIMENTAL_FEATURES_ENABLED`: gates `additional_metric_tags` and
     /// `additional_metric_tags_cardinality_limit` below, matching the Serverless
     /// Compatibility Layer (`datadog-trace-agent`).
     pub trace_experimental_features_enabled: bool,
-    /// `DD_TRACE_STATS_ADDITIONAL_TAGS` — comma-separated span `meta` keys included as
+    /// `DD_TRACE_STATS_ADDITIONAL_TAGS`: comma-separated span `meta` keys included as
     /// additional dimensions on trace stats aggregation (`ClientGroupedStats.additional_metric_tags`).
     /// Only honored when `trace_experimental_features_enabled` is true.
     pub additional_metric_tags: Vec<String>,
-    /// `DD_TRACE_STATS_ADDITIONAL_TAGS_CARDINALITY_LIMIT` — per-bucket cap on distinct
+    /// `DD_TRACE_STATS_ADDITIONAL_TAGS_CARDINALITY_LIMIT`: per-bucket cap on distinct
     /// `additional_metric_tags` value combinations; `None` uses libdatadog's default (100).
     /// Only honored when `trace_experimental_features_enabled` is true.
     pub additional_metric_tags_cardinality_limit: Option<usize>,
@@ -245,16 +245,16 @@ pub struct LambdaConfigSource {
     #[serde(deserialize_with = "deser_opt_str")]
     pub dsm_kafka_group: Option<String>,
 
-    /// `DD_TRACE_EXPERIMENTAL_FEATURES_ENABLED` — see `LambdaConfig::trace_experimental_features_enabled`.
+    /// `DD_TRACE_EXPERIMENTAL_FEATURES_ENABLED`: see `LambdaConfig::trace_experimental_features_enabled`.
     #[serde(deserialize_with = "deser_opt_bool")]
     pub trace_experimental_features_enabled: Option<bool>,
-    /// `DD_TRACE_STATS_ADDITIONAL_TAGS` — see `LambdaConfig::additional_metric_tags`.
+    /// `DD_TRACE_STATS_ADDITIONAL_TAGS`: see `LambdaConfig::additional_metric_tags`.
     /// Gated after all config sources merge by `apply_experimental_features_gate`. Field is
     /// named `trace_stats_additional_tags` (rather than `additional_metric_tags`) so it maps
     /// to the `DD_TRACE_STATS_ADDITIONAL_TAGS` env var via the field-name-to-env-var convention.
     #[serde(deserialize_with = "deser_csv")]
     pub trace_stats_additional_tags: Vec<String>,
-    /// `DD_TRACE_STATS_ADDITIONAL_TAGS_CARDINALITY_LIMIT` — see
+    /// `DD_TRACE_STATS_ADDITIONAL_TAGS_CARDINALITY_LIMIT`: see
     /// `LambdaConfig::additional_metric_tags_cardinality_limit`. Gated after all config sources
     /// merge by `apply_experimental_features_gate`. See
     /// `trace_stats_additional_tags` above for why the field name differs from the
