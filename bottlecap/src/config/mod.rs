@@ -249,14 +249,14 @@ pub struct LambdaConfigSource {
     #[serde(deserialize_with = "deser_opt_bool")]
     pub trace_experimental_features_enabled: Option<bool>,
     /// `DD_TRACE_STATS_ADDITIONAL_TAGS` — see `LambdaConfig::additional_metric_tags`.
-    /// Gated on `trace_experimental_features_enabled` in `merge_from`, not here. Field is
+    /// Gated after all config sources merge by `apply_experimental_features_gate`. Field is
     /// named `trace_stats_additional_tags` (rather than `additional_metric_tags`) so it maps
     /// to the `DD_TRACE_STATS_ADDITIONAL_TAGS` env var via the field-name-to-env-var convention.
     #[serde(deserialize_with = "deser_csv")]
     pub trace_stats_additional_tags: Vec<String>,
     /// `DD_TRACE_STATS_ADDITIONAL_TAGS_CARDINALITY_LIMIT` — see
-    /// `LambdaConfig::additional_metric_tags_cardinality_limit`. Gated on
-    /// `trace_experimental_features_enabled` in `merge_from`, not here. See
+    /// `LambdaConfig::additional_metric_tags_cardinality_limit`. Gated after all config sources
+    /// merge by `apply_experimental_features_gate`. See
     /// `trace_stats_additional_tags` above for why the field name differs from the
     /// `LambdaConfig` field it merges into.
     #[serde(deserialize_with = "deser_opt_lossless")]
