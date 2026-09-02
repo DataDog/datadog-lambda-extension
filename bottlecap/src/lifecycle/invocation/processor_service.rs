@@ -191,6 +191,7 @@ impl InvocationProcessorHandle {
                     | ProcessorCommand::PlatformRestoreReport { .. }
                     | ProcessorCommand::PlatformStart { .. }
                     | ProcessorCommand::UniversalInstrumentationStart { .. }
+                    | ProcessorCommand::RecordDsmConsumeFromPayload { .. }
                     | ProcessorCommand::UniversalInstrumentationEnd { .. }
                     | ProcessorCommand::AddReparenting { .. }
                     | ProcessorCommand::AddTracerSpan { .. }
