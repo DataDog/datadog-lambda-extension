@@ -596,22 +596,23 @@ mod tests {
         );
     }
 
-    /// The concentrator uses `CardinalityLimitConfig::default()`, so exceeding those limits must
-    /// collapse the excess aggregation keys into the `tracer_blocked_value` overflow key instead
-    /// of growing without bound. 7,001 distinct resources exceeds both the default
-    /// `whole_key_limit` (7,000) and `resource_limit` (1,024).
+    /// The concentrator uses `CardinalityLimitConfig::default()`, so resources beyond its
+    /// `resource_limit` must collapse into one `tracer_blocked_value` sentinel group. Every span
+    /// shares a timestamp and lands in the same bucket, so excess resources merge while their
+    /// aggregate hit count remains intact.
     #[tokio::test]
     async fn test_cardinality_limit_applied() {
         const OVERFLOW_KEY: &str = TRACER_BLOCKED_VALUE;
-        let span_count = CardinalityLimitConfig::default().whole_key_limit + 1;
+        let resource_limit = CardinalityLimitConfig::default().resource_limit;
+        let span_count = resource_limit + 2;
 
         let config = Arc::new(Config::default());
         let (service, handle) = StatsConcentratorService::new(config);
         tokio::spawn(service.run());
 
+        let mut span = create_span_kind_span_with_resource("client", "", vec![]);
         for i in 0..span_count {
-            let resource = format!("test-resource-{i}");
-            let span = create_span_kind_span_with_resource("client", &resource, vec![]);
+            span.resource = format!("test-resource-{i}");
             handle.add(&span).unwrap();
         }
 
@@ -620,15 +621,38 @@ mod tests {
         let payload = result.expect("Expected stats for the generated spans, but got None.");
         let all_stats: Vec<_> = payload.stats.iter().flat_map(|b| &b.stats).collect();
         assert!(
-            all_stats.len() < span_count,
-            "Expected fewer stats entries than distinct resources once the resource limit \
-             collapses the excess, got {} for {span_count} resources.",
+            all_stats.len() <= resource_limit + 1,
+            "Expected at most {} resource groups: {resource_limit} admitted resources plus one \
+             '{OVERFLOW_KEY}' overflow group, but got {}.",
+            resource_limit + 1,
             all_stats.len()
         );
-        assert!(
-            all_stats.iter().any(|s| s.resource == OVERFLOW_KEY),
-            "Expected the resources beyond the limit to collapse into the '{OVERFLOW_KEY}' \
-             overflow key."
+
+        let overflow_groups: Vec<_> = all_stats
+            .iter()
+            .filter(|stats| stats.resource == OVERFLOW_KEY)
+            .collect();
+        assert_eq!(
+            overflow_groups.len(),
+            1,
+            "Expected excess resources to merge into exactly one '{OVERFLOW_KEY}' overflow group, \
+             but found {}.",
+            overflow_groups.len()
+        );
+
+        let total_hits: u64 = all_stats.iter().map(|stats| stats.hits).sum();
+        assert_eq!(
+            total_hits, span_count as u64,
+            "Expected grouped stats to retain all {span_count} inserted span hits after \
+             resource-level cardinality collapse, but got {total_hits}."
+        );
+        assert_eq!(
+            overflow_groups[0].hits,
+            (span_count - resource_limit) as u64,
+            "Expected the '{OVERFLOW_KEY}' overflow group to contain the {} resources beyond \
+             the resource limit, but got {} hits.",
+            span_count - resource_limit,
+            overflow_groups[0].hits
         );
     }
 
