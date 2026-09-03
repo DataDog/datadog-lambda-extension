@@ -5,6 +5,7 @@ use crate::extension::{EXTENSION_ID_HEADER, base_url};
 
 pub mod events;
 pub mod listener;
+mod stitch;
 
 pub const TELEMETRY_SUBSCRIPTION_ROUTE: &str = "2022-07-01/telemetry";
 
