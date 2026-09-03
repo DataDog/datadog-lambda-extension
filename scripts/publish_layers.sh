@@ -139,7 +139,7 @@ do
         if [ ! -z "$SUFFIX" ]; then
             layer_name+="-$SUFFIX"
         fi
-        latest_version=$(aws lambda list-layer-versions --region $region --layer-name "${layer_name}" --query 'LayerVersions[0].Version || `0`')
+        latest_version=$(aws lambda list-layer-versions --region $region --layer-name "${layer_name}" --max-items 1 --query 'LayerVersions[0].Version || `0`')
         if [ $latest_version -ge $VERSION ]; then
             echo "Layer $layer_name  version $VERSION already exists in region $region, skipping..."
             continue
