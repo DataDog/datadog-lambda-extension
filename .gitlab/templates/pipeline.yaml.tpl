@@ -619,6 +619,11 @@ integration-suite:
           - {{ .name }}
         {{- end}}
   rules:
+    # Backend-delivery checks are known-flaky (large traces are intermittently
+    # dropped downstream after a successful send); keep failures visible but
+    # non-blocking until the backend issue is fixed.
+    - if: '$TEST_SUITE == "payload-size-e2e"'
+      allow_failure: true
     - when: on_success
   needs:
     - job: publish integration layer (arm64)
