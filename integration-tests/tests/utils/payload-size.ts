@@ -10,3 +10,7 @@ export const PAYLOAD_BYTES = 24_000;
 // a flush to ride out on.
 export const INVOCATION_COUNT = 3;
 export const DELAY_BETWEEN_INVOCATIONS_MS = 2000;
+
+export function sleep(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}

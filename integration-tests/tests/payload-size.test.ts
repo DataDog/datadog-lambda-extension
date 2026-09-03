@@ -5,6 +5,7 @@ import {
   PAYLOAD_BYTES,
   INVOCATION_COUNT,
   DELAY_BETWEEN_INVOCATIONS_MS,
+  sleep,
 } from './utils/payload-size';
 import { IDENTIFIER } from '../config';
 
@@ -16,6 +17,11 @@ const MIN_ENRICHED_BYTES = 10_000_000;
 // lines up to this long to become searchable.
 const LOG_SEARCHABLE_TIMEOUT_MS = 5 * 60 * 1000;
 const LOG_POLL_INTERVAL_MS = 10_000;
+
+// The batch-size line is logged when the batch is assembled; a 413 only shows
+// up after the send and its retries. Let that trail become searchable before
+// asserting no 413 was logged, otherwise the absence proves nothing.
+const SEND_ERROR_SETTLE_MS = 60_000;
 
 const stackName = `${IDENTIFIER}-payload-size`;
 
@@ -43,7 +49,7 @@ describe('Payload Size Integration Tests', () => {
           functionName, { spanCount: SPAN_COUNT, payloadBytes: PAYLOAD_BYTES });
         invocationStatusCodes.push(result.statusCode);
         if (i < INVOCATION_COUNT - 1) {
-          await new Promise(resolve => setTimeout(resolve, DELAY_BETWEEN_INVOCATIONS_MS));
+          await sleep(DELAY_BETWEEN_INVOCATIONS_MS);
         }
       }
 
@@ -71,7 +77,9 @@ describe('Payload Size Integration Tests', () => {
       // A payload over the intake limit logs "Max retries exceeded, returning
       // HTTP error" with status=413. Capture any such lines so we can assert the
       // extension flushed without a 413. Querying only after the size lines are
-      // searchable keeps an empty result meaningful rather than an indexing lag.
+      // searchable, plus a settle wait for the send that follows them, keeps an
+      // empty result meaningful rather than an indexing lag.
+      await sleep(SEND_ERROR_SETTLE_MS);
       sendErrorMessages = await filterLogMessages(
         functionName,
         '?"Max retries exceeded" ?"status=413" ?"Payload Too Large"',
@@ -122,10 +130,6 @@ function getMaxLoggedBytes(messages: string[], pattern: RegExp): number | undefi
     }
   }
   return max;
-}
-
-function sleep(ms: number): Promise<void> {
-  return new Promise(resolve => setTimeout(resolve, ms));
 }
 
 /**
