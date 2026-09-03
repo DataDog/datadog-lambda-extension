@@ -106,7 +106,7 @@ fi
 printf "[$REGION] Starting publishing layers...\n"
 
 if [ "$AUTOMATICALLY_BUMP_VERSION" = "1" ]; then
-    latest_version=$(aws lambda list-layer-versions --region $REGION --layer-name $LAYER_NAME --query 'LayerVersions[0].Version || `0`')
+    latest_version=$(aws lambda list-layer-versions --region $REGION --layer-name $LAYER_NAME --max-items 1 --query 'LayerVersions[0].Version || `0`')
     VERSION=$(($latest_version + 1))
 
 else
@@ -145,7 +145,7 @@ else
     architectures="arm64"
 fi
 
-latest_version=$(aws lambda list-layer-versions --region $REGION --layer-name $LAYER_NAME --query 'LayerVersions[0].Version || `0`')
+latest_version=$(aws lambda list-layer-versions --region $REGION --layer-name $LAYER_NAME --max-items 1 --query 'LayerVersions[0].Version || `0`')
 if [ $latest_version -ge $VERSION ]; then
     printf "[$REGION] Layer $layer version $VERSION already exists in region $REGION, skipping...\n"
     exit 1
