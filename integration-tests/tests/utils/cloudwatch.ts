@@ -10,15 +10,18 @@ const logsClient = new CloudWatchLogsClient({ region: 'us-east-1' });
  * matching `filterPattern` within [startTime, endTime] (epoch ms). The Datadog
  * extension's logs land here too, so use a quoted literal
  * (e.g. '"payload size after enrichment"') to read extension-emitted lines.
+ * `maxPages` can bound scans used only for diagnostics.
  */
 export async function filterLogMessages(
   functionName: string,
   filterPattern: string,
   startTime: number,
   endTime: number,
+  maxPages: number = Number.POSITIVE_INFINITY,
 ): Promise<string[]> {
   const logGroupName = `/aws/lambda/${functionName}`;
   const messages: string[] = [];
+  let pages = 0;
   let nextToken: string | undefined;
 
   do {
@@ -37,7 +40,12 @@ export async function filterLogMessages(
       }
     }
     nextToken = response.nextToken;
-  } while (nextToken);
+    pages += 1;
+  } while (nextToken && pages < maxPages);
+
+  if (nextToken) {
+    console.log(`filterLogMessages: stopped after ${maxPages} pages, result is incomplete`);
+  }
 
   return messages;
 }
