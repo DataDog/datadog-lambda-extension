@@ -12,6 +12,11 @@ import { IDENTIFIER } from '../config';
 // under the 12 MB cap so it flushes in a single batch without a 413.
 const MIN_ENRICHED_BYTES = 10_000_000;
 
+// CloudWatch Logs searchability lags ingestion; give the extension's debug
+// lines up to this long to become searchable.
+const LOG_SEARCHABLE_TIMEOUT_MS = 5 * 60 * 1000;
+const LOG_POLL_INTERVAL_MS = 10_000;
+
 const stackName = `${IDENTIFIER}-payload-size`;
 
 describe('Payload Size Integration Tests', () => {
@@ -42,27 +47,31 @@ describe('Payload Size Integration Tests', () => {
         }
       }
 
-      const enrichedMessages = await filterLogMessages(
-        functionName,
-        '"payload size after enrichment"',
-        startTime,
-        Date.now(),
-      );
-      enrichedPayloadBytes = getMaxLoggedBytes(enrichedMessages, /payload size after enrichment: (\d+) bytes/);
-      console.log(`Extension reported enriched payload size: ${enrichedPayloadBytes} bytes`);
-
-      const batchedMessages = await filterLogMessages(
-        functionName,
-        '"totaling"',
-        startTime,
-        Date.now(),
-      );
-      batchedPayloadBytes = getMaxLoggedBytes(batchedMessages, /totaling (\d+) bytes/);
-      console.log(`Extension reported batched payload size: ${batchedPayloadBytes} bytes`);
+      // CloudWatch Logs is eventually consistent: FilterLogEvents can return
+      // nothing for events written seconds earlier. Poll until the extension's
+      // debug lines become searchable instead of querying once immediately
+      // after the invocations.
+      [enrichedPayloadBytes, batchedPayloadBytes] = await Promise.all([
+        pollForMaxLoggedBytes(
+          functionName,
+          startTime,
+          '"payload size after enrichment"',
+          /payload size after enrichment: (\d+) bytes/,
+          'enriched',
+        ),
+        pollForMaxLoggedBytes(
+          functionName,
+          startTime,
+          '"totaling"',
+          /totaling (\d+) bytes/,
+          'batched',
+        ),
+      ]);
 
       // A payload over the intake limit logs "Max retries exceeded, returning
       // HTTP error" with status=413. Capture any such lines so we can assert the
-      // extension flushed without a 413.
+      // extension flushed without a 413. Querying only after the size lines are
+      // searchable keeps an empty result meaningful rather than an indexing lag.
       sendErrorMessages = await filterLogMessages(
         functionName,
         '?"Max retries exceeded" ?"status=413" ?"Payload Too Large"',
@@ -113,4 +122,35 @@ function getMaxLoggedBytes(messages: string[], pattern: RegExp): number | undefi
     }
   }
   return max;
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+/**
+ * Polls the function's CloudWatch logs until a message matching `pattern` is
+ * found, returning the maximum captured value, or undefined on timeout.
+ */
+async function pollForMaxLoggedBytes(
+  functionName: string,
+  startTime: number,
+  filterPattern: string,
+  pattern: RegExp,
+  label: string,
+): Promise<number | undefined> {
+  const deadline = Date.now() + LOG_SEARCHABLE_TIMEOUT_MS;
+  let attempt = 0;
+  while (Date.now() < deadline) {
+    attempt += 1;
+    const messages = await filterLogMessages(functionName, filterPattern, startTime, Date.now());
+    const max = getMaxLoggedBytes(messages, pattern);
+    if (max !== undefined) {
+      console.log(`Extension reported ${label} payload size: ${max} bytes (attempt ${attempt})`);
+      return max;
+    }
+    await sleep(LOG_POLL_INTERVAL_MS);
+  }
+  console.log(`Timed out after ${LOG_SEARCHABLE_TIMEOUT_MS / 1000}s waiting for "${filterPattern}" log lines`);
+  return undefined;
 }
