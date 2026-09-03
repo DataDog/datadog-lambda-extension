@@ -18,10 +18,10 @@ const MIN_ENRICHED_BYTES = 10_000_000;
 const LOG_SEARCHABLE_TIMEOUT_MS = 5 * 60 * 1000;
 const LOG_POLL_INTERVAL_MS = 10_000;
 
-// The batch-size line is logged when the batch is assembled; a 413 only shows
-// up after the send and its retries. Let that trail become searchable before
-// asserting no 413 was logged, otherwise the absence proves nothing.
-const SEND_ERROR_SETTLE_MS = 60_000;
+// These terminal outcomes are logged only after the trace send and any retries
+// complete. Wait for one before treating the absence of a 413 as meaningful.
+const TRACE_SEND_COMPLETION_FILTER =
+  '?"TRACES | Successfully sent trace" ?"TRACES | Request failed after"';
 
 const stackName = `${IDENTIFIER}-payload-size`;
 
@@ -31,6 +31,7 @@ describe('Payload Size Integration Tests', () => {
     let invocationStatusCodes: (number | undefined)[] = [];
     let enrichedPayloadBytes: number | undefined;
     let batchedPayloadBytes: number | undefined;
+    let traceSendCompletionMessages: string[] = [];
     let sendErrorMessages: string[] = [];
 
     const functionName = `${stackName}-large-trace-lambda`;
@@ -75,11 +76,16 @@ describe('Payload Size Integration Tests', () => {
       ]);
 
       // A payload over the intake limit logs "Max retries exceeded, returning
-      // HTTP error" with status=413. Capture any such lines so we can assert the
-      // extension flushed without a 413. Querying only after the size lines are
-      // searchable, plus a settle wait for the send that follows them, keeps an
-      // empty result meaningful rather than an indexing lag.
-      await sleep(SEND_ERROR_SETTLE_MS);
+      // HTTP error" with status=413. First wait for the terminal success or
+      // failure log emitted after trace.send completes, then capture any 413
+      // lines. This makes an empty result meaningful rather than an indexing
+      // race with an in-flight send.
+      traceSendCompletionMessages = await pollForLogMessages(
+        functionName,
+        startTime,
+        TRACE_SEND_COMPLETION_FILTER,
+        'trace send completion',
+      );
       sendErrorMessages = await filterLogMessages(
         functionName,
         '?"Max retries exceeded" ?"status=413" ?"Payload Too Large"',
@@ -107,6 +113,10 @@ describe('Payload Size Integration Tests', () => {
       expect(batchedPayloadBytes!).toBeGreaterThan(MIN_ENRICHED_BYTES);
     });
 
+    it('should complete a trace send', () => {
+      expect(traceSendCompletionMessages.length).toBeGreaterThan(0);
+    });
+
     it('should flush without a 413 Payload Too Large error', () => {
       expect(sendErrorMessages).toEqual([]);
     });
@@ -117,6 +127,29 @@ describe('Payload Size Integration Tests', () => {
     // backend issue outside the extension's control.
   });
 });
+
+async function pollForLogMessages(
+  functionName: string,
+  startTime: number,
+  filterPattern: string,
+  label: string,
+): Promise<string[]> {
+  const deadline = Date.now() + LOG_SEARCHABLE_TIMEOUT_MS;
+  let attempt = 0;
+  while (Date.now() < deadline) {
+    attempt += 1;
+    const messages = await filterLogMessages(functionName, filterPattern, startTime, Date.now());
+    if (messages.length > 0) {
+      console.log(`Found ${label} log lines: ${messages.length} (attempt ${attempt})`);
+      return messages;
+    }
+    await sleep(LOG_POLL_INTERVAL_MS);
+  }
+  console.log(
+    `Timed out after ${LOG_SEARCHABLE_TIMEOUT_MS / 1000}s waiting for ${label} log lines (${attempt} attempts)`,
+  );
+  return [];
+}
 
 function getMaxLoggedBytes(messages: string[], pattern: RegExp): number | undefined {
   let max: number | undefined;
