@@ -1030,3 +1030,85 @@ async fn stats_additional_metric_tags_cardinality_limit_through_fake_intake() {
     let total_hits: u64 = grouped.iter().map(|s| s.hits).sum();
     assert_eq!(total_hits, 3, "cardinality limiting must not drop hits");
 }
+
+/// End-to-end with multiple configured keys: spans carrying both `meta["region"]` and
+/// `meta["tenant_id"]`, with `DD_TRACE_STATS_ADDITIONAL_TAGS=region,tenant_id`, must group on
+/// the two values together: one group per distinct combination, repeats aggregating per
+/// combination, and a change in either key producing a new group.
+#[tokio::test]
+async fn stats_additional_metric_tags_multiple_keys_through_fake_intake() {
+    let fake_intake = FakeIntake::start().await;
+    let config = config_from_env(&[
+        ("DD_API_KEY", DD_API_KEY),
+        ("DD_SITE", "datadoghq.com"),
+        ("DD_TRACE_EXPERIMENTAL_FEATURES_ENABLED", "true"),
+        ("DD_TRACE_STATS_ADDITIONAL_TAGS", "region,tenant_id"),
+    ]);
+
+    let spans = vec![
+        make_eligible_span("server", &[("region", "us-east-1"), ("tenant_id", "acme")]),
+        make_eligible_span("server", &[("region", "us-east-1"), ("tenant_id", "acme")]),
+        make_eligible_span(
+            "server",
+            &[("region", "us-east-1"), ("tenant_id", "globex")],
+        ),
+        make_eligible_span("server", &[("region", "eu-west-1"), ("tenant_id", "acme")]),
+    ];
+
+    let payload = flush_spans_to_fake_intake(&fake_intake, config, &spans).await;
+    let grouped = grouped_entries(&payload);
+
+    fn tags_of(s: &pb::ClientGroupedStats) -> Vec<&str> {
+        s.additional_metric_tags
+            .iter()
+            .map(String::as_str)
+            .collect()
+    }
+
+    assert_eq!(
+        grouped.len(),
+        3,
+        "expected one group per distinct (region, tenant_id) combination, got: {:?}",
+        grouped
+            .iter()
+            .map(|s| &s.additional_metric_tags)
+            .collect::<Vec<_>>(),
+    );
+
+    let acme_us_east = grouped
+        .iter()
+        .find(|s| tags_of(s) == vec!["region:us-east-1".to_string(), "tenant_id:acme".to_string()])
+        .expect("(us-east-1, acme) combination should be present");
+    assert_eq!(
+        acme_us_east.hits, 2,
+        "repeats of the same combination must aggregate"
+    );
+
+    for (expected_tags, expected_hits) in [
+        (
+            vec![
+                "region:us-east-1".to_string(),
+                "tenant_id:globex".to_string(),
+            ],
+            1,
+        ),
+        (
+            vec!["region:eu-west-1".to_string(), "tenant_id:acme".to_string()],
+            1,
+        ),
+    ] {
+        let group = grouped
+            .iter()
+            .find(|s| s.additional_metric_tags == expected_tags)
+            .unwrap_or_else(|| {
+                panic!(
+                    "combination {expected_tags:?} should be present, got: {:?}",
+                    grouped
+                        .iter()
+                        .map(|s| &s.additional_metric_tags)
+                        .collect::<Vec<_>>()
+                )
+            });
+        assert_eq!(group.hits, expected_hits);
+    }
+}

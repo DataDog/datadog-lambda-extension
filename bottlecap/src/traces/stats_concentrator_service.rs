@@ -1060,17 +1060,30 @@ mod tests {
     /// which collapses per-field and keeps `collapsed_spans` at 0.
     #[tokio::test]
     async fn test_collapse_warns_once_per_signal() {
-        let config = Arc::new(Config::default());
+        test_collapse_warns_once_per_signal_with_config(Arc::new(Config::default()));
+    }
+
+    /// Same as [`test_collapse_warns_once_per_signal`], but with `additional_metric_tags`
+    /// configured, so the `ADDITIONAL_TAGS` field joins the possible set: its saturation and the
+    /// early return must account for it too, and the additional-tags warning is the only one
+    /// whose remediation names the customer-facing env vars.
+    #[tokio::test]
+    async fn test_collapse_warns_once_per_signal_with_additional_tags() {
+        let mut config = Config::default();
+        config.ext.additional_metric_tags = vec!["region".to_string()];
+        test_collapse_warns_once_per_signal_with_config(Arc::new(config));
+    }
+
+    fn test_collapse_warns_once_per_signal_with_config(config: Arc<Config>) {
+        let additional_tags_enabled = !config.ext.additional_metric_tags.is_empty();
+        let expected_possible = CollapsedFields::possible(additional_tags_enabled);
         let (mut service, _handle) = StatsConcentratorService::new(config);
 
+        assert_eq!(service.possible_collapsed_fields, expected_possible);
         assert!(!service.whole_key_collapse_reported);
         assert_eq!(
             service.reported_collapsed_fields,
             CollapsedFields::default()
-        );
-        assert_eq!(
-            service.possible_collapsed_fields,
-            CollapsedFields(CollapsedFields::CORE_FIELDS)
         );
 
         // No collapse at all: nothing is reported.
@@ -1087,24 +1100,32 @@ mod tests {
 
         // Per-field collapses in a later flush are still reported, independently. Include every
         // field that can collapse with the current configuration to saturate the reporting mask.
+        // additional_metric_tags only exists on the payload when additional tags are configured,
+        // so the fabricated entry only carries a sentinel there when that is possible.
         let collapsed = [bucket(vec![(
             "svc",
             TRACER_BLOCKED_VALUE,
             TRACER_BLOCKED_VALUE,
             vec![TRACER_BLOCKED_VALUE],
-            vec![],
+            if additional_tags_enabled {
+                // additional_metric_tags encodes the sentinel with a trailing colon, unlike the
+                // valueless bare-key form used for peer_tags.
+                vec!["tracer_blocked_value:"]
+            } else {
+                vec![]
+            },
         )])];
         service.report_collapse(&collapsed, 9);
         assert_eq!(
             service.reported_collapsed_fields,
-            CollapsedFields(CollapsedFields::CORE_FIELDS)
+            CollapsedFields::possible(additional_tags_enabled)
         );
 
         // Repeat flushes take the early return, leaving state untouched.
         service.report_collapse(&collapsed, 9);
         assert_eq!(
             service.reported_collapsed_fields,
-            CollapsedFields(CollapsedFields::CORE_FIELDS)
+            CollapsedFields::possible(additional_tags_enabled)
         );
     }
 }
