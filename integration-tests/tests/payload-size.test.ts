@@ -193,7 +193,13 @@ async function pollForMaxLoggedBytes(
   // Distinguish "the extension never logged anything" from "the extension
   // logged but these lines are missing or not yet searchable".
   const totalEvents = await countLogEvents(functionName, startTime, Date.now());
-  const traceLines = await filterLogMessages(functionName, '"TRACES"', startTime, Date.now());
+  const traceLines = await filterLogMessages(
+    functionName,
+    '"TRACES"',
+    startTime,
+    Date.now(),
+    20,
+  );
   console.log(
     `Diagnostics: ${totalEvents} log events in window, ${traceLines.length} extension "TRACES" lines`,
   );
