@@ -47,14 +47,20 @@ export async function filterLogMessages(
  * [startTime, endTime] (epoch ms), regardless of content. Used to distinguish
  * a silent function from a functioning one whose lines have not become
  * searchable yet.
+ *
+ * This scan is unfiltered, so a debug-level log group can span many pages;
+ * `maxPages` bounds it so a diagnostic can never outlast the test it is
+ * diagnosing. The result is a lower bound once the cap is hit.
  */
 export async function countLogEvents(
   functionName: string,
   startTime: number,
   endTime: number,
+  maxPages: number = 20,
 ): Promise<number> {
   const logGroupName = `/aws/lambda/${functionName}`;
   let count = 0;
+  let pages = 0;
   let nextToken: string | undefined;
 
   do {
@@ -68,7 +74,12 @@ export async function countLogEvents(
     );
     count += response.events?.length ?? 0;
     nextToken = response.nextToken;
-  } while (nextToken);
+    pages += 1;
+  } while (nextToken && pages < maxPages);
+
+  if (nextToken) {
+    console.log(`countLogEvents: stopped after ${maxPages} pages, ${count} is a lower bound`);
+  }
 
   return count;
 }
