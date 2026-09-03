@@ -1641,6 +1641,105 @@ mod tests {
         );
     }
 
+    /// With the error sampler disabled, an errored P0 chunk dropped from the
+    /// backend payload must still appear in the stats collection, so its stats
+    /// are counted.
+    #[test]
+    fn test_disabled_error_sampler_keeps_dropped_errored_p0_chunk_in_stats() {
+        use libdd_trace_obfuscation::obfuscation_config::ObfuscationConfig;
+
+        let config = Arc::new(Config {
+            apm_dd_url: "https://trace.agent.datadoghq.com".to_string(),
+            ext: crate::config::LambdaConfig {
+                lambda_extension_compute_stats: true,
+                ..Default::default()
+            },
+            ..Config::default()
+        });
+        let tags_provider = Arc::new(Provider::new(
+            config.clone(),
+            "lambda".to_string(),
+            &std::collections::HashMap::from([(
+                "function_arn".to_string(),
+                "test-arn".to_string(),
+            )]),
+        ));
+        let processor = ServerlessTraceProcessor {
+            obfuscation_config: Arc::new(
+                ObfuscationConfig::new().expect("Failed to create ObfuscationConfig"),
+            ),
+            error_sampler: new_error_sampler(false),
+        };
+
+        let header_tags = tracer_header_tags::TracerHeaderTags {
+            lang: "rust",
+            lang_version: "1.0",
+            lang_interpreter: "",
+            lang_vendor: "",
+            tracer_version: "1.0",
+            container_id: "",
+            generic: tracer_header_tags::TracerGenericTags::default(),
+        };
+
+        let make_span = |trace_id: u64, priority: f64, error: i32| -> pb::Span {
+            let mut metrics = HashMap::new();
+            metrics.insert("_sampling_priority_v1".to_string(), priority);
+            pb::Span {
+                trace_id,
+                span_id: trace_id,
+                parent_id: 0,
+                error,
+                metrics,
+                service: "svc".to_string(),
+                name: "op".to_string(),
+                resource: "res".to_string(),
+                ..Default::default()
+            }
+        };
+
+        // trace 1: kept normally (priority 1). trace 2: errored P0, dropped
+        // because the error sampler is disabled.
+        let traces = vec![vec![make_span(1, 1.0, 0)], vec![make_span(2, 0.0, 1)]];
+
+        let (payload_info, stats_collection) =
+            processor.process_traces(config, tags_provider, header_tags, traces, 0, None);
+        let payload_info = payload_info.expect("kept trace must produce a backend payload");
+
+        // Stats collection must include both traces, including the dropped errored P0.
+        let TracerPayloadCollection::V07(ref stats_payloads) = stats_collection else {
+            panic!("expected V07");
+        };
+        let stats_trace_ids: Vec<u64> = stats_payloads
+            .iter()
+            .flat_map(|tp| tp.chunks.iter())
+            .flat_map(|c| c.spans.iter())
+            .map(|s| s.trace_id)
+            .collect();
+        assert_eq!(stats_trace_ids.len(), 2, "stats must include all traces");
+        assert!(
+            stats_trace_ids.contains(&2),
+            "dropped errored P0 trace must still be counted in stats"
+        );
+
+        // Backend payload must only contain the kept trace.
+        let backend_send_data = payload_info.builder.build();
+        let TracerPayloadCollection::V07(backend_payloads) = backend_send_data.get_payloads()
+        else {
+            panic!("expected V07");
+        };
+        let backend_trace_ids: Vec<u64> = backend_payloads
+            .iter()
+            .flat_map(|tp| tp.chunks.iter())
+            .flat_map(|c| c.spans.iter())
+            .map(|s| s.trace_id)
+            .collect();
+        assert_eq!(
+            backend_trace_ids,
+            vec![1],
+            "backend payload must exclude the dropped errored P0 trace"
+        );
+    }
+
     /// Verifies that `process_traces` returns `None` for the backend payload when all
     /// traces are sampled out and `lambda_extension_compute_stats` is true.
     #[test]
