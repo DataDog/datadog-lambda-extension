@@ -2598,19 +2598,7 @@ mod tests {
 
         // The durable tag is already known, so the metric must be emitted immediately
         // instead of being held back.
-        let start_timestamp: i64 = std::time::UNIX_EPOCH
-            .elapsed()
-            .expect("unable to poll clock, unrecoverable")
-            .as_secs()
-            .try_into()
-            .unwrap_or_default();
         processor.on_invoke_event("req-1".to_string());
-        let end_timestamp: i64 = std::time::UNIX_EPOCH
-            .elapsed()
-            .expect("unable to poll clock, unrecoverable")
-            .as_secs()
-            .try_into()
-            .unwrap_or_default();
         assert!(
             matches!(
                 processor.first_invocation_metric_status,
@@ -2623,30 +2611,30 @@ mod tests {
             .runtime
             .clone()
             .expect("runtime should have been resolved by on_invoke_event");
-        let start_bucket = (start_timestamp / 10) * 10;
-        let end_bucket = (end_timestamp / 10) * 10;
-        let expected_tags = dogstatsd::metric::SortedTags::parse(&format!(
-            "cold_start:true,durable_function:true,runtime:{runtime}"
-        ))
-        .ok();
-        let mut entry = None;
-        for timestamp in (start_bucket..=end_bucket).step_by(10) {
-            entry = processor
-                .enhanced_metrics
-                .aggr_handle
-                .get_entry_by_id(
-                    crate::metrics::enhanced::constants::INVOCATIONS_METRIC.into(),
-                    expected_tags.clone(),
-                    timestamp,
-                )
-                .await
-                .unwrap();
-            if entry.is_some() {
-                break;
-            }
-        }
+        // Flush returns every bucket, so there is no need to guess the metric's timestamp.
+        let flushed = processor
+            .enhanced_metrics
+            .aggr_handle
+            .flush()
+            .await
+            .unwrap();
+        let expected_tags = [
+            "cold_start:true".to_string(),
+            "durable_function:true".to_string(),
+            format!("runtime:{runtime}"),
+        ];
+        let found = flushed
+            .distributions
+            .iter()
+            .flat_map(|payload| &payload.sketches)
+            .any(|sketch| {
+                &*sketch.metric == crate::metrics::enhanced::constants::INVOCATIONS_METRIC
+                    && expected_tags
+                        .iter()
+                        .all(|expected| sketch.tags.iter().any(|tag| &**tag == expected.as_str()))
+            });
         assert!(
-            entry.is_some(),
+            found,
             "Expected the invocation metric to carry the durable_function:true tag"
         );
     }
