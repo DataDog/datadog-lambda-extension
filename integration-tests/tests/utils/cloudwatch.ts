@@ -41,3 +41,34 @@ export async function filterLogMessages(
 
   return messages;
 }
+
+/**
+ * Returns the number of log events in a Lambda's CloudWatch log group within
+ * [startTime, endTime] (epoch ms), regardless of content. Used to distinguish
+ * a silent function from a functioning one whose lines have not become
+ * searchable yet.
+ */
+export async function countLogEvents(
+  functionName: string,
+  startTime: number,
+  endTime: number,
+): Promise<number> {
+  const logGroupName = `/aws/lambda/${functionName}`;
+  let count = 0;
+  let nextToken: string | undefined;
+
+  do {
+    const response = await logsClient.send(
+      new FilterLogEventsCommand({
+        logGroupName,
+        startTime,
+        endTime,
+        nextToken,
+      }),
+    );
+    count += response.events?.length ?? 0;
+    nextToken = response.nextToken;
+  } while (nextToken);
+
+  return count;
+}
