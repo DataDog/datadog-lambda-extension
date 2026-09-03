@@ -35,7 +35,7 @@ flate2 = { version = "1.1", default-features = false, features = ["rust_backend"
 thiserror = { version = "1.0", default-features = false }
 # Transitive dependency (pulled in via cookie). Pinned to >=0.3.47 so cargo audit / CI passes (RUSTSEC-2026-0009).
 time = { version = "0.3.47", default-features = false }
-tokio = { version = "1.47", default-features = false, features = ["macros", "rt-multi-thread", "time"] }
+tokio = { version = "1.47", default-features = false, features = ["macros", "rt-multi-thread", "signal", "time"] }
 tokio-util = { version = "0.7", default-features = false }
 tracing = { version = "0.1", default-features = false }
 tracing-core = { version = "0.1", default-features = false }
@@ -118,6 +118,10 @@ flate2 = { version = "1.1", default-features = false, features = ["rust_backend"
 
 [[bin]]
 name = "bottlecap"
+
+[[bin]]
+name = "bottlecap-test-mode"
+required-features = ["test-mode"]
 
 [profile.dev]
 debug = true   # same as debuginfo=2 and no stripping
