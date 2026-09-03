@@ -1,5 +1,5 @@
 import { invokeLambda, forceColdStart } from './utils/lambda';
-import { filterLogMessages } from './utils/cloudwatch';
+import { filterLogMessages, countLogEvents } from './utils/cloudwatch';
 import {
   SPAN_COUNT,
   PAYLOAD_BYTES,
@@ -151,6 +151,19 @@ async function pollForMaxLoggedBytes(
     }
     await sleep(LOG_POLL_INTERVAL_MS);
   }
-  console.log(`Timed out after ${LOG_SEARCHABLE_TIMEOUT_MS / 1000}s waiting for "${filterPattern}" log lines`);
+  console.log(
+    `Timed out after ${LOG_SEARCHABLE_TIMEOUT_MS / 1000}s waiting for "${filterPattern}" log lines (${attempt} attempts)`,
+  );
+  // Distinguish "the extension never logged anything" from "the extension
+  // logged but these lines are missing or not yet searchable".
+  const totalEvents = await countLogEvents(functionName, startTime, Date.now());
+  const traceLines = await filterLogMessages(functionName, '"TRACES"', startTime, Date.now());
+  console.log(
+    `Diagnostics: ${totalEvents} log events in window, ${traceLines.length} extension "TRACES" lines`,
+  );
+  if (traceLines.length > 0) {
+    const last = traceLines[traceLines.length - 1];
+    console.log(`Last TRACES line: ${last.length > 300 ? `${last.slice(0, 300)}...` : last}`);
+  }
   return undefined;
 }
