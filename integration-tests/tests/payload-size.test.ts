@@ -98,8 +98,7 @@ describe('Payload Size Integration Tests', () => {
     }, 1800000);
 
     it('should invoke Lambda successfully', () => {
-      expect(invocationStatusCodes.length).toBe(INVOCATION_COUNT);
-      expect(invocationStatusCodes[0]).toBe(200);
+      expect(invocationStatusCodes).toEqual(Array(INVOCATION_COUNT).fill(200));
     });
 
     // Guards that the trace is actually large enough to exercise the high cap.
