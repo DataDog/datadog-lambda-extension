@@ -25,13 +25,14 @@ export async function filterLogMessages(
   let nextToken: string | undefined;
 
   do {
+    const requestToken = nextToken;
     const response = await logsClient.send(
       new FilterLogEventsCommand({
         logGroupName,
         filterPattern,
         startTime,
         endTime,
-        nextToken,
+        nextToken: requestToken,
       }),
     );
     for (const event of response.events ?? []) {
@@ -39,7 +40,7 @@ export async function filterLogMessages(
         messages.push(event.message);
       }
     }
-    nextToken = response.nextToken;
+    nextToken = response.nextToken === requestToken ? undefined : response.nextToken;
     pages += 1;
   } while (nextToken && pages < maxPages);
 
@@ -72,16 +73,17 @@ export async function countLogEvents(
   let nextToken: string | undefined;
 
   do {
+    const requestToken = nextToken;
     const response = await logsClient.send(
       new FilterLogEventsCommand({
         logGroupName,
         startTime,
         endTime,
-        nextToken,
+        nextToken: requestToken,
       }),
     );
     count += response.events?.length ?? 0;
-    nextToken = response.nextToken;
+    nextToken = response.nextToken === requestToken ? undefined : response.nextToken;
     pages += 1;
   } while (nextToken && pages < maxPages);
 
