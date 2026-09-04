@@ -29,9 +29,10 @@ use tracing::debug;
 
 use crate::extension::telemetry::events::TelemetryEvent;
 
-/// Ceiling on a held fragment. The API can POST up to `2 * maxBytes + metadataBytes`, which
-/// fits here at the 1 MiB `maxBytes` we subscribe with.
-const MAX_FRAGMENT_BYTES: usize = 2 * 1024 * 1024;
+/// Ceiling on a held fragment. Sized above the largest single POST — the API can send up to
+/// `2 * maxBytes + metadataBytes`, so over 2 MiB at the 1 MiB `maxBytes` we subscribe with —
+/// while still bounding the accumulation when one record is cut repeatedly.
+const MAX_FRAGMENT_BYTES: usize = 4 * 1024 * 1024;
 
 /// Fragments arrive back to back, so one held this long is waiting on a continuation that
 /// never came.

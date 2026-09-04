@@ -73,15 +73,17 @@ pub async fn subscribe(
         .send()
         .await?;
 
-    if response.status().is_success() {
-        debug!("EXTENSION | Subscribed to Telemetry API: {:?}", response);
-    } else {
-        // A rejected subscription means no telemetry at all, including platform.runtimeDone, so
-        // surface it rather than leaving it at debug level.
+    if let Err(e) = response.error_for_status_ref() {
+        // A rejected subscription means no telemetry at all, including platform.runtimeDone.
+        // Fail rather than run blind: the caller falls back to the idle loop, which calls
+        // /next straight through instead of waiting for a runtimeDone that never arrives.
         error!(
             "EXTENSION | Telemetry API rejected subscription with status {}",
             response.status()
         );
+        return Err(e.into());
     }
+
+    debug!("EXTENSION | Subscribed to Telemetry API: {:?}", response);
     Ok(response)
 }

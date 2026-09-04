@@ -143,8 +143,10 @@ impl TelemetryListener {
                     // Instead, log it and move on.
                     // This will result in a dropped payload, but may be from
                     // events we haven't added support for yet
-                    let body = String::from_utf8_lossy(&body);
-                    debug!("Failed to parse telemetry events `{body}`, failed with: {e}");
+                    debug!(
+                        "TELEMETRY API | Failed to parse telemetry events ({} bytes), failed with: {e}",
+                        body.len()
+                    );
                     return (StatusCode::OK, "Failed to parse telemetry events").into_response();
                 }
             },
