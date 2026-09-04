@@ -7,5 +7,6 @@ test_suites:
   - name: oom
   - name: lmi-oom
   - name: payload-size
+  - name: payload-size-e2e
   - name: dsm
   - name: durable-cold-start
