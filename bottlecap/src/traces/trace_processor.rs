@@ -15,6 +15,9 @@ use crate::traces::{
     LAMBDA_RUNTIME_URL_PREFIX, LAMBDA_STATSD_URL_PREFIX,
 };
 use async_trait::async_trait;
+use datadog_agent_trace_sampler::{
+    ErrorSamplerConfig, ErrorSamplerMode, ErrorsSampler, SampleDecision, SpanView, TraceView,
+};
 use libdd_common::Endpoint;
 use libdd_trace_obfuscation::obfuscate::obfuscate_span;
 use libdd_trace_obfuscation::obfuscation_config;
@@ -62,6 +65,138 @@ impl StatsComputedBy {
 #[allow(clippy::module_name_repetitions)]
 pub struct ServerlessTraceProcessor {
     pub obfuscation_config: Arc<obfuscation_config::ObfuscationConfig>,
+    /// Rescues errored `AutoDrop` chunks on the `lambda_extension_compute_stats`
+    /// path. Shared across invocations so a stateful mode (`RateLimited`) would
+    /// keep its rolling window; a std Mutex rather than tokio because
+    /// `process_traces` is synchronous.
+    pub error_sampler: Arc<std::sync::Mutex<ErrorsSampler>>,
+}
+
+/// Borrow-only view of a span for the error sampler.
+fn span_view(span: &Span) -> SpanView<'_> {
+    SpanView {
+        service: &span.service,
+        name: &span.name,
+        resource: &span.resource,
+        error: span.error != 0,
+        http_status_code: span.meta.get("http.status_code").map(String::as_str),
+        error_type: span.meta.get("error.type").map(String::as_str),
+    }
+}
+
+/// Builds the error sampler as the extension ships it, enabled or disabled by
+/// `serverless_error_sampler_enabled`.
+///
+/// The mode is hardcoded to `AlwaysKeep`: Lambda's per-invocation trace volume
+/// is low, and freeze/thaw breaks `RateLimited`'s 30s wall-clock window. There
+/// is therefore no rate ceiling when enabled: every errored chunk is rescued.
+#[must_use]
+pub fn new_error_sampler(enabled: bool) -> Arc<std::sync::Mutex<ErrorsSampler>> {
+    Arc::new(std::sync::Mutex::new(ErrorsSampler::new(
+        ErrorSamplerConfig {
+            mode: ErrorSamplerMode::AlwaysKeep,
+            // `is_disabled()` is `target_tps <= 0.0`; the magnitude only
+            // matters in RateLimited mode.
+            target_tps: if enabled { 1.0 } else { 0.0 },
+            extra_sample_rate: 1.0,
+        },
+    )))
+}
+
+impl ServerlessTraceProcessor {
+    /// Removes sampled-out chunks so they won't be sent to Datadog, then drops
+    /// any payload left without chunks. `SamplerPriority::None` (-128) means no
+    /// explicit priority was set and the trace is kept. Only
+    /// `SamplerPriority::AutoDrop` (0) chunks are rescue candidates; negative
+    /// priorities are explicit drops and are honored.
+    fn drop_sampled_out_chunks(&self, tracer_payloads: &mut Vec<pb::TracerPayload>) {
+        // Read once up front so non-errored and explicitly-dropped chunks never
+        // touch the lock. Recover through poisoning: the sampler holds only
+        // rolling-window counters, so a partially updated bucket is far cheaper
+        // than disabling error rescue for the rest of the sandbox's life.
+        let rescue_enabled = !self
+            .error_sampler
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .is_disabled();
+        // Only RateLimited's rolling window reads the clock, and only rescue
+        // candidates reach it.
+        let now_secs: i64 = if rescue_enabled {
+            std::time::UNIX_EPOCH
+                .elapsed()
+                .unwrap_or_default()
+                .as_secs()
+                .try_into()
+                .unwrap_or_default()
+        } else {
+            0
+        };
+        for tp in tracer_payloads.iter_mut() {
+            // The sampler keys its per-signature rate limits on the env the
+            // tracer reported for this payload, as the Agent does.
+            let env = tp.env.as_str();
+            tp.chunks.retain_mut(|chunk| {
+                if chunk.priority > 0 || chunk.priority == SamplerPriority::None as i32 {
+                    return true;
+                }
+                // A negative priority is an explicit drop (a tracer sampling rule
+                // or MANUAL_DROP): honor it and never rescue, as the Agent does.
+                if chunk.priority < 0 {
+                    return false;
+                }
+                if !rescue_enabled {
+                    return false;
+                }
+                self.rescue_error_chunk(chunk, env, now_secs)
+            });
+        }
+        tracer_payloads.retain(|tp| !tp.chunks.is_empty());
+    }
+
+    /// Consult the error sampler for a chunk that would otherwise be dropped
+    /// (`AutoDrop`). Returns `true` to keep (rescue) the chunk. Only errored
+    /// traces are candidates; on a keep, stamps `_dd.errors_sr` on the root span.
+    fn rescue_error_chunk(&self, chunk: &mut pb::TraceChunk, env: &str, now_secs: i64) -> bool {
+        // Only errored traces are rescue candidates (matches the Go agent, which
+        // only routes error traces through the ErrorTPS ScoreSampler). An error
+        // anywhere in the chunk counts, not just on the root span. Checked before
+        // the root-span search because non-errored chunks are the common case on
+        // this path.
+        if !chunk.spans.iter().any(|s| s.error != 0) {
+            return false;
+        }
+        let Ok(root_idx) = trace_utils::get_root_span_index(&chunk.spans) else {
+            return false; // no identifiable root span
+        };
+
+        // Scoped so the views release their borrow of chunk.spans before the
+        // `_dd.errors_sr` mutation below.
+        let decision = {
+            let root = &chunk.spans[root_idx];
+            let views = chunk.spans.iter().map(span_view).collect::<Vec<SpanView>>();
+            let trace = TraceView {
+                env,
+                trace_id: root.trace_id,
+                root_index: root_idx,
+                root_global_sample_rate: root.metrics.get("_sample_rate").copied().unwrap_or(1.0),
+                spans: &views,
+            };
+            self.error_sampler
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .sample(now_secs, &trace)
+        };
+
+        match decision {
+            SampleDecision::Keep { errors_sr } => {
+                if let Some(root) = chunk.spans.get_mut(root_idx) {
+                    root.metrics.insert("_dd.errors_sr".to_string(), errors_sr);
+                }
+                true
+            }
+            SampleDecision::Drop => false,
+        }
+    }
 }
 
 struct ChunkProcessor {
@@ -437,20 +572,12 @@ impl TraceProcessor for ServerlessTraceProcessor {
             }
         };
 
-        // Remove sampled-out chunks so they won't be sent to Datadog.
-        // Sampled-out chunks are preserved in payloads_for_stats above so their
-        // stats are still counted. SamplerPriority::None (-128) means no explicit priority
-        // was set and the trace is kept; drop priorities are SamplerPriority::AutoDrop (0)
-        // and UserDrop (-1, not represented in SamplerPriority).
+        // Sampled-out chunks are preserved in payloads_for_stats above, so their
+        // stats are still counted after they are removed here.
         if config.ext.lambda_extension_compute_stats
             && let TracerPayloadCollection::V07(ref mut tracer_payloads) = payload
         {
-            for tp in tracer_payloads.iter_mut() {
-                tp.chunks.retain(|chunk| {
-                    chunk.priority > 0 || chunk.priority == SamplerPriority::None as i32
-                });
-            }
-            tracer_payloads.retain(|tp| !tp.chunks.is_empty());
+            self.drop_sampled_out_chunks(tracer_payloads);
             if tracer_payloads.is_empty() {
                 return (None, payloads_for_stats);
             }
@@ -599,6 +726,12 @@ impl SendingTraceProcessor {
     }
 }
 
+/// Enabled error sampler for constructing `ServerlessTraceProcessor` in tests.
+#[cfg(test)]
+pub(crate) fn enabled_error_sampler() -> Arc<std::sync::Mutex<ErrorsSampler>> {
+    new_error_sampler(true)
+}
+
 #[cfg(test)]
 mod tests {
     use std::{
@@ -721,6 +854,7 @@ mod tests {
             obfuscation_config: Arc::new(
                 ObfuscationConfig::new().expect("Failed to create ObfuscationConfig"),
             ),
+            error_sampler: enabled_error_sampler(),
         };
         let config = create_test_config();
         let tags_provider = create_tags_provider(config.clone());
@@ -1199,6 +1333,7 @@ mod tests {
             obfuscation_config: Arc::new(
                 ObfuscationConfig::new().expect("Failed to create ObfuscationConfig"),
             ),
+            error_sampler: enabled_error_sampler(),
         };
 
         let header_tags = tracer_header_tags::TracerHeaderTags {
@@ -1267,6 +1402,344 @@ mod tests {
         );
     }
 
+    /// On the compute-stats path, the error sampler rescues errored chunks that
+    /// would otherwise be dropped (`AutoDrop`), stamping `_dd.errors_sr`, while
+    /// non-errored P0 chunks and explicit user drops are still dropped.
+    #[test]
+    fn test_error_sampler_rescues_errored_p0_chunks() {
+        use libdd_trace_obfuscation::obfuscation_config::ObfuscationConfig;
+
+        let config = Arc::new(Config {
+            apm_dd_url: "https://trace.agent.datadoghq.com".to_string(),
+            ext: crate::config::LambdaConfig {
+                lambda_extension_compute_stats: true,
+                ..Default::default()
+            },
+            ..Config::default()
+        });
+        let tags_provider = Arc::new(Provider::new(
+            config.clone(),
+            "lambda".to_string(),
+            &std::collections::HashMap::from([(
+                "function_arn".to_string(),
+                "test-arn".to_string(),
+            )]),
+        ));
+        let processor = ServerlessTraceProcessor {
+            obfuscation_config: Arc::new(
+                ObfuscationConfig::new().expect("Failed to create ObfuscationConfig"),
+            ),
+            error_sampler: enabled_error_sampler(),
+        };
+
+        let header_tags = tracer_header_tags::TracerHeaderTags {
+            lang: "rust",
+            lang_version: "1.0",
+            lang_interpreter: "",
+            lang_vendor: "",
+            tracer_version: "1.0",
+            container_id: "",
+            generic: tracer_header_tags::TracerGenericTags::default(),
+        };
+
+        let make_span = |trace_id: u64, priority: f64, error: i32| -> pb::Span {
+            let mut metrics = HashMap::new();
+            metrics.insert("_sampling_priority_v1".to_string(), priority);
+            pb::Span {
+                trace_id,
+                span_id: trace_id,
+                parent_id: 0,
+                error,
+                metrics,
+                service: "svc".to_string(),
+                name: "op".to_string(),
+                resource: "res".to_string(),
+                ..Default::default()
+            }
+        };
+
+        // trace 1: kept normally (priority 1). trace 2: errored P0 (rescued).
+        // trace 3: non-errored P0 (dropped). trace 4: errored user drop (dropped).
+        let traces = vec![
+            vec![make_span(1, 1.0, 0)],
+            vec![make_span(2, 0.0, 1)],
+            vec![make_span(3, 0.0, 0)],
+            vec![make_span(4, -1.0, 1)],
+        ];
+
+        let (payload_info, _stats) =
+            processor.process_traces(config, tags_provider, header_tags, traces, 0, None);
+        let payload_info = payload_info.expect("expected Some payload");
+        let backend_send_data = payload_info.builder.build();
+        let TracerPayloadCollection::V07(backend_payloads) = backend_send_data.get_payloads()
+        else {
+            panic!("expected V07");
+        };
+
+        let kept: Vec<u64> = backend_payloads
+            .iter()
+            .flat_map(|tp| tp.chunks.iter())
+            .flat_map(|c| c.spans.iter())
+            .map(|s| s.trace_id)
+            .collect();
+        assert_eq!(kept.len(), 2, "kept normal trace + rescued errored trace");
+        assert!(kept.contains(&1), "priority-1 trace kept");
+        assert!(kept.contains(&2), "errored P0 trace rescued");
+        assert!(!kept.contains(&3), "non-errored P0 trace dropped");
+        assert!(!kept.contains(&4), "errored user-drop trace not rescued");
+
+        let rescued_root = backend_payloads
+            .iter()
+            .flat_map(|tp| tp.chunks.iter())
+            .flat_map(|c| c.spans.iter())
+            .find(|s| s.trace_id == 2)
+            .expect("rescued trace present");
+        assert!(
+            rescued_root.metrics.contains_key("_dd.errors_sr"),
+            "_dd.errors_sr stamped on rescued root"
+        );
+    }
+
+    /// An error on a child span (root not errored) still makes the chunk a rescue
+    /// candidate, matching the Go agent's `traceContainsError`.
+    #[test]
+    fn test_error_sampler_rescues_chunk_with_errored_child_span() {
+        use libdd_trace_obfuscation::obfuscation_config::ObfuscationConfig;
+
+        let config = Arc::new(Config {
+            apm_dd_url: "https://trace.agent.datadoghq.com".to_string(),
+            ext: crate::config::LambdaConfig {
+                lambda_extension_compute_stats: true,
+                ..Default::default()
+            },
+            ..Config::default()
+        });
+        let tags_provider = Arc::new(Provider::new(
+            config.clone(),
+            "lambda".to_string(),
+            &std::collections::HashMap::from([(
+                "function_arn".to_string(),
+                "test-arn".to_string(),
+            )]),
+        ));
+        let processor = ServerlessTraceProcessor {
+            obfuscation_config: Arc::new(
+                ObfuscationConfig::new().expect("Failed to create ObfuscationConfig"),
+            ),
+            error_sampler: enabled_error_sampler(),
+        };
+
+        let header_tags = tracer_header_tags::TracerHeaderTags {
+            lang: "rust",
+            lang_version: "1.0",
+            lang_interpreter: "",
+            lang_vendor: "",
+            tracer_version: "1.0",
+            container_id: "",
+            generic: tracer_header_tags::TracerGenericTags::default(),
+        };
+
+        let make_span = |span_id: u64, parent_id: u64, error: i32| -> pb::Span {
+            let mut metrics = HashMap::new();
+            metrics.insert("_sampling_priority_v1".to_string(), 0.0);
+            pb::Span {
+                trace_id: 1,
+                span_id,
+                parent_id,
+                error,
+                metrics,
+                service: "svc".to_string(),
+                name: "op".to_string(),
+                resource: "res".to_string(),
+                ..Default::default()
+            }
+        };
+
+        // P0 trace whose root is fine but whose child failed (e.g. a caught
+        // downstream call): still an error trace, so it must be rescued.
+        let traces = vec![vec![make_span(1, 0, 0), make_span(2, 1, 1)]];
+
+        let (payload_info, _stats) =
+            processor.process_traces(config, tags_provider, header_tags, traces, 0, None);
+        let payload_info = payload_info.expect("errored-child P0 trace rescued");
+        let backend_send_data = payload_info.builder.build();
+        let TracerPayloadCollection::V07(backend_payloads) = backend_send_data.get_payloads()
+        else {
+            panic!("expected V07");
+        };
+
+        let root = backend_payloads
+            .iter()
+            .flat_map(|tp| tp.chunks.iter())
+            .flat_map(|c| c.spans.iter())
+            .find(|s| s.span_id == 1)
+            .expect("rescued trace present");
+        assert!(
+            root.metrics.contains_key("_dd.errors_sr"),
+            "_dd.errors_sr stamped on rescued root"
+        );
+    }
+
+    /// With the error sampler disabled (the shipping default), errored P0
+    /// chunks are dropped: no rescue, no `_dd.errors_sr`.
+    #[test]
+    fn test_disabled_error_sampler_drops_errored_p0_chunks() {
+        use libdd_trace_obfuscation::obfuscation_config::ObfuscationConfig;
+
+        let config = Arc::new(Config {
+            apm_dd_url: "https://trace.agent.datadoghq.com".to_string(),
+            ext: crate::config::LambdaConfig {
+                lambda_extension_compute_stats: true,
+                ..Default::default()
+            },
+            ..Config::default()
+        });
+        let tags_provider = Arc::new(Provider::new(
+            config.clone(),
+            "lambda".to_string(),
+            &std::collections::HashMap::from([(
+                "function_arn".to_string(),
+                "test-arn".to_string(),
+            )]),
+        ));
+        let processor = ServerlessTraceProcessor {
+            obfuscation_config: Arc::new(
+                ObfuscationConfig::new().expect("Failed to create ObfuscationConfig"),
+            ),
+            error_sampler: new_error_sampler(false),
+        };
+
+        let header_tags = tracer_header_tags::TracerHeaderTags {
+            lang: "rust",
+            lang_version: "1.0",
+            lang_interpreter: "",
+            lang_vendor: "",
+            tracer_version: "1.0",
+            container_id: "",
+            generic: tracer_header_tags::TracerGenericTags::default(),
+        };
+
+        let mut metrics = HashMap::new();
+        metrics.insert("_sampling_priority_v1".to_string(), 0.0);
+        let traces = vec![vec![pb::Span {
+            trace_id: 1,
+            span_id: 1,
+            parent_id: 0,
+            error: 1,
+            metrics,
+            service: "svc".to_string(),
+            name: "op".to_string(),
+            resource: "res".to_string(),
+            ..Default::default()
+        }]];
+
+        let (payload_info, _stats) =
+            processor.process_traces(config, tags_provider, header_tags, traces, 0, None);
+        assert!(
+            payload_info.is_none(),
+            "errored P0 trace must stay dropped when the error sampler is disabled"
+        );
+    }
+
+    /// With the error sampler disabled, an errored P0 chunk dropped from the
+    /// backend payload must still appear in the stats collection, so its stats
+    /// are counted.
+    #[test]
+    fn test_disabled_error_sampler_keeps_dropped_errored_p0_chunk_in_stats() {
+        use libdd_trace_obfuscation::obfuscation_config::ObfuscationConfig;
+
+        let config = Arc::new(Config {
+            apm_dd_url: "https://trace.agent.datadoghq.com".to_string(),
+            ext: crate::config::LambdaConfig {
+                lambda_extension_compute_stats: true,
+                ..Default::default()
+            },
+            ..Config::default()
+        });
+        let tags_provider = Arc::new(Provider::new(
+            config.clone(),
+            "lambda".to_string(),
+            &std::collections::HashMap::from([(
+                "function_arn".to_string(),
+                "test-arn".to_string(),
+            )]),
+        ));
+        let processor = ServerlessTraceProcessor {
+            obfuscation_config: Arc::new(
+                ObfuscationConfig::new().expect("Failed to create ObfuscationConfig"),
+            ),
+            error_sampler: new_error_sampler(false),
+        };
+
+        let header_tags = tracer_header_tags::TracerHeaderTags {
+            lang: "rust",
+            lang_version: "1.0",
+            lang_interpreter: "",
+            lang_vendor: "",
+            tracer_version: "1.0",
+            container_id: "",
+            generic: tracer_header_tags::TracerGenericTags::default(),
+        };
+
+        let make_span = |trace_id: u64, priority: f64, error: i32| -> pb::Span {
+            let mut metrics = HashMap::new();
+            metrics.insert("_sampling_priority_v1".to_string(), priority);
+            pb::Span {
+                trace_id,
+                span_id: trace_id,
+                parent_id: 0,
+                error,
+                metrics,
+                service: "svc".to_string(),
+                name: "op".to_string(),
+                resource: "res".to_string(),
+                ..Default::default()
+            }
+        };
+
+        // trace 1: kept normally (priority 1). trace 2: errored P0, dropped
+        // because the error sampler is disabled.
+        let traces = vec![vec![make_span(1, 1.0, 0)], vec![make_span(2, 0.0, 1)]];
+
+        let (payload_info, stats_collection) =
+            processor.process_traces(config, tags_provider, header_tags, traces, 0, None);
+        let payload_info = payload_info.expect("kept trace must produce a backend payload");
+
+        // Stats collection must include both traces, including the dropped errored P0.
+        let TracerPayloadCollection::V07(ref stats_payloads) = stats_collection else {
+            panic!("expected V07");
+        };
+        let stats_trace_ids: Vec<u64> = stats_payloads
+            .iter()
+            .flat_map(|tp| tp.chunks.iter())
+            .flat_map(|c| c.spans.iter())
+            .map(|s| s.trace_id)
+            .collect();
+        assert_eq!(stats_trace_ids.len(), 2, "stats must include all traces");
+        assert!(
+            stats_trace_ids.contains(&2),
+            "dropped errored P0 trace must still be counted in stats"
+        );
+
+        // Backend payload must only contain the kept trace.
+        let backend_send_data = payload_info.builder.build();
+        let TracerPayloadCollection::V07(backend_payloads) = backend_send_data.get_payloads()
+        else {
+            panic!("expected V07");
+        };
+        let backend_trace_ids: Vec<u64> = backend_payloads
+            .iter()
+            .flat_map(|tp| tp.chunks.iter())
+            .flat_map(|c| c.spans.iter())
+            .map(|s| s.trace_id)
+            .collect();
+        assert_eq!(
+            backend_trace_ids,
+            vec![1],
+            "backend payload must exclude the dropped errored P0 trace"
+        );
+    }
+
     /// Verifies that `process_traces` returns `None` for the backend payload when all
     /// traces are sampled out and `lambda_extension_compute_stats` is true.
     #[test]
@@ -1293,6 +1766,7 @@ mod tests {
             obfuscation_config: Arc::new(
                 ObfuscationConfig::new().expect("Failed to create ObfuscationConfig"),
             ),
+            error_sampler: enabled_error_sampler(),
         };
         let header_tags = tracer_header_tags::TracerHeaderTags {
             lang: "rust",
@@ -1371,6 +1845,7 @@ mod tests {
             obfuscation_config: Arc::new(
                 ObfuscationConfig::new().expect("Failed to create ObfuscationConfig"),
             ),
+            error_sampler: enabled_error_sampler(),
         };
         let header_tags = tracer_header_tags::TracerHeaderTags {
             lang: "rust",
@@ -1476,6 +1951,7 @@ mod tests {
             obfuscation_config: Arc::new(
                 ObfuscationConfig::new().expect("Failed to create ObfuscationConfig"),
             ),
+            error_sampler: enabled_error_sampler(),
         };
         let header_tags = tracer_header_tags::TracerHeaderTags {
             lang: "rust",
@@ -1883,6 +2359,7 @@ mod tests {
                     obfuscation_config: Arc::new(
                         ObfuscationConfig::new().expect("Failed to create ObfuscationConfig"),
                     ),
+                    error_sampler: enabled_error_sampler(),
                 }),
                 trace_tx,
                 stats_generator: Arc::new(StatsGenerator::new(concentrator_handle.clone())),
