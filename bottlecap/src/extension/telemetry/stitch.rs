@@ -41,9 +41,6 @@ const FRAGMENT_TTL: Duration = Duration::from_secs(1);
 /// Precedes a record's value, so everything up to and including it is the envelope.
 const RECORD_KEY: &[u8] = b"\"record\":";
 
-/// Opens a record.
-const RECORD_START: &[u8] = b"{\"time\":";
-
 /// The API writes the record's closing `}` and the array's `]` even after cutting the
 /// record's value short, so a fragment ends with framing that belongs to neither half.
 const FRAMING: &[u8] = b"}]";
@@ -136,8 +133,7 @@ impl Fragment {
 
         // Rebuild the cut record's envelope as the continuation will send it: `[` then the
         // record's keys, up to the value that got cut. The cut record is the last one here.
-        let value_start = rfind(&body, RECORD_KEY)? + RECORD_KEY.len();
-        let record_start = rfind(body.get(..value_start)?, RECORD_START)?;
+        let (record_start, value_start) = envelope_bounds(&body)?;
 
         let mut repeated_envelope = vec![b'['];
         repeated_envelope.extend_from_slice(body.get(record_start..value_start)?);
@@ -165,11 +161,53 @@ impl Fragment {
     }
 }
 
-/// Offset of the last occurrence of `needle` in `haystack`.
-fn rfind(haystack: &[u8], needle: &[u8]) -> Option<usize> {
-    haystack
-        .windows(needle.len())
-        .rposition(|window| window == needle)
+/// Where the last record opens, and where its `record` value begins.
+///
+/// Depth- and string-aware, because a structured record can carry a `record` key of its own.
+/// A plain search would find that one instead — always at a later offset, so the envelope
+/// would come out too long, fail to match the continuation, and drop the batch.
+fn envelope_bounds(body: &[u8]) -> Option<(usize, usize)> {
+    let mut depth = 0usize;
+    let mut in_string = false;
+    let mut escaped = false;
+    let mut record_start = None;
+    let mut value_start = None;
+
+    for (i, &byte) in body.iter().enumerate() {
+        if in_string {
+            match byte {
+                _ if escaped => escaped = false,
+                b'\\' => escaped = true,
+                b'"' => in_string = false,
+                _ => {}
+            }
+            continue;
+        }
+
+        match byte {
+            b'"' => {
+                // A key at depth 2 sits directly on a record, so this is the envelope's.
+                if depth == 2 && body[i..].starts_with(RECORD_KEY) {
+                    value_start = Some(i + RECORD_KEY.len());
+                }
+                in_string = true;
+            }
+            b'{' => {
+                if depth == 1 {
+                    record_start = Some(i);
+                }
+                depth += 1;
+            }
+            b'[' => depth += 1,
+            b'}' | b']' => depth = depth.saturating_sub(1),
+            _ => {}
+        }
+    }
+
+    // Out of order means the payload was cut before the last record reached its `record` key,
+    // leaving nothing to pair the continuation against.
+    let (record_start, value_start) = (record_start?, value_start?);
+    (record_start < value_start).then_some((record_start, value_start))
 }
 
 /// The two halves of a real split payload, trimmed to the bytes that matter.
@@ -252,6 +290,47 @@ mod tests {
         assert_eq!(
             events[1].record,
             TelemetryRecord::Function(serde_json::json!({"message": "AAAABBBB"}))
+        );
+    }
+
+    /// A structured record can nest a `record` key of its own, which must not be mistaken for
+    /// the envelope's.
+    #[test]
+    fn joins_a_structured_record_that_nests_a_record_key() {
+        let fragments = FragmentBuffer::default();
+
+        let head = r#"[{"time":"2026-09-03T14:29:52.929Z","type":"function","record":{"level":"INFO","message":{"record":"AAAA}]"#;
+        let tail = r#"[{"time":"2026-09-03T14:29:52.929Z","type":"function","record":BBBB"}}},{"time":"2026-09-03T14:29:52.930Z","type":"platform.runtimeDone","record":{"requestId":"abc123","status":"success","metrics":{"durationMs":18.074,"producedBytes":329814}}}]"#;
+
+        assert!(matches!(stitch(&fragments, head), Stitch::Pending));
+
+        let events = completed(stitch(&fragments, tail));
+        assert_eq!(events.len(), 2);
+        assert_eq!(
+            events[0].record,
+            TelemetryRecord::Function(
+                serde_json::json!({"level": "INFO", "message": {"record": "AAAABBBB"}})
+            )
+        );
+    }
+
+    /// The same key inside a string is escaped, so it never looked like the envelope's.
+    #[test]
+    fn joins_a_message_whose_text_looks_like_a_record_key() {
+        let fragments = FragmentBuffer::default();
+
+        let head = r#"[{"time":"2026-09-03T14:29:52.929Z","type":"function","record":{"message":"{\"record\":\"AAAA}]"#;
+        let tail = r#"[{"time":"2026-09-03T14:29:52.929Z","type":"function","record":BBBB\"}"}},{"time":"2026-09-03T14:29:52.930Z","type":"platform.runtimeDone","record":{"requestId":"abc123","status":"success","metrics":{"durationMs":18.074,"producedBytes":329814}}}]"#;
+
+        assert!(matches!(stitch(&fragments, head), Stitch::Pending));
+
+        let events = completed(stitch(&fragments, tail));
+        assert_eq!(events.len(), 2);
+        assert_eq!(
+            events[0].record,
+            TelemetryRecord::Function(
+                serde_json::json!({"message": r#"{"record":"AAAABBBB"}"#})
+            )
         );
     }
 
