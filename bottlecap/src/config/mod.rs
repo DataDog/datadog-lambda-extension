@@ -28,7 +28,9 @@ pub type Config = datadog_agent_config::Config<LambdaConfig>;
 #[inline]
 #[must_use]
 pub fn get_config(config_directory: &Path) -> Config {
-    get_config_with_extension::<LambdaConfig>(config_directory)
+    let mut config = get_config_with_extension::<LambdaConfig>(config_directory);
+    config.ext.apply_experimental_features_gate();
+    config
 }
 // ---------------------------------------------------------------------------
 // LambdaConfig — bottlecap's `ConfigExtension` for the shared
@@ -104,6 +106,19 @@ pub struct LambdaConfig {
     /// Consumer group used for `MSK`/Kafka DSM consume checkpoints, which is not
     /// present in the Lambda event payload (`DD_DSM_KAFKA_GROUP`).
     pub dsm_kafka_group: Option<String>,
+
+    /// `DD_TRACE_EXPERIMENTAL_FEATURES_ENABLED`: gates `additional_metric_tags` and
+    /// `additional_metric_tags_cardinality_limit` below, matching the Serverless
+    /// Compatibility Layer (`datadog-trace-agent`).
+    pub trace_experimental_features_enabled: bool,
+    /// `DD_TRACE_STATS_ADDITIONAL_TAGS`: comma-separated span `meta` keys included as
+    /// additional dimensions on trace stats aggregation (`ClientGroupedStats.additional_metric_tags`).
+    /// Only honored when `trace_experimental_features_enabled` is true.
+    pub additional_metric_tags: Vec<String>,
+    /// `DD_TRACE_STATS_ADDITIONAL_TAGS_CARDINALITY_LIMIT`: per-bucket cap on distinct
+    /// `additional_metric_tags` value combinations; `None` uses libdatadog's default (100).
+    /// Only honored when `trace_experimental_features_enabled` is true.
+    pub additional_metric_tags_cardinality_limit: Option<usize>,
 }
 
 impl Default for LambdaConfig {
@@ -132,6 +147,9 @@ impl Default for LambdaConfig {
             dsm_consume_enabled: false,
             dsm_exchange_name: None,
             dsm_kafka_group: None,
+            trace_experimental_features_enabled: false,
+            additional_metric_tags: Vec::new(),
+            additional_metric_tags_cardinality_limit: None,
         }
     }
 }
@@ -226,6 +244,23 @@ pub struct LambdaConfigSource {
     /// `DD_DSM_KAFKA_GROUP` — consumer group for MSK/Kafka DSM consume checkpoints.
     #[serde(deserialize_with = "deser_opt_str")]
     pub dsm_kafka_group: Option<String>,
+
+    /// `DD_TRACE_EXPERIMENTAL_FEATURES_ENABLED`: see `LambdaConfig::trace_experimental_features_enabled`.
+    #[serde(deserialize_with = "deser_opt_bool")]
+    pub trace_experimental_features_enabled: Option<bool>,
+    /// `DD_TRACE_STATS_ADDITIONAL_TAGS`: see `LambdaConfig::additional_metric_tags`.
+    /// Gated after all config sources merge by `apply_experimental_features_gate`. Field is
+    /// named `trace_stats_additional_tags` (rather than `additional_metric_tags`) so it maps
+    /// to the `DD_TRACE_STATS_ADDITIONAL_TAGS` env var via the field-name-to-env-var convention.
+    #[serde(deserialize_with = "deser_csv")]
+    pub trace_stats_additional_tags: Vec<String>,
+    /// `DD_TRACE_STATS_ADDITIONAL_TAGS_CARDINALITY_LIMIT`: see
+    /// `LambdaConfig::additional_metric_tags_cardinality_limit`. Gated after all config sources
+    /// merge by `apply_experimental_features_gate`. See
+    /// `trace_stats_additional_tags` above for why the field name differs from the
+    /// `LambdaConfig` field it merges into.
+    #[serde(deserialize_with = "deser_opt_lossless")]
+    pub trace_stats_additional_tags_cardinality_limit: Option<usize>,
 }
 
 impl DatadogConfigExtension for LambdaConfig {
@@ -251,6 +286,7 @@ impl DatadogConfigExtension for LambdaConfig {
                 api_security_sample_delay,
                 trace_remove_integration_service_names_enabled,
                 lambda_durable_function_log_buffer_size,
+                trace_experimental_features_enabled,
             ],
             option: [span_dedup_timeout, api_key_secret_reload_interval, appsec_rules, dsm_exchange_name, dsm_kafka_group],
         );
@@ -283,6 +319,36 @@ impl DatadogConfigExtension for LambdaConfig {
             self.custom_metrics_exclude_tags
                 .clone_from(&source.lambda_customer_metrics_exclude_tags);
         }
+
+        // trace_stats_additional_tags (source) → additional_metric_tags (config), and likewise
+        // for the cardinality limit. Merged unconditionally here: `merge_from` runs once per
+        // config source (datadog.yaml, then env vars), so gating on
+        // `trace_experimental_features_enabled` at this point would discard a value read from
+        // datadog.yaml whenever the gate itself only arrives with the later env-var pass.
+        // `apply_experimental_features_gate` applies the gate once, after every source has
+        // merged.
+        if !source.trace_stats_additional_tags.is_empty() {
+            self.additional_metric_tags
+                .clone_from(&source.trace_stats_additional_tags);
+        }
+        if let Some(limit) = source.trace_stats_additional_tags_cardinality_limit {
+            self.additional_metric_tags_cardinality_limit = Some(limit);
+        }
+    }
+}
+
+impl LambdaConfig {
+    /// Drop `additional_metric_tags` / `additional_metric_tags_cardinality_limit` unless
+    /// `trace_experimental_features_enabled` is set, matching the Serverless Compatibility
+    /// Layer (`datadog-trace-agent`).
+    ///
+    /// Applied after all config sources have merged, not inside `merge_from`, so that the gate
+    /// and the values it gates can come from different sources in either order.
+    fn apply_experimental_features_gate(&mut self) {
+        if !self.trace_experimental_features_enabled {
+            self.additional_metric_tags.clear();
+            self.additional_metric_tags_cardinality_limit = None;
+        }
     }
 }
 
@@ -290,9 +356,7 @@ impl DatadogConfigExtension for LambdaConfig {
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
 mod lambda_config_tests {
-    use datadog_agent_config::{
-        Config as UpstreamConfig, flush_strategy::PeriodicStrategy, get_config_with_extension,
-    };
+    use datadog_agent_config::{Config as UpstreamConfig, flush_strategy::PeriodicStrategy};
     use figment::Jail;
 
     use super::*;
@@ -304,7 +368,9 @@ mod lambda_config_tests {
         Jail::expect_with(|jail| {
             jail.clear_env();
             jail_setup(jail)?;
-            result = Some(get_config_with_extension::<LambdaConfig>(Path::new("")));
+            // `get_config`, not `get_config_with_extension`, so the post-merge
+            // `apply_experimental_features_gate` step is covered too.
+            result = Some(get_config(Path::new("")));
             Ok(())
         });
         result.unwrap()
@@ -806,5 +872,103 @@ mod lambda_config_tests {
         });
         // Default is true.
         assert!(config.ext.enhanced_metrics);
+    }
+
+    // ---- additional_metric_tags (span-derived primary tags), gated on
+    // trace_experimental_features_enabled, matching the Serverless Compatibility Layer
+    // (datadog-trace-agent) ----
+
+    #[test]
+    fn additional_metric_tags_ignored_when_experimental_features_disabled() {
+        let config = load(|jail| {
+            jail.set_env("DD_TRACE_STATS_ADDITIONAL_TAGS", "region,tenant_id");
+            Ok(())
+        });
+        assert!(!config.ext.trace_experimental_features_enabled);
+        assert!(config.ext.additional_metric_tags.is_empty());
+    }
+
+    #[test]
+    fn additional_metric_tags_from_env_when_trace_experimental_features_enabled() {
+        let config = load(|jail| {
+            jail.set_env("DD_TRACE_EXPERIMENTAL_FEATURES_ENABLED", "true");
+            jail.set_env("DD_TRACE_STATS_ADDITIONAL_TAGS", "region, tenant_id");
+            Ok(())
+        });
+        assert!(config.ext.trace_experimental_features_enabled);
+        assert_eq!(
+            config.ext.additional_metric_tags,
+            vec!["region".to_string(), "tenant_id".to_string()]
+        );
+    }
+
+    #[test]
+    fn additional_metric_tags_cardinality_limit_ignored_when_experimental_features_disabled() {
+        let config = load(|jail| {
+            jail.set_env("DD_TRACE_STATS_ADDITIONAL_TAGS_CARDINALITY_LIMIT", "5");
+            Ok(())
+        });
+        assert_eq!(config.ext.additional_metric_tags_cardinality_limit, None);
+    }
+
+    #[test]
+    fn additional_metric_tags_cardinality_limit_from_env_when_experimental_gate_enabled() {
+        let config = load(|jail| {
+            jail.set_env("DD_TRACE_EXPERIMENTAL_FEATURES_ENABLED", "true");
+            jail.set_env("DD_TRACE_STATS_ADDITIONAL_TAGS_CARDINALITY_LIMIT", "5");
+            Ok(())
+        });
+        assert_eq!(config.ext.additional_metric_tags_cardinality_limit, Some(5));
+    }
+
+    #[test]
+    fn additional_metric_tags_cardinality_limit_invalid_value_falls_back_to_none() {
+        let config = load(|jail| {
+            jail.set_env("DD_TRACE_EXPERIMENTAL_FEATURES_ENABLED", "true");
+            jail.set_env(
+                "DD_TRACE_STATS_ADDITIONAL_TAGS_CARDINALITY_LIMIT",
+                "not-a-number",
+            );
+            Ok(())
+        });
+        assert_eq!(config.ext.additional_metric_tags_cardinality_limit, None);
+    }
+
+    /// The gate and the values it gates may come from different config sources. Sources merge
+    /// one at a time (datadog.yaml first, then env vars), so gating during the merge would
+    /// drop the yaml values before the env-var pass ever enables the gate.
+    #[test]
+    fn additional_metric_tags_from_yaml_survive_an_env_only_experimental_gate() {
+        let config = load(|jail| {
+            jail.create_file(
+                "datadog.yaml",
+                "trace_stats_additional_tags: \"region,zone\"\n\
+                 trace_stats_additional_tags_cardinality_limit: 7\n",
+            )?;
+            jail.set_env("DD_TRACE_EXPERIMENTAL_FEATURES_ENABLED", "true");
+            Ok(())
+        });
+        assert_eq!(
+            config.ext.additional_metric_tags,
+            vec!["region".to_string(), "zone".to_string()]
+        );
+        assert_eq!(config.ext.additional_metric_tags_cardinality_limit, Some(7));
+    }
+
+    /// The mirror of the above: an env-var gate of `false` must still win over yaml values.
+    #[test]
+    fn additional_metric_tags_from_yaml_dropped_when_env_disables_the_gate() {
+        let config = load(|jail| {
+            jail.create_file(
+                "datadog.yaml",
+                "trace_experimental_features_enabled: true\n\
+                 trace_stats_additional_tags: \"region,zone\"\n\
+                 trace_stats_additional_tags_cardinality_limit: 7\n",
+            )?;
+            jail.set_env("DD_TRACE_EXPERIMENTAL_FEATURES_ENABLED", "false");
+            Ok(())
+        });
+        assert!(config.ext.additional_metric_tags.is_empty());
+        assert_eq!(config.ext.additional_metric_tags_cardinality_limit, None);
     }
 }
