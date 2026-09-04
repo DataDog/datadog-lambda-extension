@@ -70,12 +70,12 @@ pub struct LambdaConfig {
     pub lambda_extension_compute_stats: bool,
 
     /// `DD_SERVERLESS_ERROR_SAMPLER_ENABLED`: rescue errored trace chunks that would
-    /// otherwise be dropped, on the `lambda_extension_compute_stats` path. The
-    /// sampler runs in `AlwaysKeep` mode, so this is a plain on/off switch with
-    /// no volume ceiling: enabled rescues every errored chunk, whatever the
-    /// tracer's sampling rate. A function that errors on most invocations under
-    /// `DD_TRACE_SAMPLE_RATE=0.01` will ingest close to every trace, not 1%.
-    /// See APMSVLS-469.
+    /// otherwise be dropped, whenever stats are computed before the backend, by
+    /// either the tracer or the extension. The sampler runs in `AlwaysKeep` mode,
+    /// so this is a plain on/off switch with no volume ceiling: enabled rescues
+    /// every errored chunk, whatever the tracer's sampling rate. A function that
+    /// errors on most invocations under `DD_TRACE_SAMPLE_RATE=0.01` will ingest
+    /// close to every trace, not 1%. See APMSVLS-469.
     pub serverless_error_sampler_enabled: bool,
 
     pub span_dedup_timeout: Option<Duration>,
