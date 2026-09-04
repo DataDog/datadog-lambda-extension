@@ -114,8 +114,6 @@ fn hold_or_discard(
 /// The leading half of a split payload.
 struct Fragment {
     body: Vec<u8>,
-    /// The envelope the continuation repeats before the resumed bytes.
-    repeated_envelope: Vec<u8>,
     received: Instant,
 }
 
@@ -131,23 +129,24 @@ impl Fragment {
             return None;
         }
 
-        // Rebuild the cut record's envelope as the continuation will send it: `[` then the
-        // record's keys, up to the value that got cut. The cut record is the last one here.
-        let (record_start, value_start) = envelope_bounds(&body)?;
-
-        let mut repeated_envelope = vec![b'['];
-        repeated_envelope.extend_from_slice(body.get(record_start..value_start)?);
-
         Some(Self {
             body,
-            repeated_envelope,
             received: Instant::now(),
         })
     }
 
     /// The bytes that resume this fragment, if `body` is its continuation.
+    ///
+    /// A continuation opens with the cut record's envelope, so its `record` key is the first
+    /// one in the payload — anything the customer nested sits inside the value that follows.
+    /// Finding the same envelope in the fragment is what pairs the two.
     fn resumed_bytes<'a>(&self, body: &'a [u8]) -> Option<&'a [u8]> {
-        body.strip_prefix(self.repeated_envelope.as_slice())
+        let payload = body.strip_prefix(b"[")?;
+        let value_start = find(payload, RECORD_KEY)? + RECORD_KEY.len();
+        let envelope = payload.get(..value_start)?;
+
+        find(&self.body, envelope)?;
+        payload.get(value_start..)
     }
 
     /// Joins the resumed bytes on, dropping the framing: left in place it would land inside
@@ -161,53 +160,11 @@ impl Fragment {
     }
 }
 
-/// Where the last record opens, and where its `record` value begins.
-///
-/// Depth- and string-aware, because a structured record can carry a `record` key of its own.
-/// A plain search would find that one instead — always at a later offset, so the envelope
-/// would come out too long, fail to match the continuation, and drop the batch.
-fn envelope_bounds(body: &[u8]) -> Option<(usize, usize)> {
-    let mut depth = 0usize;
-    let mut in_string = false;
-    let mut escaped = false;
-    let mut record_start = None;
-    let mut value_start = None;
-
-    for (i, &byte) in body.iter().enumerate() {
-        if in_string {
-            match byte {
-                _ if escaped => escaped = false,
-                b'\\' => escaped = true,
-                b'"' => in_string = false,
-                _ => {}
-            }
-            continue;
-        }
-
-        match byte {
-            b'"' => {
-                // A key at depth 2 sits directly on a record, so this is the envelope's.
-                if depth == 2 && body[i..].starts_with(RECORD_KEY) {
-                    value_start = Some(i + RECORD_KEY.len());
-                }
-                in_string = true;
-            }
-            b'{' => {
-                if depth == 1 {
-                    record_start = Some(i);
-                }
-                depth += 1;
-            }
-            b'[' => depth += 1,
-            b'}' | b']' => depth = depth.saturating_sub(1),
-            _ => {}
-        }
-    }
-
-    // Out of order means the payload was cut before the last record reached its `record` key,
-    // leaving nothing to pair the continuation against.
-    let (record_start, value_start) = (record_start?, value_start?);
-    (record_start < value_start).then_some((record_start, value_start))
+/// Offset of the first occurrence of `needle` in `haystack`.
+fn find(haystack: &[u8], needle: &[u8]) -> Option<usize> {
+    haystack
+        .windows(needle.len())
+        .position(|window| window == needle)
 }
 
 /// The two halves of a real split payload, trimmed to the bytes that matter.
