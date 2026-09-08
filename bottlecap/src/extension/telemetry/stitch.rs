@@ -285,9 +285,7 @@ mod tests {
         assert_eq!(events.len(), 2);
         assert_eq!(
             events[0].record,
-            TelemetryRecord::Function(
-                serde_json::json!({"message": r#"{"record":"AAAABBBB"}"#})
-            )
+            TelemetryRecord::Function(serde_json::json!({"message": r#"{"record":"AAAABBBB"}"#}))
         );
     }
 
