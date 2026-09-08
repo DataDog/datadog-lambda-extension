@@ -289,7 +289,7 @@ async fn extension_loop_idle(
     aws_config: &AwsConfig,
 ) -> anyhow::Result<()> {
     loop {
-        match extension::next_event(client, &r.extension_id, &aws_config.runtime_api).await {
+        match extension::next_event(client, &aws_config.runtime_api, &r.extension_id).await {
             Ok(_) => {
                 debug!("Extension is idle, skipping next event");
             }

@@ -1,10 +1,11 @@
 use reqwest::{Client, Response};
-use tracing::debug;
+use tracing::{debug, error};
 
 use crate::extension::{EXTENSION_ID_HEADER, base_url};
 
 pub mod events;
 pub mod listener;
+mod stitch;
 
 pub const TELEMETRY_SUBSCRIPTION_ROUTE: &str = "2022-07-01/telemetry";
 
@@ -62,14 +63,26 @@ pub async fn subscribe(
                 "URI": format!("http://sandbox:{}/", destination_port),
             },
             "types": get_subscription_event_types(logs_enabled),
-            "buffering": { // TODO: re evaluate using default values
+            "buffering": {
                 "maxItems": 1000,
-                "maxBytes": 256 * 1024,
+                // 1 MiB is the AWS maximum. A log line larger than this limit is split across POSTs.
+                "maxBytes": 1024 * 1024,
                 "timeoutMs": 25
             }
         }))
         .send()
         .await?;
+
+    if let Err(e) = response.error_for_status_ref() {
+        // A rejected subscription means no telemetry at all, including platform.runtimeDone.
+        // Fail rather than run blind: the caller falls back to the idle loop, which calls
+        // /next straight through instead of waiting for a runtimeDone that never arrives.
+        error!(
+            "EXTENSION | Telemetry API rejected subscription with status {}",
+            response.status()
+        );
+        return Err(e.into());
+    }
 
     debug!("EXTENSION | Subscribed to Telemetry API: {:?}", response);
     Ok(response)

@@ -1,12 +1,15 @@
 use crate::{
     event_bus,
-    extension::telemetry::events::TelemetryEvent,
+    extension::telemetry::{
+        events::TelemetryEvent,
+        stitch::{FragmentBuffer, Stitch},
+    },
     http::{extract_request_body, handler_not_found},
 };
 
 use axum::{
     Router,
-    extract::{Request, State},
+    extract::{DefaultBodyLimit, Request, State},
     http::StatusCode,
     response::{IntoResponse, Response},
     routing::post,
@@ -16,6 +19,10 @@ use tokio::{net::TcpListener, sync::mpsc::Sender};
 use tokio_util::sync::CancellationToken;
 use tracing::debug;
 
+/// Body ceiling, replacing axum's 2 MiB default so a full-size POST — up to
+/// `2 * maxBytes + metadataBytes` — isn't rejected before the handler sees it.
+const MAX_BODY_BYTES: usize = 4 * 1024 * 1024;
+
 #[allow(clippy::module_name_repetitions)]
 #[derive(Debug, Clone)]
 pub struct TelemetryListener {
@@ -24,6 +31,12 @@ pub struct TelemetryListener {
     cancel_token: CancellationToken,
     logs_tx: Sender<TelemetryEvent>,
     event_bus_tx: Sender<event_bus::Event>,
+}
+
+#[derive(Clone)]
+struct HandlerState {
+    logs_tx: Sender<TelemetryEvent>,
+    fragments: FragmentBuffer,
 }
 
 impl TelemetryListener {
@@ -70,12 +83,16 @@ impl TelemetryListener {
     }
 
     fn make_router(&self) -> Router {
-        let logs_tx: Sender<TelemetryEvent> = self.logs_tx.clone();
+        let state = HandlerState {
+            logs_tx: self.logs_tx.clone(),
+            fragments: FragmentBuffer::default(),
+        };
 
         Router::new()
             .route("/", post(Self::handle))
             .fallback(handler_not_found)
-            .with_state(logs_tx)
+            .with_state(state)
+            .layer(DefaultBodyLimit::max(MAX_BODY_BYTES))
     }
 
     async fn graceful_shutdown(
@@ -93,7 +110,7 @@ impl TelemetryListener {
         debug!("TELEMETRY API | Shutting down");
     }
 
-    async fn handle(State(logs_tx): State<Sender<TelemetryEvent>>, request: Request) -> Response {
+    async fn handle(State(state): State<HandlerState>, request: Request) -> Response {
         let (_, body) = match extract_request_body(request).await {
             Ok(r) => r,
             Err(e) => {
@@ -105,23 +122,38 @@ impl TelemetryListener {
             }
         };
 
-        let body = std::str::from_utf8(&body).expect("infallible");
-
-        let mut telemetry_events: Vec<TelemetryEvent> = match serde_json::from_str(body) {
+        let mut telemetry_events: Vec<TelemetryEvent> = match serde_json::from_slice(&body) {
             Ok(events) => events,
-            Err(e) => {
-                // If we can't parse the event, we will receive it again in a new batch
-                // causing an infinite loop and resource contention.
-                // Instead, log it and move on.
-                // This will result in a dropped payload, but may be from
-                // events we haven't added support for yet
-                debug!("Failed to parse telemetry events `{body}`, failed with: {e}");
-                return (StatusCode::OK, "Failed to parse telemetry events").into_response();
-            }
+            // The Telemetry API splits an oversized record across two POSTs, and neither half
+            // parses alone. See `stitch`.
+            Err(e) => match state.fragments.stitch(&body, &e) {
+                Stitch::Complete(events) => {
+                    debug!(
+                        "TELEMETRY API | Reassembled a split payload, recovered {} events",
+                        events.len()
+                    );
+                    events
+                }
+                Stitch::Pending => {
+                    return (StatusCode::OK, "Holding split telemetry payload").into_response();
+                }
+                Stitch::Discarded => {
+                    // If we can't parse the event, we will receive it again in a new batch
+                    // causing an infinite loop and resource contention.
+                    // Instead, log it and move on.
+                    // This will result in a dropped payload, but may be from
+                    // events we haven't added support for yet
+                    debug!(
+                        "TELEMETRY API | Failed to parse telemetry events ({} bytes), failed with: {e}",
+                        body.len()
+                    );
+                    return (StatusCode::OK, "Failed to parse telemetry events").into_response();
+                }
+            },
         };
 
         for event in telemetry_events.drain(..) {
-            logs_tx.send(event).await.expect("infallible");
+            state.logs_tx.send(event).await.expect("infallible");
         }
 
         (StatusCode::OK, "OK").into_response()
@@ -136,6 +168,22 @@ mod tests {
     use chrono::DateTime;
 
     use crate::extension::telemetry::events::{InitPhase, InitType, TelemetryRecord};
+    use crate::extension::telemetry::stitch::fixtures::{HEAD, TAIL};
+
+    fn state(logs_tx: Sender<TelemetryEvent>) -> HandlerState {
+        HandlerState {
+            logs_tx,
+            fragments: FragmentBuffer::default(),
+        }
+    }
+
+    fn post(body: &str) -> Request<Body> {
+        Request::builder()
+            .method("POST")
+            .uri("http://localhost:8080")
+            .body(Body::from(body.to_string()))
+            .expect("failed to build request")
+    }
 
     #[tokio::test]
     #[allow(clippy::unwrap_used)]
@@ -155,7 +203,7 @@ mod tests {
         let (parts, body) = req.into_parts();
         let req = Request::from_parts(parts, body);
 
-        let response = TelemetryListener::handle(axum::extract::State(tx), req).await;
+        let response = TelemetryListener::handle(axum::extract::State(state(tx)), req).await;
 
         // Check that the response is OK
         assert_eq!(response.status(), axum::http::StatusCode::OK);
@@ -170,5 +218,29 @@ mod tests {
             runtime_version: Some("nodejs:20.v22".to_string()),
             runtime_version_arn: Some("arn:aws:lambda:us-east-1::runtime:da57c20c4b965d5b75540f6865a35fc8030358e33ec44ecfed33e90901a27a72".to_string()),
         });
+    }
+
+    /// A split payload is held on the first POST and forwarded whole on the second.
+    #[tokio::test]
+    async fn test_handle_split_payload() {
+        let (tx, mut rx) = tokio::sync::mpsc::channel(2);
+        let state = state(tx);
+
+        let response =
+            TelemetryListener::handle(axum::extract::State(state.clone()), post(HEAD)).await;
+        assert_eq!(response.status(), StatusCode::OK);
+        assert!(rx.try_recv().is_err(), "held fragment must not be emitted");
+
+        let response = TelemetryListener::handle(axum::extract::State(state), post(TAIL)).await;
+        assert_eq!(response.status(), StatusCode::OK);
+
+        assert!(matches!(
+            rx.try_recv().expect("function record").record,
+            TelemetryRecord::Function(_)
+        ));
+        assert!(matches!(
+            rx.try_recv().expect("runtimeDone record").record,
+            TelemetryRecord::PlatformRuntimeDone { .. }
+        ));
     }
 }
