@@ -15,12 +15,13 @@
 //! payload-level changes that `body_contains`-style mocks can't catch.
 
 use std::collections::HashMap;
+use std::path::Path;
 use std::str::FromStr;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use bottlecap::LAMBDA_RUNTIME_SLUG;
-use bottlecap::config::Config;
+use bottlecap::config::{Config, get_config};
 use bottlecap::tags::provider::Provider;
 use bottlecap::traces::http_client::create_client;
 use bottlecap::traces::stats_aggregator::StatsAggregator;
@@ -30,13 +31,15 @@ use bottlecap::traces::stats_generator::StatsGenerator;
 use bottlecap::traces::trace_aggregator::SendDataBuilderInfo;
 use bottlecap::traces::trace_aggregator_service::AggregatorService;
 use bottlecap::traces::trace_flusher::TraceFlusher;
-use bottlecap::traces::trace_processor::{SendingTraceProcessor, ServerlessTraceProcessor};
+use bottlecap::traces::trace_processor::{
+    SendingTraceProcessor, ServerlessTraceProcessor, new_error_sampler,
+};
 use dogstatsd::api_key::ApiKeyFactory;
 use libdd_common::Endpoint;
 use libdd_trace_obfuscation::obfuscation_config::ObfuscationConfig;
 use libdd_trace_protobuf::pb;
 use libdd_trace_utils::send_data::SendDataBuilder;
-use libdd_trace_utils::trace_utils::TracerHeaderTags;
+use libdd_trace_utils::trace_utils::{TracerGenericTags, TracerHeaderTags};
 use libdd_trace_utils::tracer_payload::TracerPayloadCollection;
 use tokio::sync::Mutex;
 
@@ -55,10 +58,11 @@ fn header_tags() -> TracerHeaderTags<'static> {
         lang_vendor: "datadog",
         tracer_version: "test",
         container_id: "",
-        client_computed_top_level: true,
-        client_computed_stats: true,
-        dropped_p0_traces: 0,
-        dropped_p0_spans: 0,
+        generic: TracerGenericTags {
+            client_computed_top_level: true,
+            client_computed_stats: true,
+            ..Default::default()
+        },
     }
 }
 
@@ -68,6 +72,25 @@ fn test_config() -> Arc<Config> {
         site: "datadoghq.com".to_string(),
         ..Config::default()
     })
+}
+
+/// Build a `Config` through the real parsing path: `Jail` sets the given `DD_*`
+/// environment variables, then `get_config` parses them and applies the
+/// experimental-features gate. `clear_env` makes the result independent of the
+/// ambient environment; this is safe here because no other test in this binary
+/// reads env, each `tests/*.rs` file is its own binary, and figment's Jail holds
+/// a process-wide lock while active.
+fn config_from_env(env: &[(&str, &str)]) -> Arc<Config> {
+    let mut result: Option<Config> = None;
+    figment::Jail::expect_with(|jail| {
+        jail.clear_env();
+        for (key, value) in env.iter().copied() {
+            jail.set_env(key, value);
+        }
+        result = Some(get_config(Path::new("")));
+        Ok(())
+    });
+    Arc::new(result.expect("config must be built inside the jail"))
 }
 
 fn endpoint_for(url: &str, api_key: &str) -> Endpoint {
@@ -289,7 +312,10 @@ async fn trace_payload_roundtrip_through_fake_intake() {
 
 fn header_tags_with(client_computed_stats: bool) -> TracerHeaderTags<'static> {
     TracerHeaderTags {
-        client_computed_stats,
+        generic: TracerGenericTags {
+            client_computed_stats,
+            ..header_tags().generic
+        },
         ..header_tags()
     }
 }
@@ -339,6 +365,7 @@ async fn run_processor_pipeline_with_traces(
             obfuscation_config: Arc::new(
                 ObfuscationConfig::new().expect("Failed to create ObfuscationConfig"),
             ),
+            error_sampler: new_error_sampler(true),
         }),
         trace_tx,
         stats_generator: Arc::new(StatsGenerator::new(concentrator_handle.clone())),
@@ -455,6 +482,67 @@ fn captured_compute_stats(traces: &[pb::AgentPayload]) -> Option<String> {
         .find(|s| s.name == "web.request")
         .expect("web.request span should be present");
     span.meta.get(COMPUTE_STATS_KEY).cloned()
+}
+
+/// An errored P0 trace is rescued and reaches the intake, while a non-errored P0 trace is dropped.
+#[tokio::test]
+async fn e2e_error_sampler_rescues_only_errored_p0_traces() {
+    let make_span = |trace_id: u64, error: i32| {
+        let mut span = pb::Span {
+            service: "fake-intake-trace-service".to_string(),
+            name: "web.request".to_string(),
+            resource: "GET /fake".to_string(),
+            trace_id,
+            span_id: trace_id,
+            parent_id: 0,
+            start: STATS_SPAN_START_NS,
+            duration: 5_000_000,
+            error,
+            r#type: "web".to_string(),
+            ..pb::Span::default()
+        };
+        span.metrics
+            .insert("_sampling_priority_v1".to_string(), 0.0);
+        span
+    };
+
+    let rescued_trace_id = 1;
+    let dropped_trace_id = 2;
+    let outcome = run_processor_pipeline_with_traces(
+        true,
+        false,
+        vec![
+            vec![make_span(rescued_trace_id, 1)],
+            vec![make_span(dropped_trace_id, 0)],
+        ],
+    )
+    .await;
+
+    let captured_spans: Vec<&pb::Span> = outcome
+        .traces
+        .iter()
+        .flat_map(|payload| &payload.tracer_payloads)
+        .flat_map(|payload| &payload.chunks)
+        .flat_map(|chunk| &chunk.spans)
+        .collect();
+    assert_eq!(
+        captured_spans.len(),
+        1,
+        "only the rescued trace reaches intake"
+    );
+
+    let rescued_span = captured_spans[0];
+    assert_eq!(rescued_span.trace_id, rescued_trace_id);
+    assert!(
+        rescued_span.metrics.contains_key("_dd.errors_sr"),
+        "the rescued root span must carry its error sampling rate",
+    );
+    assert!(
+        captured_spans
+            .iter()
+            .all(|span| span.trace_id != dropped_trace_id),
+        "the non-errored P0 trace must not reach intake",
+    );
 }
 
 /// T3.1: `client_computed_stats=true` → captured span meta has `_dd.compute_stats` absent.
@@ -744,9 +832,9 @@ fn make_eligible_span(span_kind: &str, peer_meta: &[(&str, &str)]) -> pb::Span {
 /// `spans`, force a flush, and return the single captured `StatsPayload`.
 async fn flush_spans_to_fake_intake(
     fake_intake: &FakeIntake,
+    config: Arc<Config>,
     spans: &[pb::Span],
 ) -> pb::StatsPayload {
-    let config = test_config();
     let http_client = create_client(None, None, false).expect("failed to create http client");
 
     let (concentrator_service, concentrator_handle) =
@@ -792,7 +880,7 @@ async fn stats_span_kind_through_fake_intake() {
     let fake_intake = FakeIntake::start().await;
     let span = make_eligible_span("server", &[]);
 
-    let payload = flush_spans_to_fake_intake(&fake_intake, &[span]).await;
+    let payload = flush_spans_to_fake_intake(&fake_intake, test_config(), &[span]).await;
 
     let grouped: Vec<_> = payload
         .stats
@@ -823,7 +911,7 @@ async fn stats_peer_tags_through_fake_intake() {
         &[("db.instance", "i-1234"), ("db.system", "postgres")],
     );
 
-    let payload = flush_spans_to_fake_intake(&fake_intake, &[span]).await;
+    let payload = flush_spans_to_fake_intake(&fake_intake, test_config(), &[span]).await;
 
     let with_peer_tags: Vec<_> = payload
         .stats
@@ -845,4 +933,246 @@ async fn stats_peer_tags_through_fake_intake() {
         peer_tags.iter().any(|t| t.starts_with("db.system:")),
         "expected peer_tags to contain db.system, got: {peer_tags:?}",
     );
+}
+
+/// Collect the grouped-stats entries from a captured `StatsPayload`.
+fn grouped_entries(payload: &pb::StatsPayload) -> Vec<&pb::ClientGroupedStats> {
+    payload
+        .stats
+        .iter()
+        .flat_map(|p| &p.stats)
+        .flat_map(|b| &b.stats)
+        .collect()
+}
+
+/// End-to-end: spans carrying `meta["region"]` fed through the concentrator with
+/// `DD_TRACE_STATS_ADDITIONAL_TAGS=region` (behind the experimental gate) must
+/// arrive at the intake with `additional_metric_tags` populated, split into one
+/// group per distinct region value, with repeated values aggregated into the
+/// same group. Span meta keys not listed in `DD_TRACE_STATS_ADDITIONAL_TAGS`
+/// must not be exported as additional metric tags.
+#[tokio::test]
+async fn stats_additional_metric_tags_through_fake_intake() {
+    let fake_intake = FakeIntake::start().await;
+    let config = config_from_env(&[
+        ("DD_API_KEY", DD_API_KEY),
+        ("DD_SITE", "datadoghq.com"),
+        ("DD_TRACE_EXPERIMENTAL_FEATURES_ENABLED", "true"),
+        ("DD_TRACE_STATS_ADDITIONAL_TAGS", "region"),
+    ]);
+
+    let spans = vec![
+        make_eligible_span("server", &[("region", "us-east-1")]),
+        make_eligible_span("server", &[("region", "us-east-1")]),
+        make_eligible_span("server", &[("region", "eu-west-1")]),
+        // Only carries an unconfigured meta key: must not gain any additional
+        // metric tag.
+        make_eligible_span("server", &[("tenant_id", "acme")]),
+    ];
+
+    let payload = flush_spans_to_fake_intake(&fake_intake, config, &spans).await;
+    let grouped = grouped_entries(&payload);
+
+    let with_tags: Vec<_> = grouped
+        .iter()
+        .filter(|s| !s.additional_metric_tags.is_empty())
+        .collect();
+    assert_eq!(
+        with_tags.len(),
+        2,
+        "expected one group per distinct region value, got: {:?}",
+        grouped
+            .iter()
+            .map(|s| &s.additional_metric_tags)
+            .collect::<Vec<_>>(),
+    );
+
+    let us_east = with_tags
+        .iter()
+        .find(|s| s.additional_metric_tags == vec!["region:us-east-1".to_string()])
+        .expect("us-east-1 group should be present");
+    assert_eq!(us_east.hits, 2, "repeated us-east-1 values must aggregate");
+
+    let eu_west = with_tags
+        .iter()
+        .find(|s| s.additional_metric_tags == vec!["region:eu-west-1".to_string()])
+        .expect("eu-west-1 group should be present");
+    assert_eq!(eu_west.hits, 1);
+
+    let untagged = grouped
+        .iter()
+        .find(|s| s.additional_metric_tags.is_empty())
+        .expect("span without the configured key should land in its own group");
+    assert_eq!(untagged.hits, 1);
+}
+
+/// End-to-end: `DD_TRACE_STATS_ADDITIONAL_TAGS` set without the experimental
+/// gate must leave `additional_metric_tags` empty on the emitted payload, and
+/// spans differing only in the unexported meta value must merge into a single
+/// group. Proves the gate affects the payload, not just the parsed config.
+#[tokio::test]
+async fn stats_additional_metric_tags_gated_off_through_fake_intake() {
+    let fake_intake = FakeIntake::start().await;
+    let config = config_from_env(&[
+        ("DD_API_KEY", DD_API_KEY),
+        ("DD_SITE", "datadoghq.com"),
+        ("DD_TRACE_STATS_ADDITIONAL_TAGS", "region"),
+    ]);
+
+    let spans = vec![
+        make_eligible_span("server", &[("region", "us-east-1")]),
+        make_eligible_span("server", &[("region", "us-east-1")]),
+        make_eligible_span("server", &[("region", "eu-west-1")]),
+    ];
+
+    let payload = flush_spans_to_fake_intake(&fake_intake, config, &spans).await;
+    let grouped = grouped_entries(&payload);
+
+    assert_eq!(
+        grouped.len(),
+        1,
+        "spans differing only in region must merge into one group, got: {:?}",
+        grouped
+            .iter()
+            .map(|s| (&s.resource, &s.additional_metric_tags))
+            .collect::<Vec<_>>(),
+    );
+    assert!(
+        grouped[0].additional_metric_tags.is_empty(),
+        "gated-off additional tags must not appear on the payload, got: {:?}",
+        grouped[0].additional_metric_tags,
+    );
+    assert_eq!(grouped[0].hits, 3);
+}
+
+/// End-to-end: `DD_TRACE_STATS_ADDITIONAL_TAGS_CARDINALITY_LIMIT=1` with two
+/// distinct region values in the same bucket must admit the first value and
+/// collapse the second into the `tracer_blocked_value` overflow group, keeping
+/// the total hit count intact.
+#[tokio::test]
+async fn stats_additional_metric_tags_cardinality_limit_through_fake_intake() {
+    let fake_intake = FakeIntake::start().await;
+    let config = config_from_env(&[
+        ("DD_API_KEY", DD_API_KEY),
+        ("DD_SITE", "datadoghq.com"),
+        ("DD_TRACE_EXPERIMENTAL_FEATURES_ENABLED", "true"),
+        ("DD_TRACE_STATS_ADDITIONAL_TAGS", "region"),
+        ("DD_TRACE_STATS_ADDITIONAL_TAGS_CARDINALITY_LIMIT", "1"),
+    ]);
+
+    let spans = vec![
+        make_eligible_span("server", &[("region", "us-east-1")]),
+        make_eligible_span("server", &[("region", "us-east-1")]),
+        make_eligible_span("server", &[("region", "eu-west-1")]),
+    ];
+
+    let payload = flush_spans_to_fake_intake(&fake_intake, config, &spans).await;
+    let grouped = grouped_entries(&payload);
+
+    assert_eq!(
+        grouped.len(),
+        2,
+        "expected one admitted group plus one overflow group, got: {:?}",
+        grouped
+            .iter()
+            .map(|s| &s.additional_metric_tags)
+            .collect::<Vec<_>>(),
+    );
+
+    let admitted = grouped
+        .iter()
+        .find(|s| s.additional_metric_tags == vec!["region:us-east-1".to_string()])
+        .expect("first distinct value should be admitted");
+    assert_eq!(admitted.hits, 2);
+
+    let overflow = grouped
+        .iter()
+        .find(|s| s.additional_metric_tags == vec!["tracer_blocked_value:".to_string()])
+        .expect("second distinct value should collapse into the overflow sentinel");
+    assert_eq!(overflow.hits, 1);
+
+    let total_hits: u64 = grouped.iter().map(|s| s.hits).sum();
+    assert_eq!(total_hits, 3, "cardinality limiting must not drop hits");
+}
+
+/// End-to-end with multiple configured keys: spans carrying both `meta["region"]` and
+/// `meta["tenant_id"]`, with `DD_TRACE_STATS_ADDITIONAL_TAGS=region,tenant_id`, must group on
+/// the two values together: one group per distinct combination, repeats aggregating per
+/// combination, and a change in either key producing a new group.
+#[tokio::test]
+async fn stats_additional_metric_tags_multiple_keys_through_fake_intake() {
+    let fake_intake = FakeIntake::start().await;
+    let config = config_from_env(&[
+        ("DD_API_KEY", DD_API_KEY),
+        ("DD_SITE", "datadoghq.com"),
+        ("DD_TRACE_EXPERIMENTAL_FEATURES_ENABLED", "true"),
+        ("DD_TRACE_STATS_ADDITIONAL_TAGS", "region,tenant_id"),
+    ]);
+
+    let spans = vec![
+        make_eligible_span("server", &[("region", "us-east-1"), ("tenant_id", "acme")]),
+        make_eligible_span("server", &[("region", "us-east-1"), ("tenant_id", "acme")]),
+        make_eligible_span(
+            "server",
+            &[("region", "us-east-1"), ("tenant_id", "globex")],
+        ),
+        make_eligible_span("server", &[("region", "eu-west-1"), ("tenant_id", "acme")]),
+    ];
+
+    let payload = flush_spans_to_fake_intake(&fake_intake, config, &spans).await;
+    let grouped = grouped_entries(&payload);
+
+    fn tags_of(s: &pb::ClientGroupedStats) -> Vec<&str> {
+        s.additional_metric_tags
+            .iter()
+            .map(String::as_str)
+            .collect()
+    }
+
+    assert_eq!(
+        grouped.len(),
+        3,
+        "expected one group per distinct (region, tenant_id) combination, got: {:?}",
+        grouped
+            .iter()
+            .map(|s| &s.additional_metric_tags)
+            .collect::<Vec<_>>(),
+    );
+
+    let acme_us_east = grouped
+        .iter()
+        .find(|s| tags_of(s) == vec!["region:us-east-1".to_string(), "tenant_id:acme".to_string()])
+        .expect("(us-east-1, acme) combination should be present");
+    assert_eq!(
+        acme_us_east.hits, 2,
+        "repeats of the same combination must aggregate"
+    );
+
+    for (expected_tags, expected_hits) in [
+        (
+            vec![
+                "region:us-east-1".to_string(),
+                "tenant_id:globex".to_string(),
+            ],
+            1,
+        ),
+        (
+            vec!["region:eu-west-1".to_string(), "tenant_id:acme".to_string()],
+            1,
+        ),
+    ] {
+        let group = grouped
+            .iter()
+            .find(|s| s.additional_metric_tags == expected_tags)
+            .unwrap_or_else(|| {
+                panic!(
+                    "combination {expected_tags:?} should be present, got: {:?}",
+                    grouped
+                        .iter()
+                        .map(|s| &s.additional_metric_tags)
+                        .collect::<Vec<_>>()
+                )
+            });
+        assert_eq!(group.hits, expected_hits);
+    }
 }

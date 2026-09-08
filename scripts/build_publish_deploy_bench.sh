@@ -23,7 +23,7 @@ if [ -z "${DD_API_KEY+set}" ]; then
     exit 1
 fi
 
-LATEST_VERSION=$(aws-vault exec $AWS_PROFILE -- aws lambda list-layer-versions --region "$REGION" --layer-name "${LAYER_NAME}" --query 'LayerVersions[0].Version || `0`')
+LATEST_VERSION=$(aws-vault exec $AWS_PROFILE -- aws lambda list-layer-versions --region "$REGION" --layer-name "${LAYER_NAME}" --max-items 1 --query 'LayerVersions[0].Version || `0`')
 export VERSION=$(($LATEST_VERSION+1))
 
 export EXTENSION_ARN="arn:aws:lambda:$REGION:425362996713:layer:$LAYER_NAME:$VERSION"

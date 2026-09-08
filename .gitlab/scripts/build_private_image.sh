@@ -27,7 +27,7 @@ else
 fi
 
 # Increment last version
-latest_version=$(aws lambda list-layer-versions --region us-east-1 --layer-name "$LAYER_NAME" --query 'LayerVersions[0].Version || `0`')
+latest_version=$(aws lambda list-layer-versions --region us-east-1 --layer-name "$LAYER_NAME" --max-items 1 --query 'LayerVersions[0].Version || `0`')
 VERSION=$(($latest_version + 1))
 printf "Tagging container image with version: $VERSION and latest\n"
 

@@ -1,5 +1,5 @@
 use libdd_trace_utils::send_data::SendDataBuilder;
-use libdd_trace_utils::trace_utils::TracerHeaderTags;
+use libdd_trace_utils::trace_utils::{TracerGenericTags, TracerHeaderTags};
 use std::collections::VecDeque;
 use tracing::debug;
 
@@ -16,10 +16,7 @@ pub struct OwnedTracerHeaderTags {
     pub lang_vendor: String,
     pub tracer_version: String,
     pub container_id: String,
-    pub client_computed_top_level: bool,
-    pub client_computed_stats: bool,
-    pub dropped_p0_traces: usize,
-    pub dropped_p0_spans: usize,
+    pub generic: TracerGenericTags,
 }
 
 impl From<TracerHeaderTags<'_>> for OwnedTracerHeaderTags {
@@ -31,10 +28,7 @@ impl From<TracerHeaderTags<'_>> for OwnedTracerHeaderTags {
             lang_vendor: tags.lang_vendor.to_string(),
             tracer_version: tags.tracer_version.to_string(),
             container_id: tags.container_id.to_string(),
-            client_computed_top_level: tags.client_computed_top_level,
-            client_computed_stats: tags.client_computed_stats,
-            dropped_p0_traces: tags.dropped_p0_traces,
-            dropped_p0_spans: tags.dropped_p0_spans,
+            generic: tags.generic,
         }
     }
 }
@@ -49,10 +43,7 @@ impl OwnedTracerHeaderTags {
             lang_vendor: &self.lang_vendor,
             tracer_version: &self.tracer_version,
             container_id: &self.container_id,
-            client_computed_top_level: self.client_computed_top_level,
-            client_computed_stats: self.client_computed_stats,
-            dropped_p0_traces: self.dropped_p0_traces,
-            dropped_p0_spans: self.dropped_p0_spans,
+            generic: self.generic,
         }
     }
 }
@@ -153,7 +144,8 @@ impl TraceAggregator {
 mod tests {
     use libdd_common::Endpoint;
     use libdd_trace_utils::{
-        trace_utils::TracerHeaderTags, tracer_payload::TracerPayloadCollection,
+        trace_utils::{TracerGenericTags, TracerHeaderTags},
+        tracer_payload::TracerPayloadCollection,
     };
 
     use super::*;
@@ -166,10 +158,11 @@ mod tests {
             lang_vendor: "lang_vendor",
             tracer_version: "tracer_version",
             container_id: "container_id",
-            client_computed_top_level: true,
-            client_computed_stats: true,
-            dropped_p0_traces: 0,
-            dropped_p0_spans: 0,
+            generic: TracerGenericTags {
+                client_computed_top_level: true,
+                client_computed_stats: true,
+                ..Default::default()
+            },
         }
     }
 

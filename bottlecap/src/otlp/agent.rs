@@ -60,7 +60,7 @@ impl TracePipeline {
 
         let lambda_extension_compute_stats = self.config.ext.lambda_extension_compute_stats;
         // Capture before `tracer_header_tags` is moved into process_traces below.
-        let client_computed_stats = tracer_header_tags.client_computed_stats;
+        let client_computed_stats = tracer_header_tags.generic.client_computed_stats;
         let (send_data_builder, processed_traces) = self.trace_processor.process_traces(
             self.config.clone(),
             self.tags_provider.clone(),

@@ -44,6 +44,7 @@ crossbeam-utils,https://github.com/crossbeam-rs/crossbeam,MIT OR Apache-2.0,The 
 crypto-common,https://github.com/RustCrypto/traits,MIT OR Apache-2.0,RustCrypto Developers
 ctor,https://github.com/mmastrac/rust-ctor,Apache-2.0 OR MIT,Matt Mastracci <matthew@mastracci.com>
 datadog-agent-config,https://github.com/DataDog/serverless-components,Apache-2.0,The datadog-agent-config Authors
+datadog-agent-trace-sampler,https://github.com/DataDog/serverless-components,Apache-2.0,The datadog-agent-trace-sampler Authors
 datadog-fips,https://github.com/DataDog/serverless-components,Apache-2.0,The datadog-fips Authors
 datadog-opentelemetry,https://github.com/DataDog/dd-trace-rs/tree/main/datadog-opentelemetry,Apache-2.0,Datadog Inc. <info@datadoghq.com>
 datadog-protos,https://github.com/DataDog/saluki,Apache-2.0,The datadog-protos Authors

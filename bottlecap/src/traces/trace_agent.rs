@@ -592,7 +592,10 @@ impl TraceAgent {
 
                 if span.resource == INVOCATION_SPAN_RESOURCE
                     && let Err(e) = invocation_processor_handle
-                        .add_tracer_span(span.clone(), tracer_header_tags.client_computed_stats)
+                        .add_tracer_span(
+                            span.clone(),
+                            tracer_header_tags.generic.client_computed_stats,
+                        )
                         .await
                 {
                     error!("Failed to add tracer span to processor: {}", e);
@@ -807,7 +810,10 @@ mod tests {
             );
         }
         let tags: TracerHeaderTags<'_> = (&headers).into();
-        (tags.client_computed_stats, tags.client_computed_top_level)
+        (
+            tags.generic.client_computed_stats,
+            tags.generic.client_computed_top_level,
+        )
     }
 
     fn parse_stats(value: Option<&str>) -> bool {
