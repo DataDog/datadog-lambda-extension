@@ -23,8 +23,8 @@ use libdd_trace_obfuscation::obfuscate::obfuscate_span;
 use libdd_trace_obfuscation::obfuscation_config;
 use libdd_trace_protobuf::pb;
 use libdd_trace_protobuf::pb::Span;
-use libdd_trace_utils::send_data::{Compression, SendDataBuilder};
-use libdd_trace_utils::send_with_retry::{RetryBackoffType, RetryStrategy};
+use libdd_trace_utils::send_data::SendDataBuilder;
+use libdd_trace_utils::send_with_retry::{CompressionStrategy, RetryBackoffType, RetryStrategy};
 use libdd_trace_utils::trace_utils::{self};
 use libdd_trace_utils::tracer_header_tags;
 use libdd_trace_utils::tracer_payload::{TraceChunkProcessor, TracerPayloadCollection};
@@ -597,7 +597,9 @@ impl TraceProcessor for ServerlessTraceProcessor {
 
         // Move original payload into builder (no clone needed)
         let builder = SendDataBuilder::new(body_size, payload, header_tags, &endpoint)
-            .with_compression(Compression::Zstd(config.apm_config_compression_level))
+            .with_compression(CompressionStrategy::Zstd {
+                level: config.apm_config_compression_level,
+            })
             .with_retry_strategy(RetryStrategy::new(
                 1,
                 100,
