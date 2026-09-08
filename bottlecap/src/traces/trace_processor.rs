@@ -204,9 +204,10 @@ struct ChunkProcessor {
     obfuscation_config: Arc<obfuscation_config::ObfuscationConfig>,
     tags_provider: Arc<provider::Provider>,
     span_pointers: Option<Vec<SpanPointer>>,
-    /// Whether the tracer signaled (via `Datadog-Client-Computed-Stats`) that it already
-    /// computed trace stats client-side. Used to decide whether to stamp `_dd.compute_stats`.
-    client_computed_stats: bool,
+    /// Which party computes trace stats for this request, resolved once by the caller from
+    /// config and the tracer's `Datadog-Client-Computed-Stats` signal. Used to decide
+    /// whether to stamp `_dd.compute_stats`.
+    stats_computed_by: StatsComputedBy,
 }
 
 impl TraceChunkProcessor for ChunkProcessor {
@@ -222,12 +223,7 @@ impl TraceChunkProcessor for ChunkProcessor {
             .spans
             .retain(|span| !filter_span_from_lambda_library_or_runtime(span));
 
-        // The stats-routing decision depends only on config and the per-request
-        // client_computed_stats flag, so resolve it once instead of per span.
-        let stamp_compute_stats = StatsComputedBy::resolve(
-            self.config.ext.lambda_extension_compute_stats,
-            self.client_computed_stats,
-        ) == StatsComputedBy::Backend;
+        let stamp_compute_stats = self.stats_computed_by == StatsComputedBy::Backend;
 
         for span in &mut chunk.spans {
             // Service name could be incorrectly set to 'aws.lambda'
@@ -526,6 +522,12 @@ impl TraceProcessor for ServerlessTraceProcessor {
         body_size: usize,
         span_pointers: Option<Vec<SpanPointer>>,
     ) -> (Option<SendDataBuilderInfo>, TracerPayloadCollection) {
+        // Who computes stats drives both the `_dd.compute_stats` stamp below and the
+        // sampled-out filtering further down, so resolve it once for this request.
+        let stats_computed_by = StatsComputedBy::resolve(
+            config.ext.lambda_extension_compute_stats,
+            header_tags.generic.client_computed_stats,
+        );
         let mut payload = trace_utils::collect_pb_trace_chunks(
             traces,
             &header_tags,
@@ -534,7 +536,7 @@ impl TraceProcessor for ServerlessTraceProcessor {
                 obfuscation_config: self.obfuscation_config.clone(),
                 tags_provider: tags_provider.clone(),
                 span_pointers,
-                client_computed_stats: header_tags.generic.client_computed_stats,
+                stats_computed_by,
             },
             true, // send agentless since we are the agent
         )
@@ -576,10 +578,6 @@ impl TraceProcessor for ServerlessTraceProcessor {
         // stats are still counted after they are removed here. Filter whenever
         // stats are computed before the backend, by either the tracer or the
         // extension: the backend only needs these chunks when it owns stats.
-        let stats_computed_by = StatsComputedBy::resolve(
-            config.ext.lambda_extension_compute_stats,
-            header_tags.generic.client_computed_stats,
-        );
         if stats_computed_by != StatsComputedBy::Backend
             && let TracerPayloadCollection::V07(ref mut tracer_payloads) = payload
         {
@@ -1174,7 +1172,7 @@ mod tests {
                 )]),
             )),
             span_pointers: None,
-            client_computed_stats: false,
+            stats_computed_by: StatsComputedBy::Backend,
         };
 
         processor.process(&mut chunk, 0);
@@ -1259,7 +1257,7 @@ mod tests {
                 )]),
             )),
             span_pointers: None,
-            client_computed_stats: false,
+            stats_computed_by: StatsComputedBy::Backend,
         };
 
         processor.process(&mut chunk, 0);
@@ -1343,7 +1341,7 @@ mod tests {
                 )]),
             )),
             span_pointers: None,
-            client_computed_stats: false,
+            stats_computed_by: StatsComputedBy::Backend,
         };
 
         processor.process(&mut chunk, 0);
@@ -1921,6 +1919,10 @@ mod tests {
         client_computed_stats: bool,
     ) -> ChunkProcessor {
         let tags_provider = create_tags_provider(config.clone());
+        let stats_computed_by = StatsComputedBy::resolve(
+            config.ext.lambda_extension_compute_stats,
+            client_computed_stats,
+        );
         ChunkProcessor {
             config,
             obfuscation_config: Arc::new(
@@ -1928,7 +1930,7 @@ mod tests {
             ),
             tags_provider,
             span_pointers: None,
-            client_computed_stats,
+            stats_computed_by,
         }
     }
 
