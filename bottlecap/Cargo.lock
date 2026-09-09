@@ -865,7 +865,7 @@ dependencies = [
 [[package]]
 name = "datadog-agent-config"
 version = "0.1.0"
-source = "git+https://github.com/DataDog/serverless-components?rev=f596a46e71c7f393ad4f54ec7a67490848181660#f596a46e71c7f393ad4f54ec7a67490848181660"
+source = "git+https://github.com/DataDog/serverless-components?rev=3ab01258b235f2a39272780e9a0484c7fd420cd1#3ab01258b235f2a39272780e9a0484c7fd420cd1"
 dependencies = [
  "datadog-opentelemetry",
  "dogstatsd",
@@ -883,12 +883,12 @@ dependencies = [
 [[package]]
 name = "datadog-agent-trace-sampler"
 version = "0.1.0"
-source = "git+https://github.com/DataDog/serverless-components?rev=f596a46e71c7f393ad4f54ec7a67490848181660#f596a46e71c7f393ad4f54ec7a67490848181660"
+source = "git+https://github.com/DataDog/serverless-components?rev=3ab01258b235f2a39272780e9a0484c7fd420cd1#3ab01258b235f2a39272780e9a0484c7fd420cd1"
 
 [[package]]
 name = "datadog-fips"
 version = "0.1.0"
-source = "git+https://github.com/DataDog/serverless-components?rev=f596a46e71c7f393ad4f54ec7a67490848181660#f596a46e71c7f393ad4f54ec7a67490848181660"
+source = "git+https://github.com/DataDog/serverless-components?rev=3ab01258b235f2a39272780e9a0484c7fd420cd1#3ab01258b235f2a39272780e9a0484c7fd420cd1"
 dependencies = [
  "reqwest",
  "rustls",
@@ -1067,7 +1067,7 @@ dependencies = [
 [[package]]
 name = "dogstatsd"
 version = "0.1.0"
-source = "git+https://github.com/DataDog/serverless-components?rev=f596a46e71c7f393ad4f54ec7a67490848181660#f596a46e71c7f393ad4f54ec7a67490848181660"
+source = "git+https://github.com/DataDog/serverless-components?rev=3ab01258b235f2a39272780e9a0484c7fd420cd1#3ab01258b235f2a39272780e9a0484c7fd420cd1"
 dependencies = [
  "datadog-protos",
  "ddsketch-agent",
