@@ -986,6 +986,7 @@ mod tests {
         tokio::spawn(dedup_svc.run());
         let trace_processor = Arc::new(trace_processor::ServerlessTraceProcessor {
             obfuscation_config: Arc::new(ObfuscationConfig::new().expect("ObfuscationConfig")),
+            error_sampler: trace_processor::new_error_sampler(false),
         });
         let stats_aggregator = Arc::new(Mutex::new(
             stats_aggregator::StatsAggregator::new_with_concentrator(concentrator.clone()),

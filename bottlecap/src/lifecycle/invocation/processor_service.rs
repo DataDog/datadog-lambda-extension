@@ -823,12 +823,15 @@ mod tests {
             extension::telemetry::events::OnDemandReportMetrics,
             traces::{
                 stats_concentrator_service::StatsConcentratorService,
-                stats_generator::StatsGenerator, trace_processor::ServerlessTraceProcessor,
+                stats_generator::StatsGenerator, trace_processor,
+                trace_processor::ServerlessTraceProcessor,
             },
         };
         use libdd_trace_obfuscation::obfuscation_config::ObfuscationConfig;
         use std::collections::HashMap;
         use tokio::time::{Duration, timeout};
+
+        let error_sampler = trace_processor::new_error_sampler(false);
 
         let timeout_dur = Duration::from_millis(500);
 
@@ -839,6 +842,7 @@ mod tests {
             appsec: None,
             processor: Arc::new(ServerlessTraceProcessor {
                 obfuscation_config: Arc::new(ObfuscationConfig::new().expect("ObfuscationConfig")),
+                error_sampler,
             }),
             trace_tx: tokio::sync::mpsc::channel(1).0,
             stats_generator: Arc::new(StatsGenerator::new(concentrator)),
