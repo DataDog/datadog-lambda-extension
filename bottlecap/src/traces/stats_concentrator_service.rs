@@ -434,6 +434,8 @@ impl StatsConcentratorService {
             // Span meta keys included as additional aggregation dimensions, from
             // DD_TRACE_STATS_ADDITIONAL_TAGS (only set when experimental_features_enabled).
             additional_metric_tag_keys,
+            // Resource key obfuscation is handled separately in this extension; not used here.
+            None,
         );
         // After construction, so the kept keys can be read back off the concentrator rather than
         // predicted.
@@ -811,6 +813,7 @@ mod tests {
                 Vec::new(),
                 None,
                 requested.iter().map(ToString::to_string).collect(),
+                None,
             );
             concentrator.additional_metric_tag_keys().to_vec()
         };

@@ -78,24 +78,21 @@ indexmap = {version = "2.11.0", default-features = false}
 # be found in the clippy.toml file adjacent to this Cargo.toml.
 datadog-protos = { version = "0.1.0", default-features = false, git = "https://github.com/DataDog/saluki/", rev = "f863626dbfe3c59bb390985fa6530b0621c2a0a2"}
 ddsketch-agent = { version = "0.1.0", default-features = false, git = "https://github.com/DataDog/saluki/", rev = "f863626dbfe3c59bb390985fa6530b0621c2a0a2"}
-# dd-trace-rs (datadog-opentelemetry) resolves libdd-* from crates.io, so ~11 of these
-# crates are compiled twice. A `[patch.crates-io]` section used to collapse them, but it
-# cannot be restored while this rev's versions trail the published ones (libdd-common 5.1.0
-# here vs the ^5.2.0 that published libdd-data-pipeline requires) and while the rev carries
-# an unreleased breaking libdd-telemetry change under an unchanged version. Re-check with
+# These are pinned to the same crates.io versions that dd-trace-rs's datadog-opentelemetry
+# depends on, so cargo unifies them instead of compiling duplicate copies. Re-check with
 # `cargo tree --duplicates | grep ^libdd-` when bumping either side.
-libdd-capabilities = { git = "https://github.com/DataDog/libdatadog", rev = "72fa86854c823361b7d234545f1a2f2d21f944fe" }
-libdd-common = { git = "https://github.com/DataDog/libdatadog", rev = "72fa86854c823361b7d234545f1a2f2d21f944fe", default-features = false }
-libdd-trace-protobuf = { git = "https://github.com/DataDog/libdatadog", rev = "72fa86854c823361b7d234545f1a2f2d21f944fe" }
-libdd-trace-utils = { git = "https://github.com/DataDog/libdatadog", rev = "72fa86854c823361b7d234545f1a2f2d21f944fe", default-features = false, features = ["mini_agent"] }
-libdd-trace-normalization = { git = "https://github.com/DataDog/libdatadog", rev = "72fa86854c823361b7d234545f1a2f2d21f944fe" }
-libdd-trace-obfuscation = { git = "https://github.com/DataDog/libdatadog", rev = "72fa86854c823361b7d234545f1a2f2d21f944fe", default-features = false }
-libdd-trace-stats = { git = "https://github.com/DataDog/libdatadog", rev = "72fa86854c823361b7d234545f1a2f2d21f944fe", default-features = false }
-datadog-opentelemetry = { git = "https://github.com/DataDog/dd-trace-rs", rev = "50bfea8755b75e448a80ac04d53fa7edd414eefe", default-features = false, features = ["_unstable_propagation"] }
-dogstatsd = { git = "https://github.com/DataDog/serverless-components", rev = "9daae40afa87f52fad1489f4d7cfd4a579037d2d", default-features = false }
-datadog-fips = { git = "https://github.com/DataDog/serverless-components", rev = "9daae40afa87f52fad1489f4d7cfd4a579037d2d", default-features = false }
-datadog-agent-config = { git = "https://github.com/DataDog/serverless-components", rev = "9daae40afa87f52fad1489f4d7cfd4a579037d2d", default-features = false }
-datadog-agent-trace-sampler = { git = "https://github.com/DataDog/serverless-components", rev = "9daae40afa87f52fad1489f4d7cfd4a579037d2d", default-features = false }
+libdd-capabilities = "3.0.0"
+libdd-common = { version = "5.2.0", default-features = false }
+libdd-trace-protobuf = "4.0.1"
+libdd-trace-utils = { version = "10.1.0", default-features = false, features = ["mini_agent"] }
+libdd-trace-normalization = "3.0.1"
+libdd-trace-obfuscation = { version = "6.0.0", default-features = false }
+libdd-trace-stats = { version = "7.0.0", default-features = false }
+datadog-opentelemetry = { version = "0.5.2", default-features = false, features = ["_unstable_propagation"] }
+dogstatsd = { git = "https://github.com/DataDog/serverless-components", rev = "3ab01258b235f2a39272780e9a0484c7fd420cd1", default-features = false }
+datadog-fips = { git = "https://github.com/DataDog/serverless-components", rev = "3ab01258b235f2a39272780e9a0484c7fd420cd1", default-features = false }
+datadog-agent-config = { git = "https://github.com/DataDog/serverless-components", rev = "3ab01258b235f2a39272780e9a0484c7fd420cd1", default-features = false }
+datadog-agent-trace-sampler = { git = "https://github.com/DataDog/serverless-components", rev = "3ab01258b235f2a39272780e9a0484c7fd420cd1", default-features = false }
 libddwaf = { version = "1.28.1", git = "https://github.com/DataDog/libddwaf-rust", rev = "d1534a158d976bd4f747bf9fcc58e0712d2d17fc", default-features = false, features = ["serde"] }
 
 [dev-dependencies]

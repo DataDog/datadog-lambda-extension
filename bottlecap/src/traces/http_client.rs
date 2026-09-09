@@ -56,6 +56,13 @@ impl HttpClientCapability for HttpClient {
             .expect("building default proxy connector with default TLS should not fail")
     }
 
+    #[allow(clippy::expect_used)]
+    fn new_without_connection_pooling() -> Self {
+        // `create_client` always disables connection pooling (see its comment above), so
+        // this is equivalent to `new_client()`.
+        Self::new_client()
+    }
+
     fn request(
         &self,
         req: http::Request<bytes::Bytes>,
