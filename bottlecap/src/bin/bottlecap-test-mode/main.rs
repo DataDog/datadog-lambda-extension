@@ -155,10 +155,14 @@ async fn main() -> anyhow::Result<()> {
         ingest_barrier: ingest_barrier.clone(),
     });
     let trace_agent = trace_agent.with_router_extension(flush_extension);
-    let listener_task = tokio::spawn(async move {
-        if let Err(e) = trace_agent.start().await {
-            error!("Error starting trace agent: {e:?}");
-        }
+    // Errors are returned rather than logged so that a startup failure (port
+    // 8126 already bound, for instance) ends the process instead of leaving a
+    // live one with no listener for the harness to connect to.
+    let mut listener_task = tokio::spawn(async move {
+        trace_agent
+            .start()
+            .await
+            .map_err(|e| anyhow::anyhow!("trace agent failed: {e}"))
     });
 
     // Periodic flush driver. Decoupled from managed-instance mode: any non-Default
@@ -182,7 +186,16 @@ async fn main() -> anyhow::Result<()> {
         });
     }
 
-    signal::ctrl_c().await?;
+    // The listener finishing first means it never came up, or stopped serving
+    // without being asked to. Either way there is nothing left to drain.
+    tokio::select! {
+        result = signal::ctrl_c() => result?,
+        result = &mut listener_task => match result? {
+            Ok(()) => anyhow::bail!("trace agent listener stopped unexpectedly"),
+            Err(e) => return Err(e),
+        },
+    }
+
     // Cancel before the final drain so axum's graceful shutdown drives any
     // in-flight /v0.4/traces requests through the aggregator before the flush
     // reads from it.
@@ -190,14 +203,14 @@ async fn main() -> anyhow::Result<()> {
     // Cancelling only signals the shutdown; awaiting the listener is what
     // guarantees in-flight handlers have finished. Bounded so a lingering
     // connection cannot wedge shutdown: draining late data beats hanging.
-    if tokio::time::timeout(SHUTDOWN_TIMEOUT, listener_task)
-        .await
-        .is_err()
-    {
-        error!(
+    match tokio::time::timeout(SHUTDOWN_TIMEOUT, listener_task).await {
+        Ok(Ok(Ok(()))) => {}
+        Ok(Ok(Err(e))) => error!("Trace agent shut down with an error: {e:?}"),
+        Ok(Err(e)) => error!("Trace agent task failed: {e:?}"),
+        Err(_) => error!(
             "Trace agent did not shut down within {}s, draining anyway",
             SHUTDOWN_TIMEOUT.as_secs()
-        );
+        ),
     }
     // Handlers returning does not mean their payloads reached the
     // aggregators; they may still be queued ahead of them.
