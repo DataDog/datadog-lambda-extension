@@ -66,7 +66,7 @@ use bottlecap::{
     startup::build_trace_agent,
     tags::{lambda::tags::FUNCTION_ARN_KEY, provider::Provider as TagProvider},
     traces::{
-        proxy_aggregator,
+        TRACE_INTAKE_ROUTE, proxy_aggregator,
         trace_agent::{IngestBarrier, RouterExtension},
     },
 };
@@ -318,9 +318,6 @@ async fn drain_and_flush(
     };
     barrier_failed || undelivered
 }
-
-/// Path the config crate appends to `DD_APM_DD_URL` to build `apm_dd_url`.
-const TRACE_INTAKE_ROUTE: &str = "/api/v0.2/traces";
 
 /// Point stats at the same host as traces.
 ///
