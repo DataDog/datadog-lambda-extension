@@ -70,6 +70,7 @@ use dogstatsd::{
     constants::CONTEXTS, flusher::Flusher as MetricsFlusher, metric::EMPTY_TAGS,
 };
 use tokio::signal;
+use tokio_util::sync::CancellationToken;
 use tracing::error;
 use tracing_subscriber::EnvFilter;
 use ustr::Ustr;
@@ -150,9 +151,12 @@ async fn main() -> anyhow::Result<()> {
     ));
 
     let ingest_barrier = trace_agent.ingest_barrier();
+    // Serializes every flush path. See [`drain_and_flush`].
+    let flush_lock = Arc::new(tokio::sync::Mutex::new(()));
     let flush_extension = Arc::new(FlushRouterExtension {
         flushing_service: Arc::clone(&flushing_service),
         ingest_barrier: ingest_barrier.clone(),
+        flush_lock: Arc::clone(&flush_lock),
     });
     let trace_agent = trace_agent.with_router_extension(flush_extension);
     // Errors are returned rather than logged so that a startup failure (port
@@ -165,26 +169,13 @@ async fn main() -> anyhow::Result<()> {
             .map_err(|e| anyhow::anyhow!("trace agent failed: {e}"))
     });
 
-    // Periodic flush driver. Decoupled from managed-instance mode: any non-Default
-    // strategy enables it. Manual flushing via POST /flush always works regardless.
-    if config.ext.serverless_flush_strategy != FlushStrategy::Default {
-        let mut interval =
-            FlushControl::new(config.ext.serverless_flush_strategy, config.flush_timeout)
-                .get_flush_interval();
-        let fs = Arc::clone(&flushing_service);
-        let token = shutdown_token.clone();
-        tokio::spawn(async move {
-            loop {
-                tokio::select! {
-                    biased;
-                    () = token.cancelled() => break,
-                    // The periodic driver has no caller to report to; the
-                    // flushing service already logs what it dropped.
-                    _ = interval.tick() => { fs.flush_blocking().await; },
-                }
-            }
-        });
-    }
+    spawn_periodic_flush(
+        &config,
+        &flushing_service,
+        &ingest_barrier,
+        &flush_lock,
+        &shutdown_token,
+    );
 
     // The listener finishing first means it never came up, or stopped serving
     // without being asked to. Either way there is nothing left to drain.
@@ -212,11 +203,76 @@ async fn main() -> anyhow::Result<()> {
             SHUTDOWN_TIMEOUT.as_secs()
         ),
     }
-    // Handlers returning does not mean their payloads reached the
-    // aggregators; they may still be queued ahead of them.
-    ingest_barrier.wait().await;
-    flushing_service.flush_blocking_final().await;
+    // Taking the lock here is what makes an in-flight periodic flush finish
+    // before this one starts, so its queued payloads are not counted as
+    // already drained.
+    drain_and_flush(&flush_lock, &ingest_barrier, &flushing_service, true).await;
     Ok(())
+}
+
+/// Spawns the periodic flush driver. Decoupled from managed-instance mode: any
+/// non-Default strategy enables it. Manual flushing via `POST /flush` always
+/// works regardless.
+fn spawn_periodic_flush(
+    config: &config::Config,
+    flushing_service: &Arc<FlushingService>,
+    ingest_barrier: &IngestBarrier,
+    flush_lock: &Arc<tokio::sync::Mutex<()>>,
+    shutdown_token: &CancellationToken,
+) {
+    if config.ext.serverless_flush_strategy == FlushStrategy::Default {
+        return;
+    }
+
+    let mut interval =
+        FlushControl::new(config.ext.serverless_flush_strategy, config.flush_timeout)
+            .get_flush_interval();
+    let fs = Arc::clone(flushing_service);
+    let barrier = ingest_barrier.clone();
+    let lock = Arc::clone(flush_lock);
+    let token = shutdown_token.clone();
+    tokio::spawn(async move {
+        loop {
+            tokio::select! {
+                biased;
+                () = token.cancelled() => break,
+                // The periodic driver has no caller to report to; the
+                // flushing service already logs what it dropped.
+                _ = interval.tick() => {
+                    drain_and_flush(&lock, &barrier, &fs, false).await;
+                },
+            }
+        }
+    });
+}
+
+/// Runs the barrier-plus-flush sequence under `lock`.
+///
+/// Every flusher drains its aggregator before awaiting network delivery, so
+/// two overlapping flushes let one observe empty queues and report success
+/// while the other's send is still in flight and may still fail. Holding the
+/// lock across both steps keeps the periodic driver, `POST /flush`, and the
+/// shutdown drain from overlapping.
+///
+/// Returns `true` when a flusher dropped payloads it could not deliver.
+async fn drain_and_flush(
+    lock: &tokio::sync::Mutex<()>,
+    barrier: &IngestBarrier,
+    flushing_service: &FlushingService,
+    is_final: bool,
+) -> bool {
+    let _guard = lock.lock().await;
+    // A payload can be accepted, and its request answered, while it is still
+    // queued ahead of the aggregators. Drain those queues first so the flush
+    // is deterministic from the caller's point of view. Handlers returning
+    // during shutdown does not mean their payloads reached the aggregators
+    // either.
+    barrier.wait().await;
+    if is_final {
+        flushing_service.flush_blocking_final().await
+    } else {
+        flushing_service.flush_blocking().await
+    }
 }
 
 /// Path the config crate appends to `DD_APM_DD_URL` to build `apm_dd_url`.
@@ -242,6 +298,7 @@ fn stats_url_from_trace_intake(apm_dd_url: &str) -> String {
 struct FlushRouterExtension {
     flushing_service: Arc<FlushingService>,
     ingest_barrier: IngestBarrier,
+    flush_lock: Arc<tokio::sync::Mutex<()>>,
 }
 
 /// Upper bound on a single `POST /flush`. The flushers already bound their own
@@ -257,23 +314,20 @@ impl RouterExtension for FlushRouterExtension {
     fn extend(&self, router: Router) -> Result<Router, Box<dyn std::error::Error + Send + Sync>> {
         let fs = Arc::clone(&self.flushing_service);
         let barrier = self.ingest_barrier.clone();
+        let lock = Arc::clone(&self.flush_lock);
         Ok(router.route(
             "/flush",
             post(move || {
                 let fs = Arc::clone(&fs);
                 let barrier = barrier.clone();
+                let lock = Arc::clone(&lock);
                 async move {
                     // Isolate panics and bound execution time. flush_blocking_final
                     // expects on the metrics aggregator handle, so a dead aggregator
                     // task would otherwise panic the connection task instead of
                     // returning a status the harness can act on.
                     let mut task = tokio::task::spawn(async move {
-                        // A payload can be accepted, and its request answered,
-                        // while it is still queued ahead of the aggregators.
-                        // Drain those queues first so this flush is
-                        // deterministic from the caller's point of view.
-                        barrier.wait().await;
-                        fs.flush_blocking_final().await
+                        drain_and_flush(&lock, &barrier, &fs, true).await
                     });
                     match tokio::time::timeout(FLUSH_REQUEST_TIMEOUT, &mut task).await {
                         Ok(Ok(false)) => StatusCode::NO_CONTENT,
