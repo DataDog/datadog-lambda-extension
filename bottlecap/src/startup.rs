@@ -54,14 +54,15 @@ pub struct TraceAgentPipeline {
 /// Builds the full trace-processing pipeline (trace + stats + proxy
 /// aggregators, services, flushers) and the [`trace_agent::TraceAgent`] that
 /// owns the HTTP listener. Spawns the aggregator/concentrator/dedup services
-/// onto the current tokio runtime; `TraceAgent::new` additionally spawns a
-/// trace-payload drain task. Does **not** spawn the `TraceAgent` itself.
+/// onto the current tokio runtime; `TraceAgent::new` additionally spawns the
+/// trace- and stats-payload forwarder tasks. Does **not** spawn the
+/// `TraceAgent` itself.
 /// The caller owns `trace_agent` and is responsible for spawning
 /// `trace_agent.start()`, optionally after further configuring it (for
 /// example, via [`trace_agent::TraceAgent::with_router_extension`]).
 ///
-/// Note: the four background tasks started during this call (aggregator,
-/// concentrator, dedup, and the trace-payload drain task inside
+/// Note: the background tasks started during this call (aggregator,
+/// concentrator, dedup, and the two payload forwarder tasks inside
 /// `TraceAgent::new`) have no external shutdown signal; they run until
 /// their command channels are dropped. Callers that abandon the returned
 /// `TraceAgent` without either spawning it or dropping the pipeline handles
