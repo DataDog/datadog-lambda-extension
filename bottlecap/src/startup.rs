@@ -68,7 +68,14 @@ pub struct TraceAgentPipeline {
 /// `TraceAgent` without either spawning it or dropping the pipeline handles
 /// will leak those background tasks for the lifetime of the process.
 ///
+/// `stats_url_override` replaces the stats intake that would otherwise be
+/// derived from `DD_SITE`. `DD_APM_DD_URL` only moves the trace intake, so a
+/// caller that redirects traces to a local intake must pass the matching
+/// stats endpoint here or its stats will still be sent to Datadog. `None`
+/// keeps the site-derived default.
+///
 /// Most callers want [`start_trace_agent`] instead, which handles the spawn.
+#[allow(clippy::too_many_arguments)]
 pub fn build_trace_agent(
     config: &Arc<Config>,
     api_key_factory: &Arc<ApiKeyFactory>,
@@ -77,6 +84,7 @@ pub fn build_trace_agent(
     appsec_processor: Option<Arc<TokioMutex<AppSecProcessor>>>,
     client: &reqwest::Client,
     proxy_aggregator: Arc<TokioMutex<proxy_aggregator::Aggregator>>,
+    stats_url_override: Option<String>,
 ) -> (trace_agent::TraceAgent, TraceAgentPipeline) {
     // Build one shared hyper-based HTTP client for trace and stats flushing.
     // This client type is required by libdd_trace_utils for SendData::send().
@@ -99,7 +107,8 @@ pub fn build_trace_agent(
         stats_aggregator.clone(),
         Arc::clone(config),
         trace_http_client.clone(),
-        libdd_trace_utils::config_utils::trace_stats_url(&config.site),
+        stats_url_override
+            .unwrap_or_else(|| libdd_trace_utils::config_utils::trace_stats_url(&config.site)),
     ));
 
     let stats_processor = Arc::new(stats_processor::ServerlessStatsProcessor {});
@@ -212,6 +221,7 @@ pub fn start_trace_agent(
         appsec_processor,
         client,
         proxy_aggregator,
+        None,
     );
 
     // Log-only error handling preserved from the pre-extraction code in
