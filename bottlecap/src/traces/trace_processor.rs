@@ -796,7 +796,7 @@ mod tests {
     ) -> (Arc<Provider>, ServerlessTraceProcessor) {
         let tags_provider = Arc::new(Provider::new(
             config.clone(),
-            "lambda".to_string(),
+            LAMBDA_RUNTIME_SLUG.to_string(),
             &HashMap::from([("function_arn".to_string(), "test-arn".to_string())]),
         ));
         let processor = ServerlessTraceProcessor {
