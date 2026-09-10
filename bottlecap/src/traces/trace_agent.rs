@@ -145,11 +145,21 @@ pub trait RouterExtension: Send + Sync {
 /// returns once every payload enqueued before the call has reached its
 /// aggregator, which makes a flush issued afterwards observe it.
 ///
+/// A forwarder task exits once its payload channel closes, which happens as
+/// soon as the last payload sender is dropped: the [`TraceAgent`] itself holds
+/// two of them, so it drops them when its listener task finishes. The barrier
+/// therefore keeps a payload sender of its own for each forwarder, so any live
+/// `IngestBarrier` keeps both forwarders running and an `Err` from [`wait`]
+/// means a forwarder actually died rather than exited after draining.
+///
 /// [`wait`]: IngestBarrier::wait
 #[derive(Clone, Debug)]
 pub struct IngestBarrier {
     trace_tx: Sender<oneshot::Sender<()>>,
     stats_tx: Sender<oneshot::Sender<()>>,
+    /// Keep-alives only; never sent on. See the note above.
+    _trace_forwarder_keepalive: Sender<SendDataBuilderInfo>,
+    _stats_forwarder_keepalive: Sender<pb::ClientStatsPayload>,
 }
 
 /// A forwarder task ended without acknowledging the barrier, so payloads its
@@ -282,12 +292,14 @@ impl TraceAgent {
             invocation_processor_handle,
             appsec_processor,
             tags_provider,
-            tx: trace_tx,
-            stats_tx,
             ingest_barrier: IngestBarrier {
                 trace_tx: trace_barrier_tx,
                 stats_tx: stats_barrier_tx,
+                _trace_forwarder_keepalive: trace_tx.clone(),
+                _stats_forwarder_keepalive: stats_tx.clone(),
             },
+            tx: trace_tx,
+            stats_tx,
             shutdown_token: CancellationToken::new(),
             stats_concentrator,
             span_deduper,
@@ -309,7 +321,7 @@ impl TraceAgent {
     pub async fn start(&self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let now = Instant::now();
 
-        let router = self.make_router(self.stats_tx.clone())?;
+        let router = self.make_router()?;
 
         let port = u16::try_from(TRACE_AGENT_PORT).expect("TRACE_AGENT_PORT is too large");
         let socket = SocketAddr::from(([127, 0, 0, 1], port));
@@ -329,10 +341,12 @@ impl TraceAgent {
         Ok(())
     }
 
-    fn make_router(
-        &self,
-        stats_tx: Sender<pb::ClientStatsPayload>,
-    ) -> Result<Router, Box<dyn std::error::Error + Send + Sync>> {
+    /// Builds the production router. The stats endpoint is always wired to
+    /// `self.stats_tx`, the channel [`IngestBarrier`] drains; routing it
+    /// anywhere else would silently take `/v0.6/stats` out of the barrier's
+    /// coverage.
+    fn make_router(&self) -> Result<Router, Box<dyn std::error::Error + Send + Sync>> {
+        let stats_tx = self.stats_tx.clone();
         let stats_generator = Arc::new(StatsGenerator::new(self.stats_concentrator.clone()));
         let trace_state = TraceState {
             config: Arc::clone(&self.config),
@@ -1143,14 +1157,34 @@ mod tests {
         assert_eq!(payloads, 3);
     }
 
+    /// Mirrors the test-mode shutdown drain: the listener task owns the
+    /// `TraceAgent`, so the agent (and every payload sender it holds) is gone
+    /// by the time the final barrier runs. That must not be reported as a dead
+    /// forwarder, because the forwarders drain their queues before exiting.
+    #[tokio::test]
+    async fn ingest_barrier_succeeds_after_the_agent_is_dropped() {
+        let (agent, aggregator_handle) = build_test_agent_with_aggregator();
+        let trace_tx = agent.get_sender_copy();
+        let barrier = agent.ingest_barrier();
+
+        trace_tx.send(stub_payload()).await.expect("send payload");
+        drop(trace_tx);
+        drop(agent);
+
+        barrier.wait().await.expect("barrier after agent drop");
+
+        let batches = aggregator_handle.get_batches().await.expect("get_batches");
+        let payloads: usize = batches.iter().map(Vec::len).sum();
+        assert_eq!(payloads, 1);
+    }
+
     #[tokio::test]
     async fn with_router_extension_adds_reachable_route_to_make_router() {
         let hits = Arc::new(AtomicUsize::new(0));
         let agent = build_test_agent().with_router_extension(Arc::new(SpyExtension {
             hits: Arc::clone(&hits),
         }));
-        let (stats_tx, _stats_rx) = mpsc::channel::<pb::ClientStatsPayload>(1);
-        let router = agent.make_router(stats_tx).expect("make_router");
+        let router = agent.make_router().expect("make_router");
 
         let response = router
             .oneshot(
@@ -1170,10 +1204,8 @@ mod tests {
     #[tokio::test]
     async fn make_router_propagates_extension_error() {
         let agent = build_test_agent().with_router_extension(Arc::new(FailingExtension));
-        let (stats_tx, _stats_rx) = mpsc::channel::<pb::ClientStatsPayload>(1);
-
         let err = agent
-            .make_router(stats_tx)
+            .make_router()
             .expect_err("make_router should surface extension error");
 
         assert!(
@@ -1186,8 +1218,7 @@ mod tests {
     #[tokio::test]
     async fn make_router_returns_404_for_extension_route_when_none_attached() {
         let agent = build_test_agent();
-        let (stats_tx, _stats_rx) = mpsc::channel::<pb::ClientStatsPayload>(1);
-        let router = agent.make_router(stats_tx).expect("make_router");
+        let router = agent.make_router().expect("make_router");
 
         let response = router
             .oneshot(
