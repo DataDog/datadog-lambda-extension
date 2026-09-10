@@ -21,6 +21,7 @@ use reqwest::header::{CONTENT_ENCODING, CONTENT_TYPE, HeaderMap, HeaderValue};
 use tokio::sync::Mutex as TokioMutex;
 use tracing::{debug, warn};
 
+use crate::traces::TRACE_INTAKE_ROUTE;
 use crate::traces::data_streams::aggregator::Aggregator;
 use crate::traces::data_streams::checkpoint::compute_consume_checkpoint;
 use crate::traces::data_streams::context::{
@@ -30,9 +31,6 @@ use crate::traces::proxy_aggregator::{Aggregator as ProxyAggregator, ProxyReques
 
 /// gzip level used by the tracer for pipeline stats.
 const GZIP_LEVEL: u32 = 1;
-/// The trace intake path appended to `apm_dd_url` by the upstream config crate.
-/// Must be stripped before deriving non-trace endpoints from that field.
-const TRACE_INTAKE_ROUTE: &str = "/api/v0.2/traces";
 
 pub struct DsmProcessor {
     service: String,
