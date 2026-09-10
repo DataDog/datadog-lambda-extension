@@ -174,7 +174,9 @@ async fn main() -> anyhow::Result<()> {
                 tokio::select! {
                     biased;
                     () = token.cancelled() => break,
-                    _ = interval.tick() => fs.flush_blocking().await,
+                    // The periodic driver has no caller to report to; the
+                    // flushing service already logs what it dropped.
+                    _ = interval.tick() => { fs.flush_blocking().await; },
                 }
             }
         });
@@ -242,10 +244,17 @@ impl RouterExtension for FlushRouterExtension {
                         // Drain those queues first so this flush is
                         // deterministic from the caller's point of view.
                         barrier.wait().await;
-                        fs.flush_blocking_final().await;
+                        fs.flush_blocking_final().await
                     });
                     match tokio::time::timeout(FLUSH_REQUEST_TIMEOUT, &mut task).await {
-                        Ok(Ok(())) => StatusCode::NO_CONTENT,
+                        Ok(Ok(false)) => StatusCode::NO_CONTENT,
+                        // The flush ran, but a flusher gave up on payloads it
+                        // could not deliver and they were dropped. Reporting 204
+                        // here would tell the harness the drain succeeded.
+                        Ok(Ok(true)) => {
+                            error!("Flush completed with undelivered payloads");
+                            StatusCode::BAD_GATEWAY
+                        }
                         Ok(Err(e)) => {
                             error!("Flush task failed: {e:?}");
                             StatusCode::INTERNAL_SERVER_ERROR
