@@ -60,7 +60,10 @@ use bottlecap::{
     logs::{aggregator_service::AggregatorService as LogsAggregatorService, flusher::LogsFlusher},
     startup::build_trace_agent,
     tags::{lambda::tags::FUNCTION_ARN_KEY, provider::Provider as TagProvider},
-    traces::{proxy_aggregator, trace_agent::RouterExtension},
+    traces::{
+        proxy_aggregator,
+        trace_agent::{IngestBarrier, RouterExtension},
+    },
 };
 use dogstatsd::{
     aggregator::AggregatorService as MetricsAggregatorService, api_key::ApiKeyFactory,
@@ -145,8 +148,10 @@ async fn main() -> anyhow::Result<()> {
         None,
     ));
 
+    let ingest_barrier = trace_agent.ingest_barrier();
     let flush_extension = Arc::new(FlushRouterExtension {
         flushing_service: Arc::clone(&flushing_service),
+        ingest_barrier: ingest_barrier.clone(),
     });
     let trace_agent = trace_agent.with_router_extension(flush_extension);
     tokio::spawn(async move {
@@ -179,6 +184,9 @@ async fn main() -> anyhow::Result<()> {
     // in-flight /v0.4/traces requests through the aggregator before the flush
     // reads from it.
     shutdown_token.cancel();
+    // Graceful shutdown only guarantees the handlers returned; the accepted
+    // payloads may still be queued ahead of the aggregators.
+    ingest_barrier.wait().await;
     flushing_service.flush_blocking_final().await;
     Ok(())
 }
@@ -186,6 +194,7 @@ async fn main() -> anyhow::Result<()> {
 #[derive(Debug)]
 struct FlushRouterExtension {
     flushing_service: Arc<FlushingService>,
+    ingest_barrier: IngestBarrier,
 }
 
 /// Upper bound on a single `POST /flush`. The flushers already bound their own
@@ -196,16 +205,23 @@ const FLUSH_REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 impl RouterExtension for FlushRouterExtension {
     fn extend(&self, router: Router) -> Result<Router, Box<dyn std::error::Error + Send + Sync>> {
         let fs = Arc::clone(&self.flushing_service);
+        let barrier = self.ingest_barrier.clone();
         Ok(router.route(
             "/flush",
             post(move || {
                 let fs = Arc::clone(&fs);
+                let barrier = barrier.clone();
                 async move {
                     // Isolate panics and bound execution time. flush_blocking_final
                     // expects on the metrics aggregator handle, so a dead aggregator
                     // task would otherwise panic the connection task instead of
                     // returning a status the harness can act on.
                     let mut task = tokio::task::spawn(async move {
+                        // A payload can be accepted, and its request answered,
+                        // while it is still queued ahead of the aggregators.
+                        // Drain those queues first so this flush is
+                        // deterministic from the caller's point of view.
+                        barrier.wait().await;
                         fs.flush_blocking_final().await;
                     });
                     match tokio::time::timeout(FLUSH_REQUEST_TIMEOUT, &mut task).await {

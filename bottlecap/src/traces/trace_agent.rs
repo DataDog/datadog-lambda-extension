@@ -16,6 +16,7 @@ use std::time::Instant;
 use tokio::sync::{
     Mutex,
     mpsc::{self, Receiver, Sender},
+    oneshot,
 };
 use tokio_util::sync::CancellationToken;
 use tower_http::limit::RequestBodyLimitLayer;
@@ -79,6 +80,7 @@ const INSTRUMENTATION_INTAKE_PATH: &str = "/api/v2/apmtelemetry";
 
 const TRACER_PAYLOAD_CHANNEL_BUFFER_SIZE: usize = 10;
 const STATS_PAYLOAD_CHANNEL_BUFFER_SIZE: usize = 10;
+const BARRIER_CHANNEL_BUFFER_SIZE: usize = 1;
 pub const TRACE_REQUEST_BODY_LIMIT: usize = 50 * 1024 * 1024;
 pub const DEFAULT_REQUEST_BODY_LIMIT: usize = 2 * 1024 * 1024;
 pub const MAX_CONTENT_LENGTH: usize = 50 * 1024 * 1024;
@@ -135,6 +137,40 @@ pub trait RouterExtension: Send + Sync {
     fn extend(&self, router: Router) -> Result<Router, Box<dyn std::error::Error + Send + Sync>>;
 }
 
+/// Barrier over the forwarder tasks that move accepted payloads from the
+/// request handlers into the trace and stats aggregators.
+///
+/// The handlers only `await` the hand-off into an intermediate channel, so a
+/// request can return `200` while its payload is still queued. [`wait`]
+/// returns once every payload enqueued before the call has reached its
+/// aggregator, which makes a flush issued afterwards observe it.
+///
+/// [`wait`]: IngestBarrier::wait
+#[derive(Clone, Debug)]
+pub struct IngestBarrier {
+    trace_tx: Sender<oneshot::Sender<()>>,
+    stats_tx: Sender<oneshot::Sender<()>>,
+}
+
+impl IngestBarrier {
+    pub async fn wait(&self) {
+        Self::wait_for(&self.trace_tx).await;
+        Self::wait_for(&self.stats_tx).await;
+    }
+
+    /// Each forwarder task selects on its payload channel before its barrier
+    /// channel, so an acknowledgement can only be sent on an iteration where
+    /// the payload channel was empty.
+    async fn wait_for(tx: &Sender<oneshot::Sender<()>>) {
+        let (ack_tx, ack_rx) = oneshot::channel();
+        // A closed channel or a dropped acknowledgement means the forwarder
+        // task is gone, so there is nothing left to drain.
+        if tx.send(ack_tx).await.is_ok() {
+            let _ = ack_rx.await;
+        }
+    }
+}
+
 pub struct TraceAgent {
     pub config: Arc<config::Config>,
     pub trace_processor: Arc<dyn trace_processor::TraceProcessor + Send + Sync>,
@@ -146,6 +182,8 @@ pub struct TraceAgent {
     appsec_processor: Option<Arc<Mutex<AppSecProcessor>>>,
     shutdown_token: CancellationToken,
     tx: Sender<SendDataBuilderInfo>,
+    stats_tx: Sender<pb::ClientStatsPayload>,
+    ingest_barrier: IngestBarrier,
     stats_concentrator: StatsConcentratorHandle,
     span_deduper: DedupHandle,
     /// `None` when the caller wants no extra routes. See
@@ -180,12 +218,51 @@ impl TraceAgent {
         // processed trace payloads to our trace aggregator.
         let (trace_tx, mut trace_rx): (Sender<SendDataBuilderInfo>, Receiver<SendDataBuilderInfo>) =
             mpsc::channel(TRACER_PAYLOAD_CHANNEL_BUFFER_SIZE);
+        let (trace_barrier_tx, mut trace_barrier_rx) =
+            mpsc::channel::<oneshot::Sender<()>>(BARRIER_CHANNEL_BUFFER_SIZE);
 
         // Start the trace aggregator, which receives and buffers trace payloads to be consumed by the trace flusher.
         tokio::spawn(async move {
-            while let Some(tracer_payload_info) = trace_rx.recv().await {
-                if let Err(e) = aggregator_handle.insert_payload(tracer_payload_info) {
-                    error!("TRACE_AGENT | Failed to insert payload into aggregator: {e}");
+            loop {
+                tokio::select! {
+                    biased;
+                    tracer_payload_info = trace_rx.recv() => {
+                        let Some(tracer_payload_info) = tracer_payload_info else { break };
+                        if let Err(e) = aggregator_handle.insert_payload(tracer_payload_info) {
+                            error!("TRACE_AGENT | Failed to insert payload into aggregator: {e}");
+                        }
+                    }
+                    // Reached only on an iteration where the payload channel is
+                    // empty, so everything queued before the barrier request is
+                    // already in the aggregator. See [`IngestBarrier`].
+                    Some(ack) = trace_barrier_rx.recv() => {
+                        let _ = ack.send(());
+                    }
+                }
+            }
+        });
+
+        // Set up a channel to send processed stats to our stats aggregator.
+        let (stats_tx, mut stats_rx): (
+            Sender<pb::ClientStatsPayload>,
+            Receiver<pb::ClientStatsPayload>,
+        ) = mpsc::channel(STATS_PAYLOAD_CHANNEL_BUFFER_SIZE);
+        let (stats_barrier_tx, mut stats_barrier_rx) =
+            mpsc::channel::<oneshot::Sender<()>>(BARRIER_CHANNEL_BUFFER_SIZE);
+
+        // Start the stats aggregator, which receives and buffers stats payloads to be consumed by the stats flusher.
+        let stats_aggregator_task = stats_aggregator.clone();
+        tokio::spawn(async move {
+            loop {
+                tokio::select! {
+                    biased;
+                    stats_payload = stats_rx.recv() => {
+                        let Some(stats_payload) = stats_payload else { break };
+                        stats_aggregator_task.lock().await.add(stats_payload);
+                    }
+                    Some(ack) = stats_barrier_rx.recv() => {
+                        let _ = ack.send(());
+                    }
                 }
             }
         });
@@ -200,6 +277,11 @@ impl TraceAgent {
             appsec_processor,
             tags_provider,
             tx: trace_tx,
+            stats_tx,
+            ingest_barrier: IngestBarrier {
+                trace_tx: trace_barrier_tx,
+                stats_tx: stats_barrier_tx,
+            },
             shutdown_token: CancellationToken::new(),
             stats_concentrator,
             span_deduper,
@@ -221,22 +303,7 @@ impl TraceAgent {
     pub async fn start(&self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let now = Instant::now();
 
-        // Set up a channel to send processed stats to our stats aggregator.
-        let (stats_tx, mut stats_rx): (
-            Sender<pb::ClientStatsPayload>,
-            Receiver<pb::ClientStatsPayload>,
-        ) = mpsc::channel(STATS_PAYLOAD_CHANNEL_BUFFER_SIZE);
-
-        // Start the stats aggregator, which receives and buffers stats payloads to be consumed by the stats flusher.
-        let stats_aggregator = self.stats_aggregator.clone();
-        tokio::spawn(async move {
-            while let Some(stats_payload) = stats_rx.recv().await {
-                let mut aggregator = stats_aggregator.lock().await;
-                aggregator.add(stats_payload);
-            }
-        });
-
-        let router = self.make_router(stats_tx)?;
+        let router = self.make_router(self.stats_tx.clone())?;
 
         let port = u16::try_from(TRACE_AGENT_PORT).expect("TRACE_AGENT_PORT is too large");
         let socket = SocketAddr::from(([127, 0, 0, 1], port));
@@ -785,6 +852,13 @@ impl TraceAgent {
     pub fn shutdown_token(&self) -> CancellationToken {
         self.shutdown_token.clone()
     }
+
+    /// Barrier over the trace and stats forwarder tasks. Await it before a
+    /// flush to make that flush observe every payload accepted so far.
+    #[must_use]
+    pub fn ingest_barrier(&self) -> IngestBarrier {
+        self.ingest_barrier.clone()
+    }
 }
 
 fn handle_reparenting(reparenting_info: &mut VecDeque<ReparentingInfo>, span: &mut pb::Span) {
@@ -854,13 +928,17 @@ mod tests {
         LAMBDA_RUNTIME_SLUG, config,
         traces::{
             span_dedup_service::DedupService, stats_concentrator_service::StatsConcentratorService,
-            trace_aggregator_service::AggregatorService,
+            trace_aggregator::OwnedTracerHeaderTags, trace_aggregator_service::AggregatorService,
         },
     };
     use axum::body::Body;
     use axum::http::{HeaderMap, HeaderName, HeaderValue, Request};
+    use libdd_common::Endpoint;
     use libdd_trace_obfuscation::obfuscation_config::ObfuscationConfig;
-    use libdd_trace_utils::trace_utils::TracerHeaderTags;
+    use libdd_trace_utils::{
+        send_data::SendDataBuilder, trace_utils::TracerHeaderTags,
+        tracer_payload::TracerPayloadCollection,
+    };
     use std::collections::HashMap;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use tower::ServiceExt;
@@ -982,6 +1060,10 @@ mod tests {
     }
 
     fn build_test_agent() -> TraceAgent {
+        build_test_agent_with_aggregator().0
+    }
+
+    fn build_test_agent_with_aggregator() -> (TraceAgent, AggregatorHandle) {
         let config = Arc::new(config::Config::default());
         let (concentrator_svc, concentrator) = StatsConcentratorService::new(Arc::clone(&config));
         tokio::spawn(concentrator_svc.run());
@@ -1003,9 +1085,9 @@ mod tests {
             &HashMap::from([("function_arn".to_string(), "test-arn".to_string())]),
         ));
 
-        TraceAgent::new(
+        let agent = TraceAgent::new(
             config,
-            aggregator_handle,
+            aggregator_handle.clone(),
             trace_processor,
             stats_aggregator,
             Arc::new(stats_processor::ServerlessStatsProcessor {}),
@@ -1015,7 +1097,44 @@ mod tests {
             tags_provider,
             concentrator,
             dedup_handle,
-        )
+        );
+
+        (agent, aggregator_handle)
+    }
+
+    fn stub_payload() -> SendDataBuilderInfo {
+        let header_tags = TracerHeaderTags::default();
+        let owned_tags = OwnedTracerHeaderTags::from(header_tags.clone());
+        let size = 1;
+        let builder = SendDataBuilder::new(
+            size,
+            TracerPayloadCollection::V07(Vec::new()),
+            header_tags,
+            &Endpoint::from_slice("localhost"),
+        );
+
+        SendDataBuilderInfo::new(builder, size, owned_tags)
+    }
+
+    /// A payload is only handed to the aggregator by a background forwarder
+    /// task, so accepting it does not by itself make it visible to a flush.
+    /// `ingest_barrier` closes that gap: on this single-threaded runtime the
+    /// forwarder cannot have run before the barrier is awaited.
+    #[tokio::test]
+    async fn ingest_barrier_waits_for_queued_payloads_to_reach_the_aggregator() {
+        let (agent, aggregator_handle) = build_test_agent_with_aggregator();
+        let trace_tx = agent.get_sender_copy();
+        let barrier = agent.ingest_barrier();
+
+        for _ in 0..3 {
+            trace_tx.send(stub_payload()).await.expect("send payload");
+        }
+
+        barrier.wait().await;
+
+        let batches = aggregator_handle.get_batches().await.expect("get_batches");
+        let payloads: usize = batches.iter().map(Vec::len).sum();
+        assert_eq!(payloads, 3);
     }
 
     #[tokio::test]
