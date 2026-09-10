@@ -6,7 +6,7 @@
 //! workflows that need to point a tracer at bottlecap without standing up a
 //! Lambda.
 //!
-//! Endpoints exposed on `127.0.0.1:8126`:
+//! Core endpoints on `127.0.0.1:8126`:
 //!
 //! | Path           | Method    | Source                                   |
 //! |----------------|-----------|------------------------------------------|
@@ -15,6 +15,11 @@
 //! | `/v0.6/stats`  | POST, PUT | trace agent                              |
 //! | `/info`        | GET       | trace agent                              |
 //! | `/flush`       | POST      | this binary's `FlushRouterExtension`     |
+//!
+//! The inherited `TraceAgent` router also serves its proxy routes (DSM,
+//! profiling, LLM observability, debugger, diagnostics, and instrumentation
+//! telemetry). They are not what this binary exists to exercise, but they
+//! answer on the same port. `TraceAgent::make_router` has the full set.
 //!
 //! Environment variables this binary reads:
 //!
