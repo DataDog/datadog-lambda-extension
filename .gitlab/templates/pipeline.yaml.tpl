@@ -298,6 +298,8 @@ publish layer e2e sandbox ({{ $f.name }}):
     REGION: {{ $e2e_region }}
     ADD_LAYER_VERSION_PERMISSIONS: {{ $environment.add_layer_version_permissions }}
     AUTOMATICALLY_BUMP_VERSION: {{ $environment.automatically_bump_version }}
+    # Adopt the version AWS assigns because concurrent pipelines make a predicted version stale
+    USE_AWS_ASSIGNED_VERSION: 1
     DOTENV: {{ $dotenvE2E }}
   before_script:
     - EXTERNAL_ID_NAME={{ $environment.external_id }} ROLE_TO_ASSUME={{ $environment.role_to_assume }} AWS_ACCOUNT={{ $environment.account }} source .gitlab/scripts/get_secrets.sh
