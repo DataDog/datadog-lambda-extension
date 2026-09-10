@@ -155,7 +155,7 @@ async fn main() -> anyhow::Result<()> {
         ingest_barrier: ingest_barrier.clone(),
     });
     let trace_agent = trace_agent.with_router_extension(flush_extension);
-    tokio::spawn(async move {
+    let listener_task = tokio::spawn(async move {
         if let Err(e) = trace_agent.start().await {
             error!("Error starting trace agent: {e:?}");
         }
@@ -187,8 +187,20 @@ async fn main() -> anyhow::Result<()> {
     // in-flight /v0.4/traces requests through the aggregator before the flush
     // reads from it.
     shutdown_token.cancel();
-    // Graceful shutdown only guarantees the handlers returned; the accepted
-    // payloads may still be queued ahead of the aggregators.
+    // Cancelling only signals the shutdown; awaiting the listener is what
+    // guarantees in-flight handlers have finished. Bounded so a lingering
+    // connection cannot wedge shutdown: draining late data beats hanging.
+    if tokio::time::timeout(SHUTDOWN_TIMEOUT, listener_task)
+        .await
+        .is_err()
+    {
+        error!(
+            "Trace agent did not shut down within {}s, draining anyway",
+            SHUTDOWN_TIMEOUT.as_secs()
+        );
+    }
+    // Handlers returning does not mean their payloads reached the
+    // aggregators; they may still be queued ahead of them.
     ingest_barrier.wait().await;
     flushing_service.flush_blocking_final().await;
     Ok(())
@@ -223,6 +235,10 @@ struct FlushRouterExtension {
 /// HTTP calls via `flush_timeout`, but retries across the five flushers can
 /// stack, so this caps total wall-clock time for the harness.
 const FLUSH_REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// Upper bound on waiting for the HTTP listener to finish its graceful
+/// shutdown before the final drain runs.
+const SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(10);
 
 impl RouterExtension for FlushRouterExtension {
     fn extend(&self, router: Router) -> Result<Router, Box<dyn std::error::Error + Send + Sync>> {
