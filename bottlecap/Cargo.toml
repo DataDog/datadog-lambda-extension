@@ -35,7 +35,7 @@ flate2 = { version = "1.1", default-features = false, features = ["rust_backend"
 thiserror = { version = "1.0", default-features = false }
 # Transitive dependency (pulled in via cookie). Pinned to >=0.3.47 so cargo audit / CI passes (RUSTSEC-2026-0009).
 time = { version = "0.3.47", default-features = false }
-tokio = { version = "1.47", default-features = false, features = ["macros", "rt-multi-thread", "signal", "time"] }
+tokio = { version = "1.47", default-features = false, features = ["macros", "rt-multi-thread", "time"] }
 tokio-util = { version = "0.7", default-features = false }
 tracing = { version = "0.1", default-features = false }
 tracing-core = { version = "0.1", default-features = false }
@@ -182,8 +182,10 @@ fips = [
 # `InvocationProcessorHandle::noop()`) to callers that need to drive the
 # trace-processing surface without Lambda lifecycle state.
 # Not enabled in `default` or `fips`, so the items it gates do not appear
-# in production builds.
-test-mode = []
+# in production builds. `tokio/signal` is pulled in here rather than in the
+# base dependency so the shipped extension does not carry the signal driver
+# for a binary only the test-mode build produces.
+test-mode = ["tokio/signal"]
 
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(coverage,coverage_nightly)'] }
