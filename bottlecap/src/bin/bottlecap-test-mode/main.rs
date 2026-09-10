@@ -51,7 +51,7 @@ use tikv_jemallocator::Jemalloc;
 #[global_allocator]
 static GLOBAL: Jemalloc = Jemalloc;
 
-use std::{collections::HashMap, env, path::Path, str::FromStr, sync::Arc, time::Duration};
+use std::{collections::HashMap, env, fmt, path::Path, str::FromStr, sync::Arc, time::Duration};
 
 use axum::{Router, http::StatusCode, routing::post};
 use bottlecap::{
@@ -74,6 +74,7 @@ use dogstatsd::{
     aggregator::AggregatorService as MetricsAggregatorService, api_key::ApiKeyFactory,
     constants::CONTEXTS, flusher::Flusher as MetricsFlusher, metric::EMPTY_TAGS,
 };
+use futures::future::BoxFuture;
 use tokio::signal;
 use tokio_util::sync::CancellationToken;
 use tracing::error;
@@ -159,9 +160,17 @@ async fn main() -> anyhow::Result<()> {
     // Serializes every flush path. See [`drain_and_flush`].
     let flush_lock = Arc::new(tokio::sync::Mutex::new(()));
     let flush_extension = Arc::new(FlushRouterExtension {
-        flushing_service: Arc::clone(&flushing_service),
-        ingest_barrier: ingest_barrier.clone(),
-        flush_lock: Arc::clone(&flush_lock),
+        flush_op: {
+            let fs = Arc::clone(&flushing_service);
+            let barrier = ingest_barrier.clone();
+            let lock = Arc::clone(&flush_lock);
+            Arc::new(move || {
+                let fs = Arc::clone(&fs);
+                let barrier = barrier.clone();
+                let lock = Arc::clone(&lock);
+                Box::pin(async move { drain_and_flush(&lock, &barrier, &fs, true).await })
+            })
+        },
     });
     let trace_agent = trace_agent.with_router_extension(flush_extension);
     // Errors are returned rather than logged so that a startup failure (port
@@ -305,11 +314,20 @@ fn stats_url_from_trace_intake(apm_dd_url: &str) -> String {
     )
 }
 
-#[derive(Debug)]
+/// The work `POST /flush` performs, returning `true` when payloads were lost.
+///
+/// Boxed rather than called directly so the handler's status branches can be
+/// tested without standing up a flushing service.
+type FlushOp = Arc<dyn Fn() -> BoxFuture<'static, bool> + Send + Sync>;
+
 struct FlushRouterExtension {
-    flushing_service: Arc<FlushingService>,
-    ingest_barrier: IngestBarrier,
-    flush_lock: Arc<tokio::sync::Mutex<()>>,
+    flush_op: FlushOp,
+}
+
+impl fmt::Debug for FlushRouterExtension {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("FlushRouterExtension").finish()
+    }
 }
 
 /// Upper bound on a single `POST /flush`. The flushers already bound their own
@@ -323,23 +341,17 @@ const SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(10);
 
 impl RouterExtension for FlushRouterExtension {
     fn extend(&self, router: Router) -> Result<Router, Box<dyn std::error::Error + Send + Sync>> {
-        let fs = Arc::clone(&self.flushing_service);
-        let barrier = self.ingest_barrier.clone();
-        let lock = Arc::clone(&self.flush_lock);
+        let flush_op = Arc::clone(&self.flush_op);
         Ok(router.route(
             "/flush",
             post(move || {
-                let fs = Arc::clone(&fs);
-                let barrier = barrier.clone();
-                let lock = Arc::clone(&lock);
+                let flush_op = Arc::clone(&flush_op);
                 async move {
                     // Isolate panics and bound execution time. flush_blocking_final
                     // expects on the metrics aggregator handle, so a dead aggregator
                     // task would otherwise panic the connection task instead of
                     // returning a status the harness can act on.
-                    let mut task = tokio::task::spawn(async move {
-                        drain_and_flush(&lock, &barrier, &fs, true).await
-                    });
+                    let mut task = tokio::task::spawn(async move { flush_op().await });
                     match tokio::time::timeout(FLUSH_REQUEST_TIMEOUT, &mut task).await {
                         Ok(Ok(false)) => StatusCode::NO_CONTENT,
                         // The flush ran, but payloads were lost on the way to
@@ -406,6 +418,59 @@ fn enable_logging_subsystem() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    use axum::body::Body;
+    use axum::http::Request;
+    use tower::ServiceExt;
+
+    /// Drives `POST /flush` against an extension backed by `op`.
+    async fn flush_status(op: FlushOp) -> StatusCode {
+        let router = FlushRouterExtension { flush_op: op }
+            .extend(Router::new())
+            .expect("extend router");
+
+        router
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/flush")
+                    .body(Body::empty())
+                    .expect("build request"),
+            )
+            .await
+            .expect("route response")
+            .status()
+    }
+
+    #[tokio::test]
+    async fn flush_returns_204_when_nothing_was_lost() {
+        let status = flush_status(Arc::new(|| Box::pin(async { false }))).await;
+        assert_eq!(status, StatusCode::NO_CONTENT);
+    }
+
+    #[tokio::test]
+    async fn flush_returns_502_when_payloads_were_lost() {
+        let status = flush_status(Arc::new(|| Box::pin(async { true }))).await;
+        assert_eq!(status, StatusCode::BAD_GATEWAY);
+    }
+
+    #[tokio::test]
+    async fn flush_returns_500_when_the_flush_panics() {
+        let status = flush_status(Arc::new(|| Box::pin(async { panic!("flush panicked") }))).await;
+        assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn flush_returns_504_when_it_outruns_the_request_timeout() {
+        let status = flush_status(Arc::new(|| {
+            Box::pin(async {
+                tokio::time::sleep(FLUSH_REQUEST_TIMEOUT * 2).await;
+                false
+            })
+        }))
+        .await;
+        assert_eq!(status, StatusCode::GATEWAY_TIMEOUT);
+    }
 
     #[test]
     fn stats_url_follows_the_overridden_trace_intake() {
