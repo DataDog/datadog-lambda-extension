@@ -117,6 +117,10 @@ pub struct ProxyState {
 /// does not observe the failure. Callers that need to react to startup
 /// errors must spawn the agent themselves.
 ///
+/// Note that a path collision is not an `Err`: `Router::merge` panics when
+/// both routers define the same path, so a colliding extension aborts the
+/// process rather than returning an error through this trait.
+///
 /// Implementors that carry state must call `.with_state(...)` on their
 /// sub-router before merging, because `Router::merge` requires both
 /// routers to share the same state type.

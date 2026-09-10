@@ -175,7 +175,8 @@ fips = [
     "rustls-native-certs",
 ]
 # Exposes test-only constructors (for example,
-# `InvocationProcessorHandle::noop()`) to the upcoming testmode binary.
+# `InvocationProcessorHandle::noop()`) to callers that need to drive the
+# trace-processing surface without Lambda lifecycle state.
 # Not enabled in `default` or `fips`, so the items it gates do not appear
 # in production builds.
 test-mode = []
