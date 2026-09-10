@@ -194,7 +194,7 @@ async fn main() -> anyhow::Result<()> {
     // The listener finishing first means it never came up, or stopped serving
     // without being asked to. Either way there is nothing left to drain.
     tokio::select! {
-        result = signal::ctrl_c() => result?,
+        result = shutdown_signal() => result?,
         result = &mut listener_task => match result? {
             Ok(()) => anyhow::bail!("trace agent listener stopped unexpectedly"),
             Err(e) => return Err(e),
@@ -224,9 +224,33 @@ async fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Resolves on the first signal that should end the process.
+///
+/// SIGTERM matters as much as SIGINT here: the harness and any container
+/// runtime stop the binary with SIGTERM, whose default disposition kills the
+/// process outright, so without this the final drain never runs and the last
+/// accepted payloads are lost.
+#[cfg(unix)]
+async fn shutdown_signal() -> anyhow::Result<()> {
+    let mut sigterm = signal::unix::signal(signal::unix::SignalKind::terminate())?;
+    tokio::select! {
+        result = signal::ctrl_c() => result?,
+        _ = sigterm.recv() => {}
+    }
+    Ok(())
+}
+
+#[cfg(not(unix))]
+async fn shutdown_signal() -> anyhow::Result<()> {
+    signal::ctrl_c().await?;
+    Ok(())
+}
+
 /// Spawns the periodic flush driver. Decoupled from managed-instance mode: any
-/// non-Default strategy enables it. Manual flushing via `POST /flush` always
-/// works regardless.
+/// non-Default strategy enables it, using that strategy's interval. Note that
+/// `end` yields the 15-minute placeholder interval `FlushControl` uses to mean
+/// "never race a flush", so it is periodic only in name. Manual flushing via
+/// `POST /flush` always works regardless.
 fn spawn_periodic_flush(
     config: &config::Config,
     flushing_service: &Arc<FlushingService>,
