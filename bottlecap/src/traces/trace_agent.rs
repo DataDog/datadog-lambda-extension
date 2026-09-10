@@ -152,22 +152,28 @@ pub struct IngestBarrier {
     stats_tx: Sender<oneshot::Sender<()>>,
 }
 
+/// A forwarder task ended without acknowledging the barrier, so payloads its
+/// handlers had already accepted never reached the aggregator.
+#[derive(Debug, Clone, Copy, thiserror::Error)]
+#[error("ingest forwarder stopped before draining accepted payloads")]
+pub struct IngestBarrierError;
+
 impl IngestBarrier {
-    pub async fn wait(&self) {
-        Self::wait_for(&self.trace_tx).await;
-        Self::wait_for(&self.stats_tx).await;
+    pub async fn wait(&self) -> Result<(), IngestBarrierError> {
+        Self::wait_for(&self.trace_tx).await?;
+        Self::wait_for(&self.stats_tx).await
     }
 
     /// Each forwarder task selects on its payload channel before its barrier
     /// channel, so an acknowledgement can only be sent on an iteration where
     /// the payload channel was empty.
-    async fn wait_for(tx: &Sender<oneshot::Sender<()>>) {
+    async fn wait_for(tx: &Sender<oneshot::Sender<()>>) -> Result<(), IngestBarrierError> {
         let (ack_tx, ack_rx) = oneshot::channel();
-        // A closed channel or a dropped acknowledgement means the forwarder
-        // task is gone, so there is nothing left to drain.
-        if tx.send(ack_tx).await.is_ok() {
-            let _ = ack_rx.await;
-        }
+        // Both a closed channel and a dropped acknowledgement mean the
+        // forwarder task is gone. Anything still queued ahead of it is lost,
+        // not drained, so this is a failure rather than an early success.
+        tx.send(ack_tx).await.map_err(|_| IngestBarrierError)?;
+        ack_rx.await.map_err(|_| IngestBarrierError)
     }
 }
 
@@ -1130,7 +1136,7 @@ mod tests {
             trace_tx.send(stub_payload()).await.expect("send payload");
         }
 
-        barrier.wait().await;
+        barrier.wait().await.expect("barrier");
 
         let batches = aggregator_handle.get_batches().await.expect("get_batches");
         let payloads: usize = batches.iter().map(Vec::len).sum();
