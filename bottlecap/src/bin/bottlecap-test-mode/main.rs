@@ -20,8 +20,8 @@
 //!
 //! | Variable                        | Purpose                                                                 |
 //! |---------------------------------|-------------------------------------------------------------------------|
-//! | `DD_APM_DD_URL`                 | Override trace intake URL (parity harness points this at fake-intake)   |
-//! | `DD_SITE`                       | Derive stats intake URL when `DD_APM_DD_URL` is unset                   |
+//! | `DD_APM_DD_URL`                 | Override trace intake URL; stats follow it (harness points at fake-intake) |
+//! | `DD_SITE`                       | Derive trace and stats intake URLs when `DD_APM_DD_URL` is unset        |
 //! | `DD_SERVERLESS_FLUSH_STRATEGY`  | Enable periodic flushing (e.g. `periodically,5000`); default = manual   |
 //! | `DD_TESTMODE_FUNCTION_ARN`      | Override stub function ARN for tag generation                           |
 //! | `DD_LOG_LEVEL`                  | Logging verbosity, parsed by [`bottlecap::config::log_level::LogLevel`] |
@@ -115,6 +115,7 @@ async fn main() -> anyhow::Result<()> {
         None,
         &shared_client,
         Arc::clone(&proxy_aggregator),
+        Some(stats_url_from_trace_intake(&config.apm_dd_url)),
     );
     let trace_flusher = Arc::clone(&pipeline.trace_flusher);
     let stats_flusher = Arc::clone(&pipeline.stats_flusher);
@@ -189,6 +190,25 @@ async fn main() -> anyhow::Result<()> {
     ingest_barrier.wait().await;
     flushing_service.flush_blocking_final().await;
     Ok(())
+}
+
+/// Path the config crate appends to `DD_APM_DD_URL` to build `apm_dd_url`.
+const TRACE_INTAKE_ROUTE: &str = "/api/v0.2/traces";
+
+/// Point stats at the same host as traces.
+///
+/// `DD_APM_DD_URL` only moves the trace intake; stats would otherwise be
+/// derived from `DD_SITE` and leave the harness's fake-intake, so the
+/// binary's `/v0.6/stats` path could not be exercised locally. `apm_dd_url`
+/// is already a fully-resolved trace endpoint, so strip the trace route
+/// before appending the stats one. With `DD_APM_DD_URL` unset this
+/// reproduces the site-derived default.
+fn stats_url_from_trace_intake(apm_dd_url: &str) -> String {
+    libdd_trace_utils::config_utils::trace_stats_url_prefixed(
+        apm_dd_url
+            .trim_end_matches('/')
+            .trim_end_matches(TRACE_INTAKE_ROUTE),
+    )
 }
 
 #[derive(Debug)]
@@ -278,4 +298,26 @@ fn enable_logging_subsystem() {
         .event_format(logger::Formatter)
         .finish();
     tracing::subscriber::set_global_default(subscriber).expect("setting default subscriber failed");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn stats_url_follows_the_overridden_trace_intake() {
+        assert_eq!(
+            stats_url_from_trace_intake("http://127.0.0.1:8080/api/v0.2/traces"),
+            "http://127.0.0.1:8080/api/v0.2/stats"
+        );
+    }
+
+    #[test]
+    fn stats_url_matches_the_site_default_when_not_overridden() {
+        let site = "datadoghq.com";
+        assert_eq!(
+            stats_url_from_trace_intake(&libdd_trace_utils::config_utils::trace_intake_url(site)),
+            libdd_trace_utils::config_utils::trace_stats_url(site)
+        );
+    }
 }
