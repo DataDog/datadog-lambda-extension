@@ -254,7 +254,8 @@ fn spawn_periodic_flush(
 /// lock across both steps keeps the periodic driver, `POST /flush`, and the
 /// shutdown drain from overlapping.
 ///
-/// Returns `true` when a flusher dropped payloads it could not deliver.
+/// Returns `true` when payloads were lost: either the barrier reported a dead
+/// forwarder, or a flusher dropped payloads it could not deliver.
 async fn drain_and_flush(
     lock: &tokio::sync::Mutex<()>,
     barrier: &IngestBarrier,
@@ -267,12 +268,17 @@ async fn drain_and_flush(
     // is deterministic from the caller's point of view. Handlers returning
     // during shutdown does not mean their payloads reached the aggregators
     // either.
-    barrier.wait().await;
-    if is_final {
+    let barrier_failed = barrier.wait().await.is_err();
+    if barrier_failed {
+        error!("Ingest barrier reported a dead forwarder; accepted payloads were lost");
+    }
+    // Flush regardless: whatever did reach the aggregators should still go out.
+    let undelivered = if is_final {
         flushing_service.flush_blocking_final().await
     } else {
         flushing_service.flush_blocking().await
-    }
+    };
+    barrier_failed || undelivered
 }
 
 /// Path the config crate appends to `DD_APM_DD_URL` to build `apm_dd_url`.
@@ -331,11 +337,11 @@ impl RouterExtension for FlushRouterExtension {
                     });
                     match tokio::time::timeout(FLUSH_REQUEST_TIMEOUT, &mut task).await {
                         Ok(Ok(false)) => StatusCode::NO_CONTENT,
-                        // The flush ran, but a flusher gave up on payloads it
-                        // could not deliver and they were dropped. Reporting 204
-                        // here would tell the harness the drain succeeded.
+                        // The flush ran, but payloads were lost on the way to
+                        // the aggregators or to the intake. Reporting 204 here
+                        // would tell the harness the drain succeeded.
                         Ok(Ok(true)) => {
-                            error!("Flush completed with undelivered payloads");
+                            error!("Flush completed with lost payloads");
                             StatusCode::BAD_GATEWAY
                         }
                         Ok(Err(e)) => {
