@@ -105,6 +105,7 @@ fi
 
 printf "[$REGION] Starting publishing layers...\n"
 
+AUTOMATIC_VERSION=0
 if [ "$AUTOMATICALLY_BUMP_VERSION" = "1" ]; then
     if [ "${USE_AWS_ASSIGNED_VERSION:-0}" = "1" ]; then
         # Race-safe automatic versioning: publish this job's binary once and use
