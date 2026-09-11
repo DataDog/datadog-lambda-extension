@@ -778,6 +778,48 @@ mod tests {
         let provider = Provider::new(config, LAMBDA_RUNTIME_SLUG.to_string(), &metadata);
         Arc::new(provider)
     }
+
+    fn create_compute_stats_config() -> Arc<Config> {
+        Arc::new(Config {
+            apm_dd_url: "https://trace.agent.datadoghq.com".to_string(),
+            ext: crate::config::LambdaConfig {
+                lambda_extension_compute_stats: true,
+                ..Default::default()
+            },
+            ..Config::default()
+        })
+    }
+
+    fn create_test_processor(
+        config: &Arc<Config>,
+        error_sampler: Arc<std::sync::Mutex<ErrorsSampler>>,
+    ) -> (Arc<Provider>, ServerlessTraceProcessor) {
+        let tags_provider = Arc::new(Provider::new(
+            config.clone(),
+            LAMBDA_RUNTIME_SLUG.to_string(),
+            &HashMap::from([("function_arn".to_string(), "test-arn".to_string())]),
+        ));
+        let processor = ServerlessTraceProcessor {
+            obfuscation_config: Arc::new(
+                ObfuscationConfig::new().expect("Failed to create ObfuscationConfig"),
+            ),
+            error_sampler,
+        };
+        (tags_provider, processor)
+    }
+
+    fn create_test_header_tags() -> tracer_header_tags::TracerHeaderTags<'static> {
+        tracer_header_tags::TracerHeaderTags {
+            lang: "rust",
+            lang_version: "1.0",
+            lang_interpreter: "",
+            lang_vendor: "",
+            tracer_version: "1.0",
+            container_id: "",
+            generic: tracer_header_tags::TracerGenericTags::default(),
+        }
+    }
+
     fn create_test_span(
         trace_id: u64,
         span_id: u64,
@@ -1313,40 +1355,9 @@ mod tests {
     #[test]
     #[allow(clippy::unwrap_used)]
     fn test_process_traces_filters_sampled_out_chunks() {
-        use libdd_trace_obfuscation::obfuscation_config::ObfuscationConfig;
-
-        let config = Arc::new(Config {
-            apm_dd_url: "https://trace.agent.datadoghq.com".to_string(),
-            ext: crate::config::LambdaConfig {
-                lambda_extension_compute_stats: true,
-                ..Default::default()
-            },
-            ..Config::default()
-        });
-        let tags_provider = Arc::new(Provider::new(
-            config.clone(),
-            "lambda".to_string(),
-            &std::collections::HashMap::from([(
-                "function_arn".to_string(),
-                "test-arn".to_string(),
-            )]),
-        ));
-        let processor = ServerlessTraceProcessor {
-            obfuscation_config: Arc::new(
-                ObfuscationConfig::new().expect("Failed to create ObfuscationConfig"),
-            ),
-            error_sampler: enabled_error_sampler(),
-        };
-
-        let header_tags = tracer_header_tags::TracerHeaderTags {
-            lang: "rust",
-            lang_version: "1.0",
-            lang_interpreter: "",
-            lang_vendor: "",
-            tracer_version: "1.0",
-            container_id: "",
-            generic: tracer_header_tags::TracerGenericTags::default(),
-        };
+        let config = create_compute_stats_config();
+        let (tags_provider, processor) = create_test_processor(&config, enabled_error_sampler());
+        let header_tags = create_test_header_tags();
 
         let make_span = |trace_id: u64, priority: Option<f64>| -> pb::Span {
             let mut metrics = HashMap::new();
@@ -1409,40 +1420,9 @@ mod tests {
     /// non-errored P0 chunks and explicit user drops are still dropped.
     #[test]
     fn test_error_sampler_rescues_errored_p0_chunks() {
-        use libdd_trace_obfuscation::obfuscation_config::ObfuscationConfig;
-
-        let config = Arc::new(Config {
-            apm_dd_url: "https://trace.agent.datadoghq.com".to_string(),
-            ext: crate::config::LambdaConfig {
-                lambda_extension_compute_stats: true,
-                ..Default::default()
-            },
-            ..Config::default()
-        });
-        let tags_provider = Arc::new(Provider::new(
-            config.clone(),
-            "lambda".to_string(),
-            &std::collections::HashMap::from([(
-                "function_arn".to_string(),
-                "test-arn".to_string(),
-            )]),
-        ));
-        let processor = ServerlessTraceProcessor {
-            obfuscation_config: Arc::new(
-                ObfuscationConfig::new().expect("Failed to create ObfuscationConfig"),
-            ),
-            error_sampler: enabled_error_sampler(),
-        };
-
-        let header_tags = tracer_header_tags::TracerHeaderTags {
-            lang: "rust",
-            lang_version: "1.0",
-            lang_interpreter: "",
-            lang_vendor: "",
-            tracer_version: "1.0",
-            container_id: "",
-            generic: tracer_header_tags::TracerGenericTags::default(),
-        };
+        let config = create_compute_stats_config();
+        let (tags_provider, processor) = create_test_processor(&config, enabled_error_sampler());
+        let header_tags = create_test_header_tags();
 
         let make_span = |trace_id: u64, priority: f64, error: i32| -> pb::Span {
             let mut metrics = HashMap::new();
@@ -1506,40 +1486,9 @@ mod tests {
     /// candidate, matching the Go agent's `traceContainsError`.
     #[test]
     fn test_error_sampler_rescues_chunk_with_errored_child_span() {
-        use libdd_trace_obfuscation::obfuscation_config::ObfuscationConfig;
-
-        let config = Arc::new(Config {
-            apm_dd_url: "https://trace.agent.datadoghq.com".to_string(),
-            ext: crate::config::LambdaConfig {
-                lambda_extension_compute_stats: true,
-                ..Default::default()
-            },
-            ..Config::default()
-        });
-        let tags_provider = Arc::new(Provider::new(
-            config.clone(),
-            "lambda".to_string(),
-            &std::collections::HashMap::from([(
-                "function_arn".to_string(),
-                "test-arn".to_string(),
-            )]),
-        ));
-        let processor = ServerlessTraceProcessor {
-            obfuscation_config: Arc::new(
-                ObfuscationConfig::new().expect("Failed to create ObfuscationConfig"),
-            ),
-            error_sampler: enabled_error_sampler(),
-        };
-
-        let header_tags = tracer_header_tags::TracerHeaderTags {
-            lang: "rust",
-            lang_version: "1.0",
-            lang_interpreter: "",
-            lang_vendor: "",
-            tracer_version: "1.0",
-            container_id: "",
-            generic: tracer_header_tags::TracerGenericTags::default(),
-        };
+        let config = create_compute_stats_config();
+        let (tags_provider, processor) = create_test_processor(&config, enabled_error_sampler());
+        let header_tags = create_test_header_tags();
 
         let make_span = |span_id: u64, parent_id: u64, error: i32| -> pb::Span {
             let mut metrics = HashMap::new();
@@ -1586,40 +1535,9 @@ mod tests {
     /// chunks are dropped: no rescue, no `_dd.errors_sr`.
     #[test]
     fn test_disabled_error_sampler_drops_errored_p0_chunks() {
-        use libdd_trace_obfuscation::obfuscation_config::ObfuscationConfig;
-
-        let config = Arc::new(Config {
-            apm_dd_url: "https://trace.agent.datadoghq.com".to_string(),
-            ext: crate::config::LambdaConfig {
-                lambda_extension_compute_stats: true,
-                ..Default::default()
-            },
-            ..Config::default()
-        });
-        let tags_provider = Arc::new(Provider::new(
-            config.clone(),
-            "lambda".to_string(),
-            &std::collections::HashMap::from([(
-                "function_arn".to_string(),
-                "test-arn".to_string(),
-            )]),
-        ));
-        let processor = ServerlessTraceProcessor {
-            obfuscation_config: Arc::new(
-                ObfuscationConfig::new().expect("Failed to create ObfuscationConfig"),
-            ),
-            error_sampler: new_error_sampler(false),
-        };
-
-        let header_tags = tracer_header_tags::TracerHeaderTags {
-            lang: "rust",
-            lang_version: "1.0",
-            lang_interpreter: "",
-            lang_vendor: "",
-            tracer_version: "1.0",
-            container_id: "",
-            generic: tracer_header_tags::TracerGenericTags::default(),
-        };
+        let config = create_compute_stats_config();
+        let (tags_provider, processor) = create_test_processor(&config, new_error_sampler(false));
+        let header_tags = create_test_header_tags();
 
         let mut metrics = HashMap::new();
         metrics.insert("_sampling_priority_v1".to_string(), 0.0);
@@ -1648,40 +1566,9 @@ mod tests {
     /// are counted.
     #[test]
     fn test_disabled_error_sampler_keeps_dropped_errored_p0_chunk_in_stats() {
-        use libdd_trace_obfuscation::obfuscation_config::ObfuscationConfig;
-
-        let config = Arc::new(Config {
-            apm_dd_url: "https://trace.agent.datadoghq.com".to_string(),
-            ext: crate::config::LambdaConfig {
-                lambda_extension_compute_stats: true,
-                ..Default::default()
-            },
-            ..Config::default()
-        });
-        let tags_provider = Arc::new(Provider::new(
-            config.clone(),
-            "lambda".to_string(),
-            &std::collections::HashMap::from([(
-                "function_arn".to_string(),
-                "test-arn".to_string(),
-            )]),
-        ));
-        let processor = ServerlessTraceProcessor {
-            obfuscation_config: Arc::new(
-                ObfuscationConfig::new().expect("Failed to create ObfuscationConfig"),
-            ),
-            error_sampler: new_error_sampler(false),
-        };
-
-        let header_tags = tracer_header_tags::TracerHeaderTags {
-            lang: "rust",
-            lang_version: "1.0",
-            lang_interpreter: "",
-            lang_vendor: "",
-            tracer_version: "1.0",
-            container_id: "",
-            generic: tracer_header_tags::TracerGenericTags::default(),
-        };
+        let config = create_compute_stats_config();
+        let (tags_provider, processor) = create_test_processor(&config, new_error_sampler(false));
+        let header_tags = create_test_header_tags();
 
         let make_span = |trace_id: u64, priority: f64, error: i32| -> pb::Span {
             let mut metrics = HashMap::new();
@@ -1746,39 +1633,9 @@ mod tests {
     /// traces are sampled out and `lambda_extension_compute_stats` is true.
     #[test]
     fn test_process_traces_returns_none_when_all_sampled_out() {
-        use libdd_trace_obfuscation::obfuscation_config::ObfuscationConfig;
-
-        let config = Arc::new(Config {
-            apm_dd_url: "https://trace.agent.datadoghq.com".to_string(),
-            ext: crate::config::LambdaConfig {
-                lambda_extension_compute_stats: true,
-                ..Default::default()
-            },
-            ..Config::default()
-        });
-        let tags_provider = Arc::new(Provider::new(
-            config.clone(),
-            "lambda".to_string(),
-            &std::collections::HashMap::from([(
-                "function_arn".to_string(),
-                "test-arn".to_string(),
-            )]),
-        ));
-        let processor = ServerlessTraceProcessor {
-            obfuscation_config: Arc::new(
-                ObfuscationConfig::new().expect("Failed to create ObfuscationConfig"),
-            ),
-            error_sampler: enabled_error_sampler(),
-        };
-        let header_tags = tracer_header_tags::TracerHeaderTags {
-            lang: "rust",
-            lang_version: "1.0",
-            lang_interpreter: "",
-            lang_vendor: "",
-            tracer_version: "1.0",
-            container_id: "",
-            generic: tracer_header_tags::TracerGenericTags::default(),
-        };
+        let config = create_compute_stats_config();
+        let (tags_provider, processor) = create_test_processor(&config, enabled_error_sampler());
+        let header_tags = create_test_header_tags();
 
         let make_dropped_span = |trace_id: u64| -> pb::Span {
             let mut metrics = HashMap::new();
@@ -1824,40 +1681,11 @@ mod tests {
     /// protobuf-encoded size of the filtered payload, not the original request body.
     #[test]
     fn test_process_traces_body_size_reflects_filtered_payload() {
-        use libdd_trace_obfuscation::obfuscation_config::ObfuscationConfig;
         use prost::Message as _;
 
-        let config = Arc::new(Config {
-            apm_dd_url: "https://trace.agent.datadoghq.com".to_string(),
-            ext: crate::config::LambdaConfig {
-                lambda_extension_compute_stats: true,
-                ..Default::default()
-            },
-            ..Config::default()
-        });
-        let tags_provider = Arc::new(Provider::new(
-            config.clone(),
-            "lambda".to_string(),
-            &std::collections::HashMap::from([(
-                "function_arn".to_string(),
-                "test-arn".to_string(),
-            )]),
-        ));
-        let processor = ServerlessTraceProcessor {
-            obfuscation_config: Arc::new(
-                ObfuscationConfig::new().expect("Failed to create ObfuscationConfig"),
-            ),
-            error_sampler: enabled_error_sampler(),
-        };
-        let header_tags = tracer_header_tags::TracerHeaderTags {
-            lang: "rust",
-            lang_version: "1.0",
-            lang_interpreter: "",
-            lang_vendor: "",
-            tracer_version: "1.0",
-            container_id: "",
-            generic: tracer_header_tags::TracerGenericTags::default(),
-        };
+        let config = create_compute_stats_config();
+        let (tags_provider, processor) = create_test_processor(&config, enabled_error_sampler());
+        let header_tags = create_test_header_tags();
 
         let make_span = |trace_id: u64, priority: f64| -> pb::Span {
             let mut metrics = HashMap::new();
@@ -1935,35 +1763,12 @@ mod tests {
     /// reach the backend and get a 413. This is the default config (no local stats).
     #[test]
     fn test_process_traces_body_size_reflects_enriched_payload() {
-        use libdd_trace_obfuscation::obfuscation_config::ObfuscationConfig;
-
         let config = Arc::new(Config {
             apm_dd_url: "https://trace.agent.datadoghq.com".to_string(),
             ..Config::default()
         });
-        let tags_provider = Arc::new(Provider::new(
-            config.clone(),
-            "lambda".to_string(),
-            &std::collections::HashMap::from([(
-                "function_arn".to_string(),
-                "test-arn".to_string(),
-            )]),
-        ));
-        let processor = ServerlessTraceProcessor {
-            obfuscation_config: Arc::new(
-                ObfuscationConfig::new().expect("Failed to create ObfuscationConfig"),
-            ),
-            error_sampler: enabled_error_sampler(),
-        };
-        let header_tags = tracer_header_tags::TracerHeaderTags {
-            lang: "rust",
-            lang_version: "1.0",
-            lang_interpreter: "",
-            lang_vendor: "",
-            tracer_version: "1.0",
-            container_id: "",
-            generic: tracer_header_tags::TracerGenericTags::default(),
-        };
+        let (tags_provider, processor) = create_test_processor(&config, enabled_error_sampler());
+        let header_tags = create_test_header_tags();
 
         let span = pb::Span {
             trace_id: 1,
