@@ -29,7 +29,9 @@ WORKDIR /tmp/dd/bottlecap
 RUN --mount=type=cache,target=/root/.cargo/git \
     --mount=type=cache,target=/root/.cargo/registry \
     --mount=type=bind,source=.,target=/tmp/dd,rw \
-    --mount=type=cache,target=/tmp/dd/bottlecap/target \
+    # sharing=private gives each concurrent build its own target cache instead of
+    # blocking on cargo's build-directory lock while waiting for a shared mount
+    --mount=type=cache,sharing=private,target=/tmp/dd/bottlecap/target \
     if [ "${FIPS}" = "1" ]; then \
         export FEATURES=fips; \
         if [ "${PLATFORM}" = "aarch64" ]; then \
