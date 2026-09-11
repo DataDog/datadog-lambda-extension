@@ -82,8 +82,8 @@ jobs:
         run: cargo clippy --workspace --all-targets --features default
       - working-directory: bottlecap
         run: cargo clippy --workspace --all-targets --no-default-features --features fips
-      # No other job compiles the test-mode feature: it gates test-only
-      # constructors that are absent from default and fips builds.
+      # The test-mode feature gates the bottlecap-test-mode binary via
+      # required-features, so no other job compiles it.
       - working-directory: bottlecap
         run: cargo clippy --workspace --all-targets --features default,test-mode
 
