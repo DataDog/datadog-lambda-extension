@@ -484,65 +484,138 @@ fn captured_compute_stats(traces: &[pb::AgentPayload]) -> Option<String> {
     span.meta.get(COMPUTE_STATS_KEY).cloned()
 }
 
-/// An errored P0 trace is rescued and reaches the intake, while a non-errored P0 trace is dropped.
+/// An errored P0 trace is rescued and reaches the intake, while a non-errored P0 trace is
+/// dropped. Applies whenever stats are computed before the backend, by either the
+/// extension or the tracer.
 #[tokio::test]
 async fn e2e_error_sampler_rescues_only_errored_p0_traces() {
-    let make_span = |trace_id: u64, error: i32| {
-        let mut span = pb::Span {
-            service: "fake-intake-trace-service".to_string(),
-            name: "web.request".to_string(),
-            resource: "GET /fake".to_string(),
-            trace_id,
-            span_id: trace_id,
-            parent_id: 0,
-            start: STATS_SPAN_START_NS,
-            duration: 5_000_000,
-            error,
-            r#type: "web".to_string(),
-            ..pb::Span::default()
+    // (owner label, lambda_extension_compute_stats, client_computed_stats)
+    let cases = [("extension", true, false), ("tracer", false, true)];
+
+    for (owner, compute_on_extension, client_computed_stats) in cases {
+        let make_span = |trace_id: u64, error: i32| {
+            let mut span = pb::Span {
+                service: "fake-intake-trace-service".to_string(),
+                name: "web.request".to_string(),
+                resource: "GET /fake".to_string(),
+                trace_id,
+                span_id: trace_id,
+                parent_id: 0,
+                start: STATS_SPAN_START_NS,
+                duration: 5_000_000,
+                error,
+                r#type: "web".to_string(),
+                ..pb::Span::default()
+            };
+            span.metrics
+                .insert("_sampling_priority_v1".to_string(), 0.0);
+            span
         };
-        span.metrics
-            .insert("_sampling_priority_v1".to_string(), 0.0);
-        span
-    };
 
-    let rescued_trace_id = 1;
-    let dropped_trace_id = 2;
-    let outcome = run_processor_pipeline_with_traces(
-        true,
-        false,
-        vec![
-            vec![make_span(rescued_trace_id, 1)],
-            vec![make_span(dropped_trace_id, 0)],
-        ],
-    )
-    .await;
+        let rescued_trace_id = 1;
+        let dropped_trace_id = 2;
+        let outcome = run_processor_pipeline_with_traces(
+            compute_on_extension,
+            client_computed_stats,
+            vec![
+                vec![make_span(rescued_trace_id, 1)],
+                vec![make_span(dropped_trace_id, 0)],
+            ],
+        )
+        .await;
 
-    let captured_spans: Vec<&pb::Span> = outcome
-        .traces
-        .iter()
-        .flat_map(|payload| &payload.tracer_payloads)
-        .flat_map(|payload| &payload.chunks)
-        .flat_map(|chunk| &chunk.spans)
-        .collect();
-    assert_eq!(
-        captured_spans.len(),
-        1,
-        "only the rescued trace reaches intake"
-    );
-
-    let rescued_span = captured_spans[0];
-    assert_eq!(rescued_span.trace_id, rescued_trace_id);
-    assert!(
-        rescued_span.metrics.contains_key("_dd.errors_sr"),
-        "the rescued root span must carry its error sampling rate",
-    );
-    assert!(
-        captured_spans
+        let captured_spans: Vec<&pb::Span> = outcome
+            .traces
             .iter()
-            .all(|span| span.trace_id != dropped_trace_id),
-        "the non-errored P0 trace must not reach intake",
-    );
+            .flat_map(|payload| &payload.tracer_payloads)
+            .flat_map(|payload| &payload.chunks)
+            .flat_map(|chunk| &chunk.spans)
+            .collect();
+        assert_eq!(
+            captured_spans.len(),
+            1,
+            "only the rescued trace reaches intake (owner={owner})"
+        );
+
+        let rescued_span = captured_spans[0];
+        assert_eq!(rescued_span.trace_id, rescued_trace_id);
+        assert!(
+            rescued_span.metrics.contains_key("_dd.errors_sr"),
+            "the rescued root span must carry its error sampling rate (owner={owner})",
+        );
+        assert!(
+            captured_spans
+                .iter()
+                .all(|span| span.trace_id != dropped_trace_id),
+            "the non-errored P0 trace must not reach intake (owner={owner})",
+        );
+    }
+}
+
+/// Sampled-out chunks are filtered from the trace intake whenever stats are computed
+/// before the backend, by either the extension or the tracer, while backend-owned
+/// stats keep them so the backend can compute stats.
+#[tokio::test]
+async fn e2e_sampled_out_chunks_filtered_by_stats_owner() {
+    // (owner label, lambda_extension_compute_stats, client_computed_stats) -> filtering expected
+    let cases = [
+        ("backend", false, false, false),
+        ("extension", true, false, true),
+        ("tracer", false, true, true),
+    ];
+
+    for (owner, compute_on_extension, client_computed_stats, expect_filtering) in cases {
+        let make_span = |trace_id: u64, priority: f64| {
+            let mut span = pb::Span {
+                service: "fake-intake-trace-service".to_string(),
+                name: "web.request".to_string(),
+                resource: "GET /fake".to_string(),
+                trace_id,
+                span_id: trace_id,
+                parent_id: 0,
+                start: STATS_SPAN_START_NS,
+                duration: 5_000_000,
+                error: 0,
+                r#type: "web".to_string(),
+                ..pb::Span::default()
+            };
+            span.metrics
+                .insert("_sampling_priority_v1".to_string(), priority);
+            span
+        };
+
+        // kept (priority 1), auto-dropped (priority 0), explicit drop (priority -1)
+        let outcome = run_processor_pipeline_with_traces(
+            compute_on_extension,
+            client_computed_stats,
+            vec![
+                vec![make_span(1, 1.0)],
+                vec![make_span(2, 0.0)],
+                vec![make_span(3, -1.0)],
+            ],
+        )
+        .await;
+
+        let mut captured_trace_ids: Vec<u64> = outcome
+            .traces
+            .iter()
+            .flat_map(|payload| &payload.tracer_payloads)
+            .flat_map(|payload| &payload.chunks)
+            .flat_map(|chunk| &chunk.spans)
+            .map(|span| span.trace_id)
+            .collect();
+        captured_trace_ids.sort_unstable();
+
+        let expected_trace_ids: Vec<u64> = if expect_filtering {
+            vec![1]
+        } else {
+            vec![1, 2, 3]
+        };
+        assert_eq!(
+            captured_trace_ids, expected_trace_ids,
+            "unexpected intake contents (owner={owner})"
+        );
+    }
 }
 
 /// T3.1: `client_computed_stats=true` → captured span meta has `_dd.compute_stats` absent.
