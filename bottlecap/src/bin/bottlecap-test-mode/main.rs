@@ -1,0 +1,512 @@
+//! Test-mode entry point for the bottlecap APM trace processor.
+//!
+//! Runs the trace-processing surface (accept -> aggregate -> flush) as a
+//! long-lived HTTP server with no AWS Lambda Extension lifecycle. Intended for
+//! the cross-agent parity harness ([APMSVLS-496]) and for local developer
+//! workflows that need to point a tracer at bottlecap without standing up a
+//! Lambda.
+//!
+//! Core endpoints on `127.0.0.1:8126`:
+//!
+//! | Path           | Method    | Source                                   |
+//! |----------------|-----------|------------------------------------------|
+//! | `/v0.4/traces` | POST, PUT | trace agent                              |
+//! | `/v0.5/traces` | POST, PUT | trace agent                              |
+//! | `/v0.6/stats`  | POST, PUT | trace agent                              |
+//! | `/info`        | GET       | trace agent                              |
+//! | `/flush`       | POST      | this binary's `FlushRouterExtension`     |
+//!
+//! The inherited `TraceAgent` router also serves its proxy routes (DSM,
+//! profiling, LLM observability, debugger, diagnostics, and instrumentation
+//! telemetry). They are not what this binary exists to exercise, but they
+//! answer on the same port. `TraceAgent::make_router` has the full set.
+//!
+//! Environment variables this binary reads:
+//!
+//! | Variable                        | Purpose                                                                 |
+//! |---------------------------------|-------------------------------------------------------------------------|
+//! | `DD_APM_DD_URL`                 | Override trace intake URL; stats follow it (harness points at fake-intake) |
+//! | `DD_SITE`                       | Derive trace and stats intake URLs when `DD_APM_DD_URL` is unset        |
+//! | `DD_SERVERLESS_FLUSH_STRATEGY`  | Enable periodic flushing (e.g. `periodically,5000`); default = manual   |
+//! | `DD_TESTMODE_FUNCTION_ARN`      | Override stub function ARN for tag generation                           |
+//! | `DD_LOG_LEVEL`                  | Logging verbosity, parsed by [`bottlecap::config::log_level::LogLevel`] |
+//!
+//! [APMSVLS-496]: https://datadoghq.atlassian.net/browse/APMSVLS-496
+
+#![deny(clippy::all)]
+#![deny(clippy::pedantic)]
+#![deny(clippy::unwrap_used)]
+#![deny(unused_extern_crates)]
+#![deny(unused_allocation)]
+#![deny(unused_assignments)]
+#![deny(unused_comparisons)]
+#![deny(unreachable_pub)]
+#![deny(missing_copy_implementations)]
+#![deny(missing_debug_implementations)]
+
+#[cfg(not(target_env = "msvc"))]
+use tikv_jemallocator::Jemalloc;
+
+#[cfg(not(target_env = "msvc"))]
+#[global_allocator]
+static GLOBAL: Jemalloc = Jemalloc;
+
+use std::{collections::HashMap, env, fmt, path::Path, str::FromStr, sync::Arc, time::Duration};
+
+use axum::{Router, http::StatusCode, routing::post};
+use bottlecap::{
+    LAMBDA_RUNTIME_SLUG,
+    config::{self, flush_strategy::FlushStrategy, log_level::LogLevel},
+    flushing::FlushingService,
+    lifecycle::{
+        flush_control::FlushControl, invocation::processor_service::InvocationProcessorHandle,
+    },
+    logger,
+    logs::{aggregator_service::AggregatorService as LogsAggregatorService, flusher::LogsFlusher},
+    startup::build_trace_agent,
+    tags::{lambda::tags::FUNCTION_ARN_KEY, provider::Provider as TagProvider},
+    traces::{
+        TRACE_INTAKE_ROUTE, proxy_aggregator,
+        trace_agent::{IngestBarrier, RouterExtension},
+    },
+};
+use dogstatsd::{
+    aggregator::AggregatorService as MetricsAggregatorService, api_key::ApiKeyFactory,
+    constants::CONTEXTS, flusher::Flusher as MetricsFlusher, metric::EMPTY_TAGS,
+};
+use futures::future::BoxFuture;
+use tokio::signal;
+use tokio_util::sync::CancellationToken;
+use tracing::error;
+use tracing_subscriber::EnvFilter;
+use ustr::Ustr;
+
+#[tokio::main]
+async fn main() -> anyhow::Result<()> {
+    init_ustr();
+    enable_logging_subsystem();
+
+    // Outside Lambda every `AwsConfig` field falls back via `unwrap_or_default()`,
+    // so loading from env is safe with no AWS env vars set. The struct is only
+    // read by the secrets resolver, which test-mode bypasses.
+    let config = Arc::new(config::get_config(Path::new("")));
+    let shared_client = bottlecap::http::get_client(&config);
+
+    // Hardcoded literal API key. The parity harness points at a fake-intake
+    // that ignores auth; local dev with a real intake requires a code change.
+    let api_key_factory = Arc::new(ApiKeyFactory::new("stub-key"));
+
+    let function_arn = env::var("DD_TESTMODE_FUNCTION_ARN")
+        .unwrap_or_else(|_| "arn:aws:lambda:us-east-1:000000000000:function:testmode".to_string());
+    let metadata = HashMap::from([(FUNCTION_ARN_KEY.to_string(), function_arn)]);
+    let tags_provider = Arc::new(TagProvider::new(
+        Arc::clone(&config),
+        LAMBDA_RUNTIME_SLUG.to_string(),
+        &metadata,
+    ));
+
+    let invocation_processor_handle = InvocationProcessorHandle::noop();
+
+    // Shared proxy aggregator backing the trace agent's proxy endpoints.
+    let proxy_aggregator = Arc::new(tokio::sync::Mutex::new(
+        proxy_aggregator::Aggregator::default(),
+    ));
+
+    // Build the trace pipeline unspawned so we can attach our /flush extension
+    // before starting the listener.
+    let (trace_agent, pipeline) = build_trace_agent(
+        &config,
+        &api_key_factory,
+        &tags_provider,
+        invocation_processor_handle,
+        None,
+        &shared_client,
+        Arc::clone(&proxy_aggregator),
+        Some(stats_url_from_trace_intake(&config.apm_dd_url)),
+    );
+    let trace_flusher = Arc::clone(&pipeline.trace_flusher);
+    let stats_flusher = Arc::clone(&pipeline.stats_flusher);
+    let proxy_flusher = Arc::clone(&pipeline.proxy_flusher);
+    let shutdown_token = pipeline.shutdown_token.clone();
+
+    // FlushingService::new takes six non-optional owned values. Test-mode only
+    // exercises the trace/stats/proxy flushers; the logs and metrics stubs
+    // below stand up real services with empty queues so flushes are no-ops.
+    let (logs_aggregator_service, logs_aggregator_handle) = LogsAggregatorService::default();
+    tokio::spawn(async move { logs_aggregator_service.run().await });
+    let logs_flusher = LogsFlusher::new(
+        Arc::clone(&api_key_factory),
+        logs_aggregator_handle,
+        Arc::clone(&config),
+        shared_client.clone(),
+    );
+
+    let (metrics_aggregator_service, metrics_aggregator_handle) =
+        MetricsAggregatorService::new(EMPTY_TAGS, CONTEXTS).expect("metrics aggregator");
+    tokio::spawn(async move { metrics_aggregator_service.run().await });
+    let metrics_flushers: Arc<Vec<MetricsFlusher>> = Arc::new(Vec::new());
+
+    let flushing_service = Arc::new(FlushingService::new(
+        logs_flusher,
+        trace_flusher,
+        stats_flusher,
+        proxy_flusher,
+        metrics_flushers,
+        metrics_aggregator_handle,
+        None,
+    ));
+
+    let ingest_barrier = trace_agent.ingest_barrier();
+    // Serializes every flush path. See [`drain_and_flush`].
+    let flush_lock = Arc::new(tokio::sync::Mutex::new(()));
+    let flush_extension = Arc::new(FlushRouterExtension {
+        flush_op: {
+            let fs = Arc::clone(&flushing_service);
+            let barrier = ingest_barrier.clone();
+            let lock = Arc::clone(&flush_lock);
+            Arc::new(move || {
+                let fs = Arc::clone(&fs);
+                let barrier = barrier.clone();
+                let lock = Arc::clone(&lock);
+                Box::pin(async move { drain_and_flush(&lock, &barrier, &fs, true).await })
+            })
+        },
+    });
+    let trace_agent = trace_agent.with_router_extension(flush_extension);
+    // Errors are returned rather than logged so that a startup failure (port
+    // 8126 already bound, for instance) ends the process instead of leaving a
+    // live one with no listener for the harness to connect to.
+    let mut listener_task = tokio::spawn(async move {
+        trace_agent
+            .start()
+            .await
+            .map_err(|e| anyhow::anyhow!("trace agent failed: {e}"))
+    });
+
+    spawn_periodic_flush(
+        &config,
+        &flushing_service,
+        &ingest_barrier,
+        &flush_lock,
+        &shutdown_token,
+    );
+
+    // The listener finishing first means it never came up, or stopped serving
+    // without being asked to. Either way there is nothing left to drain.
+    tokio::select! {
+        result = shutdown_signal() => result?,
+        result = &mut listener_task => match result? {
+            Ok(()) => anyhow::bail!("trace agent listener stopped unexpectedly"),
+            Err(e) => return Err(e),
+        },
+    }
+
+    // Cancel before the final drain so axum's graceful shutdown drives any
+    // in-flight /v0.4/traces requests through the aggregator before the flush
+    // reads from it.
+    shutdown_token.cancel();
+    // Cancelling only signals the shutdown; awaiting the listener is what
+    // guarantees in-flight handlers have finished. Bounded so a lingering
+    // connection cannot wedge shutdown: draining late data beats hanging.
+    match tokio::time::timeout(SHUTDOWN_TIMEOUT, listener_task).await {
+        Ok(Ok(Ok(()))) => {}
+        Ok(Ok(Err(e))) => error!("Trace agent shut down with an error: {e:?}"),
+        Ok(Err(e)) => error!("Trace agent task failed: {e:?}"),
+        Err(_) => error!(
+            "Trace agent did not shut down within {}s, draining anyway",
+            SHUTDOWN_TIMEOUT.as_secs()
+        ),
+    }
+    // Taking the lock here is what makes an in-flight periodic flush finish
+    // before this one starts, so its queued payloads are not counted as
+    // already drained.
+    drain_and_flush(&flush_lock, &ingest_barrier, &flushing_service, true).await;
+    Ok(())
+}
+
+/// Resolves on the first signal that should end the process.
+///
+/// SIGTERM matters as much as SIGINT here: the harness and any container
+/// runtime stop the binary with SIGTERM, whose default disposition kills the
+/// process outright, so without this the final drain never runs and the last
+/// accepted payloads are lost.
+#[cfg(unix)]
+async fn shutdown_signal() -> anyhow::Result<()> {
+    let mut sigterm = signal::unix::signal(signal::unix::SignalKind::terminate())?;
+    tokio::select! {
+        result = signal::ctrl_c() => result?,
+        _ = sigterm.recv() => {}
+    }
+    Ok(())
+}
+
+#[cfg(not(unix))]
+async fn shutdown_signal() -> anyhow::Result<()> {
+    signal::ctrl_c().await?;
+    Ok(())
+}
+
+/// Spawns the periodic flush driver. Decoupled from managed-instance mode: any
+/// non-Default strategy enables it, using that strategy's interval. Note that
+/// `end` yields the 15-minute placeholder interval `FlushControl` uses to mean
+/// "never race a flush", so it is periodic only in name. Manual flushing via
+/// `POST /flush` always works regardless.
+fn spawn_periodic_flush(
+    config: &config::Config,
+    flushing_service: &Arc<FlushingService>,
+    ingest_barrier: &IngestBarrier,
+    flush_lock: &Arc<tokio::sync::Mutex<()>>,
+    shutdown_token: &CancellationToken,
+) {
+    if config.ext.serverless_flush_strategy == FlushStrategy::Default {
+        return;
+    }
+
+    let mut interval =
+        FlushControl::new(config.ext.serverless_flush_strategy, config.flush_timeout)
+            .get_flush_interval();
+    let fs = Arc::clone(flushing_service);
+    let barrier = ingest_barrier.clone();
+    let lock = Arc::clone(flush_lock);
+    let token = shutdown_token.clone();
+    tokio::spawn(async move {
+        loop {
+            tokio::select! {
+                biased;
+                () = token.cancelled() => break,
+                // The periodic driver has no caller to report to; the
+                // flushing service already logs what it dropped.
+                _ = interval.tick() => {
+                    drain_and_flush(&lock, &barrier, &fs, false).await;
+                },
+            }
+        }
+    });
+}
+
+/// Runs the barrier-plus-flush sequence under `lock`.
+///
+/// Every flusher drains its aggregator before awaiting network delivery, so
+/// two overlapping flushes let one observe empty queues and report success
+/// while the other's send is still in flight and may still fail. Holding the
+/// lock across both steps keeps the periodic driver, `POST /flush`, and the
+/// shutdown drain from overlapping.
+///
+/// Returns `true` when payloads were lost: either the barrier reported a dead
+/// forwarder, or a flusher dropped payloads it could not deliver.
+async fn drain_and_flush(
+    lock: &tokio::sync::Mutex<()>,
+    barrier: &IngestBarrier,
+    flushing_service: &FlushingService,
+    is_final: bool,
+) -> bool {
+    let _guard = lock.lock().await;
+    // A payload can be accepted, and its request answered, while it is still
+    // queued ahead of the aggregators. Drain those queues first so the flush
+    // is deterministic from the caller's point of view. Handlers returning
+    // during shutdown does not mean their payloads reached the aggregators
+    // either.
+    let barrier_failed = barrier.wait().await.is_err();
+    if barrier_failed {
+        error!("Ingest barrier reported a dead forwarder; accepted payloads were lost");
+    }
+    // Flush regardless: whatever did reach the aggregators should still go out.
+    let undelivered = if is_final {
+        flushing_service.flush_blocking_final().await
+    } else {
+        flushing_service.flush_blocking().await
+    };
+    barrier_failed || undelivered
+}
+
+/// Point stats at the same host as traces.
+///
+/// `DD_APM_DD_URL` only moves the trace intake; stats would otherwise be
+/// derived from `DD_SITE` and leave the harness's fake-intake, so the
+/// binary's `/v0.6/stats` path could not be exercised locally. `apm_dd_url`
+/// is already a fully-resolved trace endpoint, so strip the trace route
+/// before appending the stats one. With `DD_APM_DD_URL` unset this
+/// reproduces the site-derived default.
+fn stats_url_from_trace_intake(apm_dd_url: &str) -> String {
+    libdd_trace_utils::config_utils::trace_stats_url_prefixed(
+        apm_dd_url
+            .trim_end_matches('/')
+            .trim_end_matches(TRACE_INTAKE_ROUTE),
+    )
+}
+
+/// The work `POST /flush` performs, returning `true` when payloads were lost.
+///
+/// Boxed rather than called directly so the handler's status branches can be
+/// tested without standing up a flushing service.
+type FlushOp = Arc<dyn Fn() -> BoxFuture<'static, bool> + Send + Sync>;
+
+struct FlushRouterExtension {
+    flush_op: FlushOp,
+}
+
+impl fmt::Debug for FlushRouterExtension {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("FlushRouterExtension").finish()
+    }
+}
+
+/// Upper bound on a single `POST /flush`. The flushers already bound their own
+/// HTTP calls via `flush_timeout`, but retries across the five flushers can
+/// stack, so this caps total wall-clock time for the harness.
+const FLUSH_REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// Upper bound on waiting for the HTTP listener to finish its graceful
+/// shutdown before the final drain runs.
+const SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(10);
+
+impl RouterExtension for FlushRouterExtension {
+    fn extend(&self, router: Router) -> Result<Router, Box<dyn std::error::Error + Send + Sync>> {
+        let flush_op = Arc::clone(&self.flush_op);
+        Ok(router.route(
+            "/flush",
+            post(move || {
+                let flush_op = Arc::clone(&flush_op);
+                async move {
+                    // Isolate panics and bound execution time. flush_blocking_final
+                    // expects on the metrics aggregator handle, so a dead aggregator
+                    // task would otherwise panic the connection task instead of
+                    // returning a status the harness can act on.
+                    let mut task = tokio::task::spawn(async move { flush_op().await });
+                    match tokio::time::timeout(FLUSH_REQUEST_TIMEOUT, &mut task).await {
+                        Ok(Ok(false)) => StatusCode::NO_CONTENT,
+                        // The flush ran, but payloads were lost on the way to
+                        // the aggregators or to the intake. Reporting 204 here
+                        // would tell the harness the drain succeeded.
+                        Ok(Ok(true)) => {
+                            error!("Flush completed with lost payloads");
+                            StatusCode::BAD_GATEWAY
+                        }
+                        Ok(Err(e)) => {
+                            error!("Flush task failed: {e:?}");
+                            StatusCode::INTERNAL_SERVER_ERROR
+                        }
+                        Err(_) => {
+                            task.abort();
+                            error!(
+                                "Flush timed out after {}s, aborting",
+                                FLUSH_REQUEST_TIMEOUT.as_secs()
+                            );
+                            StatusCode::GATEWAY_TIMEOUT
+                        }
+                    }
+                }
+            }),
+        ))
+    }
+}
+
+// Warm the ustr pool early so the first SortedTags::parse call (inside
+// build_trace_agent and downstream) doesn't pay the 10+ ms init cost.
+fn init_ustr() {
+    tokio::spawn(async {
+        Ustr::from("");
+    });
+}
+
+fn enable_logging_subsystem() {
+    let log_level = LogLevel::from_str(
+        std::env::var("DD_LOG_LEVEL")
+            .unwrap_or("info".to_string())
+            .as_str(),
+    )
+    .unwrap_or(LogLevel::Info);
+
+    let env_filter = format!(
+        "h2=off,hyper=off,reqwest=off,rustls=off,datadog-trace-mini-agent=off,{log_level:?}",
+    );
+    let subscriber = tracing_subscriber::fmt::Subscriber::builder()
+        .with_env_filter(
+            EnvFilter::try_new(env_filter).expect("could not parse log level in configuration"),
+        )
+        .with_level(true)
+        .with_thread_names(false)
+        .with_thread_ids(false)
+        .with_line_number(false)
+        .with_file(false)
+        .with_target(false)
+        .without_time()
+        .event_format(logger::Formatter)
+        .finish();
+    tracing::subscriber::set_global_default(subscriber).expect("setting default subscriber failed");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    use axum::body::Body;
+    use axum::http::Request;
+    use tower::ServiceExt;
+
+    /// Drives `POST /flush` against an extension backed by `op`.
+    async fn flush_status(op: FlushOp) -> StatusCode {
+        let router = FlushRouterExtension { flush_op: op }
+            .extend(Router::new())
+            .expect("extend router");
+
+        router
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/flush")
+                    .body(Body::empty())
+                    .expect("build request"),
+            )
+            .await
+            .expect("route response")
+            .status()
+    }
+
+    #[tokio::test]
+    async fn flush_returns_204_when_nothing_was_lost() {
+        let status = flush_status(Arc::new(|| Box::pin(async { false }))).await;
+        assert_eq!(status, StatusCode::NO_CONTENT);
+    }
+
+    #[tokio::test]
+    async fn flush_returns_502_when_payloads_were_lost() {
+        let status = flush_status(Arc::new(|| Box::pin(async { true }))).await;
+        assert_eq!(status, StatusCode::BAD_GATEWAY);
+    }
+
+    #[tokio::test]
+    async fn flush_returns_500_when_the_flush_panics() {
+        let status = flush_status(Arc::new(|| Box::pin(async { panic!("flush panicked") }))).await;
+        assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn flush_returns_504_when_it_outruns_the_request_timeout() {
+        let status = flush_status(Arc::new(|| {
+            Box::pin(async {
+                tokio::time::sleep(FLUSH_REQUEST_TIMEOUT * 2).await;
+                false
+            })
+        }))
+        .await;
+        assert_eq!(status, StatusCode::GATEWAY_TIMEOUT);
+    }
+
+    #[test]
+    fn stats_url_follows_the_overridden_trace_intake() {
+        assert_eq!(
+            stats_url_from_trace_intake("http://127.0.0.1:8080/api/v0.2/traces"),
+            "http://127.0.0.1:8080/api/v0.2/stats"
+        );
+    }
+
+    #[test]
+    fn stats_url_matches_the_site_default_when_not_overridden() {
+        let site = "datadoghq.com";
+        assert_eq!(
+            stats_url_from_trace_intake(&libdd_trace_utils::config_utils::trace_intake_url(site)),
+            libdd_trace_utils::config_utils::trace_stats_url(site)
+        );
+    }
+}

@@ -117,6 +117,10 @@ flate2 = { version = "1.1", default-features = false, features = ["rust_backend"
 [[bin]]
 name = "bottlecap"
 
+[[bin]]
+name = "bottlecap-test-mode"
+required-features = ["test-mode"]
+
 [profile.dev]
 debug = true   # same as debuginfo=2 and no stripping
 strip = false
@@ -178,8 +182,10 @@ fips = [
 # `InvocationProcessorHandle::noop()`) to callers that need to drive the
 # trace-processing surface without Lambda lifecycle state.
 # Not enabled in `default` or `fips`, so the items it gates do not appear
-# in production builds.
-test-mode = []
+# in production builds. `tokio/signal` is pulled in here rather than in the
+# base dependency so the shipped extension does not carry the signal driver
+# for a binary only the test-mode build produces.
+test-mode = ["tokio/signal"]
 
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(coverage,coverage_nightly)'] }
