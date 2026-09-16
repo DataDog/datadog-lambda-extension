@@ -368,10 +368,9 @@ impl RouterExtension for FlushRouterExtension {
             post(move || {
                 let flush_op = Arc::clone(&flush_op);
                 async move {
-                    // Isolate panics and bound execution time. flush_blocking_final
-                    // expects on the metrics aggregator handle, so a dead aggregator
-                    // task would otherwise panic the connection task instead of
-                    // returning a status the harness can act on.
+                    // Bound execution time. The flushers bound their own HTTP
+                    // calls, but retries across the five flushers can stack, so
+                    // this caps total wall-clock time for the harness.
                     let mut task = tokio::task::spawn(async move { flush_op().await });
                     match tokio::time::timeout(FLUSH_REQUEST_TIMEOUT, &mut task).await {
                         Ok(Ok(false)) => StatusCode::NO_CONTENT,
