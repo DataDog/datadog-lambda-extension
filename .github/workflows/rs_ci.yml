@@ -8,6 +8,8 @@ on:
   workflow_dispatch:
 
 env:
+  # adds public.ecr.aws as fallback incase rate limit on ghcr.io is hit
+  TRIVY_DB_REPOSITORY: ghcr.io/aquasecurity/trivy-db,public.ecr.aws/aquasecurity/trivy-db
   PB_VERSION: 25.3
   PB_URL: https://github.com/protocolbuffers/protobuf/releases/download
   PB_TARGET: linux-x86_64
@@ -186,6 +188,24 @@ jobs:
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           working-directory: bottlecap
+
+  cargo-lockfile-scan:
+    name: Lockfile Scan
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Scan Cargo.lock with trivy
+        uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1 # v0.35.0
+        with:
+          scan-type: fs
+          scan-ref: bottlecap
+          # The secret scanner flags the test TLS key in `src/http.rs`.
+          scanners: vuln
+          trivyignores: .trivyignore.yaml
+          ignore-unfixed: true
+          exit-code: 1
+          format: table
 
   # Guards cold-start H1 (PR #1276): the default build must keep reqwest on
   # compiled-in webpki roots (no per-build native-cert filesystem scan), and the
