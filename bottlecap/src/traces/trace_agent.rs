@@ -244,8 +244,13 @@ impl TraceAgent {
                     biased;
                     tracer_payload_info = trace_rx.recv() => {
                         let Some(tracer_payload_info) = tracer_payload_info else { break };
-                        if let Err(e) = aggregator_handle.insert_payload(tracer_payload_info) {
-                            error!("TRACE_AGENT | Failed to insert payload into aggregator: {e}");
+                        // An error here means the aggregator task is gone and the
+                        // payload is lost. Stop the forwarder so a pending barrier
+                        // reports the loss via IngestBarrierError instead of
+                        // acknowledging a flush that would silently drop payloads.
+                        if aggregator_handle.insert_payload(tracer_payload_info).is_err() {
+                            error!("TRACE_AGENT | Aggregator stopped, dropping trace forwarder");
+                            break;
                         }
                     }
                     // Reached only on an iteration where the payload channel is
