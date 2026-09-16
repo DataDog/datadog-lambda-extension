@@ -205,23 +205,34 @@ async fn main() -> anyhow::Result<()> {
     // in-flight /v0.4/traces requests through the aggregator before the flush
     // reads from it.
     shutdown_token.cancel();
-    // Cancelling only signals the shutdown; awaiting the listener is what
-    // guarantees in-flight handlers have finished. Bounded so a lingering
-    // connection cannot wedge shutdown: draining late data beats hanging.
-    match tokio::time::timeout(SHUTDOWN_TIMEOUT, listener_task).await {
-        Ok(Ok(Ok(()))) => {}
-        Ok(Ok(Err(e))) => error!("Trace agent shut down with an error: {e:?}"),
-        Ok(Err(e)) => error!("Trace agent task failed: {e:?}"),
-        Err(_) => error!(
-            "Trace agent did not shut down within {}s, draining anyway",
-            SHUTDOWN_TIMEOUT.as_secs()
-        ),
-    }
+    await_listener_shutdown(&mut listener_task).await;
     // Taking the lock here is what makes an in-flight periodic flush finish
     // before this one starts, so its queued payloads are not counted as
     // already drained.
     drain_and_flush(&flush_lock, &ingest_barrier, &flushing_service, true).await;
     Ok(())
+}
+
+/// Cancelling only signals the shutdown; awaiting the listener is what
+/// guarantees in-flight handlers have finished. Bounded so a lingering
+/// connection cannot wedge shutdown: draining late data beats hanging.
+async fn await_listener_shutdown(listener_task: &mut tokio::task::JoinHandle<anyhow::Result<()>>) {
+    match tokio::time::timeout(SHUTDOWN_TIMEOUT, &mut *listener_task).await {
+        Ok(Ok(Ok(()))) => {}
+        Ok(Ok(Err(e))) => error!("Trace agent shut down with an error: {e:?}"),
+        Ok(Err(e)) => error!("Trace agent task failed: {e:?}"),
+        Err(_) => {
+            // Dropping the handle would detach the listener and let an in-flight
+            // flush keep holding the flush lock past this bound. Aborting and
+            // awaiting stops it before the drain takes the lock.
+            listener_task.abort();
+            let _ = listener_task.await;
+            error!(
+                "Trace agent did not shut down within {}s, aborting and draining anyway",
+                SHUTDOWN_TIMEOUT.as_secs()
+            );
+        }
+    }
 }
 
 /// Resolves on the first signal that should end the process.
