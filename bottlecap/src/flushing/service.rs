@@ -5,7 +5,8 @@ use std::sync::Arc;
 use tracing::{debug, error};
 
 use dogstatsd::{
-    aggregator::AggregatorHandle as MetricsAggregatorHandle, flusher::Flusher as MetricsFlusher,
+    aggregator::{AggregatorHandle as MetricsAggregatorHandle, FlushResponse},
+    flusher::Flusher as MetricsFlusher,
 };
 
 use crate::flushing::handles::{FlushHandles, MetricsRetryBatch};
@@ -331,11 +332,23 @@ impl FlushingService {
     /// redrive them, so the return value is the only signal that data was
     /// drained without reaching the intake.
     async fn flush_blocking_inner(&self, force_stats: bool) -> bool {
-        let flush_response = self
-            .metrics_aggr_handle
-            .flush()
-            .await
-            .expect("can't flush metrics aggr handle");
+        // A failed handle means the aggregator task is gone and its buffered
+        // metrics are lost, so report them as undelivered and continue with an
+        // empty response rather than panicking: the release profile uses
+        // panic = "abort", so a panic here would take down the process.
+        let (flush_response, metrics_handle_failed) = match self.metrics_aggr_handle.flush().await {
+            Ok(response) => (response, false),
+            Err(e) => {
+                error!("FLUSHING_SERVICE | Metrics aggregator handle failed to flush: {e}");
+                (
+                    FlushResponse {
+                        series: Vec::new(),
+                        distributions: Vec::new(),
+                    },
+                    true,
+                )
+            }
+        };
 
         let metrics_futures: Vec<_> = self
             .metrics_flushers
@@ -365,11 +378,12 @@ impl FlushingService {
             ("logs", !logs.is_empty()),
             (
                 "metrics",
-                metrics.iter().any(|retry| {
-                    retry.as_ref().is_some_and(|(series, sketches)| {
-                        !series.is_empty() || !sketches.is_empty()
-                    })
-                }),
+                metrics_handle_failed
+                    || metrics.iter().any(|retry| {
+                        retry.as_ref().is_some_and(|(series, sketches)| {
+                            !series.is_empty() || !sketches.is_empty()
+                        })
+                    }),
             ),
             ("traces", traces.is_some_and(|t| !t.is_empty())),
             ("stats", stats.is_some_and(|s| !s.is_empty())),
