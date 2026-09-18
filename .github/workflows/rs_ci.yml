@@ -82,8 +82,7 @@ jobs:
         run: cargo clippy --workspace --all-targets --features default
       - working-directory: bottlecap
         run: cargo clippy --workspace --all-targets --no-default-features --features fips
-      # The test-mode feature gates the bottlecap-test-mode binary via
-      # required-features, so no other job compiles it.
+      # Also lint the feature-gated test-mode binary.
       - working-directory: bottlecap
         run: cargo clippy --workspace --all-targets --features default,test-mode
 
@@ -145,6 +144,9 @@ jobs:
       - uses: mozilla-actions/sccache-action@7d986dd989559c6ecdb630a3fd2557667be217ad # v0.0.9
       - working-directory: bottlecap
         run: cargo nextest run --workspace
+      - name: Test the test-mode binary
+        working-directory: bottlecap
+        run: cargo nextest run --features test-mode --bin bottlecap-test-mode
 
   format:
     name: Format
