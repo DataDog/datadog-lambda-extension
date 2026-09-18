@@ -286,6 +286,7 @@ fn spawn_periodic_flush(
     let lock = Arc::clone(flush_lock);
     let token = shutdown_token.clone();
     tokio::spawn(async move {
+        interval.tick().await; // discard the immediate first tick
         loop {
             tokio::select! {
                 biased;
