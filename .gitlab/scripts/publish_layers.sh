@@ -105,9 +105,19 @@ fi
 
 printf "[$REGION] Starting publishing layers...\n"
 
+AUTOMATIC_VERSION=0
 if [ "$AUTOMATICALLY_BUMP_VERSION" = "1" ]; then
-    latest_version=$(aws lambda list-layer-versions --region $REGION --layer-name $LAYER_NAME --max-items 1 --query 'LayerVersions[0].Version || `0`')
-    VERSION=$(($latest_version + 1))
+    if [ "${USE_AWS_ASSIGNED_VERSION:-0}" = "1" ]; then
+        # Race-safe automatic versioning: publish this job's binary once and use
+        # the version AWS assigns to that call. Predicting the next version from
+        # the current latest is not reliable because another pipeline can publish
+        # in between, making the prediction stale. The publish happens after
+        # architecture selection below.
+        AUTOMATIC_VERSION=1
+    else
+        latest_version=$(aws lambda list-layer-versions --region $REGION --layer-name $LAYER_NAME --max-items 1 --query 'LayerVersions[0].Version || `0`')
+        VERSION=$(($latest_version + 1))
+    fi
 
 else
     if [ -z "$CI_COMMIT_TAG" ]; then
@@ -128,14 +138,16 @@ else
     printf "Version: ${VERSION}\n"
 fi
 
-if [ -z "$VERSION" ]; then
-    printf "[ERROR]: Layer VERSION not specified"
-    exit 1
-elif ! [[ "$VERSION" =~ ^[0-9]+$ ]]; then
-    printf "[ERROR]: Layer VERSION must be numeric, got '$VERSION'"
-    exit 1
-else
-    printf "Layer version parsed: $VERSION\n"
+if [ "${AUTOMATIC_VERSION:-0}" != "1" ]; then
+    if [ -z "$VERSION" ]; then
+        printf "[ERROR]: Layer VERSION not specified"
+        exit 1
+    elif ! [[ "$VERSION" =~ ^[0-9]+$ ]]; then
+        printf "[ERROR]: Layer VERSION must be numeric, got '$VERSION'"
+        exit 1
+    else
+        printf "Layer version parsed: $VERSION\n"
+    fi
 fi
 
 # Compatible Architectures
@@ -145,26 +157,38 @@ else
     architectures="arm64"
 fi
 
-latest_version=$(aws lambda list-layer-versions --region $REGION --layer-name $LAYER_NAME --max-items 1 --query 'LayerVersions[0].Version || `0`')
-if [ $latest_version -ge $VERSION ]; then
-    printf "[$REGION] Layer $layer version $VERSION already exists in region $REGION, skipping...\n"
-    exit 1
-elif [ $latest_version -lt $((VERSION-1)) ]; then
-    printf "[$REGION][WARNING] The latest version of layer $layer in region $REGION is $latest_version, this will publish all the missing versions including $VERSION\n"
-fi
-
-while [ $latest_version -lt $VERSION ]; do
-    latest_version=$(publish_layer $REGION $LAYER_NAME $LAYER_PATH $architectures)
-    printf "[$REGION] Published version $latest_version for layer $LAYER_NAME in region $REGION\n"
-
-    # This shouldn't happen unless someone manually deleted the latest version, say 28, and
-    # then tries to republish 28 again. The published version would actually be 29, because
-    # Lambda layers are immutable and AWS will skip deleted version and use the next number.
-    if [ $latest_version -gt $VERSION ]; then
-        printf "[$REGION] Published version $latest_version is greater than the desired version $VERSION!"
+if [ "${AUTOMATIC_VERSION:-0}" = "1" ]; then
+    # Publish exactly once and adopt the version AWS returns. Layer versions are
+    # assigned atomically by AWS at publish time, so this version always refers
+    # to the binary from this job, even if another pipeline publishes concurrently.
+    VERSION=$(publish_layer $REGION $LAYER_NAME $LAYER_PATH $architectures)
+    if [ -z "$VERSION" ] || ! [[ "$VERSION" =~ ^[0-9]+$ ]]; then
+        printf "[ERROR]: publish-layer-version returned an invalid version: '$VERSION'"
         exit 1
     fi
-done
+    printf "[$REGION] Published version $VERSION for layer $LAYER_NAME in region $REGION\n"
+else
+    latest_version=$(aws lambda list-layer-versions --region $REGION --layer-name $LAYER_NAME --max-items 1 --query 'LayerVersions[0].Version || `0`')
+    if [ $latest_version -ge $VERSION ]; then
+        printf "[$REGION] Layer $layer version $VERSION already exists in region $REGION, skipping...\n"
+        exit 1
+    elif [ $latest_version -lt $((VERSION-1)) ]; then
+        printf "[$REGION][WARNING] The latest version of layer $layer in region $REGION is $latest_version, this will publish all the missing versions including $VERSION\n"
+    fi
+
+    while [ $latest_version -lt $VERSION ]; do
+        latest_version=$(publish_layer $REGION $LAYER_NAME $LAYER_PATH $architectures)
+        printf "[$REGION] Published version $latest_version for layer $LAYER_NAME in region $REGION\n"
+
+        # This shouldn't happen unless someone manually deleted the latest version, say 28, and
+        # then tries to republish 28 again. The published version would actually be 29, because
+        # Lambda layers are immutable and AWS will skip deleted version and use the next number.
+        if [ $latest_version -gt $VERSION ]; then
+            printf "[$REGION] Published version $latest_version is greater than the desired version $VERSION!"
+            exit 1
+        fi
+    done
+fi
 
 printf "[$REGION] Finished publishing layers...\n"
 
