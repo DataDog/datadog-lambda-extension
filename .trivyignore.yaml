@@ -1,0 +1,13 @@
+# Suppressions for the `bottlecap/Cargo.lock` scans in
+# `.github/workflows/rs_ci.yml` and `.github/workflows/vulnerability-scan.yml`.
+#
+# `Cargo.lock` covers build and dev dependencies as well as the crates linked
+# into the extension, so it over-reports relative to what ships. The dependency
+# list embedded in the released binary is the authoritative view of the shipped
+# artifact.
+vulnerabilities:
+  - id: GHSA-3pv8-6f4r-ffg2
+    statement: |
+      `tar` is a build dependency of `libddwaf-sys`, used by its build script.
+      It is not linked into the extension binary: `cargo tree -i tar -e normal`
+      reports nothing, while `-e build,normal` reports the build-script edge.
