@@ -8,7 +8,7 @@ on:
   workflow_dispatch:
 
 env:
-  # adds public.ecr.aws as fallback incase rate limit on ghcr.io is hit
+  # adds public.ecr.aws as fallback in case rate limit on ghcr.io is hit
   TRIVY_DB_REPOSITORY: ghcr.io/aquasecurity/trivy-db,public.ecr.aws/aquasecurity/trivy-db
   PB_VERSION: 25.3
   PB_URL: https://github.com/protocolbuffers/protobuf/releases/download

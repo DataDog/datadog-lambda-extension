@@ -132,7 +132,7 @@ fn otel_value_to_string(value: &any_value::Value) -> String {
         }
         // Belongs to the Profiling signal, which indexes into a string table
         // this transform has no access to. OTLP tells receivers of other
-        // signals to treat it as absent; callers drop empty values.
+        // signals to process such a value as if it were absent.
         any_value::Value::StringValueStrindex(_) => String::new(),
     }
 }
@@ -1313,6 +1313,12 @@ mod tests {
         assert!(result.contains("\"key2\":\"42\""));
         assert!(result.starts_with('{'));
         assert!(result.ends_with('}'));
+    }
+
+    #[test]
+    fn test_otel_value_to_string_string_value_strindex() {
+        let value = Value::StringValueStrindex(3);
+        assert_eq!(otel_value_to_string(&value), "");
     }
 
     #[test]
