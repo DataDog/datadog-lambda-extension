@@ -159,7 +159,9 @@ async fn main() -> anyhow::Result<()> {
     let ingest_barrier = trace_agent.ingest_barrier();
     // Serializes every flush path. See [`drain_and_flush`].
     let flush_lock = Arc::new(tokio::sync::Mutex::new(()));
+    let flush_cancel_token = CancellationToken::new();
     let flush_extension = Arc::new(FlushRouterExtension {
+        cancellation_token: flush_cancel_token.clone(),
         flush_op: {
             let fs = Arc::clone(&flushing_service);
             let barrier = ingest_barrier.clone();
@@ -205,7 +207,7 @@ async fn main() -> anyhow::Result<()> {
     // in-flight /v0.4/traces requests through the aggregator before the flush
     // reads from it.
     shutdown_token.cancel();
-    await_listener_shutdown(&mut listener_task).await;
+    await_listener_shutdown(&mut listener_task, &flush_cancel_token).await;
     // Taking the lock here is what makes an in-flight periodic flush finish
     // before this one starts, so its queued payloads are not counted as
     // already drained.
@@ -216,15 +218,18 @@ async fn main() -> anyhow::Result<()> {
 /// Cancelling only signals the shutdown; awaiting the listener is what
 /// guarantees in-flight handlers have finished. Bounded so a lingering
 /// connection cannot wedge shutdown: draining late data beats hanging.
-async fn await_listener_shutdown(listener_task: &mut tokio::task::JoinHandle<anyhow::Result<()>>) {
+async fn await_listener_shutdown(
+    listener_task: &mut tokio::task::JoinHandle<anyhow::Result<()>>,
+    flush_cancel_token: &CancellationToken,
+) {
     match tokio::time::timeout(SHUTDOWN_TIMEOUT, &mut *listener_task).await {
         Ok(Ok(Ok(()))) => {}
         Ok(Ok(Err(e))) => error!("Trace agent shut down with an error: {e:?}"),
         Ok(Err(e)) => error!("Trace agent task failed: {e:?}"),
         Err(_) => {
-            // Dropping the handle would detach the listener and let an in-flight
-            // flush keep holding the flush lock past this bound. Aborting and
-            // awaiting stops it before the drain takes the lock.
+            // Axum connection tasks can outlive the listener. Cancel their
+            // flush work explicitly so it releases the lock before the drain.
+            flush_cancel_token.cancel();
             listener_task.abort();
             let _ = listener_task.await;
             error!(
@@ -354,6 +359,7 @@ type FlushOp = Arc<dyn Fn() -> BoxFuture<'static, bool> + Send + Sync>;
 
 struct FlushRouterExtension {
     flush_op: FlushOp,
+    cancellation_token: CancellationToken,
 }
 
 impl fmt::Debug for FlushRouterExtension {
@@ -374,30 +380,42 @@ const SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(10);
 impl RouterExtension for FlushRouterExtension {
     fn extend(&self, router: Router) -> Result<Router, Box<dyn std::error::Error + Send + Sync>> {
         let flush_op = Arc::clone(&self.flush_op);
+        let cancellation_token = self.cancellation_token.clone();
         Ok(router.route(
             "/flush",
             post(move || {
                 let flush_op = Arc::clone(&flush_op);
+                let cancellation_token = cancellation_token.clone();
                 async move {
                     // Bound execution time. The flushers bound their own HTTP
                     // calls, but retries across the five flushers can stack, so
                     // this caps total wall-clock time for the harness.
-                    let mut task = tokio::task::spawn(async move { flush_op().await });
-                    match tokio::time::timeout(FLUSH_REQUEST_TIMEOUT, &mut task).await {
-                        Ok(Ok(false)) => StatusCode::NO_CONTENT,
+                    let mut tasks = tokio::task::JoinSet::new();
+                    tasks.spawn(async move {
+                        tokio::select! {
+                            biased;
+                            () = cancellation_token.cancelled() => {
+                                error!("Flush cancelled after shutdown grace period");
+                                true
+                            }
+                            result = async { flush_op().await } => result,
+                        }
+                    });
+                    match tokio::time::timeout(FLUSH_REQUEST_TIMEOUT, tasks.join_next()).await {
+                        Ok(Some(Ok(false))) => StatusCode::NO_CONTENT,
                         // The flush ran, but payloads were lost on the way to
                         // the aggregators or to the intake. Reporting 204 here
                         // would tell the harness the drain succeeded.
-                        Ok(Ok(true)) => {
+                        Ok(Some(Ok(true))) => {
                             error!("Flush completed with lost payloads");
                             StatusCode::BAD_GATEWAY
                         }
-                        Ok(Err(e)) => {
-                            error!("Flush task failed: {e:?}");
+                        Ok(result) => {
+                            error!("Flush task failed: {result:?}");
                             StatusCode::INTERNAL_SERVER_ERROR
                         }
                         Err(_) => {
-                            task.abort();
+                            tasks.shutdown().await;
                             error!(
                                 "Flush timed out after {}s, aborting",
                                 FLUSH_REQUEST_TIMEOUT.as_secs()
@@ -456,9 +474,19 @@ mod tests {
 
     /// Drives `POST /flush` against an extension backed by `op`.
     async fn flush_status(op: FlushOp) -> StatusCode {
-        let router = FlushRouterExtension { flush_op: op }
-            .extend(Router::new())
-            .expect("extend router");
+        flush_status_with_cancellation(op, CancellationToken::new()).await
+    }
+
+    async fn flush_status_with_cancellation(
+        op: FlushOp,
+        cancellation_token: CancellationToken,
+    ) -> StatusCode {
+        let router = FlushRouterExtension {
+            flush_op: op,
+            cancellation_token,
+        }
+        .extend(Router::new())
+        .expect("extend router");
 
         router
             .oneshot(
@@ -471,6 +499,97 @@ mod tests {
             .await
             .expect("route response")
             .status()
+    }
+
+    fn blocked_flush(
+        lock: Arc<tokio::sync::Mutex<()>>,
+        started: Arc<tokio::sync::Notify>,
+    ) -> FlushOp {
+        Arc::new(move || {
+            let lock = Arc::clone(&lock);
+            let started = Arc::clone(&started);
+            Box::pin(async move {
+                let _guard = lock.lock().await;
+                started.notify_one();
+                std::future::pending().await
+            })
+        })
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn flush_releases_lock_when_handler_is_cancelled() {
+        let lock = Arc::new(tokio::sync::Mutex::new(()));
+        let started = Arc::new(tokio::sync::Notify::new());
+        let handler = tokio::spawn(flush_status(blocked_flush(
+            Arc::clone(&lock),
+            Arc::clone(&started),
+        )));
+        started.notified().await;
+        assert!(lock.try_lock().is_err());
+
+        handler.abort();
+        assert!(
+            handler
+                .await
+                .expect_err("handler was aborted")
+                .is_cancelled()
+        );
+
+        let _guard = tokio::time::timeout(Duration::from_secs(1), lock.lock())
+            .await
+            .expect("cancelled handler must release the flush lock");
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn shutdown_timeout_cancels_flush_in_an_independent_handler() {
+        let cancellation_token = CancellationToken::new();
+        let lock = Arc::new(tokio::sync::Mutex::new(()));
+        let started = Arc::new(tokio::sync::Notify::new());
+        let handler = tokio::spawn(flush_status_with_cancellation(
+            blocked_flush(Arc::clone(&lock), Arc::clone(&started)),
+            cancellation_token.clone(),
+        ));
+        started.notified().await;
+        assert!(lock.try_lock().is_err());
+
+        // Like an Axum connection task, the handler is not owned by the listener.
+        let mut listener = tokio::spawn(std::future::pending());
+        await_listener_shutdown(&mut listener, &cancellation_token).await;
+
+        assert!(cancellation_token.is_cancelled());
+        assert!(listener.is_finished());
+        assert_eq!(
+            tokio::time::timeout(Duration::from_secs(1), handler)
+                .await
+                .expect("shutdown must cancel the active flush")
+                .expect("handler completed"),
+            StatusCode::BAD_GATEWAY
+        );
+        assert!(lock.try_lock().is_ok());
+    }
+
+    #[tokio::test]
+    async fn flush_does_not_start_after_shutdown_cancellation() {
+        let cancellation_token = CancellationToken::new();
+        cancellation_token.cancel();
+        let status = flush_status_with_cancellation(
+            Arc::new(|| panic!("flush must not start after cancellation")),
+            cancellation_token,
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_GATEWAY);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn flush_timeout_releases_lock_before_responding() {
+        let lock = Arc::new(tokio::sync::Mutex::new(()));
+        let status = flush_status(blocked_flush(
+            Arc::clone(&lock),
+            Arc::new(tokio::sync::Notify::new()),
+        ))
+        .await;
+        assert_eq!(status, StatusCode::GATEWAY_TIMEOUT);
+        assert!(lock.try_lock().is_ok());
     }
 
     #[tokio::test]
