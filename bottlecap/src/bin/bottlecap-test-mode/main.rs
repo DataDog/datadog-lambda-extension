@@ -427,7 +427,10 @@ impl RouterExtension for FlushRouterExtension {
                 async move {
                     // Bound execution time. The flushers bound their own HTTP
                     // calls, but retries across the five flushers can stack, so
-                    // this caps total wall-clock time for the harness.
+                    // this caps total wall-clock time for the harness. Using a
+                    // `JoinSet` (rather than a bare `JoinHandle`) also means
+                    // dropping this handler (e.g. on request cancellation)
+                    // aborts the inner task instead of leaving it detached.
                     let mut tasks = tokio::task::JoinSet::new();
                     tasks.spawn(async move {
                         tokio::select! {
@@ -436,6 +439,11 @@ impl RouterExtension for FlushRouterExtension {
                                 error!("Flush cancelled after shutdown grace period");
                                 true
                             }
+                            // Wrapped in an async block so calling `flush_op()`
+                            // is deferred to when this arm is polled: `select!`
+                            // evaluates branch futures eagerly, so calling it
+                            // directly here would invoke it even on a select
+                            // where the cancellation branch wins.
                             result = async { flush_op().await } => result,
                         }
                     });
