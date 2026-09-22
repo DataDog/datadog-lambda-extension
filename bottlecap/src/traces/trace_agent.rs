@@ -10,6 +10,7 @@ use axum::{
 };
 use serde_json::json;
 use std::collections::VecDeque;
+use std::future::Future;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Instant;
@@ -169,10 +170,43 @@ pub struct IngestBarrier {
 #[error("ingest forwarder stopped before draining accepted payloads")]
 pub struct IngestBarrierError;
 
+/// Drives a forwarder task: moves payloads from `rx` into `on_payload`, and
+/// acknowledges [`IngestBarrier`] requests on iterations where `rx` is empty.
+/// Exits when `rx` closes or `on_payload` reports the payload was lost.
+async fn run_forwarder<T, F, Fut>(
+    mut rx: Receiver<T>,
+    mut barrier_rx: Receiver<oneshot::Sender<()>>,
+    mut on_payload: F,
+) where
+    F: FnMut(T) -> Fut,
+    Fut: Future<Output = bool>,
+{
+    loop {
+        tokio::select! {
+            biased;
+            payload = rx.recv() => {
+                let Some(payload) = payload else { break };
+                if !on_payload(payload).await {
+                    break;
+                }
+            }
+            // Reached only on an iteration where the payload channel is
+            // empty, so everything queued before the barrier request is
+            // already in the aggregator. See [`IngestBarrier`].
+            Some(ack) = barrier_rx.recv() => {
+                let _ = ack.send(());
+            }
+        }
+    }
+}
+
 impl IngestBarrier {
     pub async fn wait(&self) -> Result<(), IngestBarrierError> {
-        Self::wait_for(&self.trace_tx).await?;
-        Self::wait_for(&self.stats_tx).await
+        tokio::try_join!(
+            Self::wait_for(&self.trace_tx),
+            Self::wait_for(&self.stats_tx)
+        )?;
+        Ok(())
     }
 
     /// Each forwarder task selects on its payload channel before its barrier
@@ -236,61 +270,56 @@ impl TraceAgent {
         // Set up a channel to send processed traces to our trace aggregator. tx is passed through each
         // endpoint_handler to the trace processor, which uses it to send de-serialized
         // processed trace payloads to our trace aggregator.
-        let (trace_tx, mut trace_rx): (Sender<SendDataBuilderInfo>, Receiver<SendDataBuilderInfo>) =
+        let (trace_tx, trace_rx): (Sender<SendDataBuilderInfo>, Receiver<SendDataBuilderInfo>) =
             mpsc::channel(TRACER_PAYLOAD_CHANNEL_BUFFER_SIZE);
-        let (trace_barrier_tx, mut trace_barrier_rx) =
+        let (trace_barrier_tx, trace_barrier_rx) =
             mpsc::channel::<oneshot::Sender<()>>(BARRIER_CHANNEL_BUFFER_SIZE);
 
         // Start the trace aggregator, which receives and buffers trace payloads to be consumed by the trace flusher.
-        tokio::spawn(async move {
-            loop {
-                tokio::select! {
-                    biased;
-                    tracer_payload_info = trace_rx.recv() => {
-                        let Some(tracer_payload_info) = tracer_payload_info else { break };
-                        // An error here means the aggregator task is gone and the
-                        // payload is lost. Stop the forwarder so a pending barrier
-                        // reports the loss via IngestBarrierError instead of
-                        // acknowledging a flush that would silently drop payloads.
-                        if aggregator_handle.insert_payload(tracer_payload_info).is_err() {
-                            error!("TRACE_AGENT | Aggregator stopped, dropping trace forwarder");
-                            break;
-                        }
-                    }
-                    // Reached only on an iteration where the payload channel is
-                    // empty, so everything queued before the barrier request is
-                    // already in the aggregator. See [`IngestBarrier`].
-                    Some(ack) = trace_barrier_rx.recv() => {
-                        let _ = ack.send(());
+        tokio::spawn(run_forwarder(
+            trace_rx,
+            trace_barrier_rx,
+            move |tracer_payload_info| {
+                let aggregator_handle = aggregator_handle.clone();
+                async move {
+                    // An error here means the aggregator task is gone and the
+                    // payload is lost. Stop the forwarder so a pending barrier
+                    // reports the loss via IngestBarrierError instead of
+                    // acknowledging a flush that would silently drop payloads.
+                    if aggregator_handle
+                        .insert_payload(tracer_payload_info)
+                        .is_err()
+                    {
+                        error!("TRACE_AGENT | Aggregator stopped, dropping trace forwarder");
+                        false
+                    } else {
+                        true
                     }
                 }
-            }
-        });
+            },
+        ));
 
         // Set up a channel to send processed stats to our stats aggregator.
-        let (stats_tx, mut stats_rx): (
+        let (stats_tx, stats_rx): (
             Sender<pb::ClientStatsPayload>,
             Receiver<pb::ClientStatsPayload>,
         ) = mpsc::channel(STATS_PAYLOAD_CHANNEL_BUFFER_SIZE);
-        let (stats_barrier_tx, mut stats_barrier_rx) =
+        let (stats_barrier_tx, stats_barrier_rx) =
             mpsc::channel::<oneshot::Sender<()>>(BARRIER_CHANNEL_BUFFER_SIZE);
 
         // Start the stats aggregator, which receives and buffers stats payloads to be consumed by the stats flusher.
         let stats_aggregator_task = stats_aggregator.clone();
-        tokio::spawn(async move {
-            loop {
-                tokio::select! {
-                    biased;
-                    stats_payload = stats_rx.recv() => {
-                        let Some(stats_payload) = stats_payload else { break };
-                        stats_aggregator_task.lock().await.add(stats_payload);
-                    }
-                    Some(ack) = stats_barrier_rx.recv() => {
-                        let _ = ack.send(());
-                    }
+        tokio::spawn(run_forwarder(
+            stats_rx,
+            stats_barrier_rx,
+            move |stats_payload| {
+                let stats_aggregator_task = stats_aggregator_task.clone();
+                async move {
+                    stats_aggregator_task.lock().await.add(stats_payload);
+                    true
                 }
-            }
-        });
+            },
+        ));
 
         TraceAgent {
             config: config.clone(),
