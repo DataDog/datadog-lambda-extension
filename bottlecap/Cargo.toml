@@ -141,6 +141,10 @@ required-features = ["test-mode"]
 name = "mock-intake"
 required-features = ["mock-intake"]
 
+[[test]]
+name = "double_count_integration_test"
+required-features = ["fake-intake", "test-mode"]
+
 [profile.dev]
 debug = true   # same as debuginfo=2 and no stripping
 strip = false
