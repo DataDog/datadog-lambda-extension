@@ -50,7 +50,8 @@ use libdd_trace_utils::trace_utils::{self};
 
 use crate::traces::stats_concentrator_service::StatsConcentratorHandle;
 
-const TRACE_AGENT_PORT: usize = 8126;
+/// Default TCP port the trace agent listener binds to on 127.0.0.1.
+pub const TRACE_AGENT_PORT: usize = 8126;
 
 // Agent endpoints
 const V4_TRACE_ENDPOINT_PATH: &str = "/v0.4/traces";
@@ -205,6 +206,9 @@ pub struct TraceAgent {
     /// `None` when the caller wants no extra routes. See
     /// [`TraceAgent::with_router_extension`].
     router_extension: Option<Arc<dyn RouterExtension>>,
+    /// `None` when the caller wants the default port. See
+    /// [`TraceAgent::with_receiver_port`].
+    receiver_port: Option<u16>,
 }
 
 #[derive(Clone, Copy)]
@@ -309,6 +313,7 @@ impl TraceAgent {
             stats_concentrator,
             span_deduper,
             router_extension: None,
+            receiver_port: None,
         }
     }
 
@@ -322,17 +327,28 @@ impl TraceAgent {
         self
     }
 
+    /// Overrides the listener port, which defaults to [`TRACE_AGENT_PORT`]
+    /// (8126). For the test-mode binary, which maps `DD_APM_RECEIVER_PORT`
+    /// to this setting; production callers must keep the default.
+    #[must_use]
+    pub fn with_receiver_port(mut self, port: u16) -> Self {
+        self.receiver_port = Some(port);
+        self
+    }
+
     #[allow(clippy::cast_possible_truncation)]
     pub async fn start(&self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let now = Instant::now();
 
         let router = self.make_router()?;
 
-        let port = u16::try_from(TRACE_AGENT_PORT).expect("TRACE_AGENT_PORT is too large");
+        let port = self
+            .receiver_port
+            .unwrap_or(u16::try_from(TRACE_AGENT_PORT).expect("TRACE_AGENT_PORT is too large"));
         let socket = SocketAddr::from(([127, 0, 0, 1], port));
         let listener = tokio::net::TcpListener::bind(&socket).await?;
 
-        debug!("TRACE AGENT | Listening on port {TRACE_AGENT_PORT}");
+        debug!("TRACE AGENT | Listening on port {port}");
         debug!(
             "TRACE AGENT | Time taken to start: {} ms",
             now.elapsed().as_millis()

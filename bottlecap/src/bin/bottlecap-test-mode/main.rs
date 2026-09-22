@@ -6,7 +6,8 @@
 //! workflows that need to point a tracer at bottlecap without standing up a
 //! Lambda.
 //!
-//! Core endpoints on `127.0.0.1:8126`:
+//! Core endpoints on `127.0.0.1:8126` (port configurable, see
+//! `DD_APM_RECEIVER_PORT` below):
 //!
 //! | Path           | Method    | Source                                   |
 //! |----------------|-----------|------------------------------------------|
@@ -27,6 +28,7 @@
 //! |---------------------------------|-------------------------------------------------------------------------|
 //! | `DD_APM_DD_URL`                 | Override trace intake URL; stats follow it (harness points at fake-intake) |
 //! | `DD_SITE`                       | Derive trace and stats intake URLs when `DD_APM_DD_URL` is unset        |
+//! | `DD_APM_RECEIVER_PORT`          | TCP port the trace agent listener binds to (default 8126)               |
 //! | `DD_SERVERLESS_FLUSH_STRATEGY`  | Enable periodic flushing (e.g. `periodically,5000`); default = manual   |
 //! | `DD_TESTMODE_FUNCTION_ARN`      | Override stub function ARN for tag generation                           |
 //! | `DD_LOG_LEVEL`                  | Logging verbosity, parsed by [`bottlecap::config::log_level::LogLevel`] |
@@ -67,7 +69,7 @@ use bottlecap::{
     tags::{lambda::tags::FUNCTION_ARN_KEY, provider::Provider as TagProvider},
     traces::{
         TRACE_INTAKE_ROUTE, proxy_aggregator,
-        trace_agent::{IngestBarrier, RouterExtension},
+        trace_agent::{TRACE_AGENT_PORT, IngestBarrier, RouterExtension},
     },
 };
 use dogstatsd::{
@@ -85,6 +87,10 @@ use ustr::Ustr;
 async fn main() -> anyhow::Result<()> {
     init_ustr();
     enable_logging_subsystem();
+
+    // Fail before binding anything so a misconfigured harness errors out
+    // instead of listening on the wrong port.
+    let receiver_port = receiver_port_from_env()?;
 
     // Outside Lambda every `AwsConfig` field falls back via `unwrap_or_default()`,
     // so loading from env is safe with no AWS env vars set. The struct is only
@@ -174,7 +180,9 @@ async fn main() -> anyhow::Result<()> {
             })
         },
     });
-    let trace_agent = trace_agent.with_router_extension(flush_extension);
+    let trace_agent = trace_agent
+        .with_receiver_port(receiver_port)
+        .with_router_extension(flush_extension);
     // Errors are returned rather than logged so that a startup failure (port
     // 8126 already bound, for instance) ends the process instead of leaving a
     // live one with no listener for the harness to connect to.
@@ -334,6 +342,33 @@ async fn drain_and_flush(
         flushing_service.flush_blocking().await
     };
     barrier_failed || undelivered
+}
+
+/// The env var the Go trace agent uses for its listener port.
+const ENV_RECEIVER_PORT: &str = "DD_APM_RECEIVER_PORT";
+
+/// Resolves the trace agent listener port from [`ENV_RECEIVER_PORT`].
+///
+/// Unset or empty means the default [`TRACE_AGENT_PORT`] (8126): empty is
+/// treated as unset because the Go trace agent makes the same choice, and
+/// harnesses often export variables with blank values. Any other value must
+/// be a port in 1-65535 or startup fails, rather than silently falling back
+/// to a port the tracer is not pointed at.
+fn receiver_port_from_env() -> anyhow::Result<u16> {
+    receiver_port(env::var(ENV_RECEIVER_PORT).ok().as_deref())
+}
+
+/// Parses the receiver port from an already-extracted variable value.
+/// Split from [`receiver_port_from_env`] so tests need no process env.
+fn receiver_port(value: Option<&str>) -> anyhow::Result<u16> {
+    let Some(value) = value.filter(|v| !v.is_empty()) else {
+        return Ok(u16::try_from(TRACE_AGENT_PORT).expect("default trace agent port fits in u16"));
+    };
+    value
+        .parse::<u16>()
+        .ok()
+        .filter(|port| *port != 0)
+        .ok_or_else(|| anyhow::anyhow!("{ENV_RECEIVER_PORT} must be a port in 1-65535, got {value:?}"))
 }
 
 /// Point stats at the same host as traces.
@@ -638,5 +673,33 @@ mod tests {
             stats_url_from_trace_intake(&libdd_trace_utils::config_utils::trace_intake_url(site)),
             libdd_trace_utils::config_utils::trace_stats_url(site)
         );
+    }
+
+    #[test]
+    fn receiver_port_parses_valid_values_and_defaults_on_unset_or_empty() {
+        let default = u16::try_from(TRACE_AGENT_PORT).expect("default port fits in u16");
+        let test_cases = [
+            (None, Ok(default)),
+            (Some(""), Ok(default)),
+            (Some("8126"), Ok(8126)),
+            (Some("9999"), Ok(9999)),
+            (Some("65535"), Ok(65535)),
+            (Some("abc"), Err(())),
+            (Some("0"), Err(())),
+            (Some("70000"), Err(())),
+            (Some("-1"), Err(())),
+            (Some("1.5"), Err(())),
+        ];
+        for (input, expected) in test_cases {
+            let result = receiver_port(input).map_err(|_| ());
+            assert_eq!(result, expected, "input: {input:?}");
+        }
+    }
+
+    #[test]
+    fn receiver_port_error_names_the_env_var_and_value() {
+        let err = receiver_port(Some("0")).expect_err("0 is not a valid port");
+        assert!(err.to_string().contains("DD_APM_RECEIVER_PORT"));
+        assert!(err.to_string().contains("\"0\""));
     }
 }
