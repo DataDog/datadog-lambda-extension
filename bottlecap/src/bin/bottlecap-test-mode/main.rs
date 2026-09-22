@@ -69,7 +69,7 @@ use bottlecap::{
     tags::{lambda::tags::FUNCTION_ARN_KEY, provider::Provider as TagProvider},
     traces::{
         TRACE_INTAKE_ROUTE, proxy_aggregator,
-        trace_agent::{TRACE_AGENT_PORT, IngestBarrier, RouterExtension},
+        trace_agent::{IngestBarrier, RouterExtension, TRACE_AGENT_PORT},
     },
 };
 use dogstatsd::{
@@ -368,7 +368,9 @@ fn receiver_port(value: Option<&str>) -> anyhow::Result<u16> {
         .parse::<u16>()
         .ok()
         .filter(|port| *port != 0)
-        .ok_or_else(|| anyhow::anyhow!("{ENV_RECEIVER_PORT} must be a port in 1-65535, got {value:?}"))
+        .ok_or_else(|| {
+            anyhow::anyhow!("{ENV_RECEIVER_PORT} must be a port in 1-65535, got {value:?}")
+        })
 }
 
 /// Point stats at the same host as traces.
