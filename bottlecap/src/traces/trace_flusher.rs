@@ -17,7 +17,9 @@ use tracing::{debug, error};
 
 use crate::FLUSH_RETRY_COUNT;
 use crate::config::Config;
+use crate::config::aws::AwsConfig;
 use crate::lifecycle::invocation::processor::S_TO_MS;
+use crate::secrets::decrypt::build_additional_endpoint_api_key_factory;
 use crate::traces::http_client::HttpClient;
 use crate::traces::trace_aggregator_service::AggregatorHandle;
 
@@ -41,7 +43,10 @@ pub struct TraceFlusher {
     /// Additional endpoints for dual-shipping traces to multiple Datadog sites.
     /// Configured via `DD_APM_ADDITIONAL_ENDPOINTS` (e.g., sending to both US and EU).
     /// Each trace batch is sent to the primary endpoint AND all additional endpoints.
-    pub additional_endpoints: Vec<Endpoint>,
+    /// The API key is resolved lazily per endpoint at flush time (rather than baked into
+    /// `Endpoint` here) so a key that's actually a Secrets Manager ARN can be fetched without
+    /// blocking construction.
+    pub additional_endpoints: Vec<(Endpoint, Arc<ApiKeyFactory>)>,
     http_client: HttpClient,
 }
 
@@ -52,23 +57,26 @@ impl TraceFlusher {
         config: Arc<Config>,
         api_key_factory: Arc<ApiKeyFactory>,
         http_client: HttpClient,
+        aws_config: &Arc<AwsConfig>,
     ) -> Self {
         // Parse additional endpoints for dual-shipping from config.
         // Format: { "https://trace.agent.datadoghq.eu": ["api-key-1", "api-key-2"], ... }
         // Each URL + API key combination becomes a separate endpoint.
-        let mut additional_endpoints: Vec<Endpoint> = Vec::new();
+        let mut additional_endpoints: Vec<(Endpoint, Arc<ApiKeyFactory>)> = Vec::new();
         for (endpoint_url, api_keys) in config.apm_additional_endpoints.clone() {
             for api_key in api_keys {
                 let trace_intake_url = trace_intake_url_prefixed(&endpoint_url);
                 let endpoint = Endpoint {
                     url: hyper::Uri::from_str(&trace_intake_url)
                         .expect("can't parse additional trace intake URL, exiting"),
-                    api_key: Some(api_key.clone().into()),
+                    api_key: None,
                     timeout_ms: config.flush_timeout * S_TO_MS,
                     test_token: None,
                     use_system_resolver: false,
                 };
-                additional_endpoints.push(endpoint);
+                let api_key_factory =
+                    build_additional_endpoint_api_key_factory(&api_key, aws_config);
+                additional_endpoints.push((endpoint, api_key_factory));
             }
         }
 
@@ -122,6 +130,21 @@ impl TraceFlusher {
             }
         };
 
+        let mut resolved_additional_endpoints = Vec::with_capacity(self.additional_endpoints.len());
+        for (endpoint, api_key_factory) in &self.additional_endpoints {
+            if let Some(key) = api_key_factory.get_api_key().await {
+                resolved_additional_endpoints.push(Endpoint {
+                    api_key: Some(key.into()),
+                    ..endpoint.clone()
+                });
+            } else {
+                error!(
+                    "TRACES | Failed to resolve API key for additional endpoint {}, skipping dual-shipping to it",
+                    endpoint.url
+                );
+            }
+        }
+
         let mut batch_tasks = JoinSet::new();
 
         for trace_builders in all_batches {
@@ -140,7 +163,7 @@ impl TraceFlusher {
             // Send to ADDITIONAL endpoints for dual-shipping.
             // Construct separate SendData objects per endpoint by cloning the inner
             // V07 payload data (TracerPayload is Clone, but SendData is not).
-            for endpoint in self.additional_endpoints.clone() {
+            for endpoint in &resolved_additional_endpoints {
                 let additional_traces: Vec<_> = traces_with_tags
                     .iter()
                     .filter_map(|(trace, tags)| match trace.get_payloads() {
@@ -149,7 +172,7 @@ impl TraceFlusher {
                                 trace.len(),
                                 TracerPayloadCollection::V07(payloads.clone()),
                                 tags.to_tracer_header_tags(),
-                                &endpoint,
+                                endpoint,
                             );
                             send_data.set_retry_strategy(trace_retry_strategy());
                             Some(send_data)

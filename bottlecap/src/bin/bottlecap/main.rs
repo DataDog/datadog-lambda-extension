@@ -329,6 +329,7 @@ async fn extension_loop_active(
         event_bus_tx.clone(),
         aws_config.is_managed_instance_mode(),
         &shared_client,
+        &aws_config,
     );
 
     let (metrics_flushers, metrics_aggregator_handle, dogstatsd_cancel_token) = start_dogstatsd(
@@ -431,6 +432,7 @@ async fn extension_loop_active(
         appsec_processor.clone(),
         &shared_client,
         Arc::clone(&proxy_aggregator),
+        &aws_config,
     );
 
     let api_runtime_proxy_shutdown_signal = start_api_runtime_proxy(
@@ -1114,6 +1116,7 @@ fn start_logs_agent(
     event_bus: Sender<Event>,
     is_managed_instance_mode: bool,
     client: &Client,
+    aws_config: &Arc<AwsConfig>,
 ) -> (
     Sender<TelemetryEvent>,
     LogsFlusher,
@@ -1148,6 +1151,7 @@ fn start_logs_agent(
         aggregator_handle.clone(),
         config.clone(),
         client.clone(),
+        aws_config,
     );
     (
         tx,
@@ -1159,6 +1163,7 @@ fn start_logs_agent(
 }
 
 #[allow(clippy::type_complexity)]
+#[allow(clippy::too_many_arguments)]
 fn start_trace_agent(
     config: &Arc<Config>,
     api_key_factory: &Arc<ApiKeyFactory>,
@@ -1167,6 +1172,7 @@ fn start_trace_agent(
     appsec_processor: Option<Arc<TokioMutex<AppSecProcessor>>>,
     client: &Client,
     proxy_aggregator: Arc<TokioMutex<proxy_aggregator::Aggregator>>,
+    aws_config: &Arc<AwsConfig>,
 ) -> (
     Sender<SendDataBuilderInfo>,
     Arc<trace_flusher::TraceFlusher>,
@@ -1212,6 +1218,7 @@ fn start_trace_agent(
         config.clone(),
         api_key_factory.clone(),
         trace_http_client,
+        aws_config,
     ));
 
     let obfuscation_config = obfuscation_config::ObfuscationConfig {

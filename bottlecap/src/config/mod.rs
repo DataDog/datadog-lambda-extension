@@ -286,7 +286,11 @@ impl DatadogConfigExtension for LambdaConfig {
         // file, which will be removed once the migration onto upstream is
         // complete.
         datadog_agent_config::merge_fields!(self, source,
-            string: [api_key_secret_arn, kms_api_key, api_key_ssm_arn],
+            string: [
+                api_key_secret_arn,
+                kms_api_key,
+                api_key_ssm_arn,
+            ],
             value:  [
                 serverless_flush_strategy,
                 enhanced_metrics,

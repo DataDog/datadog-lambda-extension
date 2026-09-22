@@ -6,6 +6,7 @@ use crate::fips::compute_aws_api_host;
 use base64::prelude::*;
 use chrono::{DateTime, Utc};
 use datadog_fips::reqwest_adapter::create_reqwest_client_builder;
+use dogstatsd::api_key::ApiKeyFactory;
 use hmac::{Hmac, Mac};
 use reqwest::Client;
 use reqwest::header::{HeaderMap, HeaderValue};
@@ -42,21 +43,7 @@ pub async fn resolve_secrets(
         // fetch credentials and secrets. The delegated-auth path (dd_org_uuid)
         // talks to a Datadog endpoint and so uses `shared_client` below, which does
         // honor the proxy and tls_cert_file settings.
-        let builder = match create_reqwest_client_builder() {
-            Ok(builder) => builder,
-            Err(err) => {
-                error!("Error creating reqwest client builder: {}", err);
-                return None;
-            }
-        };
-
-        let client = match builder.build() {
-            Ok(client) => client,
-            Err(err) => {
-                error!("Error creating reqwest client: {}", err);
-                return None;
-            }
-        };
+        let client = build_direct_aws_client()?;
 
         let aws_credentials = get_aws_credentials(&client).await?;
 
@@ -108,6 +95,66 @@ pub async fn resolve_secrets(
     };
 
     clean_api_key(api_key_candidate)
+}
+
+// Dedicated client for direct AWS control-plane calls (KMS / Secrets Manager / SSM / STS, and
+// the SnapStart container-credentials endpoint).
+fn build_direct_aws_client() -> Option<Client> {
+    let builder = match create_reqwest_client_builder() {
+        Ok(builder) => builder,
+        Err(err) => {
+            error!("Error creating reqwest client builder: {}", err);
+            return None;
+        }
+    };
+
+    match builder.build() {
+        Ok(client) => Some(client),
+        Err(err) => {
+            error!("Error creating reqwest client: {}", err);
+            None
+        }
+    }
+}
+
+fn is_secrets_manager_arn(value: &str) -> bool {
+    value.starts_with("arn:") && value.contains(":secretsmanager:")
+}
+
+/// Builds an `ApiKeyFactory` for a single additional-endpoint API key. If the value looks like a
+/// Secrets Manager ARN it's resolved lazily and cached the same way the primary API key is;
+/// otherwise it's used as a static, literal key.
+#[must_use]
+pub fn build_additional_endpoint_api_key_factory(
+    api_key: &str,
+    aws_config: &Arc<AwsConfig>,
+) -> Arc<ApiKeyFactory> {
+    if !is_secrets_manager_arn(api_key) {
+        return Arc::new(ApiKeyFactory::new(api_key));
+    }
+
+    let secret_arn = api_key.to_string();
+    let aws_config = Arc::clone(aws_config);
+    Arc::new(ApiKeyFactory::new_from_resolver(
+        Arc::new(move || {
+            let secret_arn = secret_arn.clone();
+            let aws_config = Arc::clone(&aws_config);
+            Box::pin(async move {
+                let client = build_direct_aws_client()?;
+                let aws_credentials = get_aws_credentials(&client).await?;
+                match decrypt_aws_sm(&client, secret_arn.clone(), aws_config, &aws_credentials)
+                    .await
+                {
+                    Ok(secret) => clean_api_key(Some(secret)),
+                    Err(err) => {
+                        error!("Error resolving additional endpoint secret {secret_arn}: {err}");
+                        None
+                    }
+                }
+            })
+        }),
+        None,
+    ))
 }
 
 fn clean_api_key(maybe_key: Option<String>) -> Option<String> {
@@ -495,6 +542,50 @@ mod tests {
         let v = make_sm_response(raw);
         let result = extract_secret_string(&v).expect("should fall back to raw string");
         assert_eq!(result, raw);
+    }
+
+    fn test_aws_config() -> Arc<AwsConfig> {
+        Arc::new(AwsConfig {
+            region: "us-east-1".to_string(),
+            aws_lwa_proxy_lambda_runtime_api: None,
+            function_name: "arn:some-function".to_string(),
+            sandbox_init_time: Instant::now(),
+            runtime_api: String::new(),
+            exec_wrapper: None,
+            initialization_type: "on-demand".into(),
+        })
+    }
+
+    #[test]
+    fn test_is_secrets_manager_arn() {
+        assert!(is_secrets_manager_arn(
+            "arn:aws:secretsmanager:us-east-1:123456789012:secret:foo"
+        ));
+        assert!(!is_secrets_manager_arn("plain-api-key"));
+        assert!(!is_secrets_manager_arn(
+            "arn:aws:kms:us-east-1:123456789012:key/foo"
+        ));
+    }
+
+    #[tokio::test]
+    async fn build_additional_endpoint_api_key_factory_uses_literal_key_as_is() {
+        let factory =
+            build_additional_endpoint_api_key_factory("plain-api-key", &test_aws_config());
+        assert_eq!(
+            factory.get_api_key().await,
+            Some("plain-api-key".to_string())
+        );
+    }
+
+    #[test]
+    fn build_additional_endpoint_api_key_factory_resolves_arns_lazily() {
+        // A Secrets Manager ARN must produce a `Dynamic` factory (resolved on first use, not
+        // eagerly here) rather than a `Static` one holding the literal ARN string as the key.
+        let factory = build_additional_endpoint_api_key_factory(
+            "arn:aws:secretsmanager:us-east-1:123456789012:secret:foo",
+            &test_aws_config(),
+        );
+        assert!(matches!(*factory, ApiKeyFactory::Dynamic { .. }));
     }
 
     #[test]

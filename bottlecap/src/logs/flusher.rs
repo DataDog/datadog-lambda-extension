@@ -1,6 +1,7 @@
 use crate::FLUSH_RETRY_COUNT;
 use crate::config;
 use crate::logs::aggregator_service::AggregatorHandle;
+use crate::secrets::decrypt::build_additional_endpoint_api_key_factory;
 use dogstatsd::api_key::ApiKeyFactory;
 use futures::future::join_all;
 use hyper::StatusCode;
@@ -215,6 +216,7 @@ impl LogsFlusher {
         aggregator_handle: AggregatorHandle,
         config: Arc<config::Config>,
         client: reqwest::Client,
+        aws_config: &Arc<config::aws::AwsConfig>,
     ) -> Self {
         let mut flushers = Vec::new();
 
@@ -239,7 +241,7 @@ impl LogsFlusher {
         for endpoint in &config.logs_config_additional_endpoints {
             let endpoint_url = format!("https://{}:{}", endpoint.host, endpoint.port);
             let additional_api_key_factory =
-                Arc::new(ApiKeyFactory::new(endpoint.api_key.clone().as_str()));
+                build_additional_endpoint_api_key_factory(&endpoint.api_key, aws_config);
             flushers.push(Flusher::new(
                 additional_api_key_factory,
                 endpoint_url,

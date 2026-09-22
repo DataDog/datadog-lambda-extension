@@ -271,7 +271,16 @@ async fn trace_payload_roundtrip_through_fake_intake() {
         .expect("insert_payload must succeed");
 
     let api_key_factory = Arc::new(ApiKeyFactory::new(DD_API_KEY));
-    let flusher = TraceFlusher::new(aggregator_handle, config, api_key_factory, http_client);
+    let aws_config = Arc::new(bottlecap::config::aws::AwsConfig::from_env(
+        tokio::time::Instant::now(),
+    ));
+    let flusher = TraceFlusher::new(
+        aggregator_handle,
+        config,
+        api_key_factory,
+        http_client,
+        &aws_config,
+    );
 
     let failed = flusher.flush(None).await;
     assert!(
@@ -405,11 +414,15 @@ async fn run_processor_pipeline_with_traces(
     // Flush traces.
     let http_client = create_client(None, None, false).expect("failed to create http client");
     let api_key_factory = Arc::new(ApiKeyFactory::new(DD_API_KEY));
+    let aws_config = Arc::new(bottlecap::config::aws::AwsConfig::from_env(
+        tokio::time::Instant::now(),
+    ));
     let trace_flusher = TraceFlusher::new(
         aggregator_handle,
         Arc::clone(&config),
         Arc::clone(&api_key_factory),
         http_client.clone(),
+        &aws_config,
     );
     let failed = trace_flusher.flush(None).await;
     assert!(failed.is_none(), "trace flush failed: {failed:?}");
