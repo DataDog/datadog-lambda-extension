@@ -118,7 +118,15 @@ fn build_direct_aws_client() -> Option<Client> {
 }
 
 fn is_secrets_manager_arn(value: &str) -> bool {
-    value.starts_with("arn:") && value.contains(":secretsmanager:")
+    let parts: Vec<&str> = value.splitn(6, ':').collect();
+    matches!(
+        parts.as_slice(),
+        ["arn", partition, "secretsmanager", region, account, resource]
+            if !partition.is_empty()
+                && !region.is_empty()
+                && !account.is_empty()
+                && resource.strip_prefix("secret:").is_some_and(|name| !name.is_empty())
+    )
 }
 
 /// Builds an `ApiKeyFactory` for a single additional-endpoint API key. If the value looks like a
@@ -146,7 +154,7 @@ pub fn build_additional_endpoint_api_key_factory(
                     .await
                 {
                     Ok(secret) => clean_api_key(Some(secret)),
-                    Err(err) => {
+                    Err(_err) => {
                         error!("Error resolving additional endpoint secret");
                         None
                     }
@@ -564,6 +572,19 @@ mod tests {
         assert!(!is_secrets_manager_arn("plain-api-key"));
         assert!(!is_secrets_manager_arn(
             "arn:aws:kms:us-east-1:123456789012:key/foo"
+        ));
+        // Malformed / incomplete ARN-shaped values must not be treated as valid ARNs.
+        assert!(!is_secrets_manager_arn(
+            "arn:invalid:secretsmanager:not-an-arn"
+        ));
+        assert!(!is_secrets_manager_arn(
+            "arn::secretsmanager:us-east-1:123456789012:secret:foo"
+        ));
+        assert!(!is_secrets_manager_arn(
+            "arn:aws:secretsmanager:us-east-1:123456789012:secret:"
+        ));
+        assert!(!is_secrets_manager_arn(
+            "arn:aws:secretsmanager:us-east-1:123456789012:function:foo"
         ));
     }
 
