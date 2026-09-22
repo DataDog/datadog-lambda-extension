@@ -23,6 +23,8 @@ pub mod appsec;
 pub mod config;
 pub mod event_bus;
 pub mod extension;
+#[cfg(feature = "fake-intake")]
+pub mod fake_intake;
 pub mod fips;
 pub mod flushing;
 pub mod http;

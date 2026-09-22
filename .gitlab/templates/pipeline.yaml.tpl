@@ -63,9 +63,23 @@ cargo clippy:
     # We need to do these separately because the fips feature is incompatible with the default feature.
     - cargo clippy --workspace --features default
     - cargo clippy --workspace --no-default-features --features fips
-    # No other job compiles the test-mode feature: it gates test-only
-    # constructors that are absent from default and fips builds.
-    - cargo clippy --workspace --features default,test-mode
+    # No other job compiles the test-mode or fake-intake features: they gate
+    # test-only constructors and fixtures that are absent from default and
+    # fips builds.
+    - cargo clippy --workspace --all-targets --features default,test-mode,fake-intake
+
+cargo test:
+  stage: test
+  tags: ["arch:amd64"]
+  image: ${CI_DOCKER_TARGET_IMAGE}:${CI_DOCKER_TARGET_VERSION}
+  needs: []
+  script:
+    - apt-get update && apt-get install -y --fix-missing --no-install-recommends golang-go
+    - cd bottlecap
+    # fake-intake enables the APM / DSM integration tests and the fake-intake
+    # unit tests; default and fips feature sets skip those targets.
+    - cargo install cargo-nextest --locked
+    - cargo nextest run --workspace --features fake-intake
 
 {{ range $flavor := (ds "flavors").flavors }}
 

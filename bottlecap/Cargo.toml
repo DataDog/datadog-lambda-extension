@@ -117,6 +117,19 @@ flate2 = { version = "1.1", default-features = false, features = ["rust_backend"
 [[bin]]
 name = "bottlecap"
 
+[[bin]]
+name = "fake-intake"
+path = "src/bin/fake-intake/main.rs"
+required-features = ["fake-intake"]
+
+[[test]]
+name = "apm_integration_test"
+required-features = ["fake-intake"]
+
+[[test]]
+name = "dsm_integration_test"
+required-features = ["fake-intake"]
+
 [profile.dev]
 debug = true   # same as debuginfo=2 and no stripping
 strip = false
@@ -180,6 +193,10 @@ fips = [
 # Not enabled in `default` or `fips`, so the items it gates do not appear
 # in production builds.
 test-mode = []
+# Builds the standalone fake-intake binary (`src/bin/fake-intake`) and the
+# embedded `fake_intake` library module used by the APM / DSM integration
+# tests. Not enabled in `default` or `fips`.
+fake-intake = ["tokio/signal"]
 
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(coverage,coverage_nightly)'] }

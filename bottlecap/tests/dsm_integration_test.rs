@@ -28,10 +28,7 @@ use datadog_fips::reqwest_adapter::create_reqwest_client_builder;
 use dogstatsd::api_key::ApiKeyFactory;
 use tokio::sync::Mutex;
 
-#[path = "common/fake_intake.rs"]
-mod fake_intake;
-
-use fake_intake::FakeIntake;
+use bottlecap::fake_intake::FakeIntake;
 
 const DD_API_KEY: &str = "my_test_key";
 

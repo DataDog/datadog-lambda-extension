@@ -82,10 +82,11 @@ jobs:
         run: cargo clippy --workspace --all-targets --features default
       - working-directory: bottlecap
         run: cargo clippy --workspace --all-targets --no-default-features --features fips
-      # No other job compiles the test-mode feature: it gates test-only
-      # constructors that are absent from default and fips builds.
+      # No other job compiles the test-mode or fake-intake features: they gate
+      # test-only constructors and fixtures that are absent from default and
+      # fips builds.
       - working-directory: bottlecap
-        run: cargo clippy --workspace --all-targets --features default,test-mode
+        run: cargo clippy --workspace --all-targets --features default,test-mode,fake-intake
 
   build-all:
     name: Build All
@@ -144,7 +145,9 @@ jobs:
           tool: nextest@0.9
       - uses: mozilla-actions/sccache-action@7d986dd989559c6ecdb630a3fd2557667be217ad # v0.0.9
       - working-directory: bottlecap
-        run: cargo nextest run --workspace
+        # fake-intake enables the APM / DSM integration tests and the fake-intake
+        # unit tests; default and fips feature sets skip those targets.
+        run: cargo nextest run --workspace --features fake-intake
 
   format:
     name: Format
