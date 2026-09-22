@@ -147,7 +147,7 @@ pub fn build_additional_endpoint_api_key_factory(
                 {
                     Ok(secret) => clean_api_key(Some(secret)),
                     Err(err) => {
-                        error!("Error resolving additional endpoint secret {secret_arn}: {err}");
+                        error!("Error resolving additional endpoint secret");
                         None
                     }
                 }
