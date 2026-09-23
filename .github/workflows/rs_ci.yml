@@ -186,6 +186,9 @@ jobs:
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           working-directory: bottlecap
+          # Mirrors bottlecap/.cargo/audit.toml. This action only reads ./.cargo/audit.toml
+          # relative to its cwd (repo root), so the crate-local ignore list is never loaded in CI.
+          ignore: RUSTSEC-2026-0285
 
   # Guards cold-start H1 (PR #1276): the default build must keep reqwest on
   # compiled-in webpki roots (no per-build native-cert filesystem scan), and the
