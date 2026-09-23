@@ -44,6 +44,9 @@ hmac = { version = "0.12", default-features = false }
 sha2 = { version = "0.10", default-features = false }
 hex = { version = "0.4", default-features = false, features = ["std"] }
 base64 = { version = "0.22", default-features = false }
+# Resolved version is intentionally held below 0.23.45 (see .cargo/audit.toml): that version
+# requires aws-lc-rs >= 1.18, which pulls in AWS-LC-FIPS 4.x, pending FIPS 140-3 certification.
+# Do not bump until a FIPS-certified aws-lc-rs is available, or a future `cargo update` will re-bump it.
 rustls = { version = "0.23.18", default-features = false }
 # Transitive via rustls. Pinned to >=0.103.13 so cargo audit passes (RUSTSEC-2026-0098, RUSTSEC-2026-0099, RUSTSEC-2026-0104).
 rustls-webpki = { version = "0.103.13", default-features = false }
