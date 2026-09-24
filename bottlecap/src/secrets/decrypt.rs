@@ -30,33 +30,9 @@ pub async fn resolve_secrets(
     {
         let before_decrypt = Instant::now();
 
-        // Dedicated client for *direct* AWS control-plane calls (KMS / Secrets
-        // Manager / SSM / STS, and the SnapStart container-credentials endpoint).
-        // It intentionally uses the default root set (compiled-in webpki roots on
-        // non-FIPS builds; see bottlecap/Cargo.toml) with no proxy and no
-        // tls_cert_file: AWS endpoints present certificates that chain to public
-        // AWS CAs, and DD_PROXY_HTTPS / tls_cert_file are for *Datadog* egress, not
-        // AWS API traffic (which goes direct, or through VPC endpoints that also
-        // present public certs). skip_ssl_validation is deliberately not applied
-        // here either — we do not disable certificate validation on the calls that
-        // fetch credentials and secrets. The delegated-auth path (dd_org_uuid)
-        // talks to a Datadog endpoint and so uses `shared_client` below, which does
-        // honor the proxy and tls_cert_file settings.
-        let builder = match create_reqwest_client_builder() {
-            Ok(builder) => builder,
-            Err(err) => {
-                error!("Error creating reqwest client builder: {}", err);
-                return None;
-            }
-        };
-
-        let client = match builder.build() {
-            Ok(client) => client,
-            Err(err) => {
-                error!("Error creating reqwest client: {}", err);
-                return None;
-            }
-        };
+        // The delegated-auth path (dd_org_uuid) talks to a Datadog endpoint and so uses
+        // `shared_client` below, which does honor the proxy and tls_cert_file settings.
+        let client = build_direct_aws_client()?;
 
         let aws_credentials = get_aws_credentials(&client).await?;
 
@@ -108,6 +84,126 @@ pub async fn resolve_secrets(
     };
 
     clean_api_key(api_key_candidate)
+}
+
+/// Dedicated client for *direct* AWS control-plane calls (KMS / Secrets Manager / SSM / STS, and
+/// the `SnapStart` container-credentials endpoint). It intentionally uses the default root set
+/// (compiled-in webpki roots on non-FIPS builds; see bottlecap/Cargo.toml) with no proxy and no
+/// `tls_cert_file`: AWS endpoints present certificates that chain to public AWS CAs, and
+/// `DD_PROXY_HTTPS` / `tls_cert_file` are for *Datadog* egress, not AWS API traffic (which goes
+/// direct, or through VPC endpoints that also present public certs). `skip_ssl_validation` is
+/// deliberately not applied here either — we do not disable certificate validation on the calls
+/// that fetch credentials and secrets.
+fn build_direct_aws_client() -> Option<Client> {
+    let builder = match create_reqwest_client_builder() {
+        Ok(builder) => builder,
+        Err(err) => {
+            error!("Error creating reqwest client builder: {}", err);
+            return None;
+        }
+    };
+
+    match builder.build() {
+        Ok(client) => Some(client),
+        Err(err) => {
+            error!("Error creating reqwest client: {}", err);
+            None
+        }
+    }
+}
+
+/// Resolves the `DD_*_ADDITIONAL_ENDPOINTS_SECRET_ARN` dual-shipping secrets into `config`.
+///
+/// Each secret holds the whole additional-endpoints JSON blob, in the same shape as the
+/// corresponding plaintext `DD_*_ADDITIONAL_ENDPOINTS` env var. When a pipeline's ARN is set and
+/// resolves, it replaces that pipeline's plaintext value; otherwise the plaintext value stands.
+/// Runs once at startup, before any flusher is built, so flushers read the resolved config as usual.
+pub async fn resolve_additional_endpoints_secrets(
+    config: &mut Config,
+    aws_config: &Arc<AwsConfig>,
+) {
+    if config.additional_endpoints_secret_arn.is_empty()
+        && config.apm_additional_endpoints_secret_arn.is_empty()
+        && config
+            .logs_config_additional_endpoints_secret_arn
+            .is_empty()
+    {
+        return;
+    }
+
+    let Some(client) = build_direct_aws_client() else {
+        return;
+    };
+    let Some(aws_credentials) = get_aws_credentials(&client).await else {
+        return;
+    };
+
+    let (metrics, apm, logs) = tokio::join!(
+        fetch_additional_endpoints(
+            &client,
+            &config.additional_endpoints_secret_arn,
+            aws_config,
+            &aws_credentials,
+            "DD_ADDITIONAL_ENDPOINTS_SECRET_ARN",
+        ),
+        fetch_additional_endpoints(
+            &client,
+            &config.apm_additional_endpoints_secret_arn,
+            aws_config,
+            &aws_credentials,
+            "DD_APM_ADDITIONAL_ENDPOINTS_SECRET_ARN",
+        ),
+        fetch_additional_endpoints(
+            &client,
+            &config.logs_config_additional_endpoints_secret_arn,
+            aws_config,
+            &aws_credentials,
+            "DD_LOGS_CONFIG_ADDITIONAL_ENDPOINTS_SECRET_ARN",
+        ),
+    );
+
+    if let Some(metrics) = metrics {
+        config.additional_endpoints = metrics;
+    }
+    if let Some(apm) = apm {
+        config.apm_additional_endpoints = apm;
+    }
+    if let Some(logs) = logs {
+        config.logs_config_additional_endpoints = logs;
+    }
+}
+
+/// Fetches and parses one additional-endpoints secret, or `None` if `secret_arn` is unset, the
+/// fetch fails, or the blob is malformed — in which case the plaintext config value stands.
+async fn fetch_additional_endpoints<T: serde::de::DeserializeOwned>(
+    client: &Client,
+    secret_arn: &str,
+    aws_config: &Arc<AwsConfig>,
+    aws_credentials: &AwsCredentials,
+    env_var: &str,
+) -> Option<T> {
+    if secret_arn.is_empty() {
+        return None;
+    }
+
+    // `decrypt_aws_sm` returns the raw secret verbatim here: its `dd_api_key`/`apiKey` unwrapping
+    // only fires on *string* values, and these blobs hold arrays and objects. Its error is dropped
+    // rather than logged — it carries the Secrets Manager response body, which can hold secrets.
+    let Ok(blob) = decrypt_aws_sm(
+        client,
+        secret_arn.to_string(),
+        Arc::clone(aws_config),
+        aws_credentials,
+    )
+    .await
+    else {
+        error!("Failed to fetch secret from {env_var}");
+        return None;
+    };
+
+    serde_json::from_str(&blob)
+        .inspect_err(|err| error!("Failed to parse secret from {env_var}: {err}"))
+        .ok()
 }
 
 fn clean_api_key(maybe_key: Option<String>) -> Option<String> {
@@ -503,6 +599,45 @@ mod tests {
         assert_eq!(key.expect("it should parse the key"), "32alxcxf");
         let key = clean_api_key(Some("   \n".to_string()));
         assert_eq!(key, None);
+    }
+
+    // `fetch_additional_endpoints` relies on `extract_secret_string` passing these blobs through
+    // untouched, which only holds because its `dd_api_key`/`apiKey` unwrapping requires a string
+    // value. These two guard that assumption.
+    #[test]
+    fn test_additional_endpoints_map_secret_returned_verbatim() {
+        let raw = r#"{"https://app.datadoghq.eu":["key-1","key-2"]}"#;
+        let v = make_sm_response(raw);
+        let result = extract_secret_string(&v).expect("should return the blob verbatim");
+        assert_eq!(result, raw);
+    }
+
+    #[test]
+    fn test_logs_additional_endpoints_secret_returned_verbatim() {
+        let raw = r#"[{"api_key":"key-1","Host":"agent-http-intake.logs.datadoghq.eu","Port":443,"is_reliable":true}]"#;
+        let v = make_sm_response(raw);
+        let result = extract_secret_string(&v).expect("should return the blob verbatim");
+        assert_eq!(result, raw);
+    }
+
+    #[tokio::test]
+    async fn test_resolve_additional_endpoints_secrets_noop_when_no_arns_set() {
+        let mut config = Config::default();
+        let expected = config.clone();
+        let aws_config = Arc::new(AwsConfig {
+            region: "us-east-1".to_string(),
+            aws_lwa_proxy_lambda_runtime_api: None,
+            function_name: "arn:some-function".to_string(),
+            sandbox_init_time: Instant::now(),
+            runtime_api: String::new(),
+            exec_wrapper: None,
+            initialization_type: "on-demand".into(),
+        });
+
+        // No ARNs set: leaves config untouched and makes no network call.
+        resolve_additional_endpoints_secrets(&mut config, &aws_config).await;
+
+        assert_eq!(config, expected);
     }
 
     #[test]
