@@ -56,6 +56,11 @@ const stacks = [
     new PayloadSize(app, `${IDENTIFIER}-payload-size`, {
         env,
     }),
+    // Second instance so the payload-size-e2e suite deploys its own stack and
+    // function; the two suite jobs run in parallel and must not share resources.
+    new PayloadSize(app, `${IDENTIFIER}-payload-size-e2e`, {
+        env,
+    }),
     new DurableColdStart(app, `${IDENTIFIER}-durable-cold-start`, {
         env,
     }),
