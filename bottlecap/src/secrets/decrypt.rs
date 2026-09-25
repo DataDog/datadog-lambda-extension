@@ -132,9 +132,11 @@ pub async fn resolve_additional_endpoints_secrets(
     }
 
     let Some(client) = build_direct_aws_client() else {
+        error!("Could not build AWS client, skipping additional-endpoints secret resolution");
         return;
     };
     let Some(aws_credentials) = get_aws_credentials(&client).await else {
+        error!("Could not get AWS credentials, skipping additional-endpoints secret resolution");
         return;
     };
 
@@ -201,8 +203,11 @@ async fn fetch_additional_endpoints<T: serde::de::DeserializeOwned>(
         return None;
     };
 
+    // `serde_json::Error`'s `Display` impl embeds the offending value (e.g. `invalid type: string
+    // "..."`), which can contain the secret itself, so we deliberately don't log it here.
     serde_json::from_str(&blob)
-        .inspect_err(|err| error!("Failed to parse secret from {env_var}: {err}"))
+        .inspect(|_| debug!("Successfully parsed secret for {env_var}"))
+        .inspect_err(|_| error!("Failed to parse secret from {env_var}"))
         .ok()
 }
 
