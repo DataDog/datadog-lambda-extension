@@ -103,10 +103,10 @@ impl StatsFlusher {
         // jitter over an exponential base), small next to the per-attempt
         // timeout (flush_timeout seconds), which dominates failure latency
         // on Lambda.
-        // Open question: should a permanent failure skip redrive? For now the
-        // redrive semantics are unchanged: any failed round returns the stats
-        // for one more flush round.
-        if send_with_retry(
+        // Permanent failures are dropped: retrying cannot fix them, neither
+        // locally nor via redrive. Retriable failures that exhausted their
+        // attempts are returned for one more flush round.
+        match send_with_retry(
             &self.http_client,
             endpoint,
             api_key.as_str(),
@@ -117,9 +117,8 @@ impl StatsFlusher {
         )
         .await
         {
-            None
-        } else {
-            Some(stats)
+            SendResult::Retriable => Some(stats),
+            SendResult::Delivered | SendResult::Permanent => None,
         }
     }
 
@@ -189,6 +188,19 @@ enum SendOutcome {
     Permanent(String),
 }
 
+/// Outcome of a full `send_with_retry` round, after all local attempts.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SendResult {
+    /// Delivered on some attempt.
+    Delivered,
+    /// Retriable failure (transport error, timeout, or 408/425/429/5xx) that
+    /// exhausted the local attempts; the caller may still redrive the payload.
+    Retriable,
+    /// Permanent failure (other 4xx status or request-build error); retrying
+    /// cannot succeed, so the payload must not be redriven.
+    Permanent,
+}
+
 /// Full-jitter exponential backoff: the delay before retry `retry`
 /// (1-based) is drawn uniformly from `0..=base * 2^(retry-1)`.
 struct Backoff {
@@ -239,14 +251,13 @@ fn body_preview(body: &[u8]) -> String {
 
 /// Sends the payload with up to `FLUSH_RETRY_COUNT` attempts, retrying only
 /// retriable failures and backing off with full jitter between attempts.
-/// Returns `true` if the payload was delivered.
 async fn send_with_retry(
     client: &HttpClient,
     target: &Endpoint,
     api_key: &str,
     data: Vec<u8>,
     backoff: Backoff,
-) -> bool {
+) -> SendResult {
     for attempt in 1..=FLUSH_RETRY_COUNT {
         let start = std::time::Instant::now();
         let outcome = send_stats_payload(client, target, api_key, data.clone()).await;
@@ -259,14 +270,14 @@ async fn send_with_retry(
                     target.url,
                     elapsed.as_millis()
                 );
-                return true;
+                return SendResult::Delivered;
             }
             SendOutcome::Permanent(detail) => {
                 error!(
                     "STATS | Permanent failure sending stats to {} (attempt {attempt}/{FLUSH_RETRY_COUNT}): {detail}; not retrying",
                     target.url
                 );
-                return false;
+                return SendResult::Permanent;
             }
             SendOutcome::Retriable(detail) => {
                 debug!(
@@ -285,7 +296,7 @@ async fn send_with_retry(
     }
 
     error!("STATS | Exhausted all {FLUSH_RETRY_COUNT} attempts, returning stats for redrive");
-    false
+    SendResult::Retriable
 }
 
 /// Posts a serialized stats payload once using the supplied client.
@@ -362,7 +373,9 @@ async fn send_stats_payload(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::Config;
     use crate::traces::http_client::create_client;
+    use crate::traces::stats_concentrator_service::StatsConcentratorService;
     use httpmock::prelude::*;
 
     fn test_endpoint(url: hyper::Uri) -> Endpoint {
@@ -449,14 +462,14 @@ mod tests {
         }
     }
 
-    async fn assert_flush(status: u16, expected_delivered: bool, expected_hits: usize) {
+    async fn assert_flush(status: u16, expected_result: SendResult, expected_hits: usize) {
         let server = MockServer::start();
         let mock = server.mock(|when, then| {
             when.method(POST).path("/api/v0.2/stats");
             then.status(status);
         });
         let client = create_client(None, None, false).expect("client should build");
-        let delivered = send_with_retry(
+        let result = send_with_retry(
             &client,
             &mock_endpoint(&server),
             "test-api-key",
@@ -465,13 +478,13 @@ mod tests {
         )
         .await;
 
-        assert_eq!(delivered, expected_delivered);
+        assert_eq!(result, expected_result);
         assert_eq!(mock.hits(), expected_hits);
     }
 
     #[tokio::test]
     async fn send_with_retry_accepts_202_immediately() {
-        assert_flush(202, true, 1).await;
+        assert_flush(202, SendResult::Delivered, 1).await;
     }
 
     /// Regression: a 200 from a proxy must count as delivered. Previously
@@ -479,26 +492,26 @@ mod tests {
     /// by the intake.
     #[tokio::test]
     async fn send_with_retry_accepts_any_2xx_immediately() {
-        assert_flush(200, true, 1).await;
+        assert_flush(200, SendResult::Delivered, 1).await;
     }
 
     #[tokio::test]
     async fn send_with_retry_does_not_retry_permanent_400() {
-        assert_flush(400, false, 1).await;
+        assert_flush(400, SendResult::Permanent, 1).await;
     }
 
     #[tokio::test]
     async fn send_with_retry_exhausts_retries_on_503() {
-        assert_flush(503, false, FLUSH_RETRY_COUNT).await;
+        assert_flush(503, SendResult::Retriable, FLUSH_RETRY_COUNT).await;
     }
 
     #[tokio::test]
     async fn send_with_retry_exhausts_retries_on_429() {
-        assert_flush(429, false, FLUSH_RETRY_COUNT).await;
+        assert_flush(429, SendResult::Retriable, FLUSH_RETRY_COUNT).await;
     }
 
     #[tokio::test]
-    async fn send_with_retry_returns_false_on_transport_error() {
+    async fn send_with_retry_marks_transport_error_retriable() {
         // Bind a listener, read its port, and drop it, so connections to the
         // port are refused.
         let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind ephemeral port");
@@ -522,6 +535,51 @@ mod tests {
         .await
         .expect("send_with_retry must terminate on connection refusal");
 
-        assert!(!delivered, "transport failure should not be delivered");
+        assert_eq!(
+            delivered,
+            SendResult::Retriable,
+            "transport failure should stay eligible for redrive"
+        );
+    }
+
+    /// Runs one `send` round against a mock returning `status` and returns
+    /// whether the stats were kept for redrive.
+    async fn send_once(status: u16) -> Option<Vec<pb::ClientStatsPayload>> {
+        let server = MockServer::start();
+        server.mock(|when, then| {
+            when.method(POST).path("/api/v0.2/stats");
+            then.status(status);
+        });
+        let client = create_client(None, None, false).expect("client should build");
+        let config = Arc::new(Config::default());
+        let aggregator = Arc::new(Mutex::new(StatsAggregator::new_with_concentrator(
+            StatsConcentratorService::new(Arc::clone(&config)).1,
+        )));
+        let flusher = StatsFlusher::new(
+            Arc::new(ApiKeyFactory::new("test-api-key")),
+            aggregator,
+            config,
+            client,
+            format!("{}/api/v0.2/stats", server.url("")),
+        );
+        flusher.send(vec![pb::ClientStatsPayload::default()]).await
+    }
+
+    /// Regression: a permanent status must not be returned for redrive, even
+    /// though the payload failed to send.
+    #[tokio::test]
+    async fn send_drops_stats_on_permanent_failure() {
+        let result = tokio::time::timeout(Duration::from_secs(5), send_once(400))
+            .await
+            .expect("send must terminate");
+        assert!(result.is_none(), "permanent failure must be dropped");
+    }
+
+    #[tokio::test]
+    async fn send_keeps_stats_on_exhausted_retriable_failure() {
+        let result = tokio::time::timeout(Duration::from_secs(5), send_once(503))
+            .await
+            .expect("send must terminate");
+        assert!(result.is_some(), "retriable failure must be kept for redrive");
     }
 }
