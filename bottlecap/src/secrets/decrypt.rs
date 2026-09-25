@@ -13,6 +13,7 @@ use serde_json::Value;
 use sha2::{Digest, Sha256};
 use std::io::Error;
 use std::sync::Arc;
+use std::time::Duration;
 use tokio::time::Instant;
 use tracing::{debug, error};
 
@@ -112,6 +113,14 @@ fn build_direct_aws_client() -> Option<Client> {
     }
 }
 
+/// Bounds the `SnapStart` credentials fetch and each individual secret fetch in
+/// `resolve_additional_endpoints_secrets`. Neither `build_direct_aws_client()`'s client nor the
+/// underlying `request()` helper has a request timeout, so an unreachable endpoint (e.g. no VPC
+/// route to Secrets Manager, or to the `SnapStart` container-credentials endpoint) would
+/// otherwise hang extension init indefinitely instead of falling back to the plaintext config as
+/// documented.
+const ADDITIONAL_ENDPOINTS_SECRET_FETCH_TIMEOUT: Duration = Duration::from_secs(5);
+
 /// Resolves the `DD_*_ADDITIONAL_ENDPOINTS_SECRET_ARN` dual-shipping secrets into `config`.
 ///
 /// Each secret holds the whole additional-endpoints JSON blob, in the same shape as the
@@ -135,7 +144,14 @@ pub async fn resolve_additional_endpoints_secrets(
         error!("Could not build AWS client, skipping additional-endpoints secret resolution");
         return;
     };
-    let Some(aws_credentials) = get_aws_credentials(&client).await else {
+    // Normally just reads env vars, but under SnapStart it fetches short-lived credentials from
+    // the container-credentials endpoint over HTTP, which has no request timeout of its own.
+    let Ok(Some(aws_credentials)) = tokio::time::timeout(
+        ADDITIONAL_ENDPOINTS_SECRET_FETCH_TIMEOUT,
+        get_aws_credentials(&client),
+    )
+    .await
+    else {
         error!("Could not get AWS credentials, skipping additional-endpoints secret resolution");
         return;
     };
@@ -188,17 +204,26 @@ async fn fetch_additional_endpoints<T: serde::de::DeserializeOwned>(
         return None;
     }
 
-    // `decrypt_aws_sm` returns the raw secret verbatim here: its `dd_api_key`/`apiKey` unwrapping
-    // only fires on *string* values, and these blobs hold arrays and objects. Its error is dropped
-    // rather than logged — it carries the Secrets Manager response body, which can hold secrets.
-    let Ok(blob) = decrypt_aws_sm(
-        client,
-        secret_arn.to_string(),
-        Arc::clone(aws_config),
-        aws_credentials,
+    let Ok(result) = tokio::time::timeout(
+        ADDITIONAL_ENDPOINTS_SECRET_FETCH_TIMEOUT,
+        decrypt_aws_sm(
+            client,
+            secret_arn.to_string(),
+            Arc::clone(aws_config),
+            aws_credentials,
+        ),
     )
     .await
     else {
+        error!(
+            "Timed out fetching secret from {env_var} after {ADDITIONAL_ENDPOINTS_SECRET_FETCH_TIMEOUT:?}, falling back to plaintext config"
+        );
+        return None;
+    };
+
+    // Any error is dropped rather than logged, as it carries the Secrets Manager response body,
+    // which can hold secrets.
+    let Ok(blob) = result else {
         error!("Failed to fetch secret from {env_var}");
         return None;
     };
