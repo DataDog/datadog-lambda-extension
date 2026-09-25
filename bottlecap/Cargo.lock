@@ -496,6 +496,7 @@ dependencies = [
  "datadog-agent-config",
  "datadog-agent-trace-sampler",
  "datadog-fips",
+ "datadog-mock-intake",
  "datadog-opentelemetry",
  "datadog-protos",
  "ddsketch-agent",
@@ -894,6 +895,26 @@ dependencies = [
  "rustls",
  "rustls-native-certs",
  "tracing",
+]
+
+[[package]]
+name = "datadog-mock-intake"
+version = "0.1.0"
+source = "git+https://github.com/DataDog/serverless-components?rev=c5f424b49cc6307f4204e016ad57d9973bdba243#c5f424b49cc6307f4204e016ad57d9973bdba243"
+dependencies = [
+ "bytes",
+ "flate2",
+ "http-body-util",
+ "hyper 1.8.1",
+ "hyper-util",
+ "libdd-trace-protobuf",
+ "prost 0.14.3",
+ "rmp-serde",
+ "serde",
+ "serde_json",
+ "thiserror 1.0.69",
+ "tokio",
+ "zstd",
 ]
 
 [[package]]

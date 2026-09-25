@@ -8,7 +8,7 @@
 //! `DsmProcessor::record_consume` → `drain_into_proxy` (aggregate + serialize +
 //! gzip) → `ProxyFlusher::flush` → `POST /api/v0.1/pipeline_stats`.
 //!
-//! The test spins up a `FakeIntake`, points the `DsmProcessor` at it via the
+//! The test spins up a `MockIntake`, points the `DsmProcessor` at it via the
 //! `apm_dd_url` argument (mirroring how `DD_APM_DD_URL` flows through in
 //! production), triggers a flush, then decodes the captured msgpack payload and
 //! asserts on concrete fields. Unit tests stop at the `ProxyRequest` boundary;
@@ -28,10 +28,7 @@ use datadog_fips::reqwest_adapter::create_reqwest_client_builder;
 use dogstatsd::api_key::ApiKeyFactory;
 use tokio::sync::Mutex;
 
-#[path = "common/fake_intake.rs"]
-mod fake_intake;
-
-use fake_intake::FakeIntake;
+use datadog_mock_intake::MockIntake;
 
 const DD_API_KEY: &str = "my_test_key";
 
@@ -56,7 +53,7 @@ fn tags_provider(config: &Arc<Config>) -> Arc<Provider> {
 
 #[tokio::test]
 async fn dsm_pipeline_stats_roundtrip_through_fake_intake() {
-    let fake_intake = FakeIntake::start().await;
+    let fake_intake = MockIntake::start().await;
     let config = test_config();
     let http_client = create_reqwest_client_builder()
         .expect("failed to create reqwest client builder")
