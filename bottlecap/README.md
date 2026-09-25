@@ -3,13 +3,13 @@
 ## Development
 Use the `/scripts/build_bottlecap_layer.sh` and either publish it as a layer and test in Lambda or copy the binary into a container image and test there. Ask AJ or see the internal wiki for more.
 
-## Local APM debugging with fake-intake
+## Local APM debugging with mock-intake
 
-The `fake-intake` feature builds a standalone fake Datadog APM intake: a small HTTP server that accepts the same APM endpoints the extension flushes to, decodes the payloads, and reports them locally. It is gated behind a feature and is never part of `default` or `fips` production builds.
+The `mock-intake` feature builds a standalone mock Datadog APM intake: a small HTTP server that accepts the same APM endpoints the extension flushes to, decodes the payloads, and reports them locally. It is gated behind a feature and is never part of `default` or `fips` production builds.
 
 ```bash
 cd bottlecap
-cargo build --bin fake-intake --features fake-intake
+cargo build --bin mock-intake --features mock-intake
 ```
 
 The binary wraps the shared `datadog-mock-intake` crate from the `serverless-components` repository. The same crate backs the `apm_integration_test` and `dsm_integration_test` integration tests, which run in every test build via a dev-dependency.
@@ -18,9 +18,9 @@ The binary wraps the shared `datadog-mock-intake` crate from the `serverless-com
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `FAKE_INTAKE_PORT` | `8127` | Loopback listener port; `0` picks a free port (the bound address is printed at startup) |
-| `FAKE_INTAKE_FAIL_STATS_FIRST_N` | `0` | Return HTTP 500 for the first N stats request attempts |
-| `FAKE_INTAKE_DUMP_DIR` | unset | Write one JSON envelope per successfully decoded request into this directory |
+| `MOCK_INTAKE_PORT` | `8127` | Loopback listener port; `0` picks a free port (the bound address is printed at startup) |
+| `MOCK_INTAKE_FAIL_STATS_FIRST_N` | `0` | Return HTTP 500 for the first N stats request attempts |
+| `MOCK_INTAKE_DUMP_DIR` | unset | Write one JSON envelope per successfully decoded request into this directory |
 
 Malformed configuration values cause a clear error and a nonzero exit. Bind failures and dump-directory creation failures are also reported instead of being ignored.
 
@@ -34,7 +34,7 @@ Malformed configuration values cause a clear error and a nonzero exit. Bind fail
 
 ### Failure injection semantics
 
-With `FAKE_INTAKE_FAIL_STATS_FIRST_N=N`, the first N stats *attempts* return 500 and their payloads are not captured by the intake. Attempts are counted per server instance, atomically, so concurrent requests cannot exceed the limit. Rejected attempts are still decoded, summarized, and dumped, so a rejected attempt and its successful retry are each visible with their own status. Trace and DSM requests do not consume the rejection budget.
+With `MOCK_INTAKE_FAIL_STATS_FIRST_N=N`, the first N stats *attempts* return 500 and their payloads are not captured by the intake. Attempts are counted per server instance, atomically, so concurrent requests cannot exceed the limit. Rejected attempts are still decoded, summarized, and dumped, so a rejected attempt and its successful retry are each visible with their own status. Trace and DSM requests do not consume the rejection budget.
 
 ### Request summaries and stats grouping
 
@@ -42,23 +42,23 @@ Each handled request produces one summary line on stderr (prefix `mock-intake:`)
 
 ### JSON dumps
 
-With `FAKE_INTAKE_DUMP_DIR` set, each successfully decoded request attempt (including rejected stats attempts) writes one JSON file containing the request identity, endpoint, encoding, response status, and decoded payload. Trace payloads are serialized field by field because `AgentPayload` does not implement `Serialize` in `libdd-trace-protobuf` 4.0.1. DSM dumps contain only the fields the crate decodes. Filenames are collision-resistant and never overwrite earlier dumps.
+With `MOCK_INTAKE_DUMP_DIR` set, each successfully decoded request attempt (including rejected stats attempts) writes one JSON file containing the request identity, endpoint, encoding, response status, and decoded payload. Trace payloads are serialized field by field because `AgentPayload` does not implement `Serialize` in `libdd-trace-protobuf` 4.0.1. DSM dumps contain only the fields the crate decodes. Filenames are collision-resistant and never overwrite earlier dumps.
 
 ### Smoke procedure
 
-Point the test-mode trace processor (currently in the separate worktree / PR that adds the `bottlecap-test-mode` binary) at a local fake intake:
+Point the test-mode trace processor (currently in the separate worktree / PR that adds the `bottlecap-test-mode` binary) at a local mock intake:
 
 ```bash
 cd ../<test-mode-worktree>/bottlecap
 cargo build --bin bottlecap-test-mode --features test-mode
 
 cd ../<this-checkout>/bottlecap
-cargo run --bin fake-intake --features fake-intake
+cargo run --bin mock-intake --features mock-intake
 
 # in another shell:
 DD_APM_DD_URL=http://127.0.0.1:8127 \
 DD_LAMBDA_EXTENSION_COMPUTE_STATS=true \
-DD_SERVICE=fake-intake-smoke DD_ENV=local DD_VERSION=smoke \
+DD_SERVICE=mock-intake-smoke DD_ENV=local DD_VERSION=smoke \
 ./target/debug/bottlecap-test-mode
 ```
 
