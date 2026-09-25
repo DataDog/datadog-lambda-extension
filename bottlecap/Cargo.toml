@@ -90,7 +90,7 @@ libdd-capabilities = "4.0.1"
 libdd-common = { version = "10.0.0", default-features = false }
 libdd-trace-protobuf = "5.1.1"
 # Shared mock APM intake crate from serverless-components, linked only by the
-# standalone fake-intake binary behind the `fake-intake` feature. The APM /
+# standalone mock-intake binary behind the `mock-intake` feature. The APM /
 # DSM integration tests consume it as an ungated dev-dependency below.
 datadog-mock-intake = { git = "https://github.com/DataDog/serverless-components", rev = "e462105e918904e6b1ad2ebc153ae561cebe5a34", optional = true }
 libdd-trace-utils = { version = "16.0.0", default-features = false, features = ["mini_agent"] }
@@ -136,9 +136,9 @@ name = "bottlecap-test-mode"
 required-features = ["test-mode"]
 
 [[bin]]
-name = "fake-intake"
-path = "src/bin/fake-intake/main.rs"
-required-features = ["fake-intake"]
+name = "mock-intake"
+path = "src/bin/mock-intake/main.rs"
+required-features = ["mock-intake"]
 
 [profile.dev]
 debug = true   # same as debuginfo=2 and no stripping
@@ -206,11 +206,11 @@ fips = [
 # base dependency so the shipped extension does not carry the signal driver
 # for a binary only the test-mode build produces.
 test-mode = ["tokio/signal"]
-# Builds the standalone fake-intake binary (`src/bin/fake-intake`). The
+# Builds the standalone mock-intake binary (`src/bin/mock-intake`). The
 # APM / DSM integration tests do not require this feature: they use
 # `datadog-mock-intake` as a dev-dependency and run in every test build.
 # Not enabled in `default` or `fips`.
-fake-intake = ["dep:datadog-mock-intake", "tokio/signal"]
+mock-intake = ["dep:datadog-mock-intake", "tokio/signal"]
 
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(coverage,coverage_nightly)'] }
