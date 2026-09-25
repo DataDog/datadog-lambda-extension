@@ -9,7 +9,7 @@
 //! - `StatsFlusher` → msgpack+gzip `pb::StatsPayload` on `/api/v0.2/stats`
 //! - `TraceFlusher` → protobuf `pb::AgentPayload` on `/api/v0.2/traces`
 //!
-//! Each test spins up a `FakeIntake`, points the flusher at it, triggers a
+//! Each test spins up a `MockIntake`, points the flusher at it, triggers a
 //! flush, then decodes the captured payload and asserts on concrete fields.
 //! This is what APMSVLS-496 phase 1 unblocks: regression coverage for
 //! payload-level changes that `body_contains`-style mocks can't catch.
@@ -43,10 +43,7 @@ use libdd_trace_utils::trace_utils::{TracerGenericTags, TracerHeaderTags};
 use libdd_trace_utils::tracer_payload::TracerPayloadCollection;
 use tokio::sync::Mutex;
 
-#[path = "common/fake_intake.rs"]
-mod fake_intake;
-
-use fake_intake::FakeIntake;
+use datadog_mock_intake::MockIntake;
 
 const DD_API_KEY: &str = "my_test_key";
 
@@ -105,7 +102,7 @@ fn endpoint_for(url: &str, api_key: &str) -> Endpoint {
 
 #[tokio::test]
 async fn stats_payload_roundtrip_through_fake_intake() {
-    let fake_intake = FakeIntake::start().await;
+    let fake_intake = MockIntake::start().await;
     let config = test_config();
     let http_client = create_client(None, None, false).expect("failed to create http client");
 
@@ -217,7 +214,7 @@ async fn stats_payload_roundtrip_through_fake_intake() {
 
 #[tokio::test]
 async fn trace_payload_roundtrip_through_fake_intake() {
-    let fake_intake = FakeIntake::start().await;
+    let fake_intake = MockIntake::start().await;
     let config = test_config();
     let http_client = create_client(None, None, false).expect("failed to create http client");
     let endpoint = endpoint_for(&fake_intake.traces_url(), DD_API_KEY);
@@ -334,7 +331,7 @@ async fn run_processor_pipeline_with_traces(
     client_computed_stats: bool,
     traces: Vec<Vec<pb::Span>>,
 ) -> PipelineOutcome {
-    let fake_intake = FakeIntake::start().await;
+    let fake_intake = MockIntake::start().await;
 
     let config = Arc::new(Config {
         api_key: DD_API_KEY.to_string(),
@@ -831,7 +828,7 @@ fn make_eligible_span(span_kind: &str, peer_meta: &[(&str, &str)]) -> pb::Span {
 /// Wire concentrator -> aggregator -> flusher pointed at the fake intake, feed in
 /// `spans`, force a flush, and return the single captured `StatsPayload`.
 async fn flush_spans_to_fake_intake(
-    fake_intake: &FakeIntake,
+    fake_intake: &MockIntake,
     config: Arc<Config>,
     spans: &[pb::Span],
 ) -> pb::StatsPayload {
@@ -877,7 +874,7 @@ async fn flush_spans_to_fake_intake(
 /// the gap left by the in-memory concentrator unit tests, which never serialize.
 #[tokio::test]
 async fn stats_span_kind_through_fake_intake() {
-    let fake_intake = FakeIntake::start().await;
+    let fake_intake = MockIntake::start().await;
     let span = make_eligible_span("server", &[]);
 
     let payload = flush_spans_to_fake_intake(&fake_intake, test_config(), &[span]).await;
@@ -905,7 +902,7 @@ async fn stats_span_kind_through_fake_intake() {
 /// the concentrator -> flusher -> intake path.
 #[tokio::test]
 async fn stats_peer_tags_through_fake_intake() {
-    let fake_intake = FakeIntake::start().await;
+    let fake_intake = MockIntake::start().await;
     let span = make_eligible_span(
         "client",
         &[("db.instance", "i-1234"), ("db.system", "postgres")],
@@ -953,7 +950,7 @@ fn grouped_entries(payload: &pb::StatsPayload) -> Vec<&pb::ClientGroupedStats> {
 /// must not be exported as additional metric tags.
 #[tokio::test]
 async fn stats_additional_metric_tags_through_fake_intake() {
-    let fake_intake = FakeIntake::start().await;
+    let fake_intake = MockIntake::start().await;
     let config = config_from_env(&[
         ("DD_API_KEY", DD_API_KEY),
         ("DD_SITE", "datadoghq.com"),
@@ -1012,7 +1009,7 @@ async fn stats_additional_metric_tags_through_fake_intake() {
 /// group. Proves the gate affects the payload, not just the parsed config.
 #[tokio::test]
 async fn stats_additional_metric_tags_gated_off_through_fake_intake() {
-    let fake_intake = FakeIntake::start().await;
+    let fake_intake = MockIntake::start().await;
     let config = config_from_env(&[
         ("DD_API_KEY", DD_API_KEY),
         ("DD_SITE", "datadoghq.com"),
@@ -1051,7 +1048,7 @@ async fn stats_additional_metric_tags_gated_off_through_fake_intake() {
 /// the total hit count intact.
 #[tokio::test]
 async fn stats_additional_metric_tags_cardinality_limit_through_fake_intake() {
-    let fake_intake = FakeIntake::start().await;
+    let fake_intake = MockIntake::start().await;
     let config = config_from_env(&[
         ("DD_API_KEY", DD_API_KEY),
         ("DD_SITE", "datadoghq.com"),
@@ -1101,7 +1098,7 @@ async fn stats_additional_metric_tags_cardinality_limit_through_fake_intake() {
 /// combination, and a change in either key producing a new group.
 #[tokio::test]
 async fn stats_additional_metric_tags_multiple_keys_through_fake_intake() {
-    let fake_intake = FakeIntake::start().await;
+    let fake_intake = MockIntake::start().await;
     let config = config_from_env(&[
         ("DD_API_KEY", DD_API_KEY),
         ("DD_SITE", "datadoghq.com"),

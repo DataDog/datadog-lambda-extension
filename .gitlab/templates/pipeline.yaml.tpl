@@ -63,9 +63,10 @@ cargo clippy:
     # We need to do these separately because the fips feature is incompatible with the default feature.
     - cargo clippy --workspace --features default
     - cargo clippy --workspace --no-default-features --features fips
-    # No other job compiles the test-mode feature: it gates test-only
-    # constructors that are absent from default and fips builds.
-    - cargo clippy --workspace --features default,test-mode
+    # No other job compiles the test-mode or mock-intake features: they gate
+    # test-only constructors and the standalone mock-intake binary, which are
+    # absent from default and fips builds.
+    - cargo clippy --workspace --all-targets --features default,test-mode,mock-intake
 
 {{ range $flavor := (ds "flavors").flavors }}
 
