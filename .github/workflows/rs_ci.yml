@@ -82,11 +82,11 @@ jobs:
         run: cargo clippy --workspace --all-targets --features default
       - working-directory: bottlecap
         run: cargo clippy --workspace --all-targets --no-default-features --features fips
-      # No other job compiles the test-mode or fake-intake features: they gate
-      # test-only constructors and the standalone fake-intake binary, which are
+      # No other job compiles the test-mode or mock-intake features: they gate
+      # test-only constructors and the standalone mock-intake binary, which are
       # absent from default and fips builds.
       - working-directory: bottlecap
-        run: cargo clippy --workspace --all-targets --features default,test-mode,fake-intake
+        run: cargo clippy --workspace --all-targets --features default,test-mode,mock-intake
 
   build-all:
     name: Build All

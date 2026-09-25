@@ -88,9 +88,9 @@ libdd-capabilities = "3.0.0"
 libdd-common = { version = "5.2.0", default-features = false }
 libdd-trace-protobuf = "4.0.1"
 # Shared mock APM intake crate from serverless-components, linked only by the
-# standalone fake-intake binary behind the `fake-intake` feature. The APM /
+# standalone mock-intake binary behind the `mock-intake` feature. The APM /
 # DSM integration tests consume it as an ungated dev-dependency below.
-datadog-mock-intake = { git = "https://github.com/DataDog/serverless-components", rev = "c5f424b49cc6307f4204e016ad57d9973bdba243", optional = true }
+datadog-mock-intake = { git = "https://github.com/DataDog/serverless-components", rev = "37f5b32a853f82a00523051827af074662f3e8fa", optional = true }
 libdd-trace-utils = { version = "10.1.0", default-features = false, features = ["mini_agent"] }
 libdd-trace-normalization = "3.0.1"
 libdd-trace-obfuscation = { version = "6.0.0", default-features = false }
@@ -119,7 +119,7 @@ rmp-serde = { version = "1.3.1", default-features = false }
 flate2 = { version = "1.1", default-features = false, features = ["rust_backend"] }
 # Shared mock APM intake for the APM / DSM integration tests. Ungated so the
 # tests run in every feature set.
-datadog-mock-intake = { git = "https://github.com/DataDog/serverless-components", rev = "c5f424b49cc6307f4204e016ad57d9973bdba243" }
+datadog-mock-intake = { git = "https://github.com/DataDog/serverless-components", rev = "37f5b32a853f82a00523051827af074662f3e8fa" }
 
 [build-dependencies]
 # No external dependencies needed for the build script
@@ -128,9 +128,9 @@ datadog-mock-intake = { git = "https://github.com/DataDog/serverless-components"
 name = "bottlecap"
 
 [[bin]]
-name = "fake-intake"
-path = "src/bin/fake-intake/main.rs"
-required-features = ["fake-intake"]
+name = "mock-intake"
+path = "src/bin/mock-intake/main.rs"
+required-features = ["mock-intake"]
 
 [profile.dev]
 debug = true   # same as debuginfo=2 and no stripping
@@ -195,11 +195,11 @@ fips = [
 # Not enabled in `default` or `fips`, so the items it gates do not appear
 # in production builds.
 test-mode = []
-# Builds the standalone fake-intake binary (`src/bin/fake-intake`). The
+# Builds the standalone mock-intake binary (`src/bin/mock-intake`). The
 # APM / DSM integration tests do not require this feature: they use
 # `datadog-mock-intake` as a dev-dependency and run in every test build.
 # Not enabled in `default` or `fips`.
-fake-intake = ["dep:datadog-mock-intake", "tokio/signal"]
+mock-intake = ["dep:datadog-mock-intake", "tokio/signal"]
 
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(coverage,coverage_nightly)'] }
