@@ -80,7 +80,7 @@ use bottlecap::{
     },
 };
 use datadog_fips::reqwest_adapter::create_reqwest_client_builder;
-use decrypt::resolve_secrets;
+use decrypt::{resolve_additional_endpoints_secrets, resolve_secrets};
 use dogstatsd::{
     aggregator::{
         AggregatorHandle as MetricsAggregatorHandle, AggregatorService as MetricsAggregatorService,
@@ -157,9 +157,12 @@ async fn main() -> anyhow::Result<()> {
     // First load the AWS configuration
     let lambda_directory: String =
         env::var("LAMBDA_TASK_ROOT").unwrap_or_else(|_| "/var/task".to_string());
-    let config = Arc::new(config::get_config(Path::new(&lambda_directory)));
-
     let aws_config = Arc::new(aws_config);
+
+    let mut lambda_config = config::get_config(Path::new(&lambda_directory));
+    resolve_additional_endpoints_secrets(&mut lambda_config, &aws_config).await;
+    let config = Arc::new(lambda_config);
+
     // Build one shared reqwest::Client for metrics, logs, trace proxy flushing, and calls to
     // Datadog APIs (e.g. delegated auth). reqwest::Client is Arc-based internally, so cloning
     // just increments a refcount and shares the connection pool.
