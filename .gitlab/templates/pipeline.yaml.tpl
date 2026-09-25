@@ -63,9 +63,8 @@ cargo clippy:
     # We need to do these separately because the fips feature is incompatible with the default feature.
     - cargo clippy --workspace --features default
     - cargo clippy --workspace --no-default-features --features fips
-    # The test-mode feature gates the bottlecap-test-mode binary via
-    # required-features, so no other job compiles it.
-    - cargo clippy --workspace --features default,test-mode
+    # Also lint the feature-gated test-mode and fake-intake binaries.
+    - cargo clippy --workspace --all-targets --features default,test-mode,fake-intake
 
 {{ range $flavor := (ds "flavors").flavors }}
 
