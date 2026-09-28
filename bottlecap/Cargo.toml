@@ -44,7 +44,10 @@ hmac = { version = "0.12", default-features = false }
 sha2 = { version = "0.10", default-features = false }
 hex = { version = "0.4", default-features = false, features = ["std"] }
 base64 = { version = "0.22", default-features = false }
-rustls = { version = "0.23.18", default-features = false }
+# Resolved version is intentionally held below 0.23.45 (see .cargo/audit.toml): that version
+# requires aws-lc-rs >= 1.18, which pulls in AWS-LC-FIPS 4.x, pending FIPS 140-3 certification.
+# Do not bump until a FIPS-certified aws-lc-rs is available, or a future `cargo update` will re-bump it.
+rustls = { version = ">=0.23.18, <0.23.45", default-features = false }
 # Transitive via rustls. Pinned to >=0.103.13 so cargo audit passes (RUSTSEC-2026-0098, RUSTSEC-2026-0099, RUSTSEC-2026-0104).
 rustls-webpki = { version = "0.103.13", default-features = false }
 rustls-pemfile = { version = "2.0", default-features = false, features = ["std"] }
@@ -89,10 +92,10 @@ libdd-trace-normalization = "3.0.1"
 libdd-trace-obfuscation = { version = "6.0.0", default-features = false }
 libdd-trace-stats = { version = "7.0.0", default-features = false }
 datadog-opentelemetry = { version = "0.5.2", default-features = false, features = ["_unstable_propagation"] }
-dogstatsd = { git = "https://github.com/DataDog/serverless-components", rev = "3ab01258b235f2a39272780e9a0484c7fd420cd1", default-features = false }
-datadog-fips = { git = "https://github.com/DataDog/serverless-components", rev = "3ab01258b235f2a39272780e9a0484c7fd420cd1", default-features = false }
-datadog-agent-config = { git = "https://github.com/DataDog/serverless-components", rev = "3ab01258b235f2a39272780e9a0484c7fd420cd1", default-features = false }
-datadog-agent-trace-sampler = { git = "https://github.com/DataDog/serverless-components", rev = "3ab01258b235f2a39272780e9a0484c7fd420cd1", default-features = false }
+dogstatsd = { git = "https://github.com/DataDog/serverless-components", rev = "8156757470d0843a99fc5d19809ae021cd2c7178", default-features = false }
+datadog-fips = { git = "https://github.com/DataDog/serverless-components", rev = "8156757470d0843a99fc5d19809ae021cd2c7178", default-features = false }
+datadog-agent-config = { git = "https://github.com/DataDog/serverless-components", rev = "8156757470d0843a99fc5d19809ae021cd2c7178", default-features = false }
+datadog-agent-trace-sampler = { git = "https://github.com/DataDog/serverless-components", rev = "8156757470d0843a99fc5d19809ae021cd2c7178", default-features = false }
 libddwaf = { version = "1.28.1", git = "https://github.com/DataDog/libddwaf-rust", rev = "d1534a158d976bd4f747bf9fcc58e0712d2d17fc", default-features = false, features = ["serde"] }
 
 [dev-dependencies]
