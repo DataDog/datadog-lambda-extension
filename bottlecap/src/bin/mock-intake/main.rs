@@ -87,16 +87,7 @@ fn parse_options() -> anyhow::Result<MockIntakeOptions> {
         "a non-negative integer",
     )?;
 
-    let dump_dir = match std::env::var("MOCK_INTAKE_DUMP_DIR") {
-        Ok(raw) => Some(PathBuf::from(raw)),
-        Err(std::env::VarError::NotPresent) => None,
-        Err(std::env::VarError::NotUnicode(raw)) => {
-            bail!(
-                "mock-intake: MOCK_INTAKE_DUMP_DIR is not valid Unicode: {}",
-                raw.display()
-            )
-        }
-    };
+    let dump_dir = std::env::var_os("MOCK_INTAKE_DUMP_DIR").map(PathBuf::from);
 
     Ok(MockIntakeOptions {
         port,
