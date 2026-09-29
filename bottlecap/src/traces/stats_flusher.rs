@@ -99,10 +99,10 @@ impl StatsFlusher {
             }
         };
 
-        // Backoff budget: at most 50 + 100 = 150 ms per send round (full
-        // jitter over an exponential base), small next to the per-attempt
-        // timeout (flush_timeout seconds), which dominates failure latency
-        // on Lambda.
+        // Backoff budget: full jitter over an exponential bound starting at
+        // BACKOFF_BASE_MS, doubling per retry. With few attempts
+        // (FLUSH_RETRY_COUNT) this is small next to the per-attempt timeout
+        // (flush_timeout seconds), which dominates failure latency on Lambda.
         // Permanent failures are dropped: retrying cannot fix them, neither
         // locally nor via redrive. Retriable failures that exhausted their
         // attempts are returned for one more flush round.
@@ -149,6 +149,9 @@ impl StatsFlusher {
         // Then flush new stats from the aggregator. The lock is scoped to
         // each get_batch call so send() (which includes retry backoff sleeps
         // and network timeouts) runs without blocking aggregator.add().
+        // Concurrent flush() calls may now send at the same time; this is
+        // safe because get_batch hands each caller a disjoint batch, and
+        // shutdown awaits pending flush handles before the final flush.
         let mut stats = {
             let mut guard = self.aggregator.lock().await;
             guard.get_batch(force_flush).await
