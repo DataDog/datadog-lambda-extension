@@ -1,7 +1,7 @@
 // Copyright 2023-Present Datadog, Inc. https://www.datadoghq.com/
 // SPDX-License-Identifier: Apache-2.0
 
-//! Payload-level DSM integration test using the in-process fake-intake.
+//! Payload-level DSM integration test using the in-process mock-intake.
 //!
 //! Covers the full Data Streams Monitoring egress path:
 //!
@@ -52,8 +52,8 @@ fn tags_provider(config: &Arc<Config>) -> Arc<Provider> {
 }
 
 #[tokio::test]
-async fn dsm_pipeline_stats_roundtrip_through_fake_intake() {
-    let fake_intake = MockIntake::start().await;
+async fn dsm_pipeline_stats_roundtrip_through_mock_intake() {
+    let mock_intake = MockIntake::start().await;
     let config = test_config();
     let http_client = create_reqwest_client_builder()
         .expect("failed to create reqwest client builder")
@@ -63,10 +63,10 @@ async fn dsm_pipeline_stats_roundtrip_through_fake_intake() {
     let proxy_aggregator = Arc::new(Mutex::new(ProxyAggregator::default()));
 
     // The DsmProcessor derives its target URL from `apm_dd_url`, appending
-    // `/api/v0.1/pipeline_stats`. Pointing it at the fake intake's base URL
+    // `/api/v0.1/pipeline_stats`. Pointing it at the mock intake's base URL
     // exercises the same path a custom DD_APM_DD_URL takes in production.
     let dsm_processor = DsmProcessor::new(
-        "fake-intake-dsm-service".to_string(),
+        "mock-intake-dsm-service".to_string(),
         "test-env".to_string(),
         "1.0".to_string(),
         "2.0".to_string(),
@@ -74,7 +74,7 @@ async fn dsm_pipeline_stats_roundtrip_through_fake_intake() {
             "team:serverless".to_string(),
             "region:us-east-1".to_string(),
         ],
-        &fake_intake.base_url(),
+        &mock_intake.base_url(),
         Arc::clone(&proxy_aggregator),
     );
 
@@ -103,7 +103,7 @@ async fn dsm_pipeline_stats_roundtrip_through_fake_intake() {
         "flush reported failed requests: {failed:?}"
     );
 
-    let payloads = fake_intake.pipeline_stats_payloads();
+    let payloads = mock_intake.pipeline_stats_payloads();
     assert_eq!(
         payloads.len(),
         1,
@@ -111,7 +111,7 @@ async fn dsm_pipeline_stats_roundtrip_through_fake_intake() {
     );
 
     let payload = &payloads[0];
-    assert_eq!(payload.service, "fake-intake-dsm-service");
+    assert_eq!(payload.service, "mock-intake-dsm-service");
     assert_eq!(payload.env, "test-env");
     assert_eq!(payload.tracer_version, "1.0");
     assert_eq!(payload.version, "2.0");
