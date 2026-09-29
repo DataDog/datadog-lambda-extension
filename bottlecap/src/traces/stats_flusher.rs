@@ -587,6 +587,9 @@ mod tests {
         let result = tokio::time::timeout(Duration::from_secs(5), send_once(503))
             .await
             .expect("send must terminate");
-        assert!(result.is_some(), "retriable failure must be kept for redrive");
+        assert!(
+            result.is_some(),
+            "retriable failure must be kept for redrive"
+        );
     }
 }
