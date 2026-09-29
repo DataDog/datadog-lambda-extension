@@ -152,18 +152,24 @@ impl StatsFlusher {
         // Concurrent flush() calls may now send at the same time; this is
         // safe because get_batch hands each caller a disjoint batch, and
         // shutdown awaits pending flush handles before the final flush.
-        let mut stats = {
+        // Batches are snapshotted up front so stats added while a slow send
+        // is in flight remain queued for the next flush instead of extending
+        // this one indefinitely.
+        let mut batches = Vec::new();
+        {
             let mut guard = self.aggregator.lock().await;
-            guard.get_batch(force_flush).await
-        };
-        while !stats.is_empty() {
+            loop {
+                let stats = guard.get_batch(force_flush).await;
+                if stats.is_empty() {
+                    break;
+                }
+                batches.push(stats);
+            }
+        }
+        for stats in batches {
             if let Some(failed) = self.send(stats).await {
                 all_failed.extend(failed);
             }
-            stats = {
-                let mut guard = self.aggregator.lock().await;
-                guard.get_batch(force_flush).await
-            };
         }
 
         if all_failed.is_empty() {
