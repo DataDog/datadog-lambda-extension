@@ -56,26 +56,35 @@ async fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
-fn parse_options() -> anyhow::Result<MockIntakeOptions> {
-    let port = match std::env::var("MOCK_INTAKE_PORT") {
-        Ok(raw) => raw
-            .parse::<u16>()
-            .with_context(|| format!("mock-intake: invalid MOCK_INTAKE_PORT value '{raw}', expected a port number between 0 and 65535"))?,
-        Err(std::env::VarError::NotPresent) => 8127,
+/// Parse an environment variable via `FromStr`, falling back to `default` when
+/// unset. `expected` describes the accepted format for the error message.
+fn parse_env_or<T: std::str::FromStr>(name: &str, default: T, expected: &str) -> anyhow::Result<T> {
+    let value = match std::env::var(name) {
+        Ok(raw) => raw.parse::<T>().map_err(|_| {
+            anyhow::anyhow!("mock-intake: invalid {name} value '{raw}', expected {expected}")
+        })?,
+        Err(std::env::VarError::NotPresent) => default,
         Err(std::env::VarError::NotUnicode(raw)) => {
-            bail!("mock-intake: MOCK_INTAKE_PORT is not valid Unicode: {}", raw.display())
+            bail!(
+                "mock-intake: {name} is not valid Unicode: {}",
+                raw.display()
+            )
         }
     };
+    Ok(value)
+}
 
-    let fail_stats_first_n = match std::env::var("MOCK_INTAKE_FAIL_STATS_FIRST_N") {
-        Ok(raw) => raw
-            .parse::<usize>()
-            .with_context(|| format!("mock-intake: invalid MOCK_INTAKE_FAIL_STATS_FIRST_N value '{raw}', expected a non-negative integer"))?,
-        Err(std::env::VarError::NotPresent) => 0,
-        Err(std::env::VarError::NotUnicode(raw)) => {
-            bail!("mock-intake: MOCK_INTAKE_FAIL_STATS_FIRST_N is not valid Unicode: {}", raw.display())
-        }
-    };
+fn parse_options() -> anyhow::Result<MockIntakeOptions> {
+    let port = parse_env_or(
+        "MOCK_INTAKE_PORT",
+        8127u16,
+        "a port number between 0 and 65535",
+    )?;
+    let fail_stats_first_n = parse_env_or(
+        "MOCK_INTAKE_FAIL_STATS_FIRST_N",
+        0usize,
+        "a non-negative integer",
+    )?;
 
     let dump_dir = match std::env::var("MOCK_INTAKE_DUMP_DIR") {
         Ok(raw) => Some(PathBuf::from(raw)),
