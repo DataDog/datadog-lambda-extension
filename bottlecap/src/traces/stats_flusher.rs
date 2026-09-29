@@ -220,7 +220,8 @@ struct Backoff {
 impl Backoff {
     /// Inclusive upper bound for the delay before retry `retry`.
     fn upper_bound(&self, retry: u32) -> Duration {
-        self.base * 2u32.pow(retry - 1)
+        let factor = 2u32.saturating_pow(retry.saturating_sub(1));
+        self.base.saturating_mul(factor)
     }
 
     /// Draws the actual delay for retry `retry` from `rng`.
