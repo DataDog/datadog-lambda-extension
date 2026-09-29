@@ -5,7 +5,8 @@
 //!
 //! Runs the shared `datadog-mock-intake` crate with request summaries enabled
 //! and accepts the same APM endpoints the Lambda extension flushes to. Point a
-//! tracer or the `bottlecap-test-mode` trace processor at it and inspect
+//! tracer or the `bottlecap-test-mode` trace processor (added in
+//! DataDog/datadog-lambda-extension#1216) at it and inspect
 //! decoded payloads and JSON dumps locally. See `bottlecap/README.md` for usage.
 //!
 //! Environment variables:
