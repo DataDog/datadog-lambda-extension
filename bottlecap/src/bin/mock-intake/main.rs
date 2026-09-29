@@ -44,8 +44,8 @@ async fn main() -> anyhow::Result<()> {
     println!("mock-intake: stats   endpoint POST {}", intake.stats_url());
     println!("mock-intake: traces  endpoint POST {}", intake.traces_url());
     println!(
-        "mock-intake: DSM     endpoint POST {}/api/v0.1/pipeline_stats",
-        intake.base_url()
+        "mock-intake: DSM     endpoint POST {}",
+        intake.pipeline_stats_url()
     );
     println!("mock-intake: waiting for SIGINT or SIGTERM to shut down");
 
