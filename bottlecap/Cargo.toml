@@ -44,7 +44,8 @@ hmac = { version = "0.12", default-features = false }
 sha2 = { version = "0.10", default-features = false }
 hex = { version = "0.4", default-features = false, features = ["std"] }
 base64 = { version = "0.22", default-features = false }
-rustls = { version = "0.23.18", default-features = false }
+# Keep rustls below 0.23.45 while AWS-LC-FIPS 4.x is uncertified.
+rustls = { version = ">=0.23.18, <0.23.45", default-features = false }
 # Constrain the transitive FIPS crypto backend: aws-lc-rs 1.18 switches to
 # AWS-LC-FIPS 4.x, pending FIPS 140-3 certification. Lift this bound only
 # after 4.x certification is verified. See .cargo/audit.toml and
