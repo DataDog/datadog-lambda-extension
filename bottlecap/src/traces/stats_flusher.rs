@@ -146,14 +146,21 @@ impl StatsFlusher {
             }
         }
 
-        // Then flush new stats from the aggregator
-        let mut guard = self.aggregator.lock().await;
-        let mut stats = guard.get_batch(force_flush).await;
+        // Then flush new stats from the aggregator. The lock is scoped to
+        // each get_batch call so send() (which includes retry backoff sleeps
+        // and network timeouts) runs without blocking aggregator.add().
+        let mut stats = {
+            let mut guard = self.aggregator.lock().await;
+            guard.get_batch(force_flush).await
+        };
         while !stats.is_empty() {
             if let Some(failed) = self.send(stats).await {
                 all_failed.extend(failed);
             }
-            stats = guard.get_batch(force_flush).await;
+            stats = {
+                let mut guard = self.aggregator.lock().await;
+                guard.get_batch(force_flush).await
+            };
         }
 
         if all_failed.is_empty() {
