@@ -306,7 +306,7 @@ async fn send_with_retry(
         }
     }
 
-    error!("STATS | Exhausted all {FLUSH_RETRY_COUNT} attempts, returning stats for redrive");
+    error!("STATS | Exhausted all {FLUSH_RETRY_COUNT} attempts sending stats");
     SendResult::Retriable
 }
 
