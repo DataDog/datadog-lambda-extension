@@ -110,7 +110,7 @@ impl StatsFlusher {
             &self.http_client,
             endpoint,
             api_key.as_str(),
-            serialized_stats_payload,
+            Bytes::from(serialized_stats_payload),
             Backoff {
                 base: Duration::from_millis(BACKOFF_BASE_MS),
             },
@@ -266,7 +266,7 @@ async fn send_with_retry(
     client: &HttpClient,
     target: &Endpoint,
     api_key: &str,
-    data: Vec<u8>,
+    data: Bytes,
     backoff: Backoff,
 ) -> SendResult {
     for attempt in 1..=FLUSH_RETRY_COUNT {
@@ -320,7 +320,7 @@ async fn send_stats_payload(
     client: &HttpClient,
     target: &Endpoint,
     api_key: &str,
-    data: Vec<u8>,
+    data: Bytes,
 ) -> SendOutcome {
     let req = match http::Request::builder()
         .method(http::Method::POST)
@@ -328,7 +328,7 @@ async fn send_stats_payload(
         .header("Content-Type", "application/msgpack")
         .header("Content-Encoding", "gzip")
         .header("DD-API-KEY", api_key)
-        .body(Bytes::from(data))
+        .body(data)
     {
         Ok(req) => req,
         Err(e) => return SendOutcome::Permanent(format!("Failed to build stats request: {e}")),
@@ -496,7 +496,7 @@ mod tests {
             &client,
             &mock_endpoint(&server),
             "test-api-key",
-            b"stats".to_vec(),
+            Bytes::from_static(b"stats"),
             zero_backoff(),
         )
         .await;
@@ -551,7 +551,7 @@ mod tests {
                 &client,
                 &test_endpoint(url),
                 "test-api-key",
-                b"stats".to_vec(),
+                Bytes::from_static(b"stats"),
                 zero_backoff(),
             ),
         )
