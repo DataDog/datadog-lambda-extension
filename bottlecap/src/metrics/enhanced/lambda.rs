@@ -884,12 +884,6 @@ mod tests {
             .try_into()
             .unwrap_or_default();
         lambda.increment_invocation_metric(now);
-        let now: i64 = std::time::UNIX_EPOCH
-            .elapsed()
-            .expect("unable to poll clock, unrecoverable")
-            .as_secs()
-            .try_into()
-            .unwrap_or_default();
         assert_sketch(&metrics_aggr, constants::INVOCATIONS_METRIC, 1f64, now).await;
     }
 
@@ -905,12 +899,6 @@ mod tests {
             .try_into()
             .unwrap_or_default();
         lambda.increment_errors_metric(now);
-        let now: i64 = std::time::UNIX_EPOCH
-            .elapsed()
-            .expect("unable to poll clock, unrecoverable")
-            .as_secs()
-            .try_into()
-            .unwrap_or_default();
         assert_sketch(&metrics_aggr, constants::ERRORS_METRIC, 1f64, now).await;
     }
 
