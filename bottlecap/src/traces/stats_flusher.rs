@@ -456,6 +456,18 @@ mod tests {
     }
 
     #[test]
+    fn backoff_upper_bound_saturates_out_of_range_retries() {
+        let backoff = Backoff {
+            base: Duration::from_millis(50),
+        };
+        assert_eq!(backoff.upper_bound(0), Duration::from_millis(50));
+        assert_eq!(
+            backoff.upper_bound(u32::MAX),
+            Duration::from_millis(50) * u32::MAX
+        );
+    }
+
+    #[test]
     fn backoff_delay_stays_within_upper_bound() {
         let backoff = Backoff {
             base: Duration::from_millis(50),
