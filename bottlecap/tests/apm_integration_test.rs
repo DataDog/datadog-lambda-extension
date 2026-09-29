@@ -1,7 +1,7 @@
 // Copyright 2023-Present Datadog, Inc. https://www.datadoghq.com/
 // SPDX-License-Identifier: Apache-2.0
 
-//! Payload-level APM integration tests using the in-process fake-intake.
+//! Payload-level APM integration tests using the in-process mock-intake.
 //!
 //! Covers the two flush paths bottlecap uses to forward APM data to the
 //! Datadog backend:
@@ -101,8 +101,8 @@ fn endpoint_for(url: &str, api_key: &str) -> Endpoint {
 }
 
 #[tokio::test]
-async fn stats_payload_roundtrip_through_fake_intake() {
-    let fake_intake = MockIntake::start().await;
+async fn stats_payload_roundtrip_through_mock_intake() {
+    let mock_intake = MockIntake::start().await;
     let config = test_config();
     let http_client = create_client(None, None, false).expect("failed to create http client");
 
@@ -123,7 +123,7 @@ async fn stats_payload_roundtrip_through_fake_intake() {
         aggregator,
         config,
         http_client,
-        fake_intake.stats_url(),
+        mock_intake.stats_url(),
     );
 
     let client_stats = pb::ClientStatsPayload {
@@ -134,13 +134,13 @@ async fn stats_payload_roundtrip_through_fake_intake() {
         tracer_version: "test-tracer".to_string(),
         runtime_id: "00000000-0000-0000-0000-000000000001".to_string(),
         sequence: 7,
-        service: "fake-intake-test-service".to_string(),
+        service: "mock-intake-test-service".to_string(),
         stats: vec![pb::ClientStatsBucket {
             start: 1_700_000_000_000_000_000,
             duration: 10_000_000_000,
             agent_time_shift: 0,
             stats: vec![pb::ClientGroupedStats {
-                service: "fake-intake-test-service".to_string(),
+                service: "mock-intake-test-service".to_string(),
                 name: "handler".to_string(),
                 resource: "GET /fake".to_string(),
                 r#type: "web".to_string(),
@@ -179,7 +179,7 @@ async fn stats_payload_roundtrip_through_fake_intake() {
         "stats send reported a retry-able failure: {failed:?}",
     );
 
-    let captured = fake_intake.stats_payloads();
+    let captured = mock_intake.stats_payloads();
     assert_eq!(captured.len(), 1, "expected exactly one StatsPayload");
 
     let payload = &captured[0];
@@ -194,7 +194,7 @@ async fn stats_payload_roundtrip_through_fake_intake() {
     assert_eq!(inner.hostname, "");
     assert_eq!(inner.env, "test-env");
     assert_eq!(inner.version, "1.2.3");
-    assert_eq!(inner.service, "fake-intake-test-service");
+    assert_eq!(inner.service, "mock-intake-test-service");
     assert_eq!(inner.sequence, 7);
     assert_eq!(inner.stats.len(), 1);
     let bucket = &inner.stats[0];
@@ -213,17 +213,17 @@ async fn stats_payload_roundtrip_through_fake_intake() {
 }
 
 #[tokio::test]
-async fn trace_payload_roundtrip_through_fake_intake() {
-    let fake_intake = MockIntake::start().await;
+async fn trace_payload_roundtrip_through_mock_intake() {
+    let mock_intake = MockIntake::start().await;
     let config = test_config();
     let http_client = create_client(None, None, false).expect("failed to create http client");
-    let endpoint = endpoint_for(&fake_intake.traces_url(), DD_API_KEY);
+    let endpoint = endpoint_for(&mock_intake.traces_url(), DD_API_KEY);
 
     let (aggregator_service, aggregator_handle) = AggregatorService::default();
     tokio::spawn(aggregator_service.run());
 
     let span = pb::Span {
-        service: "fake-intake-trace-service".to_string(),
+        service: "mock-intake-trace-service".to_string(),
         name: "web.request".to_string(),
         resource: "GET /fake".to_string(),
         trace_id: 0x1111_1111_1111_1111,
@@ -276,7 +276,7 @@ async fn trace_payload_roundtrip_through_fake_intake() {
         "trace flush reported a retry-able failure: {failed:?}",
     );
 
-    let captured = fake_intake.trace_payloads();
+    let captured = mock_intake.trace_payloads();
     assert_eq!(captured.len(), 1, "expected exactly one AgentPayload");
 
     let payload = &captured[0];
@@ -290,7 +290,7 @@ async fn trace_payload_roundtrip_through_fake_intake() {
     assert_eq!(chunk.priority, 1);
     assert_eq!(chunk.spans.len(), 1);
     let span = &chunk.spans[0];
-    assert_eq!(span.service, "fake-intake-trace-service");
+    assert_eq!(span.service, "mock-intake-trace-service");
     assert_eq!(span.name, "web.request");
     assert_eq!(span.resource, "GET /fake");
     assert_eq!(span.trace_id, 0x1111_1111_1111_1111);
@@ -298,9 +298,9 @@ async fn trace_payload_roundtrip_through_fake_intake() {
 }
 
 // ---------------------------------------------------------------------------
-// APMSVLS-487 Tier 3: full fake-intake E2E through `SendingTraceProcessor`.
+// APMSVLS-487 Tier 3: full mock-intake E2E through `SendingTraceProcessor`.
 //
-// Unlike `trace_payload_roundtrip_through_fake_intake` (which inserts a hand-built
+// Unlike `trace_payload_roundtrip_through_mock_intake` (which inserts a hand-built
 // `pb::TracerPayload` directly), these tests route a trace through
 // `SendingTraceProcessor::send_processed_traces` so they exercise the real
 // `process_traces`/`ChunkProcessor` stamping of `_dd.compute_stats` and the
@@ -325,20 +325,20 @@ struct PipelineOutcome {
 
 /// Drives `traces` through `SendingTraceProcessor::send_processed_traces` with the given
 /// `lambda_extension_compute_stats` / `client_computed_stats`, then flushes both the trace
-/// and stats pipelines into a fresh fake-intake and returns what it captured.
+/// and stats pipelines into a fresh mock-intake and returns what it captured.
 async fn run_processor_pipeline_with_traces(
     compute_on_extension: bool,
     client_computed_stats: bool,
     traces: Vec<Vec<pb::Span>>,
 ) -> PipelineOutcome {
-    let fake_intake = MockIntake::start().await;
+    let mock_intake = MockIntake::start().await;
 
     let config = Arc::new(Config {
         api_key: DD_API_KEY.to_string(),
         site: "datadoghq.com".to_string(),
         // process_traces builds its trace endpoint directly from apm_dd_url.
-        apm_dd_url: fake_intake.traces_url(),
-        service: Some("fake-intake-trace-service".to_string()),
+        apm_dd_url: mock_intake.traces_url(),
+        service: Some("mock-intake-trace-service".to_string()),
         ext: bottlecap::config::LambdaConfig {
             lambda_extension_compute_stats: compute_on_extension,
             ..Default::default()
@@ -420,14 +420,14 @@ async fn run_processor_pipeline_with_traces(
         stats_aggregator,
         Arc::clone(&config),
         http_client,
-        fake_intake.stats_url(),
+        mock_intake.stats_url(),
     );
     let failed = stats_flusher.flush(true, None).await;
     assert!(failed.is_none(), "stats flush failed: {failed:?}");
 
     PipelineOutcome {
-        traces: fake_intake.trace_payloads(),
-        stats: fake_intake.stats_payloads(),
+        traces: mock_intake.trace_payloads(),
+        stats: mock_intake.stats_payloads(),
     }
 }
 
@@ -443,7 +443,7 @@ async fn run_processor_pipeline(
 ) -> PipelineOutcome {
     // A top-level root span so the concentrator produces stats.
     let mut span = pb::Span {
-        service: "fake-intake-trace-service".to_string(),
+        service: "mock-intake-trace-service".to_string(),
         name: "web.request".to_string(),
         resource: "GET /fake".to_string(),
         trace_id: 0x1111_1111_1111_1111,
@@ -486,7 +486,7 @@ fn captured_compute_stats(traces: &[pb::AgentPayload]) -> Option<String> {
 async fn e2e_error_sampler_rescues_only_errored_p0_traces() {
     let make_span = |trace_id: u64, error: i32| {
         let mut span = pb::Span {
-            service: "fake-intake-trace-service".to_string(),
+            service: "mock-intake-trace-service".to_string(),
             name: "web.request".to_string(),
             resource: "GET /fake".to_string(),
             trace_id,
@@ -624,7 +624,7 @@ async fn e2e_client_computed_stats_absent_meta_and_no_stats() {
 /// Distinct `id` values keep trace/span ids unique across invocations.
 fn stats_trace(id: u64, resource: &str, duration: i64, error: i32) -> Vec<pb::Span> {
     let mut span = pb::Span {
-        service: "fake-intake-trace-service".to_string(),
+        service: "mock-intake-trace-service".to_string(),
         name: "web.request".to_string(),
         resource: resource.to_string(),
         trace_id: id,
@@ -809,7 +809,7 @@ fn make_eligible_span(span_kind: &str, peer_meta: &[(&str, &str)]) -> pb::Span {
     meta.insert("span.kind".to_string(), span_kind.to_string());
 
     pb::Span {
-        service: "fake-intake-stats-service".to_string(),
+        service: "mock-intake-stats-service".to_string(),
         name: "test-op".to_string(),
         resource: "test-resource".to_string(),
         trace_id: 1,
@@ -825,10 +825,10 @@ fn make_eligible_span(span_kind: &str, peer_meta: &[(&str, &str)]) -> pb::Span {
     }
 }
 
-/// Wire concentrator -> aggregator -> flusher pointed at the fake intake, feed in
+/// Wire concentrator -> aggregator -> flusher pointed at the mock intake, feed in
 /// `spans`, force a flush, and return the single captured `StatsPayload`.
-async fn flush_spans_to_fake_intake(
-    fake_intake: &MockIntake,
+async fn flush_spans_to_mock_intake(
+    mock_intake: &MockIntake,
     config: Arc<Config>,
     spans: &[pb::Span],
 ) -> pb::StatsPayload {
@@ -854,7 +854,7 @@ async fn flush_spans_to_fake_intake(
         aggregator,
         config,
         http_client,
-        fake_intake.stats_url(),
+        mock_intake.stats_url(),
     );
 
     let failed = flusher.flush(true, None).await;
@@ -863,7 +863,7 @@ async fn flush_spans_to_fake_intake(
         "stats flush reported a retry-able failure: {failed:?}",
     );
 
-    let captured = fake_intake.stats_payloads();
+    let captured = mock_intake.stats_payloads();
     assert_eq!(captured.len(), 1, "expected exactly one StatsPayload");
     captured.into_iter().next().expect("captured payload")
 }
@@ -873,11 +873,11 @@ async fn flush_spans_to_fake_intake(
 /// at the intake as a grouped-stats entry with `span_kind="server"`. This closes
 /// the gap left by the in-memory concentrator unit tests, which never serialize.
 #[tokio::test]
-async fn stats_span_kind_through_fake_intake() {
-    let fake_intake = MockIntake::start().await;
+async fn stats_span_kind_through_mock_intake() {
+    let mock_intake = MockIntake::start().await;
     let span = make_eligible_span("server", &[]);
 
-    let payload = flush_spans_to_fake_intake(&fake_intake, test_config(), &[span]).await;
+    let payload = flush_spans_to_mock_intake(&mock_intake, test_config(), &[span]).await;
 
     let grouped: Vec<_> = payload
         .stats
@@ -901,14 +901,14 @@ async fn stats_span_kind_through_fake_intake() {
 /// populated in `peer_tags`, proving peer-tags survive serialization through
 /// the concentrator -> flusher -> intake path.
 #[tokio::test]
-async fn stats_peer_tags_through_fake_intake() {
-    let fake_intake = MockIntake::start().await;
+async fn stats_peer_tags_through_mock_intake() {
+    let mock_intake = MockIntake::start().await;
     let span = make_eligible_span(
         "client",
         &[("db.instance", "i-1234"), ("db.system", "postgres")],
     );
 
-    let payload = flush_spans_to_fake_intake(&fake_intake, test_config(), &[span]).await;
+    let payload = flush_spans_to_mock_intake(&mock_intake, test_config(), &[span]).await;
 
     let with_peer_tags: Vec<_> = payload
         .stats
@@ -949,8 +949,8 @@ fn grouped_entries(payload: &pb::StatsPayload) -> Vec<&pb::ClientGroupedStats> {
 /// same group. Span meta keys not listed in `DD_TRACE_STATS_ADDITIONAL_TAGS`
 /// must not be exported as additional metric tags.
 #[tokio::test]
-async fn stats_additional_metric_tags_through_fake_intake() {
-    let fake_intake = MockIntake::start().await;
+async fn stats_additional_metric_tags_through_mock_intake() {
+    let mock_intake = MockIntake::start().await;
     let config = config_from_env(&[
         ("DD_API_KEY", DD_API_KEY),
         ("DD_SITE", "datadoghq.com"),
@@ -967,7 +967,7 @@ async fn stats_additional_metric_tags_through_fake_intake() {
         make_eligible_span("server", &[("tenant_id", "acme")]),
     ];
 
-    let payload = flush_spans_to_fake_intake(&fake_intake, config, &spans).await;
+    let payload = flush_spans_to_mock_intake(&mock_intake, config, &spans).await;
     let grouped = grouped_entries(&payload);
 
     let with_tags: Vec<_> = grouped
@@ -1008,8 +1008,8 @@ async fn stats_additional_metric_tags_through_fake_intake() {
 /// spans differing only in the unexported meta value must merge into a single
 /// group. Proves the gate affects the payload, not just the parsed config.
 #[tokio::test]
-async fn stats_additional_metric_tags_gated_off_through_fake_intake() {
-    let fake_intake = MockIntake::start().await;
+async fn stats_additional_metric_tags_gated_off_through_mock_intake() {
+    let mock_intake = MockIntake::start().await;
     let config = config_from_env(&[
         ("DD_API_KEY", DD_API_KEY),
         ("DD_SITE", "datadoghq.com"),
@@ -1022,7 +1022,7 @@ async fn stats_additional_metric_tags_gated_off_through_fake_intake() {
         make_eligible_span("server", &[("region", "eu-west-1")]),
     ];
 
-    let payload = flush_spans_to_fake_intake(&fake_intake, config, &spans).await;
+    let payload = flush_spans_to_mock_intake(&mock_intake, config, &spans).await;
     let grouped = grouped_entries(&payload);
 
     assert_eq!(
@@ -1047,8 +1047,8 @@ async fn stats_additional_metric_tags_gated_off_through_fake_intake() {
 /// collapse the second into the `tracer_blocked_value` overflow group, keeping
 /// the total hit count intact.
 #[tokio::test]
-async fn stats_additional_metric_tags_cardinality_limit_through_fake_intake() {
-    let fake_intake = MockIntake::start().await;
+async fn stats_additional_metric_tags_cardinality_limit_through_mock_intake() {
+    let mock_intake = MockIntake::start().await;
     let config = config_from_env(&[
         ("DD_API_KEY", DD_API_KEY),
         ("DD_SITE", "datadoghq.com"),
@@ -1063,7 +1063,7 @@ async fn stats_additional_metric_tags_cardinality_limit_through_fake_intake() {
         make_eligible_span("server", &[("region", "eu-west-1")]),
     ];
 
-    let payload = flush_spans_to_fake_intake(&fake_intake, config, &spans).await;
+    let payload = flush_spans_to_mock_intake(&mock_intake, config, &spans).await;
     let grouped = grouped_entries(&payload);
 
     assert_eq!(
@@ -1097,8 +1097,8 @@ async fn stats_additional_metric_tags_cardinality_limit_through_fake_intake() {
 /// the two values together: one group per distinct combination, repeats aggregating per
 /// combination, and a change in either key producing a new group.
 #[tokio::test]
-async fn stats_additional_metric_tags_multiple_keys_through_fake_intake() {
-    let fake_intake = MockIntake::start().await;
+async fn stats_additional_metric_tags_multiple_keys_through_mock_intake() {
+    let mock_intake = MockIntake::start().await;
     let config = config_from_env(&[
         ("DD_API_KEY", DD_API_KEY),
         ("DD_SITE", "datadoghq.com"),
@@ -1116,7 +1116,7 @@ async fn stats_additional_metric_tags_multiple_keys_through_fake_intake() {
         make_eligible_span("server", &[("region", "eu-west-1"), ("tenant_id", "acme")]),
     ];
 
-    let payload = flush_spans_to_fake_intake(&fake_intake, config, &spans).await;
+    let payload = flush_spans_to_mock_intake(&mock_intake, config, &spans).await;
     let grouped = grouped_entries(&payload);
 
     fn tags_of(s: &pb::ClientGroupedStats) -> Vec<&str> {
