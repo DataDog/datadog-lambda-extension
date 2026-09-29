@@ -61,8 +61,8 @@ cargo clippy:
     - apt-get update && apt-get install -y --fix-missing --no-install-recommends golang-go
     - cd bottlecap
     # We need to do these separately because the fips feature is incompatible with the default feature.
-    - cargo clippy --workspace --features default
-    - cargo clippy --workspace --no-default-features --features fips
+    - cargo clippy --workspace --all-targets --features default
+    - cargo clippy --workspace --all-targets --no-default-features --features fips
     # Also lint the feature-gated test-mode and mock-intake binaries.
     - cargo clippy --workspace --all-targets --features default,test-mode,mock-intake
 
