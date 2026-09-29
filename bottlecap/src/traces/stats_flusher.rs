@@ -598,6 +598,57 @@ mod tests {
         assert!(result.is_none(), "permanent failure must be dropped");
     }
 
+    /// Regression: the aggregator lock must not be held while a batch is
+    /// being sent, so tracer stats submissions are not blocked by retries or
+    /// slow intake responses.
+    #[tokio::test]
+    async fn flush_does_not_hold_aggregator_lock_during_send() {
+        let server = MockServer::start_async().await;
+        let mock = server
+            .mock_async(|when, then| {
+                when.method(POST).path("/api/v0.2/stats");
+                then.status(202).delay(Duration::from_secs(2));
+            })
+            .await;
+        let client = create_client(None, None, false).expect("client should build");
+        let config = Arc::new(Config::default());
+        let aggregator = Arc::new(Mutex::new(StatsAggregator::new_with_concentrator(
+            StatsConcentratorService::new(Arc::clone(&config)).1,
+        )));
+        aggregator
+            .lock()
+            .await
+            .add(pb::ClientStatsPayload::default());
+        let flusher = Arc::new(StatsFlusher::new(
+            Arc::new(ApiKeyFactory::new("test-api-key")),
+            Arc::clone(&aggregator),
+            config,
+            client,
+            server.url("/api/v0.2/stats"),
+        ));
+
+        let flush = tokio::spawn({
+            let flusher = Arc::clone(&flusher);
+            async move { flusher.flush(false, None).await }
+        });
+
+        // Wait until the request is in flight at the mock.
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while mock.hits_async().await == 0 {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("stats request should reach the mock");
+
+        let guard = tokio::time::timeout(Duration::from_millis(500), aggregator.lock())
+            .await
+            .expect("aggregator lock must be free while send is in flight");
+        drop(guard);
+
+        assert!(flush.await.expect("flush task").is_none());
+    }
+
     #[tokio::test]
     async fn send_keeps_stats_on_exhausted_retriable_failure() {
         let result = tokio::time::timeout(Duration::from_secs(5), send_once(503))
