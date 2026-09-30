@@ -328,7 +328,7 @@ impl LambdaProcessor {
                     error!("Failed to send PlatformRuntimeDone to the main event bus: {}", e);
                 }
 
-                let mut message = format!("END RequestId: {request_id}"); 
+                let mut message = format!("END RequestId: {request_id}");
                 let mut result_status = "info".to_string();
                 if let Some(metrics) = metrics {
                     self.invocation_context.runtime_duration_ms = metrics.duration_ms;
@@ -339,6 +339,9 @@ impl LambdaProcessor {
                         let _ = write!(message, " Task failed: {:?}", error_type.unwrap_or_default());
                         result_status = "error".to_string();
                     }
+                } else if status == Status::Timeout {
+                    message.push_str(" Task timed out");
+                    result_status = "error".to_string();
                 }
                 // Remove the `request_id` since no more orphan logs will be processed with this one
                 self.invocation_context.request_id = String::new();
@@ -1027,6 +1030,29 @@ mod tests {
             },
             Message {
                     message: "END RequestId: test-request-id Task timed out after 5.00 seconds".to_string(),
+                    lambda: Lambda {
+                        arn: "test-arn".to_string(),
+                        request_id: Some("test-request-id".to_string()),
+                    ..Lambda::default()
+                    },
+                    timestamp: 1_673_061_827_000,
+                    status: "error".to_string(),
+                },
+        ),
+
+        // platform runtime done timeout without metrics
+        platform_runtime_done_timeout_without_metrics: (
+            &TelemetryEvent {
+                time: Utc.with_ymd_and_hms(2023, 1, 7, 3, 23, 47).unwrap(),
+                record: TelemetryRecord::PlatformRuntimeDone {
+                    request_id: "test-request-id".to_string(),
+                    status: Status::Timeout,
+                    error_type: None,
+                    metrics: None,
+                }
+            },
+            Message {
+                    message: "END RequestId: test-request-id Task timed out".to_string(),
                     lambda: Lambda {
                         arn: "test-arn".to_string(),
                         request_id: Some("test-request-id".to_string()),
