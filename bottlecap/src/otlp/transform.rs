@@ -130,6 +130,10 @@ fn otel_value_to_string(value: &any_value::Value) -> String {
                 .collect();
             serde_json::to_string(&hashmap).unwrap_or_default()
         }
+        // Belongs to the Profiling signal, which indexes into a string table
+        // this transform has no access to. OTLP tells receivers of other
+        // signals to process such a value as if it were absent.
+        any_value::Value::StringValueStrindex(_) => String::new(),
     }
 }
 
@@ -1003,7 +1007,7 @@ pub fn otel_span_to_dd_span(
         }
     }
 
-    for KeyValue { key, value } in &otel_res.attributes {
+    for KeyValue { key, value, .. } in &otel_res.attributes {
         if let Some(v) = value.as_ref().and_then(|v| v.value.as_ref()) {
             let value = otel_value_to_string(v);
             if !value.is_empty() {
@@ -1017,7 +1021,7 @@ pub fn otel_span_to_dd_span(
         }
     }
 
-    for KeyValue { key, value } in &lib.attributes {
+    for KeyValue { key, value, .. } in &lib.attributes {
         if let Some(v) = value.as_ref().and_then(|v| v.value.as_ref()) {
             let value = otel_value_to_string(v);
             if !value.is_empty() {
@@ -1053,7 +1057,7 @@ pub fn otel_span_to_dd_span(
         );
     }
 
-    for KeyValue { key, value } in &otel_span.attributes {
+    for KeyValue { key, value, .. } in &otel_span.attributes {
         if key.starts_with("datadog.") {
             continue;
         }
@@ -1289,12 +1293,14 @@ mod tests {
                 value: Some(AnyValue {
                     value: Some(Value::StringValue("value1".to_string())),
                 }),
+                ..Default::default()
             },
             KeyValue {
                 key: "key2".to_string(),
                 value: Some(AnyValue {
                     value: Some(Value::IntValue(42)),
                 }),
+                ..Default::default()
             },
         ];
 
@@ -1307,6 +1313,12 @@ mod tests {
         assert!(result.contains("\"key2\":\"42\""));
         assert!(result.starts_with('{'));
         assert!(result.ends_with('}'));
+    }
+
+    #[test]
+    fn test_otel_value_to_string_string_value_strindex() {
+        let value = Value::StringValueStrindex(3);
+        assert_eq!(otel_value_to_string(&value), "");
     }
 
     #[test]
