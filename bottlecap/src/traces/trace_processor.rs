@@ -204,9 +204,8 @@ struct ChunkProcessor {
     obfuscation_config: Arc<obfuscation_config::ObfuscationConfig>,
     tags_provider: Arc<provider::Provider>,
     span_pointers: Option<Vec<SpanPointer>>,
-    /// Which party computes trace stats for this request, resolved once by the caller from
-    /// config and the tracer's `Datadog-Client-Computed-Stats` signal. Used to decide
-    /// whether to stamp `_dd.compute_stats`.
+    /// Resolved once per request by the caller; used to decide whether to stamp
+    /// `_dd.compute_stats`.
     stats_computed_by: StatsComputedBy,
 }
 
@@ -784,10 +783,14 @@ mod tests {
     }
 
     fn create_compute_stats_config() -> Arc<Config> {
+        create_compute_stats_config_with(true)
+    }
+
+    fn create_compute_stats_config_with(lambda_extension_compute_stats: bool) -> Arc<Config> {
         Arc::new(Config {
             apm_dd_url: "https://trace.agent.datadoghq.com".to_string(),
             ext: crate::config::LambdaConfig {
-                lambda_extension_compute_stats: true,
+                lambda_extension_compute_stats,
                 ..Default::default()
             },
             ..Config::default()
@@ -1368,15 +1371,25 @@ mod tests {
             (true, true, true),    // tracer owns stats even when extension configured: filter
         ];
 
+        let make_span = |trace_id: u64, priority: Option<f64>| -> pb::Span {
+            let mut metrics = HashMap::new();
+            if let Some(p) = priority {
+                metrics.insert("_sampling_priority_v1".to_string(), p);
+            }
+            pb::Span {
+                trace_id,
+                span_id: trace_id,
+                parent_id: 0,
+                metrics,
+                service: "svc".to_string(),
+                name: "op".to_string(),
+                resource: "res".to_string(),
+                ..Default::default()
+            }
+        };
+
         for (compute_on_extension, client_computed_stats, expect_filtering) in cases {
-            let config = Arc::new(Config {
-                apm_dd_url: "https://trace.agent.datadoghq.com".to_string(),
-                ext: crate::config::LambdaConfig {
-                    lambda_extension_compute_stats: compute_on_extension,
-                    ..Default::default()
-                },
-                ..Config::default()
-            });
+            let config = create_compute_stats_config_with(compute_on_extension);
             let (tags_provider, processor) =
                 create_test_processor(&config, enabled_error_sampler());
             let header_tags = tracer_header_tags::TracerHeaderTags {
@@ -1385,23 +1398,6 @@ mod tests {
                     ..Default::default()
                 },
                 ..create_test_header_tags()
-            };
-
-            let make_span = |trace_id: u64, priority: Option<f64>| -> pb::Span {
-                let mut metrics = HashMap::new();
-                if let Some(p) = priority {
-                    metrics.insert("_sampling_priority_v1".to_string(), p);
-                }
-                pb::Span {
-                    trace_id,
-                    span_id: trace_id,
-                    parent_id: 0,
-                    metrics,
-                    service: "svc".to_string(),
-                    name: "op".to_string(),
-                    resource: "res".to_string(),
-                    ..Default::default()
-                }
             };
 
             // Three traces: kept (priority 1), dropped (priority 0), dropped (priority -1)
@@ -1454,50 +1450,37 @@ mod tests {
     /// dropped (`AutoDrop`), stamping `_dd.errors_sr`, while non-errored P0 chunks
     /// and explicit user drops are still dropped. Priorities are never rewritten.
     #[test]
-    #[allow(clippy::too_many_lines)]
     fn test_error_sampler_rescues_errored_p0_chunks() {
         // (owner label, lambda_extension_compute_stats, client_computed_stats)
         let cases = [("extension", true, false), ("tracer", false, true)];
 
+        let make_span = |trace_id: u64, priority: f64, error: i32| -> pb::Span {
+            let mut metrics = HashMap::new();
+            metrics.insert("_sampling_priority_v1".to_string(), priority);
+            pb::Span {
+                trace_id,
+                span_id: trace_id,
+                parent_id: 0,
+                error,
+                metrics,
+                service: "svc".to_string(),
+                name: "op".to_string(),
+                resource: "res".to_string(),
+                ..Default::default()
+            }
+        };
+
         for (owner, compute_on_extension, client_computed_stats) in cases {
-            let config = Arc::new(Config {
-                apm_dd_url: "https://trace.agent.datadoghq.com".to_string(),
-                ext: crate::config::LambdaConfig {
-                    lambda_extension_compute_stats: compute_on_extension,
-                    ..Default::default()
-                },
-                ..Config::default()
-            });
+            let config = create_compute_stats_config_with(compute_on_extension);
             let (tags_provider, processor) =
                 create_test_processor(&config, enabled_error_sampler());
 
             let header_tags = tracer_header_tags::TracerHeaderTags {
-                lang: "rust",
-                lang_version: "1.0",
-                lang_interpreter: "",
-                lang_vendor: "",
-                tracer_version: "1.0",
-                container_id: "",
                 generic: tracer_header_tags::TracerGenericTags {
                     client_computed_stats,
                     ..Default::default()
                 },
-            };
-
-            let make_span = |trace_id: u64, priority: f64, error: i32| -> pb::Span {
-                let mut metrics = HashMap::new();
-                metrics.insert("_sampling_priority_v1".to_string(), priority);
-                pb::Span {
-                    trace_id,
-                    span_id: trace_id,
-                    parent_id: 0,
-                    error,
-                    metrics,
-                    service: "svc".to_string(),
-                    name: "op".to_string(),
-                    resource: "res".to_string(),
-                    ..Default::default()
-                }
+                ..create_test_header_tags()
             };
 
             // trace 1: kept normally (priority 1). trace 2: errored P0 (rescued).
