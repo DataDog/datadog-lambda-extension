@@ -1,4 +1,4 @@
-import { invokeAndCollectTelemetry, FunctionConfig } from './utils/default';
+import { invokeAndCollectTelemetry } from './utils/default';
 import { DatadogTelemetry, getInvocationTracesLogsByRequestId, InvocationTracesLogs } from './utils/datadog';
 import { forceColdStart } from './utils/lambda';
 import {
@@ -34,14 +34,11 @@ describe('Payload Size E2E Delivery Tests', () => {
     const functionName = `${stackName}-large-trace-lambda`;
 
     beforeAll(async () => {
-      const functions: FunctionConfig[] = [
-        { functionName, runtime: 'node' },
-      ];
-
-      await Promise.all(functions.map(fn => forceColdStart(fn.functionName)));
+      await forceColdStart(functionName);
 
       telemetry = await invokeAndCollectTelemetry(
-        functions, INVOCATION_COUNT, 1, DELAY_BETWEEN_INVOCATIONS_MS,
+        [{ functionName, runtime: 'node' }],
+        INVOCATION_COUNT, 1, DELAY_BETWEEN_INVOCATIONS_MS,
         { spanCount: SPAN_COUNT, payloadBytes: PAYLOAD_BYTES });
 
       // The assertions below target the FIRST request's trace. Its ~10 MB of
@@ -89,11 +86,7 @@ describe('Payload Size E2E Delivery Tests', () => {
       // (SPAN_COUNT < the 1000-span API page limit, so none are truncated).
       const result = getInvocation();
       expect(result).toBeDefined();
-
-      const orderSpans = result
-        .traces!.flatMap(t => t.spans)
-        .filter((span: any) => span.attributes.operation_name === 'order.process');
-      expect(orderSpans.length).toBe(SPAN_COUNT);
+      expect(countOrderSpans(result)).toBe(SPAN_COUNT);
     });
   });
 });
