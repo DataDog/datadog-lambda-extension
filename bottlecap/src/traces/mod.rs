@@ -38,6 +38,11 @@ const DNS_LOCAL_HOST_ADDRESS_URL_PREFIX: &str = "127.0.0.1";
 // URL from the `_AWS_XRAY_DAEMON_ADDRESS` for DNS traces
 const AWS_XRAY_DAEMON_ADDRESS_URL_PREFIX: &str = "169.254.79.129";
 
+/// The trace intake path the config crate appends to `DD_APM_DD_URL` to build
+/// `apm_dd_url`. Must be stripped from that field before deriving any
+/// non-trace endpoint (stats, DSM) from it.
+pub const TRACE_INTAKE_ROUTE: &str = "/api/v0.2/traces";
+
 // Name of the placeholder invocation span set by Java and Go tracers
 pub(crate) const INVOCATION_SPAN_RESOURCE: &str = "dd-tracer-serverless-span";
 

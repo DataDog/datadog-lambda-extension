@@ -5,7 +5,8 @@ use std::sync::Arc;
 use tracing::{debug, error};
 
 use dogstatsd::{
-    aggregator::AggregatorHandle as MetricsAggregatorHandle, flusher::Flusher as MetricsFlusher,
+    aggregator::{AggregatorHandle as MetricsAggregatorHandle, FlushResponse},
+    flusher::Flusher as MetricsFlusher,
 };
 
 use crate::flushing::handles::{FlushHandles, MetricsRetryBatch};
@@ -300,8 +301,11 @@ impl FlushingService {
     ///
     /// The stats flusher respects its normal timing constraints (time-based bucketing),
     /// which may result in some stats being held back until the next flush cycle.
-    pub async fn flush_blocking(&self) {
-        self.flush_blocking_inner(false).await;
+    ///
+    /// Returns `true` when at least one flusher finished with payloads it could
+    /// not deliver. See [`flush_blocking_inner`](Self::flush_blocking_inner).
+    pub async fn flush_blocking(&self) -> bool {
+        self.flush_blocking_inner(false).await
     }
 
     /// Performs a final blocking flush of all telemetry data before shutdown.
@@ -311,19 +315,40 @@ impl FlushingService {
     /// flush immediately regardless of its normal timing constraints.
     ///
     /// Use this during shutdown when this is the last opportunity to send data.
-    pub async fn flush_blocking_final(&self) {
-        self.flush_blocking_inner(true).await;
+    ///
+    /// Returns `true` when at least one flusher finished with payloads it could
+    /// not deliver. See [`flush_blocking_inner`](Self::flush_blocking_inner).
+    pub async fn flush_blocking_final(&self) -> bool {
+        self.flush_blocking_inner(true).await
     }
 
     /// Internal implementation for blocking flush operations.
     ///
     /// Fetches metrics from the aggregator and flushes all data types in parallel.
-    async fn flush_blocking_inner(&self, force_stats: bool) {
-        let flush_response = self
-            .metrics_aggr_handle
-            .flush()
-            .await
-            .expect("can't flush metrics aggr handle");
+    ///
+    /// Returns `true` when at least one flusher handed back payloads it could
+    /// not deliver after exhausting its own retries. Unlike the
+    /// [`spawn_non_blocking`](Self::spawn_non_blocking) path, this one does not
+    /// redrive them, so the return value is the only signal that data was
+    /// drained without reaching the intake.
+    async fn flush_blocking_inner(&self, force_stats: bool) -> bool {
+        // A failed handle means the aggregator task is gone and its buffered
+        // metrics are lost, so report them as undelivered and continue with an
+        // empty response rather than panicking: the release profile uses
+        // panic = "abort", so a panic here would take down the process.
+        let (flush_response, metrics_handle_failed) = match self.metrics_aggr_handle.flush().await {
+            Ok(response) => (response, false),
+            Err(e) => {
+                error!("FLUSHING_SERVICE | Metrics aggregator handle failed to flush: {e}");
+                (
+                    FlushResponse {
+                        series: Vec::new(),
+                        distributions: Vec::new(),
+                    },
+                    true,
+                )
+            }
+        };
 
         let metrics_futures: Vec<_> = self
             .metrics_flushers
@@ -341,13 +366,43 @@ impl FlushingService {
             dsm.drain_into_proxy().await;
         }
 
-        tokio::join!(
+        let (logs, metrics, traces, stats, proxy) = tokio::join!(
             self.logs_flusher.flush(None),
             futures::future::join_all(metrics_futures),
             self.trace_flusher.flush(None),
             self.stats_flusher.flush(force_stats, None),
             self.proxy_flusher.flush(None),
         );
+
+        let undelivered = [
+            ("logs", !logs.is_empty()),
+            (
+                "metrics",
+                metrics_handle_failed
+                    || metrics.iter().any(|retry| {
+                        retry.as_ref().is_some_and(|(series, sketches)| {
+                            !series.is_empty() || !sketches.is_empty()
+                        })
+                    }),
+            ),
+            ("traces", traces.is_some_and(|t| !t.is_empty())),
+            ("stats", stats.is_some_and(|s| !s.is_empty())),
+            ("proxy", proxy.is_some_and(|p| !p.is_empty())),
+        ];
+
+        let failed: Vec<&str> = undelivered
+            .iter()
+            .filter_map(|(name, failed)| failed.then_some(*name))
+            .collect();
+
+        if !failed.is_empty() {
+            error!(
+                "FLUSHING_SERVICE | Dropping undelivered payloads after blocking flush: {}",
+                failed.join(", ")
+            );
+        }
+
+        !failed.is_empty()
     }
 }
 
