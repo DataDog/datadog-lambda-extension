@@ -44,7 +44,6 @@ describe('Payload Size Integration Tests', () => {
       // Invoke a few times so the first request's large trace gets a flush to
       // ride out on (cold-start race). Only extension-side behavior is checked
       // here: payload sizes and the absence of 413s, read from the logs.
-      invocationStatusCodes = [];
       for (let i = 0; i < INVOCATION_COUNT; i++) {
         const result = await invokeLambda(
           functionName, { spanCount: SPAN_COUNT, payloadBytes: PAYLOAD_BYTES });
@@ -59,33 +58,38 @@ describe('Payload Size Integration Tests', () => {
       // debug lines become searchable instead of querying once immediately
       // after the invocations.
       [enrichedPayloadBytes, batchedPayloadBytes] = await Promise.all([
-        pollForMaxLoggedBytes(
+        pollForLogValue(
           functionName,
           startTime,
           '"payload size after enrichment"',
-          /payload size after enrichment: (\d+) bytes/,
-          'enriched',
+          'enriched payload size',
+          messages => getMaxLoggedBytes(messages, /payload size after enrichment: (\d+) bytes/),
         ),
-        pollForMaxLoggedBytes(
+        pollForLogValue(
           functionName,
           startTime,
           '"totaling"',
-          /totaling (\d+) bytes/,
-          'batched',
+          'batched payload size',
+          messages => getMaxLoggedBytes(messages, /totaling (\d+) bytes/),
         ),
       ]);
+      console.log(
+        `Extension reported payload sizes: enriched=${enrichedPayloadBytes} bytes, batched=${batchedPayloadBytes} bytes`,
+      );
 
       // A payload over the intake limit logs "Max retries exceeded, returning
       // HTTP error" with status=413. First wait for the terminal success or
       // failure log emitted after trace.send completes, then capture any 413
       // lines. This makes an empty result meaningful rather than an indexing
       // race with an in-flight send.
-      traceSendCompletionMessages = await pollForLogMessages(
+      traceSendCompletionMessages = await pollForLogValue(
         functionName,
         startTime,
         TRACE_SEND_COMPLETION_FILTER,
         'trace send completion',
-      );
+        messages => (messages.length > 0 ? messages : undefined),
+      ) ?? [];
+      console.log(`Extension trace send completion log lines: ${traceSendCompletionMessages.length}`);
       sendErrorMessages = await filterLogMessages(
         functionName,
         '?"Max retries exceeded" ?"status=413" ?"Payload Too Large"',
@@ -127,29 +131,6 @@ describe('Payload Size Integration Tests', () => {
   });
 });
 
-async function pollForLogMessages(
-  functionName: string,
-  startTime: number,
-  filterPattern: string,
-  label: string,
-): Promise<string[]> {
-  const deadline = Date.now() + LOG_SEARCHABLE_TIMEOUT_MS;
-  let attempt = 0;
-  while (Date.now() < deadline) {
-    attempt += 1;
-    const messages = await filterLogMessages(functionName, filterPattern, startTime, Date.now());
-    if (messages.length > 0) {
-      console.log(`Found ${label} log lines: ${messages.length} (attempt ${attempt})`);
-      return messages;
-    }
-    await sleep(LOG_POLL_INTERVAL_MS);
-  }
-  console.log(
-    `Timed out after ${LOG_SEARCHABLE_TIMEOUT_MS / 1000}s waiting for ${label} log lines (${attempt} attempts)`,
-  );
-  return [];
-}
-
 function getMaxLoggedBytes(messages: string[], pattern: RegExp): number | undefined {
   let max: number | undefined;
   for (const message of messages) {
@@ -165,30 +146,29 @@ function getMaxLoggedBytes(messages: string[], pattern: RegExp): number | undefi
 }
 
 /**
- * Polls the function's CloudWatch logs until a message matching `pattern` is
- * found, returning the maximum captured value, or undefined on timeout.
+ * Polls the function's CloudWatch logs until `extract` yields a value from the
+ * messages matching `filterPattern`, or undefined on timeout.
  */
-async function pollForMaxLoggedBytes(
+async function pollForLogValue<T>(
   functionName: string,
   startTime: number,
   filterPattern: string,
-  pattern: RegExp,
   label: string,
-): Promise<number | undefined> {
+  extract: (messages: string[]) => T | undefined,
+): Promise<T | undefined> {
   const deadline = Date.now() + LOG_SEARCHABLE_TIMEOUT_MS;
   let attempt = 0;
   while (Date.now() < deadline) {
     attempt += 1;
-    const messages = await filterLogMessages(functionName, filterPattern, startTime, Date.now());
-    const max = getMaxLoggedBytes(messages, pattern);
-    if (max !== undefined) {
-      console.log(`Extension reported ${label} payload size: ${max} bytes (attempt ${attempt})`);
-      return max;
+    const value = extract(await filterLogMessages(functionName, filterPattern, startTime, Date.now()));
+    if (value !== undefined) {
+      console.log(`Found ${label} (attempt ${attempt})`);
+      return value;
     }
     await sleep(LOG_POLL_INTERVAL_MS);
   }
   console.log(
-    `Timed out after ${LOG_SEARCHABLE_TIMEOUT_MS / 1000}s waiting for "${filterPattern}" log lines (${attempt} attempts)`,
+    `Timed out after ${LOG_SEARCHABLE_TIMEOUT_MS / 1000}s waiting for ${label} log lines (${attempt} attempts)`,
   );
   // Distinguish "the extension never logged anything" from "the extension
   // logged but these lines are missing or not yet searchable".
