@@ -37,6 +37,38 @@ fi
 
 LAYER_DIR=".layers"
 
+# Grant GetLayerVersion permission on a published layer version. Idempotent:
+# skips versions that already carry the release-$version_nbr statement, so
+# re-runs after a partial publish (version published, permission missing)
+# complete the permission instead of skipping it.
+ensure_permission() {
+    region=$1
+    layer=$2
+    version_nbr=$3
+
+    policy=$(aws lambda get-layer-version-policy --layer-name $layer \
+        --version-number $version_nbr --region $region 2>/dev/null || true)
+    if [[ "$policy" == *"release-$version_nbr"* ]]; then
+        return 0
+    fi
+
+    # Add permissions: public for prod, grant testing account access to sandbox layers
+    principal="093468662994"
+    if [ "$ADD_LAYER_VERSION_PERMISSIONS" = "1" ]; then
+        principal="*"
+    fi
+    permission=$(aws lambda add-layer-version-permission --layer-name $layer \
+        --version-number $version_nbr \
+        --statement-id "release-$version_nbr" \
+        --action lambda:GetLayerVersion \
+        --principal "$principal" \
+        --region $region
+    ) || {
+        printf "[ERROR]: Failed to add permission to layer $layer version $version_nbr in region $region\n"
+        return 1
+    }
+}
+
 publish_layer() {
     region=$1
     layer=$2
@@ -56,24 +88,7 @@ publish_layer() {
         return 1
     fi
 
-    # Add permissions: public for prod, grant testing account access to sandbox layers
-    if [ "$ADD_LAYER_VERSION_PERMISSIONS" = "1" ]; then
-        permission=$(aws lambda add-layer-version-permission --layer-name $layer \
-            --version-number $version_nbr \
-            --statement-id "release-$version_nbr" \
-            --action lambda:GetLayerVersion \
-            --principal "*" \
-            --region $region
-        ) || return 1
-    else
-        permission=$(aws lambda add-layer-version-permission --layer-name $layer \
-            --version-number $version_nbr \
-            --statement-id "release-$version_nbr" \
-            --action lambda:GetLayerVersion \
-            --principal "093468662994" \
-            --region $region
-        ) || return 1
-    fi
+    ensure_permission $region $layer $version_nbr || return 1
 
     echo $version_nbr
 }
@@ -154,6 +169,9 @@ fi
 latest_version=$(aws lambda list-layer-versions --region $REGION --layer-name $LAYER_NAME --max-items 1 --query 'LayerVersions[0].Version || `0`')
 if [ $latest_version -ge $VERSION ]; then
     printf "[$REGION] Layer $layer version $VERSION already exists in region $REGION, skipping...\n"
+    # The version may exist without permissions if a previous run published it
+    # but failed to grant them. Heal that before exiting.
+    ensure_permission $REGION $LAYER_NAME $VERSION || printf "[ERROR]: Failed to ensure permissions on layer $LAYER_NAME version $VERSION in region $REGION\n"
     exit 1
 elif [ $latest_version -lt $((VERSION-1)) ]; then
     printf "[$REGION][WARNING] The latest version of layer $layer in region $REGION is $latest_version, this will publish all the missing versions including $VERSION\n"
