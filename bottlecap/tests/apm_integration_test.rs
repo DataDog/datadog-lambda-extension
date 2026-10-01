@@ -484,6 +484,26 @@ fn captured_compute_stats(traces: &[pb::AgentPayload]) -> Option<String> {
     span.meta.get(COMPUTE_STATS_KEY).cloned()
 }
 
+/// Single-span trace root with the given sampling priority and error flag.
+fn sampled_root_span(trace_id: u64, priority: f64, error: i32) -> pb::Span {
+    let mut span = pb::Span {
+        service: "fake-intake-trace-service".to_string(),
+        name: "web.request".to_string(),
+        resource: "GET /fake".to_string(),
+        trace_id,
+        span_id: trace_id,
+        parent_id: 0,
+        start: STATS_SPAN_START_NS,
+        duration: 5_000_000,
+        error,
+        r#type: "web".to_string(),
+        ..pb::Span::default()
+    };
+    span.metrics
+        .insert("_sampling_priority_v1".to_string(), priority);
+    span
+}
+
 /// An errored P0 trace is rescued and reaches the intake, while a non-errored P0 trace is
 /// dropped. Applies whenever stats are computed before the backend, by either the
 /// extension or the tracer.
@@ -493,33 +513,14 @@ async fn e2e_error_sampler_rescues_only_errored_p0_traces() {
     let cases = [("extension", true, false), ("tracer", false, true)];
 
     for (owner, compute_on_extension, client_computed_stats) in cases {
-        let make_span = |trace_id: u64, error: i32| {
-            let mut span = pb::Span {
-                service: "fake-intake-trace-service".to_string(),
-                name: "web.request".to_string(),
-                resource: "GET /fake".to_string(),
-                trace_id,
-                span_id: trace_id,
-                parent_id: 0,
-                start: STATS_SPAN_START_NS,
-                duration: 5_000_000,
-                error,
-                r#type: "web".to_string(),
-                ..pb::Span::default()
-            };
-            span.metrics
-                .insert("_sampling_priority_v1".to_string(), 0.0);
-            span
-        };
-
         let rescued_trace_id = 1;
         let dropped_trace_id = 2;
         let outcome = run_processor_pipeline_with_traces(
             compute_on_extension,
             client_computed_stats,
             vec![
-                vec![make_span(rescued_trace_id, 1)],
-                vec![make_span(dropped_trace_id, 0)],
+                vec![sampled_root_span(rescued_trace_id, 0.0, 1)],
+                vec![sampled_root_span(dropped_trace_id, 0.0, 0)],
             ],
         )
         .await;
@@ -565,33 +566,14 @@ async fn e2e_sampled_out_chunks_filtered_by_stats_owner() {
     ];
 
     for (owner, compute_on_extension, client_computed_stats, expect_filtering) in cases {
-        let make_span = |trace_id: u64, priority: f64| {
-            let mut span = pb::Span {
-                service: "fake-intake-trace-service".to_string(),
-                name: "web.request".to_string(),
-                resource: "GET /fake".to_string(),
-                trace_id,
-                span_id: trace_id,
-                parent_id: 0,
-                start: STATS_SPAN_START_NS,
-                duration: 5_000_000,
-                error: 0,
-                r#type: "web".to_string(),
-                ..pb::Span::default()
-            };
-            span.metrics
-                .insert("_sampling_priority_v1".to_string(), priority);
-            span
-        };
-
         // kept (priority 1), auto-dropped (priority 0), explicit drop (priority -1)
         let outcome = run_processor_pipeline_with_traces(
             compute_on_extension,
             client_computed_stats,
             vec![
-                vec![make_span(1, 1.0)],
-                vec![make_span(2, 0.0)],
-                vec![make_span(3, -1.0)],
+                vec![sampled_root_span(1, 1.0, 0)],
+                vec![sampled_root_span(2, 0.0, 0)],
+                vec![sampled_root_span(3, -1.0, 0)],
             ],
         )
         .await;
