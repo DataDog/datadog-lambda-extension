@@ -81,7 +81,10 @@ publish_layer() {
         --zip-file "fileb://${file}" \
         --region $region \
         | jq -r '.Version'
-    ) || return 1
+    ) || {
+        printf "[ERROR]: Failed to publish layer $layer in region $region\n"
+        return 1
+    }
 
     if ! [[ "$version_nbr" =~ ^[0-9]+$ ]]; then
         printf "[ERROR]: publish-layer-version returned a non-numeric version: '%s'\n" "$version_nbr"
@@ -119,7 +122,7 @@ if [ -z "$REGION" ]; then
 else
     printf "Region specified: $REGION\n"
     if [[ ! "$AVAILABLE_REGIONS" == *"$REGION"* ]]; then
-        printf "Could not find $REGION in available regions: $AVAILABLE_REGIONS"
+        printf "Could not find $REGION in available regions: $AVAILABLE_REGIONS\n"
         exit 1
     fi
 fi
@@ -137,7 +140,7 @@ else
             # VERSION manually there since we don't have a CI_COMMIT_TAG.
             printf "VERSION exists so we should be okay to continue\n"
         else
-            printf "[ERROR]: No CI_COMMIT_TAG found and VERSION is not nuymeric.\n"
+            printf "[ERROR]: No CI_COMMIT_TAG found and VERSION is not numeric.\n"
             printf "Exiting script...\n"
             exit 1
         fi
@@ -168,13 +171,13 @@ fi
 
 latest_version=$(aws lambda list-layer-versions --region $REGION --layer-name $LAYER_NAME --max-items 1 --query 'LayerVersions[0].Version || `0`')
 if [ $latest_version -ge $VERSION ]; then
-    printf "[$REGION] Layer $layer version $VERSION already exists in region $REGION, skipping...\n"
+    printf "[$REGION] Layer $LAYER_NAME version $VERSION already exists in region $REGION, skipping...\n"
     # The version may exist without permissions if a previous run published it
     # but failed to grant them. Heal that before exiting.
     ensure_permission $REGION $LAYER_NAME $VERSION || printf "[ERROR]: Failed to ensure permissions on layer $LAYER_NAME version $VERSION in region $REGION\n"
     exit 1
 elif [ $latest_version -lt $((VERSION-1)) ]; then
-    printf "[$REGION][WARNING] The latest version of layer $layer in region $REGION is $latest_version, this will publish all the missing versions including $VERSION\n"
+    printf "[$REGION][WARNING] The latest version of layer $LAYER_NAME in region $REGION is $latest_version, this will publish all the missing versions including $VERSION\n"
 fi
 
 while [ $latest_version -lt $VERSION ]; do
@@ -185,7 +188,7 @@ while [ $latest_version -lt $VERSION ]; do
     # then tries to republish 28 again. The published version would actually be 29, because
     # Lambda layers are immutable and AWS will skip deleted version and use the next number.
     if [ $latest_version -gt $VERSION ]; then
-        printf "[$REGION] Published version $latest_version is greater than the desired version $VERSION!"
+        printf "[$REGION] Published version $latest_version is greater than the desired version $VERSION!\n"
         exit 1
     fi
 done
