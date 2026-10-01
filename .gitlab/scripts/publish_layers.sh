@@ -6,30 +6,31 @@
 # Copyright 2024 Datadog, Inc.
 
 set -e
+set -o pipefail
 
 
 if [ -z "$ADD_LAYER_VERSION_PERMISSIONS" ]; then
-    printf "[ERROR]: ADD_LAYER_VERSION_PERMISSIONS not specified."
+    printf "[ERROR]: ADD_LAYER_VERSION_PERMISSIONS not specified.\n"
     exit 1
 fi
 
 if [ -z "$AUTOMATICALLY_BUMP_VERSION" ]; then
-    printf "[ERROR]: AUTOMATICALLY_BUMP_VERSION not specified."
+    printf "[ERROR]: AUTOMATICALLY_BUMP_VERSION not specified.\n"
     exit 1
 fi
 
 if [ -z "$ARCHITECTURE" ]; then
-    printf "[ERROR]: ARCHITECTURE not specified."
+    printf "[ERROR]: ARCHITECTURE not specified.\n"
     exit 1
 fi
 
 if [ -z "${LAYER_NAME_BASE_SUFFIX+x}" ]; then
-    printf "[ERROR]: LAYER_NAME_BASE_SUFFIX not specified."
+    printf "[ERROR]: LAYER_NAME_BASE_SUFFIX not specified.\n"
     exit 1
 fi
 
 if [ -z "$LAYER_FILE" ]; then
-    printf "[ERROR]: LAYER_FILE not specified."
+    printf "[ERROR]: LAYER_FILE not specified.\n"
     exit 1
 fi
 
@@ -48,7 +49,12 @@ publish_layer() {
         --zip-file "fileb://${file}" \
         --region $region \
         | jq -r '.Version'
-    )
+    ) || return 1
+
+    if ! [[ "$version_nbr" =~ ^[0-9]+$ ]]; then
+        printf "[ERROR]: publish-layer-version returned a non-numeric version: '%s'\n" "$version_nbr"
+        return 1
+    fi
 
     # Add permissions: public for prod, grant testing account access to sandbox layers
     if [ "$ADD_LAYER_VERSION_PERMISSIONS" = "1" ]; then
@@ -58,7 +64,7 @@ publish_layer() {
             --action lambda:GetLayerVersion \
             --principal "*" \
             --region $region
-        )
+        ) || return 1
     else
         permission=$(aws lambda add-layer-version-permission --layer-name $layer \
             --version-number $version_nbr \
@@ -66,7 +72,7 @@ publish_layer() {
             --action lambda:GetLayerVersion \
             --principal "093468662994" \
             --region $region
-        )
+        ) || return 1
     fi
 
     echo $version_nbr
@@ -77,7 +83,7 @@ publish_layer() {
 LAYER_PATH="${LAYER_DIR}/${LAYER_FILE}"
 # Check that the layer files exist
 if [ ! -f $LAYER_PATH  ]; then
-    printf "[ERROR]: Could not find ${LAYER_PATH}."
+    printf "[ERROR]: Could not find ${LAYER_PATH}.\n"
     exit 1
 fi
 
@@ -93,7 +99,7 @@ fi
 AVAILABLE_REGIONS=$(aws ec2 describe-regions | jq -r '.[] | .[] | .RegionName')
 
 if [ -z "$REGION" ]; then
-    printf "[ERROR]: REGION not specified."
+    printf "[ERROR]: REGION not specified.\n"
     exit 1
 else
     printf "Region specified: $REGION\n"
@@ -129,10 +135,10 @@ else
 fi
 
 if [ -z "$VERSION" ]; then
-    printf "[ERROR]: Layer VERSION not specified"
+    printf "[ERROR]: Layer VERSION not specified\n"
     exit 1
 elif ! [[ "$VERSION" =~ ^[0-9]+$ ]]; then
-    printf "[ERROR]: Layer VERSION must be numeric, got '$VERSION'"
+    printf "[ERROR]: Layer VERSION must be numeric, got '$VERSION'\n"
     exit 1
 else
     printf "Layer version parsed: $VERSION\n"
