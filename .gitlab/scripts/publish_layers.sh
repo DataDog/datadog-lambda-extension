@@ -174,7 +174,7 @@ if [ $latest_version -ge $VERSION ]; then
     printf "[$REGION] Layer $LAYER_NAME version $VERSION already exists in region $REGION, skipping...\n"
     # The version may exist without permissions if a previous run published it
     # but failed to grant them. Heal that before exiting.
-    ensure_permission $REGION $LAYER_NAME $VERSION || printf "[ERROR]: Failed to ensure permissions on layer $LAYER_NAME version $VERSION in region $REGION\n"
+    ensure_permission $REGION $LAYER_NAME $VERSION || true
     exit 1
 elif [ $latest_version -lt $((VERSION-1)) ]; then
     printf "[$REGION][WARNING] The latest version of layer $LAYER_NAME in region $REGION is $latest_version, this will publish all the missing versions including $VERSION\n"
