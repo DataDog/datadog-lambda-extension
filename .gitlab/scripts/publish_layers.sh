@@ -138,7 +138,7 @@ else
     printf "Version: ${VERSION}\n"
 fi
 
-if [ "${AUTOMATIC_VERSION:-0}" != "1" ]; then
+if [ "$AUTOMATIC_VERSION" != "1" ]; then
     if [ -z "$VERSION" ]; then
         printf "[ERROR]: Layer VERSION not specified"
         exit 1
@@ -157,12 +157,12 @@ else
     architectures="arm64"
 fi
 
-if [ "${AUTOMATIC_VERSION:-0}" = "1" ]; then
+if [ "$AUTOMATIC_VERSION" = "1" ]; then
     # Publish exactly once and adopt the version AWS returns. Layer versions are
     # assigned atomically by AWS at publish time, so this version always refers
     # to the binary from this job, even if another pipeline publishes concurrently.
     VERSION=$(publish_layer $REGION $LAYER_NAME $LAYER_PATH $architectures)
-    if [ -z "$VERSION" ] || ! [[ "$VERSION" =~ ^[0-9]+$ ]]; then
+    if ! [[ "$VERSION" =~ ^[0-9]+$ ]]; then
         printf "[ERROR]: publish-layer-version returned an invalid version: '$VERSION'"
         exit 1
     fi
