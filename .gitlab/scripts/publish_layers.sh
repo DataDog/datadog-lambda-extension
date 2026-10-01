@@ -170,11 +170,15 @@ else
 fi
 
 latest_version=$(aws lambda list-layer-versions --region $REGION --layer-name $LAYER_NAME --max-items 1 --query 'LayerVersions[0].Version || `0`')
+# A failed run stops right after the version whose permission failed, so only
+# the latest existing version can be missing its permission. Repair it before
+# skipping or publishing newer versions.
+if [ $latest_version -gt 0 ]; then
+    ensure_permission $REGION $LAYER_NAME $latest_version || exit 1
+fi
+
 if [ $latest_version -ge $VERSION ]; then
     printf "[$REGION] Layer $LAYER_NAME version $VERSION already exists in region $REGION, skipping...\n"
-    # The version may exist without permissions if a previous run published it
-    # but failed to grant them. Heal that before exiting.
-    ensure_permission $REGION $LAYER_NAME $VERSION || true
     exit 1
 elif [ $latest_version -lt $((VERSION-1)) ]; then
     printf "[$REGION][WARNING] The latest version of layer $LAYER_NAME in region $REGION is $latest_version, this will publish all the missing versions including $VERSION\n"
