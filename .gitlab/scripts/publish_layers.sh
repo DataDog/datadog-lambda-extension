@@ -64,7 +64,7 @@ ensure_permission() {
         --principal "$principal" \
         --region $region
     ) || {
-        printf "[ERROR]: Failed to add permission to layer $layer version $version_nbr in region $region\n"
+        printf "[ERROR]: Failed to add permission to layer $layer version $version_nbr in region $region\n" >&2
         return 1
     }
 }
@@ -82,12 +82,12 @@ publish_layer() {
         --region $region \
         | jq -r '.Version'
     ) || {
-        printf "[ERROR]: Failed to publish layer $layer in region $region\n"
+        printf "[ERROR]: Failed to publish layer $layer in region $region\n" >&2
         return 1
     }
 
     if ! [[ "$version_nbr" =~ ^[0-9]+$ ]]; then
-        printf "[ERROR]: publish-layer-version returned a non-numeric version: '%s'\n" "$version_nbr"
+        printf "[ERROR]: publish-layer-version returned a non-numeric version: '%s'\n" "$version_nbr" >&2
         return 1
     fi
 
