@@ -425,12 +425,10 @@ impl RouterExtension for FlushRouterExtension {
                 let flush_op = Arc::clone(&flush_op);
                 let cancellation_token = cancellation_token.clone();
                 async move {
-                    // Bound execution time. The flushers bound their own HTTP
-                    // calls, but retries across the five flushers can stack, so
-                    // this caps total wall-clock time for the harness. Using a
-                    // `JoinSet` (rather than a bare `JoinHandle`) also means
+                    // Using a `JoinSet` (rather than a bare `JoinHandle`) means
                     // dropping this handler (e.g. on request cancellation)
                     // aborts the inner task instead of leaving it detached.
+                    // Timing is bounded by [`FLUSH_REQUEST_TIMEOUT`].
                     let mut tasks = tokio::task::JoinSet::new();
                     tasks.spawn(async move {
                         tokio::select! {
@@ -485,7 +483,7 @@ fn init_ustr() {
 
 fn enable_logging_subsystem() {
     let log_level = LogLevel::from_str(
-        std::env::var("DD_LOG_LEVEL")
+        env::var("DD_LOG_LEVEL")
             .unwrap_or("info".to_string())
             .as_str(),
     )
