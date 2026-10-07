@@ -7,7 +7,7 @@ use tracing_subscriber::fmt::{
 use tracing_subscriber::registry::LookupSpan;
 
 /// Tracing target for the duration of each cold start step. Enable it alone with
-/// `DD_LOG_DEBUG_TARGETS=cold_start_duration`.
+/// `DD_LOG_LEVEL_BY_TARGET=cold_start_duration=debug`.
 pub const COLD_START_DURATION: &str = "cold_start_duration";
 
 /// Logs at debug level how long `step` took since `start`, under a duration target such as
