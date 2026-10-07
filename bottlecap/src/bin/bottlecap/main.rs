@@ -44,7 +44,8 @@ use bottlecap::{
         invocation::processor_service::{InvocationProcessorHandle, InvocationProcessorService},
         listener::Listener as LifecycleListener,
     },
-    logger,
+    log_duration,
+    logger::{self, COLD_START_DURATION},
     logs::{
         agent::LogsAgent,
         aggregator_service::{
@@ -120,11 +121,11 @@ async fn main() -> anyhow::Result<()> {
     let start_time = Instant::now();
     init_ustr();
     enable_logging_subsystem();
-    log_cold_start_step("Enabling logging", start_time);
+    log_duration!(COLD_START_DURATION, "Enabling logging", start_time);
     let step_start = Instant::now();
     let aws_config = AwsConfig::from_env(start_time);
     log_fips_status(&aws_config.region);
-    log_cold_start_step("Loading AWS config", step_start);
+    log_duration!(COLD_START_DURATION, "Loading AWS config", step_start);
     let version_without_next = EXTENSION_VERSION.split('-').next().unwrap_or("NA");
     debug!("Starting Datadog Extension v{version_without_next}");
 
@@ -145,7 +146,11 @@ async fn main() -> anyhow::Result<()> {
         .no_proxy()
         .build()
         .map_err(|e| anyhow::anyhow!("Failed to create client: {e:?}"))?;
-    log_cold_start_step("Creating the Extensions API client", step_start);
+    log_duration!(
+        COLD_START_DURATION,
+        "Creating the Extensions API client",
+        step_start
+    );
 
     let cloned_client = client.clone();
     let runtime_api = aws_config.runtime_api.clone();
@@ -159,7 +164,7 @@ async fn main() -> anyhow::Result<()> {
             managed_instance_mode,
         )
         .await;
-        log_cold_start_step("Registering the extension", step_start);
+        log_duration!(COLD_START_DURATION, "Registering the extension", step_start);
         response
     });
     // First load the AWS configuration
@@ -169,10 +174,14 @@ async fn main() -> anyhow::Result<()> {
 
     let step_start = Instant::now();
     let mut lambda_config = config::get_config(Path::new(&lambda_directory));
-    log_cold_start_step("Loading config", step_start);
+    log_duration!(COLD_START_DURATION, "Loading config", step_start);
     let step_start = Instant::now();
     resolve_additional_endpoints_secrets(&mut lambda_config, &aws_config).await;
-    log_cold_start_step("Resolving additional endpoint secrets", step_start);
+    log_duration!(
+        COLD_START_DURATION,
+        "Resolving additional endpoint secrets",
+        step_start
+    );
     let config = Arc::new(lambda_config);
 
     // Build one shared reqwest::Client for metrics, logs, trace proxy flushing, and calls to
@@ -186,7 +195,11 @@ async fn main() -> anyhow::Result<()> {
         .await
         .map_err(|e| anyhow::anyhow!("Failed to join task: {e:?}"))?
         .map_err(|e| anyhow::anyhow!("Failed to register extension: {e:?}"))?;
-    log_cold_start_step("Waiting for extension registration", step_start);
+    log_duration!(
+        COLD_START_DURATION,
+        "Waiting for extension registration",
+        step_start
+    );
 
     match extension_loop_active(
         Arc::clone(&aws_config),
@@ -216,17 +229,6 @@ fn init_ustr() {
     tokio::spawn(async {
         Ustr::from("");
     });
-}
-
-/// Tracing target for the duration of each cold start step.
-const COLD_START_DURATION: &str = "cold_start_duration";
-
-fn log_cold_start_step(step: &str, step_start: Instant) {
-    debug!(
-        target: COLD_START_DURATION,
-        "{step} took {:.3}ms",
-        step_start.elapsed().as_secs_f64() * 1000.0
-    );
 }
 
 fn enable_logging_subsystem() {
@@ -367,7 +369,7 @@ async fn extension_loop_active(
         &shared_client,
     )
     .await;
-    log_cold_start_step("Starting DogStatsD", step_start);
+    log_duration!(COLD_START_DURATION, "Starting DogStatsD", step_start);
 
     let propagator = Arc::new(DatadogCompositePropagator::new(Arc::clone(config)));
 
@@ -444,7 +446,11 @@ async fn extension_loop_active(
             None
         }
     };
-    log_cold_start_step("Creating the AppSec processor", step_start);
+    log_duration!(
+        COLD_START_DURATION,
+        "Creating the AppSec processor",
+        step_start
+    );
 
     let (
         trace_agent_channel,
@@ -494,7 +500,11 @@ async fn extension_loop_active(
         aws_config.is_managed_instance_mode(),
     )
     .await?;
-    log_cold_start_step("Starting the telemetry listener", step_start);
+    log_duration!(
+        COLD_START_DURATION,
+        "Starting the telemetry listener",
+        step_start
+    );
 
     let otlp_cancel_token = start_otlp_agent(
         config,

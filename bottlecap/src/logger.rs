@@ -6,6 +6,23 @@ use tracing_subscriber::fmt::{
 };
 use tracing_subscriber::registry::LookupSpan;
 
+/// Tracing target for the duration of each cold start step.
+pub const COLD_START_DURATION: &str = "cold_start_duration";
+
+/// Logs at debug level how long `step` took since `start`, under a duration target such as
+/// [`COLD_START_DURATION`]. A macro, because `tracing` needs the target as a constant.
+#[macro_export]
+macro_rules! log_duration {
+    ($target:expr, $step:expr, $start:expr) => {
+        tracing::debug!(
+            target: $target,
+            "{} took {:.3}ms",
+            $step,
+            $start.elapsed().as_secs_f64() * 1000.0
+        )
+    };
+}
+
 /// Writes `s` to `w` with the 6 mandatory JSON string escape sequences applied.
 /// Handles: `"`, `\`, `\n`, `\r`, `\t`, and U+0000–U+001F control characters.
 fn write_json_escaped(w: &mut impl fmt::Write, s: &str) -> fmt::Result {
