@@ -1650,11 +1650,13 @@ mod env_filter_tests {
 
     #[test]
     fn adds_debug_directive_per_target() {
-        let (filter, invalid) =
-            build_env_filter(LogLevel::Info, " cold_start_duration, bottlecap::traces ,");
+        let (filter, invalid) = build_env_filter(
+            LogLevel::Info,
+            " cold_start_duration, trace_flush_duration ,",
+        );
         let filter = filter.to_string();
         assert!(filter.contains("cold_start_duration=debug"));
-        assert!(filter.contains("bottlecap::traces=debug"));
+        assert!(filter.contains("trace_flush_duration=debug"));
         assert!(invalid.is_empty());
     }
 
