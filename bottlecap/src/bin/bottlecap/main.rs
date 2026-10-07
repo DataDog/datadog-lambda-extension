@@ -120,8 +120,11 @@ async fn main() -> anyhow::Result<()> {
     let start_time = Instant::now();
     init_ustr();
     enable_logging_subsystem();
+    log_cold_start_step("Enabling logging", start_time);
+    let step_start = Instant::now();
     let aws_config = AwsConfig::from_env(start_time);
     log_fips_status(&aws_config.region);
+    log_cold_start_step("Loading AWS config", step_start);
     let version_without_next = EXTENSION_VERSION.split('-').next().unwrap_or("NA");
     debug!("Starting Datadog Extension v{version_without_next}");
 
@@ -135,32 +138,41 @@ async fn main() -> anyhow::Result<()> {
         debug!("DD_DEBUG_WAIT_FOR_ATTACH: Continuing execution...");
     }
 
+    let step_start = Instant::now();
     prepare_client_provider()?;
     let client = create_reqwest_client_builder()
         .map_err(|e| anyhow::anyhow!("Failed to create client builder: {e:?}"))?
         .no_proxy()
         .build()
         .map_err(|e| anyhow::anyhow!("Failed to create client: {e:?}"))?;
+    log_cold_start_step("Creating the Extensions API client", step_start);
 
     let cloned_client = client.clone();
     let runtime_api = aws_config.runtime_api.clone();
     let managed_instance_mode = aws_config.is_managed_instance_mode();
     let response = tokio::task::spawn(async move {
-        extension::register(
+        let step_start = Instant::now();
+        let response = extension::register(
             &cloned_client,
             &runtime_api,
             extension::EXTENSION_NAME,
             managed_instance_mode,
         )
-        .await
+        .await;
+        log_cold_start_step("Registering the extension", step_start);
+        response
     });
     // First load the AWS configuration
     let lambda_directory: String =
         env::var("LAMBDA_TASK_ROOT").unwrap_or_else(|_| "/var/task".to_string());
     let aws_config = Arc::new(aws_config);
 
+    let step_start = Instant::now();
     let mut lambda_config = config::get_config(Path::new(&lambda_directory));
+    log_cold_start_step("Loading config", step_start);
+    let step_start = Instant::now();
     resolve_additional_endpoints_secrets(&mut lambda_config, &aws_config).await;
+    log_cold_start_step("Resolving additional endpoint secrets", step_start);
     let config = Arc::new(lambda_config);
 
     // Build one shared reqwest::Client for metrics, logs, trace proxy flushing, and calls to
@@ -169,10 +181,12 @@ async fn main() -> anyhow::Result<()> {
     let shared_client = bottlecap::http::get_client(&config);
     let api_key_factory = create_api_key_factory(&config, &aws_config, &shared_client);
 
+    let step_start = Instant::now();
     let r = response
         .await
         .map_err(|e| anyhow::anyhow!("Failed to join task: {e:?}"))?
         .map_err(|e| anyhow::anyhow!("Failed to register extension: {e:?}"))?;
+    log_cold_start_step("Waiting for extension registration", step_start);
 
     match extension_loop_active(
         Arc::clone(&aws_config),
@@ -202,6 +216,17 @@ fn init_ustr() {
     tokio::spawn(async {
         Ustr::from("");
     });
+}
+
+/// Tracing target for the duration of each cold start step.
+const COLD_START_DURATION: &str = "cold_start_duration";
+
+fn log_cold_start_step(step: &str, step_start: Instant) {
+    debug!(
+        target: COLD_START_DURATION,
+        "{step} took {:.3}ms",
+        step_start.elapsed().as_secs_f64() * 1000.0
+    );
 }
 
 fn enable_logging_subsystem() {
@@ -334,6 +359,7 @@ async fn extension_loop_active(
         &shared_client,
     );
 
+    let step_start = Instant::now();
     let (metrics_flushers, metrics_aggregator_handle, dogstatsd_cancel_token) = start_dogstatsd(
         tags_provider.clone(),
         Arc::clone(&api_key_factory),
@@ -341,6 +367,7 @@ async fn extension_loop_active(
         &shared_client,
     )
     .await;
+    log_cold_start_step("Starting DogStatsD", step_start);
 
     let propagator = Arc::new(DatadogCompositePropagator::new(Arc::clone(config)));
 
@@ -406,6 +433,7 @@ async fn extension_loop_active(
     });
 
     // AppSec processor (if enabled)
+    let step_start = Instant::now();
     let appsec_processor = match AppSecProcessor::new(config) {
         Ok(p) => Some(Arc::new(TokioMutex::new(p))),
         Err(AppSecFeatureDisabled) => None,
@@ -416,6 +444,7 @@ async fn extension_loop_active(
             None
         }
     };
+    log_cold_start_step("Creating the AppSec processor", step_start);
 
     let (
         trace_agent_channel,
@@ -454,6 +483,7 @@ async fn extension_loop_active(
         }
     });
 
+    let step_start = Instant::now();
     let telemetry_listener_cancel_token = setup_telemetry_client(
         client,
         &r.extension_id,
@@ -464,6 +494,7 @@ async fn extension_loop_active(
         aws_config.is_managed_instance_mode(),
     )
     .await?;
+    log_cold_start_step("Starting the telemetry listener", step_start);
 
     let otlp_cancel_token = start_otlp_agent(
         config,
@@ -480,6 +511,7 @@ async fn extension_loop_active(
     let mut flush_control = FlushControl::new(flush_strategy, config.flush_timeout);
 
     debug!(
+        target: COLD_START_DURATION,
         "Datadog Next-Gen Extension ready in {:}ms",
         start_time.elapsed().as_millis().to_string()
     );
