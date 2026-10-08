@@ -2,7 +2,7 @@
 
 # This is a wrapper script that is intended be used in conjunction with the
 # AWS_LAMBDA_EXEC_WRAPPER environment variable on an AWS Lambda function. It
-# enables universal instrumentation support for our Java and .NET runtimes.
+# enables universal instrumentation support for our Java, .NET, and Ruby runtimes.
 
 args=("$@")
 
@@ -48,6 +48,16 @@ debug_log "The runtime is $AWS_EXECUTION_ENV"
 export DD_TRACE_STATS_COMPUTATION_ENABLED="${DD_TRACE_STATS_COMPUTATION_ENABLED:-false}"
 
 debug_log "DD_TRACE_STATS_COMPUTATION_ENABLED: $DD_TRACE_STATS_COMPUTATION_ENABLED"
+
+# The Ruby runtime loads the function handler after this wrapper runs. Load the
+# Runtime Interface Client first so datadog/auto_instrument can patch its stable
+# LambdaHandler#call_handler boundary without requiring changes to user code.
+if [[ "$AWS_EXECUTION_ENV" == *"ruby"* ]]
+then
+  debug_log "Configuring for the Ruby runtime!"
+  export RUBYOPT="-raws_lambda_ric -rdatadog/auto_instrument${RUBYOPT:+ $RUBYOPT}"
+  debug_log "RUBYOPT: $RUBYOPT"
+fi
 
 # if it is .NET
 if [[ "$AWS_EXECUTION_ENV" == *"dotnet"* ]]
