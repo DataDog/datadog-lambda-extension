@@ -11,3 +11,9 @@ vulnerabilities:
       `tar` is a build dependency of `libddwaf-sys`, used by its build script.
       It is not linked into the extension binary: `cargo tree -i tar -e normal`
       reports nothing, while `-e build,normal` reports the build-script edge.
+  - id: GHSA-2mjx-qc3c-rqvc
+    statement: |
+      Same advisory as RUSTSEC-2026-0285, already ignored for `cargo audit` in
+      `bottlecap/.cargo/audit.toml`. It is fixed in rustls >= 0.23.45, which
+      requires aws-lc-rs >= 1.18 and with it AWS-LC-FIPS 4.x, pending FIPS 140-3
+      certification. Remove once a FIPS-certified aws-lc-rs is available.
