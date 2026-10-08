@@ -1,20 +1,23 @@
 //! Reassembles telemetry payloads that the Telemetry API split across two POSTs.
 //!
-//! A record larger than the subscription's `maxBytes` is cut mid-value. The rest of it — plus
-//! the rest of the batch — arrives in the next POST, which repeats the cut record's envelope
-//! ahead of the resumed bytes. Neither half parses on its own:
+//! A log record longer than about 256 KiB is cut mid-value into pieces, each an event of its
+//! own. When a payload ends on a cut piece, the rest of it — plus the rest of the batch —
+//! arrives in the next POST, under the next piece's envelope. Neither half parses on its own:
 //!
 //! ```text
 //! POST 1  [{"time":"..929Z","type":"function","record":{"message":"iVBORw0KGgoAAA}]
 //!         `------------- envelope --------------------'`--- cut here ---'`framing'
 //!
 //! POST 2  [{"time":"..929Z","type":"function","record":QICAgIfAhkiAAA"}},{..},{..runtimeDone..}]
-//!         `------- the same envelope, repeated -------'`-- resumed --'`- rest of the batch -'
+//!         `------ the next piece's envelope ----------'`-- resumed --'`- rest of the batch -'
 //! ```
 //!
-//! So the two are joined by dropping POST 1's framing and POST 2's repeated envelope. That
-//! byte-identical envelope, which carries the cut record's timestamp, is the only thing
-//! pairing them: the API sends no sequence number.
+//! So the two are joined by dropping POST 1's framing and POST 2's envelope. Each piece carries
+//! its own timestamp, so nothing pairs them but the joined bytes parsing.
+//!
+//! Pieces also sit side by side within one POST, where the seam between them — the cut piece's
+//! closing `}` and the next piece's envelope — is dropped the same way. Serde fails at, or just
+//! after, a seam, which tells it apart from the boundary between two whole events.
 //!
 //! Recovering the batch matters beyond the log line itself. `platform.runtimeDone` lands in
 //! the second half, and the on-demand loop waits for it before calling `/next` — so dropping
@@ -22,6 +25,7 @@
 
 use serde_json::error::Category;
 use std::{
+    ops::Range,
     sync::{Arc, Mutex, PoisonError},
     time::{Duration, Instant},
 };
@@ -45,6 +49,22 @@ const RECORD_KEY: &[u8] = b"\"record\":";
 /// record's value short, so a fragment ends with framing that belongs to neither half.
 const FRAMING: &[u8] = b"}]";
 
+/// Opens a seam between two pieces: the cut piece's closing `}`, then the next one's envelope.
+const SEAM: &[u8] = b"},{\"time\":\"";
+
+/// How a piece's envelope ends: only log lines are long enough to be split.
+const PIECE_TYPES: &[&[u8]] = &[
+    b"\"type\":\"function\",\"record\":",
+    b"\"type\":\"extension\",\"record\":",
+];
+
+/// How far past a seam's start serde can fail: a cut inside a string swallows `},{"`, and
+/// the string closes on the `"` before `time`.
+const SEAM_REACH: usize = 4;
+
+/// Bounds the re-parsing of one payload: a 4 MiB payload of 256 KiB pieces has 16 seams.
+const MAX_SEAMS: usize = 64;
+
 /// What came of pairing an unparseable body with a held fragment.
 #[derive(Debug)]
 pub(crate) enum Stitch {
@@ -64,10 +84,7 @@ pub(crate) struct FragmentBuffer {
 
 impl FragmentBuffer {
     /// Joins `body` onto the held fragment, or holds `body` if it opens a split payload.
-    ///
-    /// `error` is the failure `body` produced on its own; it is how a payload cut mid-record
-    /// is told apart from one we simply can't interpret.
-    pub(crate) fn stitch(&self, body: &[u8], error: &serde_json::Error) -> Stitch {
+    pub(crate) fn stitch(&self, body: &[u8]) -> Stitch {
         let mut slot = self.held.lock().unwrap_or_else(PoisonError::into_inner);
 
         if let Some(stale) = slot.take_if(|held| held.received.elapsed() > FRAGMENT_TTL) {
@@ -78,9 +95,9 @@ impl FragmentBuffer {
         }
 
         if let Some(head) = slot.take() {
-            if let Some(resumed) = head.resumed_bytes(body) {
-                let joined = head.join(resumed);
-                return match serde_json::from_slice(&joined) {
+            if let Some(resumed) = Fragment::resumed_bytes(body) {
+                let mut joined = head.join(resumed);
+                return match unsplit(&mut joined) {
                     Ok(events) => Stitch::Complete(events),
                     // A record can be cut more than once, so keep accumulating.
                     Err(e) => hold_or_discard(&mut slot, joined, &e),
@@ -93,7 +110,11 @@ impl FragmentBuffer {
             );
         }
 
-        hold_or_discard(&mut slot, body.to_vec(), error)
+        let mut body = body.to_vec();
+        match unsplit(&mut body) {
+            Ok(events) => Stitch::Complete(events),
+            Err(e) => hold_or_discard(&mut slot, body, &e),
+        }
     }
 }
 
@@ -118,14 +139,17 @@ struct Fragment {
 }
 
 impl Fragment {
-    /// A fragment, if `body` is the leading half of a split payload: an array that ran out of
-    /// input inside its last record's value. Any other parse failure won't be fixed by
-    /// joining, and holding such a body would poison the next stitch.
+    /// A fragment, if `body` is the leading half of a split payload: an array whose last piece
+    /// was cut short, running out of input or into the framing. Any other parse failure won't
+    /// be fixed by joining, and holding such a body would poison the next stitch.
     fn from_cut_payload(body: Vec<u8>, error: &serde_json::Error) -> Option<Self> {
-        if error.classify() != Category::Eof
-            || body.len() > MAX_FRAGMENT_BYTES
-            || body.first() != Some(&b'[')
-        {
+        let cut_short = match error.classify() {
+            Category::Eof => true,
+            // Cut after a `\` or a whole value, the piece runs into the framing instead.
+            Category::Syntax => offset(&body, error) + FRAMING.len() >= body.len(),
+            _ => false,
+        };
+        if !cut_short || body.len() > MAX_FRAGMENT_BYTES || body.first() != Some(&b'[') {
             return None;
         }
 
@@ -137,15 +161,11 @@ impl Fragment {
 
     /// The bytes that resume this fragment, if `body` is its continuation.
     ///
-    /// A continuation opens with the cut record's envelope, so its `record` key is the first
+    /// A continuation opens with the next piece's envelope, so its `record` key is the first
     /// one in the payload — anything the customer nested sits inside the value that follows.
-    /// Finding the same envelope in the fragment is what pairs the two.
-    fn resumed_bytes<'a>(&self, body: &'a [u8]) -> Option<&'a [u8]> {
+    fn resumed_bytes(body: &[u8]) -> Option<&[u8]> {
         let payload = body.strip_prefix(b"[")?;
         let value_start = find(payload, RECORD_KEY)? + RECORD_KEY.len();
-        let envelope = payload.get(..value_start)?;
-
-        find(&self.body, envelope)?;
         payload.get(value_start..)
     }
 
@@ -167,6 +187,59 @@ fn find(haystack: &[u8], needle: &[u8]) -> Option<usize> {
         .position(|window| window == needle)
 }
 
+/// Parses `body`, dropping the seams between pieces one at a time where serde fails on them.
+fn unsplit(body: &mut Vec<u8>) -> Result<Vec<TelemetryEvent>, serde_json::Error> {
+    let mut seams = 0;
+    loop {
+        let error = match serde_json::from_slice(body) {
+            Ok(events) => return Ok(events),
+            Err(e) => e,
+        };
+        if seams == MAX_SEAMS || error.classify() == Category::Data {
+            return Err(error);
+        }
+        match seam_at(body, offset(body, &error)) {
+            Some(seam) => body.drain(seam),
+            None => return Err(error),
+        };
+        seams += 1;
+    }
+}
+
+/// The seam serde failed on at byte `at`, if there is one.
+fn seam_at(body: &[u8], at: usize) -> Option<Range<usize>> {
+    let start = (at.saturating_sub(SEAM_REACH)..=at)
+        .rev()
+        .find(|&i| body.get(i..).is_some_and(|rest| rest.starts_with(SEAM)))?;
+
+    // The envelope holds only the timestamp and a log type; a brace means the match ran into a
+    // value, and any other type is a whole event — say `platform.runtimeDone` — not a piece.
+    let envelope = body.get(start + SEAM.len()..)?;
+    let len = find(envelope, RECORD_KEY)? + RECORD_KEY.len();
+    let envelope = &envelope[..len];
+    if envelope.iter().any(|b| matches!(b, b'{' | b'}'))
+        || !PIECE_TYPES.iter().any(|tail| envelope.ends_with(tail))
+    {
+        return None;
+    }
+
+    Some(start..start + SEAM.len() + len)
+}
+
+/// The byte serde's one-based line and column point at.
+fn offset(body: &[u8], error: &serde_json::Error) -> usize {
+    let line_start = match error.line() {
+        0 | 1 => 0,
+        line => body
+            .iter()
+            .enumerate()
+            .filter(|&(_, &b)| b == b'\n')
+            .nth(line - 2)
+            .map_or(0, |(i, _)| i + 1),
+    };
+    line_start + error.column().saturating_sub(1)
+}
+
 /// The two halves of a real split payload, trimmed to the bytes that matter.
 #[cfg(test)]
 pub(crate) mod fixtures {
@@ -186,9 +259,9 @@ mod tests {
 
     /// Mirrors the handler: a body only reaches the buffer once it has failed to parse.
     fn stitch(fragments: &FragmentBuffer, body: &str) -> Stitch {
-        let error = serde_json::from_slice::<Vec<TelemetryEvent>>(body.as_bytes())
+        serde_json::from_slice::<Vec<TelemetryEvent>>(body.as_bytes())
             .expect_err("fixture must not parse on its own");
-        fragments.stitch(body.as_bytes(), &error)
+        fragments.stitch(body.as_bytes())
     }
 
     /// The events of a stitch that should have completed, reporting what came back if it did not.
@@ -289,6 +362,108 @@ mod tests {
         );
     }
 
+    /// A record logged as JSON, with the escapes, multi-byte text, nesting, numbers and literals a
+    /// cut can land in.
+    const RECORD: &str = r#"{"level":"info","msg":"{\"a\":[1,true,null],\"b\":\"café caf\u00e9 \\\\ x\"}","n":-1.5e3}"#;
+
+    const RUNTIME_DONE: &str = r#"{"time":"2026-09-03T14:29:52.950Z","type":"platform.runtimeDone","record":{"requestId":"abc123","status":"success"}}"#;
+
+    /// A piece of `RECORD` as Lambda delivers it: raw, under an envelope of its own.
+    fn piece(millis: &str, bytes: &str) -> String {
+        format!(r#"{{"time":"2026-09-03T14:29:52.{millis}Z","type":"function","record":{bytes}}}"#)
+    }
+
+    fn assert_whole_record(events: &[TelemetryEvent]) {
+        let record = serde_json::from_str(RECORD).expect("valid record");
+        assert_eq!(events.len(), 2);
+        assert_eq!(events[0].record, TelemetryRecord::Function(record));
+        assert!(matches!(
+            events[1].record,
+            TelemetryRecord::PlatformRuntimeDone { .. }
+        ));
+    }
+
+    #[test]
+    fn joins_pieces_within_a_payload_at_every_cut() {
+        for cut in (1..RECORD.len()).filter(|&cut| RECORD.is_char_boundary(cut)) {
+            let (first, rest) = RECORD.split_at(cut);
+            let body = format!(
+                "[{},{},{RUNTIME_DONE}]",
+                piece("929", first),
+                piece("930", rest)
+            );
+
+            let Stitch::Complete(events) = stitch(&FragmentBuffer::default(), &body) else {
+                panic!("pieces cut after {first:?} were not joined");
+            };
+            assert_whole_record(&events);
+        }
+    }
+
+    #[test]
+    fn joins_pieces_across_payloads_at_every_cut() {
+        for cut in (1..RECORD.len()).filter(|&cut| RECORD.is_char_boundary(cut)) {
+            let (first, rest) = RECORD.split_at(cut);
+            let fragments = FragmentBuffer::default();
+
+            let head = format!("[{}]", piece("929", first));
+            assert!(
+                matches!(stitch(&fragments, &head), Stitch::Pending),
+                "payload ending after {first:?} was not held"
+            );
+
+            let tail = format!("[{},{RUNTIME_DONE}]", piece("930", rest));
+            let Stitch::Complete(events) = stitch(&fragments, &tail) else {
+                panic!("payloads cut after {first:?} were not joined");
+            };
+            assert_whole_record(&events);
+        }
+    }
+
+    /// The shape seen in production: a record in several pieces, the payload ending between
+    /// two of them.
+    #[test]
+    fn joins_a_record_in_pieces_across_payloads() {
+        let fragments = FragmentBuffer::default();
+
+        let (a, rest) = RECORD.split_at(20);
+        let (b, rest) = rest.split_at(20);
+        let (c, d) = rest.split_at(20);
+
+        let head = format!(
+            r#"[{{"time":"2026-09-03T14:29:52.900Z","type":"extension","record":"ready"}},{},{}]"#,
+            piece("929", a),
+            piece("930", b)
+        );
+        assert!(matches!(stitch(&fragments, &head), Stitch::Pending));
+
+        let tail = format!("[{},{},{RUNTIME_DONE}]", piece("931", c), piece("932", d));
+        let mut events = completed(stitch(&fragments, &tail));
+
+        assert_eq!(events.len(), 3);
+        assert!(matches!(
+            events.remove(0).record,
+            TelemetryRecord::Extension(_)
+        ));
+        assert_whole_record(&events);
+    }
+
+    #[test]
+    fn does_not_mistake_a_broken_record_for_pieces() {
+        let body = r#"[{"time":"2026-09-03T14:29:52.929Z","type":"function","record":{"message":"ok"}},{"time":"2026-09-03T14:29:52.930Z","type":"function","record":{"message":"bad\q"}}]"#;
+        assert!(matches!(
+            stitch(&FragmentBuffer::default(), body),
+            Stitch::Discarded
+        ));
+
+        // Fails where `platform.runtimeDone` begins, which a log piece's seam never does.
+        let body = r#"[{"time":"2026-09-03T14:29:52.929Z","type":"function","record":},{"time":"2026-09-03T14:29:52.930Z","type":"platform.runtimeDone","record":{"requestId":"abc123","status":"success"}}]"#;
+        assert!(matches!(
+            stitch(&FragmentBuffer::default(), body),
+            Stitch::Discarded
+        ));
+    }
+
     #[test]
     fn does_not_hold_a_payload_that_arrived_whole() {
         let fragments = FragmentBuffer::default();
@@ -309,11 +484,10 @@ mod tests {
 
         assert!(matches!(stitch(&fragments, HEAD), Stitch::Pending));
 
-        // A different record's envelope, so the held fragment goes and this one takes its
-        // place.
+        // Another cut record, which doesn't parse joined on, so the held fragment goes with it.
         let other =
             r#"[{"time":"2026-09-03T14:30:11.001Z","type":"function","record":{"message":"CCCC}]"#;
-        assert!(matches!(stitch(&fragments, other), Stitch::Pending));
+        assert!(matches!(stitch(&fragments, other), Stitch::Discarded));
 
         // Proof the first fragment is gone: its own continuation no longer joins.
         assert!(matches!(stitch(&fragments, TAIL), Stitch::Discarded));
