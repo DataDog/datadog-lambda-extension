@@ -8,7 +8,7 @@
 //! POST 1  [{"time":"..929Z","type":"function","record":{"message":"iVBORw0KGgoAAA}]
 //!         `------------- envelope --------------------'`--- cut here ---'`framing'
 //!
-//! POST 2  [{"time":"..929Z","type":"function","record":QICAgIfAhkiAAA"}},{..},{..runtimeDone..}]
+//! POST 2  [{"time":"..930Z","type":"function","record":QICAgIfAhkiAAA"}},{..},{..runtimeDone..}]
 //!         `------ the next piece's envelope ----------'`-- resumed --'`- rest of the batch -'
 //! ```
 //!
@@ -58,6 +58,9 @@ const PIECE_TYPES: &[&[u8]] = &[
     b"\"type\":\"extension\",\"record\":",
 ];
 
+/// Room for an envelope's timestamp and type, bounding the search for its `record` key.
+const MAX_ENVELOPE_BYTES: usize = 128;
+
 /// How far past a seam's start serde can fail: a cut inside a string swallows `},{"`, and
 /// the string closes on the `"` before `time`.
 const SEAM_REACH: usize = 4;
@@ -95,18 +98,24 @@ impl FragmentBuffer {
         }
 
         if let Some(head) = slot.take() {
+            let held = head.body.len();
             if let Some(resumed) = Fragment::resumed_bytes(body) {
                 let mut joined = head.join(resumed);
-                return match unsplit(&mut joined) {
-                    Ok(events) => Stitch::Complete(events),
+                match unsplit(&mut joined) {
+                    Ok(events) => return Stitch::Complete(events),
                     // A record can be cut more than once, so keep accumulating.
-                    Err(e) => hold_or_discard(&mut slot, joined, &e),
-                };
+                    Err(e) => {
+                        if matches!(hold_or_discard(&mut slot, joined, &e), Stitch::Pending) {
+                            return Stitch::Pending;
+                        }
+                    }
+                }
             }
 
+            // Nothing pairs the two but the join parsing, so a failed one means `body` stands
+            // alone.
             debug!(
-                "TELEMETRY API | Dropping {} held bytes, the next payload does not continue it",
-                head.body.len()
+                "TELEMETRY API | Dropping {held} held bytes, the next payload does not continue it"
             );
         }
 
@@ -164,9 +173,8 @@ impl Fragment {
     /// A continuation opens with the next piece's envelope, so its `record` key is the first
     /// one in the payload — anything the customer nested sits inside the value that follows.
     fn resumed_bytes(body: &[u8]) -> Option<&[u8]> {
-        let payload = body.strip_prefix(b"[")?;
-        let value_start = find(payload, RECORD_KEY)? + RECORD_KEY.len();
-        payload.get(value_start..)
+        let payload = body.strip_prefix(b"[{\"time\":\"")?;
+        payload.get(piece_envelope(payload)?..)
     }
 
     /// Joins the resumed bytes on, dropping the framing: left in place it would land inside
@@ -212,18 +220,21 @@ fn seam_at(body: &[u8], at: usize) -> Option<Range<usize>> {
         .rev()
         .find(|&i| body.get(i..).is_some_and(|rest| rest.starts_with(SEAM)))?;
 
+    let len = piece_envelope(body.get(start + SEAM.len()..)?)?;
+    Some(start..start + SEAM.len() + len)
+}
+
+/// Length of the rest of a piece's envelope, if `bytes` — following its `{"time":"` — is one.
+fn piece_envelope(bytes: &[u8]) -> Option<usize> {
+    let window = &bytes[..bytes.len().min(MAX_ENVELOPE_BYTES)];
+    let len = find(window, RECORD_KEY)? + RECORD_KEY.len();
+
     // The envelope holds only the timestamp and a log type; a brace means the match ran into a
     // value, and any other type is a whole event — say `platform.runtimeDone` — not a piece.
-    let envelope = body.get(start + SEAM.len()..)?;
-    let len = find(envelope, RECORD_KEY)? + RECORD_KEY.len();
-    let envelope = &envelope[..len];
-    if envelope.iter().any(|b| matches!(b, b'{' | b'}'))
-        || !PIECE_TYPES.iter().any(|tail| envelope.ends_with(tail))
-    {
-        return None;
-    }
-
-    Some(start..start + SEAM.len() + len)
+    let envelope = &window[..len];
+    let is_piece = !envelope.iter().any(|b| matches!(b, b'{' | b'}'))
+        && PIECE_TYPES.iter().any(|tail| envelope.ends_with(tail));
+    is_piece.then_some(len)
 }
 
 /// The byte serde's one-based line and column point at.
@@ -247,7 +258,7 @@ pub(crate) mod fixtures {
     pub(crate) const HEAD: &str =
         r#"[{"time":"2026-09-03T14:29:52.929Z","type":"function","record":{"message":"AAAA}]"#;
 
-    /// The continuation: the same envelope, the resumed bytes, then the rest of the batch.
+    /// The continuation: the next piece's envelope, the resumed bytes, then the rest of the batch.
     pub(crate) const TAIL: &str = r#"[{"time":"2026-09-03T14:29:52.929Z","type":"function","record":BBBB"}},{"time":"2026-09-03T14:29:52.930Z","type":"platform.runtimeDone","record":{"requestId":"abc123","status":"success","metrics":{"durationMs":18.074,"producedBytes":329814}}}]"#;
 }
 
@@ -484,12 +495,44 @@ mod tests {
 
         assert!(matches!(stitch(&fragments, HEAD), Stitch::Pending));
 
-        // Another cut record, which doesn't parse joined on, so the held fragment goes with it.
+        // Another cut record, which doesn't parse joined on, so the held fragment goes and this
+        // one takes its place.
         let other =
             r#"[{"time":"2026-09-03T14:30:11.001Z","type":"function","record":{"message":"CCCC}]"#;
-        assert!(matches!(stitch(&fragments, other), Stitch::Discarded));
+        assert!(matches!(stitch(&fragments, other), Stitch::Pending));
 
-        // Proof the first fragment is gone: its own continuation no longer joins.
-        assert!(matches!(stitch(&fragments, TAIL), Stitch::Discarded));
+        // Proof the first fragment is gone: the continuation now resumes this one.
+        let events = completed(stitch(&fragments, TAIL));
+        assert_eq!(
+            events[0].record,
+            TelemetryRecord::Function(serde_json::json!({"message": "CCCCBBBB"}))
+        );
+    }
+
+    #[test]
+    fn recovers_a_payload_that_does_not_continue_the_held_fragment() {
+        let fragments = FragmentBuffer::default();
+
+        assert!(matches!(stitch(&fragments, HEAD), Stitch::Pending));
+
+        // Whole once its own seam is dropped, so it must not go down with the held fragment.
+        let (first, rest) = RECORD.split_at(20);
+        let body = format!(
+            "[{},{},{RUNTIME_DONE}]",
+            piece("931", first),
+            piece("932", rest)
+        );
+        assert_whole_record(&completed(stitch(&fragments, &body)));
+    }
+
+    #[test]
+    fn does_not_resume_a_fragment_with_a_whole_event() {
+        let fragments = FragmentBuffer::default();
+
+        assert!(matches!(stitch(&fragments, HEAD), Stitch::Pending));
+
+        // Only a log piece continues one, so this record isn't glued onto the held message.
+        let body = r#"[{"time":"2026-09-03T14:29:52.930Z","type":"platform.runtimeDone","record":BBBB"}}]"#;
+        assert!(matches!(stitch(&fragments, body), Stitch::Discarded));
     }
 }
