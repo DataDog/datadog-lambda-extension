@@ -61,7 +61,7 @@ impl TracePipeline {
         let lambda_extension_compute_stats = self.config.ext.lambda_extension_compute_stats;
         // Capture before `tracer_header_tags` is moved into process_traces below.
         let client_computed_stats = tracer_header_tags.generic.client_computed_stats;
-        let (send_data_builder, processed_traces) = self.trace_processor.process_traces(
+        let (send_data_builders, processed_traces) = self.trace_processor.process_traces(
             self.config.clone(),
             self.tags_provider.clone(),
             tracer_header_tags,
@@ -70,11 +70,13 @@ impl TracePipeline {
             None,
         );
 
-        if let Some(send_data_builder) = send_data_builder {
-            if let Err(err) = self.trace_tx.send(send_data_builder).await {
-                return Err(format!(
-                    "Error sending traces to the trace aggregator: {err}"
-                ));
+        if !send_data_builders.is_empty() {
+            for send_data_builder in send_data_builders {
+                if let Err(err) = self.trace_tx.send(send_data_builder).await {
+                    return Err(format!(
+                        "Error sending traces to the trace aggregator: {err}"
+                    ));
+                }
             }
             debug!("OTLP | Successfully buffered traces to be aggregated.");
         }
