@@ -2,9 +2,8 @@
 
 Opening a same-repository GitHub PR or pushing another commit to it dispatches one
 benchmark publication after `layer (amd64)` and its existing size check succeed.
-Here `external_pull_request_event` means GitHub-hosted PRs, including employee PRs.
-The companion branch-push pipeline does not dispatch again. Fork PRs are excluded;
-repository identity is not an employee-status check.
+Here `external_pull_request_event` means GitHub-hosted PRs.
+The companion branch-push pipeline does not dispatch again. Fork PRs are excluded.
 
 The generated build pipeline starts a detached child pipeline without a dependent
 or mirror strategy. It downloads the existing layer artifact by the exact build
