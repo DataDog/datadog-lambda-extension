@@ -52,6 +52,7 @@ datadog-agent-trace-sampler,https://github.com/DataDog/serverless-components,Apa
 datadog-fips,https://github.com/DataDog/serverless-components,Apache-2.0,The datadog-fips Authors
 datadog-opentelemetry,https://github.com/DataDog/dd-trace-rs/tree/main/datadog-opentelemetry,Apache-2.0,Datadog Inc. <info@datadoghq.com>
 datadog-protos,https://github.com/DataDog/saluki,Apache-2.0,The datadog-protos Authors
+datadog-serverless-logging,https://github.com/DataDog/serverless-components,Apache-2.0,The datadog-serverless-logging Authors
 ddsketch-agent,https://github.com/DataDog/saluki,Apache-2.0,The ddsketch-agent Authors
 defmt,https://github.com/knurling-rs/defmt,MIT OR Apache-2.0,The Knurling-rs developers
 defmt-macros,https://github.com/knurling-rs/defmt,MIT OR Apache-2.0,The Knurling-rs developers

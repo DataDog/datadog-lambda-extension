@@ -81,6 +81,7 @@ use bottlecap::{
     },
 };
 use datadog_fips::reqwest_adapter::create_reqwest_client_builder;
+use datadog_serverless_logging::{LEVEL_BY_TARGET_ENV_VAR, build_env_filter};
 use decrypt::{resolve_additional_endpoints_secrets, resolve_secrets};
 use dogstatsd::{
     aggregator::{
@@ -103,7 +104,6 @@ use tokio::time::Instant;
 use tokio::{sync::Mutex as TokioMutex, sync::mpsc::Sender};
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, warn};
-use tracing_subscriber::{EnvFilter, filter::Directive};
 use ustr::Ustr;
 
 fn resolve_dsm_service(
@@ -240,9 +240,12 @@ fn enable_logging_subsystem() {
     .unwrap_or(LogLevel::Info);
 
     let (env_filter, invalid_entries) = build_env_filter(
-        log_level,
-        &std::env::var("DD_LOG_LEVEL_BY_TARGET").unwrap_or_default(),
-    );
+        &format!(
+            "h2=off,hyper=off,reqwest=off,rustls=off,datadog-trace-mini-agent=off,{log_level:?}"
+        ),
+        &std::env::var(LEVEL_BY_TARGET_ENV_VAR).unwrap_or_default(),
+    )
+    .expect("could not parse log level in configuration");
     let subscriber = tracing_subscriber::fmt::Subscriber::builder()
         .with_env_filter(env_filter)
         .with_level(true)
@@ -257,49 +260,9 @@ fn enable_logging_subsystem() {
     tracing::subscriber::set_global_default(subscriber).expect("setting default subscriber failed");
 
     if !invalid_entries.is_empty() {
-        warn!("Ignoring invalid DD_LOG_LEVEL_BY_TARGET entries: {invalid_entries:?}");
+        warn!("Ignoring invalid {LEVEL_BY_TARGET_ENV_VAR} entries: {invalid_entries:?}");
     }
     debug!("Logging subsystem enabled");
-}
-
-/// Builds the log filter from `DD_LOG_LEVEL` and `DD_LOG_LEVEL_BY_TARGET`, a comma-separated
-/// list of `target=level` entries. Targets include the module paths of dependencies, which use
-/// underscores, such as `dogstatsd` or `datadog_agent_config`. Returns the entries that are not
-/// valid, so that a typo is logged instead of failing startup.
-fn build_env_filter(log_level: LogLevel, levels_by_target: &str) -> (EnvFilter, Vec<String>) {
-    let mut env_filter = EnvFilter::try_new(format!(
-        "h2=off,hyper=off,reqwest=off,rustls=off,datadog-trace-mini-agent=off,{log_level:?}",
-    ))
-    .expect("could not parse log level in configuration");
-    let mut invalid_entries = Vec::new();
-    for entry in levels_by_target
-        .split(',')
-        .map(str::trim)
-        .filter(|e| !e.is_empty())
-    {
-        match parse_target_level(entry) {
-            Some(directive) => env_filter = env_filter.add_directive(directive),
-            None => invalid_entries.push(entry.to_string()),
-        }
-    }
-    (env_filter, invalid_entries)
-}
-
-/// Parses one `target=level` entry. Rejects the other forms that `EnvFilter` accepts, such as a
-/// level with no target, which would replace `DD_LOG_LEVEL`, or a span filter such as `[span]`.
-fn parse_target_level(entry: &str) -> Option<Directive> {
-    let (target, level) = entry.split_once('=')?;
-    let (target, level) = (target.trim(), level.trim());
-    let valid_target =
-        !target.is_empty() && !target.contains(|c: char| c.is_whitespace() || "[]{}".contains(c));
-    let valid_level = matches!(
-        level.to_ascii_lowercase().as_str(),
-        "off" | "error" | "warn" | "info" | "debug" | "trace"
-    );
-    if !(valid_target && valid_level) {
-        return None;
-    }
-    format!("{target}={level}").parse().ok()
 }
 
 /// Returns the appropriate flush strategy for the given mode.
@@ -1654,53 +1617,5 @@ mod dsm_config_tests {
     #[test]
     fn falls_back_to_aws_lambda_when_unset() {
         assert_eq!(resolve_dsm_service(None, None), "aws.lambda");
-    }
-}
-
-#[cfg(test)]
-mod env_filter_tests {
-    use super::{LogLevel, build_env_filter};
-
-    #[test]
-    fn adds_directive_per_entry() {
-        let (filter, invalid) = build_env_filter(
-            LogLevel::Info,
-            " cold_start_duration=debug, trace_flush_duration = TRACE ,",
-        );
-        let filter = filter.to_string();
-        assert!(filter.contains("cold_start_duration=debug"));
-        assert!(filter.contains("trace_flush_duration=trace"));
-        assert!(invalid.is_empty());
-    }
-
-    #[test]
-    fn skips_invalid_entries() {
-        let (filter, invalid) = build_env_filter(
-            LogLevel::Info,
-            "debug,cold_start_duration,cold_start_duration=verbose,=debug,[span]=debug,a b=debug,trace_flush_duration=debug",
-        );
-        let filter = filter.to_string();
-        assert!(filter.contains("trace_flush_duration=debug"));
-        assert!(filter.ends_with(",info") || filter.contains(",info,"));
-        assert_eq!(
-            invalid,
-            vec![
-                "debug",
-                "cold_start_duration",
-                "cold_start_duration=verbose",
-                "=debug",
-                "[span]=debug",
-                "a b=debug",
-            ]
-        );
-    }
-
-    #[test]
-    fn overrides_default_levels() {
-        let (filter, _) = build_env_filter(LogLevel::Debug, "bottlecap::logs=warn,h2=debug");
-        let filter = filter.to_string();
-        assert!(filter.contains("bottlecap::logs=warn"));
-        assert!(filter.contains("h2=debug"));
-        assert!(!filter.contains("h2=off"));
     }
 }
