@@ -6,11 +6,7 @@ use tracing_subscriber::fmt::{
 };
 use tracing_subscriber::registry::LookupSpan;
 
-// `DD_LOG_LEVEL_BY_TARGET` matches a target by text prefix, so no target name may start with
-// another one: an entry for `trace_flush` would also match `trace_flush_duration`.
-
-/// Tracing target for the duration of each cold start step. Enable it alone with
-/// `DD_LOG_LEVEL_BY_TARGET=cold_start_duration=debug`.
+/// Tracing target for the duration of each cold start step.
 pub const COLD_START_DURATION: &str = "cold_start_duration";
 
 /// Logs at debug level how long `step` took since `start`, under a duration target such as
