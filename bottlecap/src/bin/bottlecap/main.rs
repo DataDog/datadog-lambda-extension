@@ -81,6 +81,7 @@ use bottlecap::{
     },
 };
 use datadog_fips::reqwest_adapter::create_reqwest_client_builder;
+use datadog_serverless_logging::{LEVEL_BY_TARGET_ENV_VAR, build_env_filter};
 use decrypt::{resolve_additional_endpoints_secrets, resolve_secrets};
 use dogstatsd::{
     aggregator::{
@@ -103,7 +104,6 @@ use tokio::time::Instant;
 use tokio::{sync::Mutex as TokioMutex, sync::mpsc::Sender};
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, warn};
-use tracing_subscriber::EnvFilter;
 use ustr::Ustr;
 
 fn resolve_dsm_service(
@@ -239,13 +239,15 @@ fn enable_logging_subsystem() {
     )
     .unwrap_or(LogLevel::Info);
 
-    let env_filter = format!(
-        "h2=off,hyper=off,reqwest=off,rustls=off,datadog-trace-mini-agent=off,{log_level:?}",
-    );
+    let (env_filter, invalid_entries) = build_env_filter(
+        &format!(
+            "h2=off,hyper=off,reqwest=off,rustls=off,datadog-trace-mini-agent=off,{log_level:?}"
+        ),
+        &std::env::var(LEVEL_BY_TARGET_ENV_VAR).unwrap_or_default(),
+    )
+    .expect("could not parse log level in configuration");
     let subscriber = tracing_subscriber::fmt::Subscriber::builder()
-        .with_env_filter(
-            EnvFilter::try_new(env_filter).expect("could not parse log level in configuration"),
-        )
+        .with_env_filter(env_filter)
         .with_level(true)
         .with_thread_names(false)
         .with_thread_ids(false)
@@ -257,6 +259,9 @@ fn enable_logging_subsystem() {
         .finish();
     tracing::subscriber::set_global_default(subscriber).expect("setting default subscriber failed");
 
+    if !invalid_entries.is_empty() {
+        warn!("Ignoring invalid {LEVEL_BY_TARGET_ENV_VAR} entries: {invalid_entries:?}");
+    }
     debug!("Logging subsystem enabled");
 }
 
