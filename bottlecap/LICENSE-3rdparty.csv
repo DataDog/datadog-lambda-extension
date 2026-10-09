@@ -50,6 +50,7 @@ darling_macro,https://github.com/TedDriggs/darling,MIT,Ted Driggs <ted.driggs@ou
 datadog-agent-config,https://github.com/DataDog/serverless-components,Apache-2.0,The datadog-agent-config Authors
 datadog-agent-trace-sampler,https://github.com/DataDog/serverless-components,Apache-2.0,The datadog-agent-trace-sampler Authors
 datadog-fips,https://github.com/DataDog/serverless-components,Apache-2.0,The datadog-fips Authors
+datadog-mock-intake,https://github.com/DataDog/serverless-components,Apache-2.0,The datadog-mock-intake Authors
 datadog-opentelemetry,https://github.com/DataDog/dd-trace-rs/tree/main/datadog-opentelemetry,Apache-2.0,Datadog Inc. <info@datadoghq.com>
 datadog-protos,https://github.com/DataDog/saluki,Apache-2.0,The datadog-protos Authors
 ddsketch-agent,https://github.com/DataDog/saluki,Apache-2.0,The ddsketch-agent Authors
