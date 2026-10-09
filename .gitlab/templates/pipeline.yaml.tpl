@@ -67,6 +67,32 @@ cargo clippy:
     # constructors that are absent from default and fips builds.
     - cargo clippy --workspace --features default,test-mode
 
+# "external" means GitHub-hosted: run on PR creation and every subsequent push.
+benchmark PR performance:
+  stage: build
+  allow_failure: true
+  interruptible: false
+  rules:
+    - if: '$PR_BENCHMARK_BRANCH =~ /^graphite-base\/.*$/'
+      when: never
+    - if: >-
+        $PR_BENCHMARK_PIPELINE_SOURCE == "external_pull_request_event" &&
+        $PR_BENCHMARK_COMMIT_SHA && $PR_BENCHMARK_BRANCH
+    - when: never
+  needs:
+    - job: layer (amd64)
+      artifacts: false
+    - job: check layer size (amd64)
+      artifacts: false
+  variables:
+    PR_BENCHMARK_BUILD_PIPELINE_ID: $CI_PIPELINE_ID
+  trigger:
+    include:
+      - local: .gitlab/pr-benchmark.yml
+    forward:
+      yaml_variables: true
+      pipeline_variables: true
+
 {{ range $flavor := (ds "flavors").flavors }}
 
 bottlecap ({{ $flavor.name }}):

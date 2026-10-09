@@ -54,6 +54,10 @@ generator:
 
 generated pipeline:
   stage: run
+  variables:
+    PR_BENCHMARK_PIPELINE_SOURCE: $CI_PIPELINE_SOURCE
+    PR_BENCHMARK_COMMIT_SHA: $CI_EXTERNAL_PULL_REQUEST_SOURCE_BRANCH_SHA
+    PR_BENCHMARK_BRANCH: $CI_EXTERNAL_PULL_REQUEST_SOURCE_BRANCH_NAME
   trigger:
     include:
       - artifact: .gitlab/pipeline.yaml
