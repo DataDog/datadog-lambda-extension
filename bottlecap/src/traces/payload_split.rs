@@ -11,6 +11,8 @@
 use libdd_trace_protobuf::pb;
 use prost::Message;
 use prost::encoding::message::encoded_len as field_len;
+use prost::encoding::{encoded_len_varint, key_len};
+use std::collections::HashMap;
 use tracing::warn;
 
 /// Protobuf field number of `TracerPayload.chunks`.
@@ -79,10 +81,7 @@ fn split_payload(
 fn split_chunk(mut chunk: pb::TraceChunk, budget: usize) -> Vec<pb::TraceChunk> {
     let spans = std::mem::take(&mut chunk.spans);
     let trace_tags = trace_level_tags(&spans);
-    // Room for the trace tags added to each piece's first span, with slack for map entry
-    // framing and the span's length varint growing.
-    let tags_reserve: usize = trace_tags.iter().map(|(k, v)| k.len() + v.len() + 8).sum();
-    let span_budget = budget.saturating_sub(chunk.encoded_len() + FIELD_OVERHEAD + tags_reserve);
+    let span_budget = budget.saturating_sub(chunk.encoded_len() + FIELD_OVERHEAD);
 
     let mut pieces = Vec::new();
     let mut current = Vec::new();
@@ -90,7 +89,9 @@ fn split_chunk(mut chunk: pb::TraceChunk, budget: usize) -> Vec<pb::TraceChunk> 
     let mut dropped = 0;
     for span in spans {
         let span_len = field_len(SPANS_TAG, &span);
-        if span_len > span_budget {
+        // Only a piece's first span gains the trace tags, so this is charged only then.
+        let extra = trace_tags_growth(&span, span_len, &trace_tags);
+        if span_len + extra > span_budget {
             dropped += 1;
             continue;
         }
@@ -98,7 +99,11 @@ fn split_chunk(mut chunk: pb::TraceChunk, budget: usize) -> Vec<pb::TraceChunk> 
             pieces.push(with_spans(&chunk, std::mem::take(&mut current)));
             current_len = 0;
         }
-        current_len += span_len;
+        current_len += if current.is_empty() {
+            span_len + extra
+        } else {
+            span_len
+        };
         current.push(span);
     }
     if !current.is_empty() {
@@ -118,6 +123,27 @@ fn split_chunk(mut chunk: pb::TraceChunk, budget: usize) -> Vec<pb::TraceChunk> 
         }
     }
     pieces
+}
+
+/// Returns how much the encoded `spans` field of `span` (currently `span_len`) grows when
+/// the trace tags it lacks are added to its meta.
+fn trace_tags_growth(span: &pb::Span, span_len: usize, trace_tags: &[(String, String)]) -> usize {
+    let missing: HashMap<String, String> = trace_tags
+        .iter()
+        .filter(|(k, _)| !span.meta.contains_key(k))
+        .cloned()
+        .collect();
+    if missing.is_empty() {
+        return 0;
+    }
+    // A span holding only the missing tags encodes to exactly the added map entries.
+    let added = pb::Span {
+        meta: missing,
+        ..Default::default()
+    }
+    .encoded_len();
+    let new_len = span.encoded_len() + added;
+    key_len(SPANS_TAG) + encoded_len_varint(new_len as u64) + new_len - span_len
 }
 
 /// Returns the `_dd.p.*` tags of the chunk's root span, or of the first span that has any.
@@ -156,7 +182,6 @@ fn with_spans(template: &pb::TraceChunk, spans: Vec<pb::Span>) -> pb::TraceChunk
 #[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
-    use std::collections::HashMap;
 
     fn span(trace_id: u64, span_id: u64, meta_bytes: usize) -> pb::Span {
         pb::Span {
@@ -307,5 +332,35 @@ mod tests {
         assert!(out.len() >= 3);
         assert!(out.iter().all(|p| p.encoded_len() <= limit));
         assert_eq!(span_ids(&out), span_ids(&[small, large]));
+    }
+
+    #[test]
+    fn near_limit_span_with_trace_tags_is_kept() {
+        let mut root = span(5, 1, 0);
+        root.meta
+            .insert("_dd.p.tid".to_string(), "66f1e2a300000000".to_string());
+        root.meta.insert("_dd.p.dm".to_string(), "-1".to_string());
+        root.meta.insert("payload".to_string(), "x".repeat(5_000));
+        let mut trace = chunk(5, 0, 0);
+        let empty_chunk_len = trace.encoded_len();
+        trace.spans.push(root);
+        trace.spans.extend((2..=5).map(|i| span(5, i, 100)));
+        let input = payload(vec![trace]);
+        let empty_payload_len = {
+            let mut p = input.clone();
+            p.chunks.clear();
+            p.encoded_len()
+        };
+        // The root span leaves only a few bytes of the space available to a single span. It
+        // already carries the trace tags, so it gains nothing when they are propagated.
+        let root_len = field_len(SPANS_TAG, &input.chunks[0].spans[0]);
+        let limit = empty_payload_len + empty_chunk_len + FIELD_OVERHEAD + root_len + 10;
+        assert!(input.encoded_len() > limit);
+
+        let out = split_tracer_payloads(vec![input.clone()], limit);
+
+        assert!(span_ids(&out).contains(&(5, 1)), "root span was dropped");
+        assert_eq!(span_ids(&out), span_ids(&[input]));
+        assert!(out.iter().all(|p| p.encoded_len() <= limit));
     }
 }
