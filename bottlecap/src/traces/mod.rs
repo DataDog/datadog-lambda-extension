@@ -3,6 +3,7 @@
 
 pub mod data_streams;
 pub mod http_client;
+pub mod payload_split;
 pub mod propagation;
 pub mod proxy_aggregator;
 pub mod proxy_flusher;

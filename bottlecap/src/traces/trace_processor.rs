@@ -36,8 +36,11 @@ use tokio::sync::mpsc::Sender;
 use tokio::sync::mpsc::error::SendError;
 use tracing::{debug, error};
 
+use crate::traces::payload_split::split_tracer_payloads;
 use crate::traces::stats_generator::StatsGenerator;
-use crate::traces::trace_aggregator::{OwnedTracerHeaderTags, SendDataBuilderInfo};
+use crate::traces::trace_aggregator::{
+    MAX_CONTENT_SIZE_BYTES, OwnedTracerHeaderTags, SendDataBuilderInfo,
+};
 use libdd_trace_normalization::normalizer::SamplerPriority;
 
 /// Which party is responsible for computing trace stats for a trace, derived from
@@ -512,7 +515,7 @@ pub trait TraceProcessor {
         traces: Vec<Vec<pb::Span>>,
         body_size: usize,
         span_pointers: Option<Vec<SpanPointer>>,
-    ) -> (Option<SendDataBuilderInfo>, TracerPayloadCollection);
+    ) -> (Vec<SendDataBuilderInfo>, TracerPayloadCollection);
 }
 
 #[async_trait]
@@ -525,7 +528,7 @@ impl TraceProcessor for ServerlessTraceProcessor {
         traces: Vec<Vec<pb::Span>>,
         body_size: usize,
         span_pointers: Option<Vec<SpanPointer>>,
-    ) -> (Option<SendDataBuilderInfo>, TracerPayloadCollection) {
+    ) -> (Vec<SendDataBuilderInfo>, TracerPayloadCollection) {
         let mut payload = trace_utils::collect_pb_trace_chunks(
             traces,
             &header_tags,
@@ -579,7 +582,7 @@ impl TraceProcessor for ServerlessTraceProcessor {
         {
             self.drop_sampled_out_chunks(tracer_payloads);
             if tracer_payloads.is_empty() {
-                return (None, payloads_for_stats);
+                return (Vec::new(), payloads_for_stats);
             }
         }
 
@@ -593,28 +596,45 @@ impl TraceProcessor for ServerlessTraceProcessor {
 
         debug!("TRACES | trace payload size after enrichment: {body_size} bytes");
 
-        let owned_header_tags = OwnedTracerHeaderTags::from(header_tags.clone());
+        // A payload larger than the batch cap can never be batched, so split it into
+        // payloads that each fit.
+        let payloads = match payload {
+            TracerPayloadCollection::V07(tracer_payloads) if body_size > MAX_CONTENT_SIZE_BYTES => {
+                let split = split_tracer_payloads(tracer_payloads, MAX_CONTENT_SIZE_BYTES);
+                debug!(
+                    "TRACES | split {body_size} byte trace payload into {} payloads",
+                    split.len()
+                );
+                split
+                    .into_iter()
+                    .map(|p| {
+                        let size = prost::Message::encoded_len(&p);
+                        (TracerPayloadCollection::V07(vec![p]), size)
+                    })
+                    .collect()
+            }
+            other => vec![(other, body_size)],
+        };
 
-        // Move original payload into builder (no clone needed)
-        let builder = SendDataBuilder::new(body_size, payload, header_tags, &endpoint)
-            .with_compression(CompressionStrategy::Zstd {
-                level: config.apm_config_compression_level,
+        let builders = payloads
+            .into_iter()
+            .map(|(payload, size)| {
+                let owned_header_tags = OwnedTracerHeaderTags::from(header_tags.clone());
+                let builder = SendDataBuilder::new(size, payload, header_tags.clone(), &endpoint)
+                    .with_compression(CompressionStrategy::Zstd {
+                        level: config.apm_config_compression_level,
+                    })
+                    .with_retry_strategy(RetryStrategy::new(
+                        1,
+                        100,
+                        RetryBackoffType::Exponential,
+                        None,
+                    ));
+                SendDataBuilderInfo::new(builder, size, owned_header_tags)
             })
-            .with_retry_strategy(RetryStrategy::new(
-                1,
-                100,
-                RetryBackoffType::Exponential,
-                None,
-            ));
+            .collect();
 
-        (
-            Some(SendDataBuilderInfo::new(
-                builder,
-                body_size,
-                owned_header_tags,
-            )),
-            payloads_for_stats,
-        )
+        (builders, payloads_for_stats)
     }
 }
 
@@ -697,7 +717,7 @@ impl SendingTraceProcessor {
         // Capture before `header_tags` is moved into process_traces below.
         let client_computed_stats = header_tags.generic.client_computed_stats;
 
-        let (payload, processed_traces) = self.processor.process_traces(
+        let (payloads, processed_traces) = self.processor.process_traces(
             config.clone(),
             tags_provider,
             header_tags,
@@ -721,7 +741,7 @@ impl SendingTraceProcessor {
             error!("TRACE_PROCESSOR | Error sending traces to the stats concentrator: {err}");
         }
 
-        if let Some(payload) = payload {
+        for payload in payloads {
             self.trace_tx.send(payload).await?;
         }
         Ok(())
@@ -910,7 +930,10 @@ mod tests {
             100,
             None,
         );
-        let tracer_payload = tracer_payload.expect("expected Some payload");
+        let tracer_payload = tracer_payload
+            .into_iter()
+            .next()
+            .expect("expected a payload");
 
         let expected_tracer_payload = pb::TracerPayload {
             container_id: "33".to_string(),
@@ -1385,7 +1408,7 @@ mod tests {
 
         let (payload_info, stats_collection) =
             processor.process_traces(config, tags_provider, header_tags, traces, 0, None);
-        let payload_info = payload_info.expect("expected Some payload");
+        let payload_info = payload_info.into_iter().next().expect("expected a payload");
 
         // Stats collection must include all three traces
         let TracerPayloadCollection::V07(ref stats_payloads) = stats_collection else {
@@ -1451,7 +1474,7 @@ mod tests {
 
         let (payload_info, _stats) =
             processor.process_traces(config, tags_provider, header_tags, traces, 0, None);
-        let payload_info = payload_info.expect("expected Some payload");
+        let payload_info = payload_info.into_iter().next().expect("expected a payload");
         let backend_send_data = payload_info.builder.build();
         let TracerPayloadCollection::V07(backend_payloads) = backend_send_data.get_payloads()
         else {
@@ -1512,7 +1535,10 @@ mod tests {
 
         let (payload_info, _stats) =
             processor.process_traces(config, tags_provider, header_tags, traces, 0, None);
-        let payload_info = payload_info.expect("errored-child P0 trace rescued");
+        let payload_info = payload_info
+            .into_iter()
+            .next()
+            .expect("errored-child P0 trace rescued");
         let backend_send_data = payload_info.builder.build();
         let TracerPayloadCollection::V07(backend_payloads) = backend_send_data.get_payloads()
         else {
@@ -1556,7 +1582,7 @@ mod tests {
         let (payload_info, _stats) =
             processor.process_traces(config, tags_provider, header_tags, traces, 0, None);
         assert!(
-            payload_info.is_none(),
+            payload_info.is_empty(),
             "errored P0 trace must stay dropped when the error sampler is disabled"
         );
     }
@@ -1592,7 +1618,10 @@ mod tests {
 
         let (payload_info, stats_collection) =
             processor.process_traces(config, tags_provider, header_tags, traces, 0, None);
-        let payload_info = payload_info.expect("kept trace must produce a backend payload");
+        let payload_info = payload_info
+            .into_iter()
+            .next()
+            .expect("kept trace must produce a backend payload");
 
         // Stats collection must include both traces, including the dropped errored P0.
         let TracerPayloadCollection::V07(ref stats_payloads) = stats_collection else {
@@ -1658,8 +1687,8 @@ mod tests {
             processor.process_traces(config, tags_provider, header_tags, traces, 0, None);
 
         assert!(
-            payload.is_none(),
-            "backend payload must be None when all traces are sampled out"
+            payload.is_empty(),
+            "no backend payload must be produced when all traces are sampled out"
         );
 
         // Stats collection must still include both traces
@@ -1713,7 +1742,7 @@ mod tests {
         let (payload_info, stats_collection) =
             processor.process_traces(config, tags_provider, header_tags, traces, 999_999, None);
 
-        let info = payload_info.expect("expected Some payload");
+        let info = payload_info.into_iter().next().expect("expected a payload");
 
         // The reported size must equal the sum of encoded_len() of the kept TracerPayloads.
         // stats_collection has all 4 traces. Reconstruct the filtered payload (only trace_id=1
@@ -1793,7 +1822,7 @@ mod tests {
             None,
         );
 
-        let info = payload_info.expect("expected Some payload");
+        let info = payload_info.into_iter().next().expect("expected a payload");
 
         // Nothing is filtered here, so the returned payloads are exactly what gets sent.
         let TracerPayloadCollection::V07(ref payloads) = processed_payloads else {
@@ -1808,6 +1837,84 @@ mod tests {
         assert!(
             info.size > ingress_size,
             "enrichment inflates the payload, so body_size must exceed the ingress size"
+        );
+    }
+
+    /// A single trace whose enriched payload exceeds the aggregator batch cap must be
+    /// split into multiple payloads that each fit, without losing or duplicating spans.
+    #[test]
+    fn test_process_traces_splits_oversized_trace() {
+        const TRACE_ID: u64 = 42;
+        const SPAN_COUNT: u64 = 40_000;
+
+        let config = Arc::new(Config {
+            apm_dd_url: "https://trace.agent.datadoghq.com".to_string(),
+            ..Config::default()
+        });
+        let (tags_provider, processor) = create_test_processor(&config, enabled_error_sampler());
+        let header_tags = create_test_header_tags();
+
+        // Span 1 is the root; every other span is its child.
+        let make_span = |span_id: u64| -> pb::Span {
+            pb::Span {
+                trace_id: TRACE_ID,
+                span_id,
+                parent_id: u64::from(span_id != 1),
+                service: "svc".to_string(),
+                name: "op".to_string(),
+                resource: "res".to_string(),
+                meta: HashMap::from([("payload".to_string(), "x".repeat(300))]),
+                ..Default::default()
+            }
+        };
+        let traces = vec![(1..=SPAN_COUNT).map(make_span).collect::<Vec<_>>()];
+
+        let (payload_infos, stats_collection) =
+            processor.process_traces(config, tags_provider, header_tags, traces, 1, None);
+
+        assert!(
+            payload_infos.len() > 1,
+            "oversized trace must be split into multiple payloads"
+        );
+        assert!(
+            payload_infos
+                .iter()
+                .all(|info| info.size <= MAX_CONTENT_SIZE_BYTES),
+            "every split payload must fit within the batch cap"
+        );
+
+        let mut sent_span_ids = Vec::new();
+        for info in payload_infos {
+            let send_data = info.builder.build();
+            let TracerPayloadCollection::V07(payloads) = send_data.get_payloads() else {
+                panic!("expected V07");
+            };
+            for chunk in payloads.iter().flat_map(|tp| &tp.chunks) {
+                for span in &chunk.spans {
+                    assert_eq!(span.trace_id, TRACE_ID);
+                    sent_span_ids.push(span.span_id);
+                }
+            }
+        }
+        sent_span_ids.sort_unstable();
+        let expected_span_ids: Vec<u64> = (1..=SPAN_COUNT).collect();
+        assert_eq!(
+            sent_span_ids, expected_span_ids,
+            "split payloads must contain every input span exactly once"
+        );
+
+        let TracerPayloadCollection::V07(ref stats_payloads) = stats_collection else {
+            panic!("expected V07");
+        };
+        let stats_span_count: usize = stats_payloads
+            .iter()
+            .flat_map(|tp| &tp.chunks)
+            .map(|c| c.spans.len())
+            .sum();
+        assert_eq!(
+            stats_span_count,
+            expected_span_ids.len(),
+            "stats must include all input spans"
         );
     }
 
