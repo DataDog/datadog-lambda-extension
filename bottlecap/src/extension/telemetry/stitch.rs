@@ -15,9 +15,10 @@
 //! So the two are joined by dropping POST 1's framing and POST 2's envelope. Each piece carries
 //! its own timestamp, so nothing pairs them but the joined bytes parsing.
 //!
-//! Pieces also sit side by side within one POST, where the seam between them — the cut piece's
-//! closing `}` and the next piece's envelope — is dropped the same way. Serde fails at, or just
-//! after, a seam, which tells it apart from the boundary between two whole events.
+//! Pieces can also arrive next to each other in one POST. The seam between two such pieces is the
+//! cut piece's closing `}` followed by the next piece's envelope, and it is dropped the same way.
+//! Serde fails at a seam or a few bytes after it. This is how a seam is told apart from the
+//! boundary between two whole events.
 //!
 //! Recovering the batch matters beyond the log line itself. `platform.runtimeDone` lands in
 //! the second half, and the on-demand loop waits for it before calling `/next` — so dropping
@@ -98,7 +99,7 @@ impl FragmentBuffer {
         }
 
         if let Some(head) = slot.take() {
-            let held = head.body.len();
+            let held_len = head.body.len();
             if let Some(resumed) = Fragment::resumed_bytes(body) {
                 let mut joined = head.join(resumed);
                 match unsplit(&mut joined) {
@@ -115,7 +116,7 @@ impl FragmentBuffer {
             // Nothing pairs the two but the join parsing, so a failed one means `body` stands
             // alone.
             debug!(
-                "TELEMETRY API | Dropping {held} held bytes, the next payload does not continue it"
+                "TELEMETRY API | Dropping {held_len} held bytes, the next payload does not continue it"
             );
         }
 
@@ -152,13 +153,13 @@ impl Fragment {
     /// was cut short, running out of input or into the framing. Any other parse failure won't
     /// be fixed by joining, and holding such a body would poison the next stitch.
     fn from_cut_payload(body: Vec<u8>, error: &serde_json::Error) -> Option<Self> {
-        let cut_short = match error.classify() {
+        let is_cut_short = match error.classify() {
             Category::Eof => true,
             // Cut after a `\` or a whole value, the piece runs into the framing instead.
             Category::Syntax => offset(&body, error) + FRAMING.len() >= body.len(),
             _ => false,
         };
-        if !cut_short || body.len() > MAX_FRAGMENT_BYTES || body.first() != Some(&b'[') {
+        if !is_cut_short || body.len() > MAX_FRAGMENT_BYTES || body.first() != Some(&b'[') {
             return None;
         }
 
@@ -197,20 +198,20 @@ fn find(haystack: &[u8], needle: &[u8]) -> Option<usize> {
 
 /// Parses `body`, dropping the seams between pieces one at a time where serde fails on them.
 fn unsplit(body: &mut Vec<u8>) -> Result<Vec<TelemetryEvent>, serde_json::Error> {
-    let mut seams = 0;
+    let mut seam_count = 0;
     loop {
         let error = match serde_json::from_slice(body) {
             Ok(events) => return Ok(events),
             Err(e) => e,
         };
-        if seams == MAX_SEAMS || error.classify() == Category::Data {
+        if seam_count == MAX_SEAMS || error.classify() == Category::Data {
             return Err(error);
         }
         match seam_at(body, offset(body, &error)) {
             Some(seam) => body.drain(seam),
             None => return Err(error),
         };
-        seams += 1;
+        seam_count += 1;
     }
 }
 
@@ -224,7 +225,8 @@ fn seam_at(body: &[u8], at: usize) -> Option<Range<usize>> {
     Some(start..start + SEAM.len() + len)
 }
 
-/// Length of the rest of a piece's envelope, if `bytes` — following its `{"time":"` — is one.
+/// Length of a piece's envelope, counted from just after its opening `{"time":"`. Returns
+/// `None` if `bytes` is not the rest of a piece's envelope.
 fn piece_envelope(bytes: &[u8]) -> Option<usize> {
     let window = &bytes[..bytes.len().min(MAX_ENVELOPE_BYTES)];
     let len = find(window, RECORD_KEY)? + RECORD_KEY.len();
