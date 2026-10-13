@@ -22,6 +22,9 @@ const SPANS_TAG: u32 = 3;
 /// Upper bound on the bytes a length-delimited field adds around its contents
 /// (1-byte key for these tags plus a varint length of at most 5 bytes).
 const FIELD_OVERHEAD: usize = 6;
+/// Process tags key. Tracers set it only on the first span of a payload's first chunk, and
+/// the Agent reads the payload-level tag first, so it is promoted there when splitting.
+const PROCESS_TAGS_KEY: &str = "_dd.tags.process";
 
 /// Splits `payloads` so that each returned payload encodes to at most `max_bytes`.
 ///
@@ -48,6 +51,7 @@ fn split_payload(
     max_bytes: usize,
     out: &mut Vec<pb::TracerPayload>,
 ) {
+    promote_process_tags(&mut payload);
     let chunks = std::mem::take(&mut payload.chunks);
     let budget = max_bytes.saturating_sub(payload.encoded_len());
 
@@ -71,6 +75,24 @@ fn split_payload(
     }
     if !current.is_empty() {
         out.push(with_chunks(&payload, current));
+    }
+}
+
+/// Copies the first span's process tags to the payload tags, so every split payload keeps
+/// them. An existing payload-level value is left unchanged.
+fn promote_process_tags(payload: &mut pb::TracerPayload) {
+    if payload.tags.contains_key(PROCESS_TAGS_KEY) {
+        return;
+    }
+    let process_tags = payload
+        .chunks
+        .first()
+        .and_then(|c| c.spans.first())
+        .and_then(|s| s.meta.get(PROCESS_TAGS_KEY));
+    if let Some(value) = process_tags {
+        payload
+            .tags
+            .insert(PROCESS_TAGS_KEY.to_string(), value.clone());
     }
 }
 
@@ -362,5 +384,69 @@ mod tests {
         assert!(span_ids(&out).contains(&(5, 1)), "root span was dropped");
         assert_eq!(span_ids(&out), span_ids(&[input]));
         assert!(out.iter().all(|p| p.encoded_len() <= limit));
+    }
+
+    const PROCESS_TAGS: &str = "entrypoint.name:bootstrap,entrypoint.type:executable";
+
+    fn with_process_tags_on_first_span(mut input: pb::TracerPayload) -> pb::TracerPayload {
+        input.chunks[0].spans[0]
+            .meta
+            .insert(PROCESS_TAGS_KEY.to_string(), PROCESS_TAGS.to_string());
+        input
+    }
+
+    fn assert_process_tags_on_every_output(input: &pb::TracerPayload, min_outputs: usize) {
+        let limit = input.encoded_len() / min_outputs;
+
+        let out = split_tracer_payloads(vec![input.clone()], limit);
+
+        assert!(out.len() >= min_outputs, "got {} payloads", out.len());
+        for p in &out {
+            assert!(p.encoded_len() <= limit, "{} > {limit}", p.encoded_len());
+            assert_eq!(p.tags[PROCESS_TAGS_KEY], PROCESS_TAGS);
+        }
+        assert_eq!(span_ids(&out), span_ids(std::slice::from_ref(input)));
+    }
+
+    #[test]
+    fn process_tags_are_promoted_when_splitting_by_chunk() {
+        let input = with_process_tags_on_first_span(payload(
+            (1..=10).map(|t| chunk(t, 10, 1_000)).collect(),
+        ));
+        assert_process_tags_on_every_output(&input, 3);
+    }
+
+    #[test]
+    fn process_tags_are_promoted_when_splitting_by_span() {
+        let input = with_process_tags_on_first_span(payload(vec![chunk(7, 2_000, 500)]));
+        assert_process_tags_on_every_output(&input, 5);
+    }
+
+    #[test]
+    fn payload_level_process_tags_take_priority() {
+        let mut input = with_process_tags_on_first_span(payload(vec![chunk(7, 2_000, 500)]));
+        input
+            .tags
+            .insert(PROCESS_TAGS_KEY.to_string(), "payload-level".to_string());
+        let limit = input.encoded_len() / 4;
+
+        let out = split_tracer_payloads(vec![input], limit);
+
+        assert!(out.len() >= 4);
+        for p in &out {
+            assert!(p.encoded_len() <= limit, "{} > {limit}", p.encoded_len());
+            assert_eq!(p.tags[PROCESS_TAGS_KEY], "payload-level");
+        }
+    }
+
+    #[test]
+    fn payload_without_process_tags_gains_none() {
+        let input = payload((1..=10).map(|t| chunk(t, 10, 1_000)).collect());
+        let limit = input.encoded_len() / 3;
+
+        let out = split_tracer_payloads(vec![input], limit);
+
+        assert!(out.len() >= 3);
+        assert!(out.iter().all(|p| !p.tags.contains_key(PROCESS_TAGS_KEY)));
     }
 }
