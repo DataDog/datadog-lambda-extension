@@ -1,7 +1,12 @@
-# RUSTSEC-2026-0285 is fixed in rustls >= 0.23.45, but that version requires
-# aws-lc-rs >= 1.18, which pulls in AWS-LC-FIPS 4.x, pending FIPS 140-3
-# certification. Remove this ignore once a FIPS-certified aws-lc-rs is
-# available. Trivy reports the same advisory as GHSA-2mjx-qc3c-rqvc, ignored in
-# .trivyignore.yaml.
+# These rustls advisories are fixed in rustls >= 0.23.45 (RUSTSEC-2026-0285) or
+# >= 0.23.46 (the other three), but those versions require aws-lc-rs >= 1.18,
+# which pulls in AWS-LC-FIPS 4.x, pending FIPS 140-3 certification. Remove these
+# ignores once a FIPS-certified aws-lc-rs is available. Trivy reports
+# RUSTSEC-2026-0285 as GHSA-2mjx-qc3c-rqvc, ignored in .trivyignore.yaml.
 [advisories]
-ignore = ["RUSTSEC-2026-0285"]
+ignore = [
+    "RUSTSEC-2026-0285",
+    "RUSTSEC-2026-0346",
+    "RUSTSEC-2026-0348",
+    "RUSTSEC-2026-0349",
+]
