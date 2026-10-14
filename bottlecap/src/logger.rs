@@ -9,20 +9,6 @@ use tracing_subscriber::registry::LookupSpan;
 /// Tracing target for the duration of each cold start step.
 pub const COLD_START_DURATION: &str = "cold_start_duration";
 
-/// Logs at debug level how long `step` took since `start`, under a duration target such as
-/// [`COLD_START_DURATION`]. A macro, because `tracing` needs the target as a constant.
-#[macro_export]
-macro_rules! log_duration {
-    ($target:expr, $step:expr, $start:expr) => {
-        tracing::debug!(
-            target: $target,
-            "{} took {:.3}ms",
-            $step,
-            $start.elapsed().as_secs_f64() * 1000.0
-        )
-    };
-}
-
 /// Writes `s` to `w` with the 6 mandatory JSON string escape sequences applied.
 /// Handles: `"`, `\`, `\n`, `\r`, `\t`, and U+0000–U+001F control characters.
 fn write_json_escaped(w: &mut impl fmt::Write, s: &str) -> fmt::Result {
@@ -43,21 +29,98 @@ fn write_json_escaped(w: &mut impl fmt::Write, s: &str) -> fmt::Result {
 #[derive(Debug, Clone, Copy)]
 pub struct Formatter;
 
-/// Visitor that captures the message from tracing event fields.
-struct MessageVisitor(String);
+/// Visitor that captures the message and the other fields of a tracing event. Each other field
+/// becomes a JSON value, so that Datadog parses numbers as numbers.
+#[derive(Default)]
+struct FieldVisitor {
+    message: String,
+    /// Field names and JSON values, in the order of the event.
+    fields: Vec<(&'static str, String)>,
+}
 
-impl tracing::field::Visit for MessageVisitor {
+impl FieldVisitor {
+    fn push_string(&mut self, field: &tracing::field::Field, value: &str) {
+        let mut json = String::from("\"");
+        // Writing to a `String` cannot fail.
+        let _ = write_json_escaped(&mut json, value);
+        json.push('"');
+        self.fields.push((field.name(), json));
+    }
+}
+
+impl tracing::field::Visit for FieldVisitor {
     fn record_debug(&mut self, field: &tracing::field::Field, value: &dyn fmt::Debug) {
         if field.name() == "message" {
-            self.0 = format!("{value:?}");
+            self.message = format!("{value:?}");
+        } else {
+            self.push_string(field, &format!("{value:?}"));
         }
     }
 
     fn record_str(&mut self, field: &tracing::field::Field, value: &str) {
         if field.name() == "message" {
-            self.0 = value.to_string();
+            self.message = value.to_string();
+        } else {
+            self.push_string(field, value);
         }
     }
+
+    fn record_f64(&mut self, field: &tracing::field::Field, value: f64) {
+        // JSON has no NaN or infinity, so write those as strings.
+        if value.is_finite() {
+            self.fields.push((field.name(), value.to_string()));
+        } else {
+            self.push_string(field, &value.to_string());
+        }
+    }
+
+    fn record_i64(&mut self, field: &tracing::field::Field, value: i64) {
+        self.fields.push((field.name(), value.to_string()));
+    }
+
+    fn record_u64(&mut self, field: &tracing::field::Field, value: u64) {
+        self.fields.push((field.name(), value.to_string()));
+    }
+
+    fn record_bool(&mut self, field: &tracing::field::Field, value: bool) {
+        self.fields.push((field.name(), value.to_string()));
+    }
+}
+
+/// Writes `fields` as JSON members, each one preceded by a comma. A field named `group.key`
+/// goes into a nested `"group": {"key": ...}` object.
+fn write_json_fields(w: &mut impl fmt::Write, fields: &[(&'static str, String)]) -> fmt::Result {
+    let mut written_groups: Vec<&str> = Vec::new();
+    for (name, value) in fields {
+        match name.split_once('.') {
+            None => {
+                w.write_str(",\"")?;
+                write_json_escaped(w, name)?;
+                write!(w, "\":{value}")?;
+            }
+            Some((group, _)) => {
+                if written_groups.contains(&group) {
+                    continue;
+                }
+                written_groups.push(group);
+                w.write_str(",\"")?;
+                write_json_escaped(w, group)?;
+                w.write_str("\":{")?;
+                let members = fields.iter().filter_map(|(n, v)| {
+                    n.split_once('.')
+                        .filter(|(g, _)| *g == group)
+                        .map(|(_, k)| (k, v))
+                });
+                for (i, (key, value)) in members.enumerate() {
+                    w.write_str(if i == 0 { "\"" } else { ",\"" })?;
+                    write_json_escaped(w, key)?;
+                    write!(w, "\":{value}")?;
+                }
+                w.write_str("}")?;
+            }
+        }
+    }
+    Ok(())
 }
 
 impl<S, N> FormatEvent<S, N> for Formatter
@@ -74,7 +137,7 @@ where
         let metadata = event.metadata();
         let level = metadata.level();
 
-        let mut visitor = MessageVisitor(String::new());
+        let mut visitor = FieldVisitor::default();
         event.record(&mut visitor);
 
         // Build span context prefix
@@ -94,14 +157,16 @@ where
             }
         }
 
-        let message = format!("DD_EXTENSION | {level} | {span_prefix}{}", visitor.0);
+        let message = format!("DD_EXTENSION | {level} | {span_prefix}{}", visitor.message);
 
         // Setting specifically `status` as opposed to `level` since AWS
         // filters out logs by the `level` field. This allows our logs to
         // appear in CWL regardless of the log level.
         write!(writer, "{{\"status\":\"{level}\",\"message\":\"")?;
         write_json_escaped(&mut writer, &message)?;
-        writeln!(writer, "\"}}")
+        writer.write_char('"')?;
+        write_json_fields(&mut writer, &visitor.fields)?;
+        writeln!(writer, "}}")
     }
 }
 
@@ -280,5 +345,61 @@ mod tests {
             msg.contains('\n'),
             "parsed message should contain literal newline"
         );
+    }
+
+    #[test]
+    fn test_formatter_nests_grouped_fields_as_numbers() {
+        let output = capture_log(|| {
+            tracing::event!(
+                tracing::Level::DEBUG,
+                cold_start.total_ms = 21.0_f64,
+                cold_start.load_config_ms = 1.61_f64,
+                "durations"
+            );
+        });
+
+        let parsed: serde_json::Value =
+            serde_json::from_str(output.trim()).expect("output should be valid JSON");
+
+        assert_eq!(parsed["cold_start"]["total_ms"].as_f64(), Some(21.0));
+        assert_eq!(parsed["cold_start"]["load_config_ms"].as_f64(), Some(1.61));
+        assert!(
+            parsed["message"]
+                .as_str()
+                .unwrap()
+                .contains("DD_EXTENSION | DEBUG | durations")
+        );
+    }
+
+    #[test]
+    fn test_formatter_omits_none_fields() {
+        let output = capture_log(|| {
+            tracing::event!(
+                tracing::Level::DEBUG,
+                cold_start.secrets_ms = None::<f64>,
+                cold_start.load_config_ms = 1.5_f64,
+                "durations"
+            );
+        });
+
+        let parsed: serde_json::Value =
+            serde_json::from_str(output.trim()).expect("output should be valid JSON");
+
+        assert!(parsed["cold_start"].get("secrets_ms").is_none());
+        assert_eq!(parsed["cold_start"]["load_config_ms"].as_f64(), Some(1.5));
+    }
+
+    #[test]
+    fn test_formatter_writes_flat_fields_by_type() {
+        let output = capture_log(|| {
+            tracing::info!(count = 3_u64, ok = true, name = "a \"b\"", "fields");
+        });
+
+        let parsed: serde_json::Value =
+            serde_json::from_str(output.trim()).expect("output should be valid JSON");
+
+        assert_eq!(parsed["count"].as_u64(), Some(3));
+        assert_eq!(parsed["ok"].as_bool(), Some(true));
+        assert_eq!(parsed["name"].as_str(), Some("a \"b\""));
     }
 }

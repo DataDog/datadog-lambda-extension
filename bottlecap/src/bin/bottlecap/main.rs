@@ -44,7 +44,6 @@ use bottlecap::{
         invocation::processor_service::{InvocationProcessorHandle, InvocationProcessorService},
         listener::Listener as LifecycleListener,
     },
-    log_duration,
     logger::{self, COLD_START_DURATION},
     logs::{
         agent::LogsAgent,
@@ -118,14 +117,14 @@ fn resolve_dsm_service(
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    let start_time = Instant::now();
+    let mut cold_start = ColdStartDurations::new(Instant::now());
     init_ustr();
     enable_logging_subsystem();
-    log_duration!(COLD_START_DURATION, "Enabling logging", start_time);
+    cold_start.enable_logging_ms = elapsed_ms(cold_start.start);
     let step_start = Instant::now();
-    let aws_config = AwsConfig::from_env(start_time);
+    let aws_config = AwsConfig::from_env(cold_start.start);
     log_fips_status(&aws_config.region);
-    log_duration!(COLD_START_DURATION, "Loading AWS config", step_start);
+    cold_start.load_aws_config_ms = elapsed_ms(step_start);
     let version_without_next = EXTENSION_VERSION.split('-').next().unwrap_or("NA");
     debug!("Starting Datadog Extension v{version_without_next}");
 
@@ -146,11 +145,7 @@ async fn main() -> anyhow::Result<()> {
         .no_proxy()
         .build()
         .map_err(|e| anyhow::anyhow!("Failed to create client: {e:?}"))?;
-    log_duration!(
-        COLD_START_DURATION,
-        "Creating the Extensions API client",
-        step_start
-    );
+    cold_start.create_extensions_api_client_ms = elapsed_ms(step_start);
 
     let cloned_client = client.clone();
     let runtime_api = aws_config.runtime_api.clone();
@@ -164,8 +159,7 @@ async fn main() -> anyhow::Result<()> {
             managed_instance_mode,
         )
         .await;
-        log_duration!(COLD_START_DURATION, "Registering the extension", step_start);
-        response
+        (response, elapsed_ms(step_start))
     });
     // First load the AWS configuration
     let lambda_directory: String =
@@ -174,14 +168,10 @@ async fn main() -> anyhow::Result<()> {
 
     let step_start = Instant::now();
     let mut lambda_config = config::get_config(Path::new(&lambda_directory));
-    log_duration!(COLD_START_DURATION, "Loading config", step_start);
+    cold_start.load_config_ms = elapsed_ms(step_start);
     let step_start = Instant::now();
     resolve_additional_endpoints_secrets(&mut lambda_config, &aws_config).await;
-    log_duration!(
-        COLD_START_DURATION,
-        "Resolving additional endpoint secrets",
-        step_start
-    );
+    cold_start.resolve_additional_endpoint_secrets_ms = elapsed_ms(step_start);
     let config = Arc::new(lambda_config);
 
     // Build one shared reqwest::Client for metrics, logs, trace proxy flushing, and calls to
@@ -191,15 +181,12 @@ async fn main() -> anyhow::Result<()> {
     let api_key_factory = create_api_key_factory(&config, &aws_config, &shared_client);
 
     let step_start = Instant::now();
-    let r = response
+    let (response, register_extension_ms) = response
         .await
-        .map_err(|e| anyhow::anyhow!("Failed to join task: {e:?}"))?
-        .map_err(|e| anyhow::anyhow!("Failed to register extension: {e:?}"))?;
-    log_duration!(
-        COLD_START_DURATION,
-        "Waiting for extension registration",
-        step_start
-    );
+        .map_err(|e| anyhow::anyhow!("Failed to join task: {e:?}"))?;
+    let r = response.map_err(|e| anyhow::anyhow!("Failed to register extension: {e:?}"))?;
+    cold_start.register_extension_ms = register_extension_ms;
+    cold_start.wait_for_register_ms = elapsed_ms(step_start);
 
     match extension_loop_active(
         Arc::clone(&aws_config),
@@ -208,7 +195,7 @@ async fn main() -> anyhow::Result<()> {
         shared_client,
         &r,
         Arc::clone(&api_key_factory),
-        start_time,
+        cold_start,
     )
     .await
     {
@@ -229,6 +216,66 @@ fn init_ustr() {
     tokio::spawn(async {
         Ustr::from("");
     });
+}
+
+/// Duration of each cold start step in milliseconds. The steps go in one log line as numeric
+/// fields, so that Datadog can graph each step.
+struct ColdStartDurations {
+    start: Instant,
+    enable_logging_ms: f64,
+    load_aws_config_ms: f64,
+    create_extensions_api_client_ms: f64,
+    register_extension_ms: f64,
+    load_config_ms: f64,
+    resolve_additional_endpoint_secrets_ms: f64,
+    wait_for_register_ms: f64,
+    start_dogstatsd_ms: f64,
+    create_appsec_processor_ms: f64,
+    start_telemetry_listener_ms: f64,
+}
+
+impl ColdStartDurations {
+    fn new(start: Instant) -> Self {
+        Self {
+            start,
+            enable_logging_ms: 0.0,
+            load_aws_config_ms: 0.0,
+            create_extensions_api_client_ms: 0.0,
+            register_extension_ms: 0.0,
+            load_config_ms: 0.0,
+            resolve_additional_endpoint_secrets_ms: 0.0,
+            wait_for_register_ms: 0.0,
+            start_dogstatsd_ms: 0.0,
+            create_appsec_processor_ms: 0.0,
+            start_telemetry_listener_ms: 0.0,
+        }
+    }
+
+    fn log(&self) {
+        // `debug!` cannot parse dotted field names after `target:`, so this uses `event!`.
+        tracing::event!(
+            target: COLD_START_DURATION,
+            tracing::Level::DEBUG,
+            cold_start.total_ms = elapsed_ms(self.start),
+            cold_start.enable_logging_ms = self.enable_logging_ms,
+            cold_start.load_aws_config_ms = self.load_aws_config_ms,
+            cold_start.create_extensions_api_client_ms = self.create_extensions_api_client_ms,
+            cold_start.register_extension_ms = self.register_extension_ms,
+            cold_start.load_config_ms = self.load_config_ms,
+            cold_start.resolve_additional_endpoint_secrets_ms =
+                self.resolve_additional_endpoint_secrets_ms,
+            cold_start.wait_for_register_ms = self.wait_for_register_ms,
+            cold_start.start_dogstatsd_ms = self.start_dogstatsd_ms,
+            cold_start.create_appsec_processor_ms = self.create_appsec_processor_ms,
+            cold_start.start_telemetry_listener_ms = self.start_telemetry_listener_ms,
+            "Cold start step durations"
+        );
+    }
+}
+
+/// Milliseconds since `start`, rounded to 2 decimals.
+fn elapsed_ms(start: Instant) -> f64 {
+    (start.elapsed().as_secs_f64() * 100_000.0).round() / 100.0
 }
 
 fn enable_logging_subsystem() {
@@ -339,7 +386,7 @@ async fn extension_loop_active(
     shared_client: reqwest::Client,
     r: &RegisterResponse,
     api_key_factory: Arc<ApiKeyFactory>,
-    start_time: Instant,
+    mut cold_start: ColdStartDurations,
 ) -> anyhow::Result<()> {
     let (mut event_bus, event_bus_tx) = EventBus::run();
 
@@ -369,7 +416,7 @@ async fn extension_loop_active(
         &shared_client,
     )
     .await;
-    log_duration!(COLD_START_DURATION, "Starting DogStatsD", step_start);
+    cold_start.start_dogstatsd_ms = elapsed_ms(step_start);
 
     let propagator = Arc::new(DatadogCompositePropagator::new(Arc::clone(config)));
 
@@ -446,11 +493,7 @@ async fn extension_loop_active(
             None
         }
     };
-    log_duration!(
-        COLD_START_DURATION,
-        "Creating the AppSec processor",
-        step_start
-    );
+    cold_start.create_appsec_processor_ms = elapsed_ms(step_start);
 
     let (
         trace_agent_channel,
@@ -500,11 +543,7 @@ async fn extension_loop_active(
         aws_config.is_managed_instance_mode(),
     )
     .await?;
-    log_duration!(
-        COLD_START_DURATION,
-        "Starting the telemetry listener",
-        step_start
-    );
+    cold_start.start_telemetry_listener_ms = elapsed_ms(step_start);
 
     let otlp_cancel_token = start_otlp_agent(
         config,
@@ -523,8 +562,9 @@ async fn extension_loop_active(
     debug!(
         target: COLD_START_DURATION,
         "Datadog Next-Gen Extension ready in {:}ms",
-        start_time.elapsed().as_millis().to_string()
+        cold_start.start.elapsed().as_millis().to_string()
     );
+    cold_start.log();
 
     if aws_config.is_managed_instance_mode() {
         // Clone Arc references for the background flusher task
