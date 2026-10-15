@@ -123,11 +123,11 @@ async fn main() -> anyhow::Result<()> {
     let mut cold_start_durations = ColdStartDurations::new(Instant::now());
     init_ustr();
     enable_logging_subsystem();
-    cold_start_durations.enable_logging_ms = elapsed_ms(cold_start_durations.started_at);
-    let step_started_at = Instant::now();
-    let aws_config = AwsConfig::from_env(cold_start_durations.started_at);
+    cold_start_durations.enable_logging_ms = elapsed_ms(cold_start_durations.start_time);
+    let step_start_time = Instant::now();
+    let aws_config = AwsConfig::from_env(cold_start_durations.start_time);
     log_fips_status(&aws_config.region);
-    cold_start_durations.load_aws_config_ms = elapsed_ms(step_started_at);
+    cold_start_durations.load_aws_config_ms = elapsed_ms(step_start_time);
     let version_without_next = EXTENSION_VERSION.split('-').next().unwrap_or("NA");
     debug!("Starting Datadog Extension v{version_without_next}");
 
@@ -141,20 +141,20 @@ async fn main() -> anyhow::Result<()> {
         debug!("DD_DEBUG_WAIT_FOR_ATTACH: Continuing execution...");
     }
 
-    let step_started_at = Instant::now();
+    let step_start_time = Instant::now();
     prepare_client_provider()?;
     let client = create_reqwest_client_builder()
         .map_err(|e| anyhow::anyhow!("Failed to create client builder: {e:?}"))?
         .no_proxy()
         .build()
         .map_err(|e| anyhow::anyhow!("Failed to create client: {e:?}"))?;
-    cold_start_durations.create_extensions_api_client_ms = elapsed_ms(step_started_at);
+    cold_start_durations.create_extensions_api_client_ms = elapsed_ms(step_start_time);
 
     let cloned_client = client.clone();
     let runtime_api = aws_config.runtime_api.clone();
     let managed_instance_mode = aws_config.is_managed_instance_mode();
     let response = tokio::task::spawn(async move {
-        let step_started_at = Instant::now();
+        let step_start_time = Instant::now();
         let response = extension::register(
             &cloned_client,
             &runtime_api,
@@ -162,19 +162,19 @@ async fn main() -> anyhow::Result<()> {
             managed_instance_mode,
         )
         .await;
-        (response, elapsed_ms(step_started_at))
+        (response, elapsed_ms(step_start_time))
     });
     // First load the AWS configuration
     let lambda_directory: String =
         env::var("LAMBDA_TASK_ROOT").unwrap_or_else(|_| "/var/task".to_string());
     let aws_config = Arc::new(aws_config);
 
-    let step_started_at = Instant::now();
+    let step_start_time = Instant::now();
     let mut lambda_config = config::get_config(Path::new(&lambda_directory));
-    cold_start_durations.load_config_ms = elapsed_ms(step_started_at);
-    let step_started_at = Instant::now();
+    cold_start_durations.load_config_ms = elapsed_ms(step_start_time);
+    let step_start_time = Instant::now();
     resolve_additional_endpoints_secrets(&mut lambda_config, &aws_config).await;
-    cold_start_durations.resolve_additional_endpoint_secrets_ms = elapsed_ms(step_started_at);
+    cold_start_durations.resolve_additional_endpoint_secrets_ms = elapsed_ms(step_start_time);
     let config = Arc::new(lambda_config);
 
     // Build one shared reqwest::Client for metrics, logs, trace proxy flushing, and calls to
@@ -183,13 +183,13 @@ async fn main() -> anyhow::Result<()> {
     let shared_client = bottlecap::http::get_client(&config);
     let api_key_factory = create_api_key_factory(&config, &aws_config, &shared_client);
 
-    let step_started_at = Instant::now();
+    let step_start_time = Instant::now();
     let (response, register_extension_ms) = response
         .await
         .map_err(|e| anyhow::anyhow!("Failed to join task: {e:?}"))?;
     let r = response.map_err(|e| anyhow::anyhow!("Failed to register extension: {e:?}"))?;
     cold_start_durations.register_extension_ms = register_extension_ms;
-    cold_start_durations.wait_for_register_ms = elapsed_ms(step_started_at);
+    cold_start_durations.wait_for_register_ms = elapsed_ms(step_start_time);
 
     match extension_loop_active(
         Arc::clone(&aws_config),
@@ -351,7 +351,7 @@ async fn extension_loop_active(
         &shared_client,
     );
 
-    let step_started_at = Instant::now();
+    let step_start_time = Instant::now();
     let (metrics_flushers, metrics_aggregator_handle, dogstatsd_cancel_token) = start_dogstatsd(
         tags_provider.clone(),
         Arc::clone(&api_key_factory),
@@ -359,7 +359,7 @@ async fn extension_loop_active(
         &shared_client,
     )
     .await;
-    cold_start_durations.start_dogstatsd_ms = elapsed_ms(step_started_at);
+    cold_start_durations.start_dogstatsd_ms = elapsed_ms(step_start_time);
 
     let propagator = Arc::new(DatadogCompositePropagator::new(Arc::clone(config)));
 
@@ -425,7 +425,7 @@ async fn extension_loop_active(
     });
 
     // AppSec processor (if enabled)
-    let step_started_at = Instant::now();
+    let step_start_time = Instant::now();
     let appsec_processor = match AppSecProcessor::new(config) {
         Ok(p) => Some(Arc::new(TokioMutex::new(p))),
         Err(AppSecFeatureDisabled) => None,
@@ -436,7 +436,7 @@ async fn extension_loop_active(
             None
         }
     };
-    cold_start_durations.create_appsec_processor_ms = elapsed_ms(step_started_at);
+    cold_start_durations.create_appsec_processor_ms = elapsed_ms(step_start_time);
 
     let (
         trace_agent_channel,
@@ -475,7 +475,7 @@ async fn extension_loop_active(
         }
     });
 
-    let step_started_at = Instant::now();
+    let step_start_time = Instant::now();
     let telemetry_listener_cancel_token = setup_telemetry_client(
         client,
         &r.extension_id,
@@ -486,7 +486,7 @@ async fn extension_loop_active(
         aws_config.is_managed_instance_mode(),
     )
     .await?;
-    cold_start_durations.start_telemetry_listener_ms = elapsed_ms(step_started_at);
+    cold_start_durations.start_telemetry_listener_ms = elapsed_ms(step_start_time);
 
     let otlp_cancel_token = start_otlp_agent(
         config,
@@ -505,7 +505,7 @@ async fn extension_loop_active(
     debug!(
         "Datadog Next-Gen Extension ready in {:}ms",
         cold_start_durations
-            .started_at
+            .start_time
             .elapsed()
             .as_millis()
             .to_string()

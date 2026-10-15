@@ -7,7 +7,7 @@ use super::COLD_START_DURATION;
 #[derive(Debug, Clone, Copy)]
 pub struct ColdStartDurations {
     /// When the extension process started.
-    pub started_at: Instant,
+    pub start_time: Instant,
     pub enable_logging_ms: f64,
     pub load_aws_config_ms: f64,
     pub create_extensions_api_client_ms: f64,
@@ -22,9 +22,9 @@ pub struct ColdStartDurations {
 
 impl ColdStartDurations {
     #[must_use]
-    pub fn new(started_at: Instant) -> Self {
+    pub fn new(start_time: Instant) -> Self {
         Self {
-            started_at,
+            start_time,
             enable_logging_ms: 0.0,
             load_aws_config_ms: 0.0,
             create_extensions_api_client_ms: 0.0,
@@ -38,13 +38,13 @@ impl ColdStartDurations {
         }
     }
 
-    /// Logs all durations in one line, with the time since `started_at` as the total.
+    /// Logs all durations in one line, with the time since `start_time` as the total.
     pub fn log(&self) {
         // `debug!` cannot parse dotted field names after `target:`, so this uses `event!`.
         tracing::event!(
             target: COLD_START_DURATION,
             tracing::Level::DEBUG,
-            cold_start.total_ms = elapsed_ms(self.started_at),
+            cold_start.total_ms = elapsed_ms(self.start_time),
             cold_start.enable_logging_ms = self.enable_logging_ms,
             cold_start.load_aws_config_ms = self.load_aws_config_ms,
             cold_start.create_extensions_api_client_ms = self.create_extensions_api_client_ms,
@@ -61,8 +61,8 @@ impl ColdStartDurations {
     }
 }
 
-/// Milliseconds since `started_at`, rounded to 2 decimals.
+/// Milliseconds since `start_time`, rounded to 2 decimals.
 #[must_use]
-pub fn elapsed_ms(started_at: Instant) -> f64 {
-    (started_at.elapsed().as_secs_f64() * 100_000.0).round() / 100.0
+pub fn elapsed_ms(start_time: Instant) -> f64 {
+    (start_time.elapsed().as_secs_f64() * 100_000.0).round() / 100.0
 }
