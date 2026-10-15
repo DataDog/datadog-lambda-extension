@@ -13,10 +13,12 @@ pub struct ColdStartDurations {
     pub create_extensions_api_client_ms: f64,
     pub register_extension_ms: f64,
     pub load_config_ms: f64,
-    pub resolve_additional_endpoint_secrets_ms: f64,
+    /// Set only when the config has an additional endpoints secret ARN.
+    pub resolve_additional_endpoint_secrets_ms: Option<f64>,
     pub wait_for_register_ms: f64,
     pub start_dogstatsd_ms: f64,
-    pub create_appsec_processor_ms: f64,
+    /// Set only when App and API Protection is enabled.
+    pub create_appsec_processor_ms: Option<f64>,
     pub start_telemetry_listener_ms: f64,
 }
 
@@ -30,10 +32,10 @@ impl ColdStartDurations {
             create_extensions_api_client_ms: 0.0,
             register_extension_ms: 0.0,
             load_config_ms: 0.0,
-            resolve_additional_endpoint_secrets_ms: 0.0,
+            resolve_additional_endpoint_secrets_ms: None,
             wait_for_register_ms: 0.0,
             start_dogstatsd_ms: 0.0,
-            create_appsec_processor_ms: 0.0,
+            create_appsec_processor_ms: None,
             start_telemetry_listener_ms: 0.0,
         }
     }

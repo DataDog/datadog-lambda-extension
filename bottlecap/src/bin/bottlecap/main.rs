@@ -83,7 +83,9 @@ use bottlecap::{
     },
 };
 use datadog_fips::reqwest_adapter::create_reqwest_client_builder;
-use decrypt::{resolve_additional_endpoints_secrets, resolve_secrets};
+use decrypt::{
+    has_additional_endpoints_secrets, resolve_additional_endpoints_secrets, resolve_secrets,
+};
 use dogstatsd::{
     aggregator::{
         AggregatorHandle as MetricsAggregatorHandle, AggregatorService as MetricsAggregatorService,
@@ -172,9 +174,12 @@ async fn main() -> anyhow::Result<()> {
     let step_start_time = Instant::now();
     let mut lambda_config = config::get_config(Path::new(&lambda_directory));
     cold_start_durations.load_config_ms = elapsed_ms(step_start_time);
-    let step_start_time = Instant::now();
-    resolve_additional_endpoints_secrets(&mut lambda_config, &aws_config).await;
-    cold_start_durations.resolve_additional_endpoint_secrets_ms = elapsed_ms(step_start_time);
+    if has_additional_endpoints_secrets(&lambda_config) {
+        let step_start_time = Instant::now();
+        resolve_additional_endpoints_secrets(&mut lambda_config, &aws_config).await;
+        cold_start_durations.resolve_additional_endpoint_secrets_ms =
+            Some(elapsed_ms(step_start_time));
+    }
     let config = Arc::new(lambda_config);
 
     // Build one shared reqwest::Client for metrics, logs, trace proxy flushing, and calls to
@@ -427,16 +432,19 @@ async fn extension_loop_active(
     // AppSec processor (if enabled)
     let step_start_time = Instant::now();
     let appsec_processor = match AppSecProcessor::new(config) {
-        Ok(p) => Some(Arc::new(TokioMutex::new(p))),
+        Ok(p) => {
+            cold_start_durations.create_appsec_processor_ms = Some(elapsed_ms(step_start_time));
+            Some(Arc::new(TokioMutex::new(p)))
+        }
         Err(AppSecFeatureDisabled) => None,
         Err(e) => {
+            cold_start_durations.create_appsec_processor_ms = Some(elapsed_ms(step_start_time));
             error!(
                 "AAP | error creating App & API Protection processor, the feature will be disabled: {e}"
             );
             None
         }
     };
-    cold_start_durations.create_appsec_processor_ms = elapsed_ms(step_start_time);
 
     let (
         trace_agent_channel,
