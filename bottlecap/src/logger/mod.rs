@@ -31,96 +31,64 @@ fn write_json_escaped(w: &mut impl fmt::Write, s: &str) -> fmt::Result {
 #[derive(Debug, Clone, Copy)]
 pub struct Formatter;
 
-/// Visitor that captures the message and the other fields of a tracing event. Each other field
-/// becomes a JSON value, so that Datadog parses numbers as numbers.
+/// Visitor that captures the message and the `f64` fields of a tracing event, so that Datadog
+/// parses those fields as numbers. It drops fields of other types. To write another type, add
+/// its `record_*` method.
 #[derive(Default)]
 struct FieldVisitor {
     message: String,
-    /// Field names and JSON values, in the order of the event.
-    fields: Vec<(&'static str, String)>,
-}
-
-impl FieldVisitor {
-    fn push_string(&mut self, field: &tracing::field::Field, value: &str) {
-        let mut json = String::from("\"");
-        // Writing to a `String` cannot fail.
-        let _ = write_json_escaped(&mut json, value);
-        json.push('"');
-        self.fields.push((field.name(), json));
-    }
+    /// The `f64` fields, in the order of the event.
+    fields: Vec<(&'static str, f64)>,
 }
 
 impl tracing::field::Visit for FieldVisitor {
     fn record_debug(&mut self, field: &tracing::field::Field, value: &dyn fmt::Debug) {
         if field.name() == "message" {
             self.message = format!("{value:?}");
-        } else {
-            self.push_string(field, &format!("{value:?}"));
         }
     }
 
     fn record_str(&mut self, field: &tracing::field::Field, value: &str) {
         if field.name() == "message" {
             self.message = value.to_string();
-        } else {
-            self.push_string(field, value);
         }
     }
 
     fn record_f64(&mut self, field: &tracing::field::Field, value: f64) {
-        // JSON has no NaN or infinity, so write those as strings.
+        // JSON has no NaN or infinity, so drop those values.
         if value.is_finite() {
-            self.fields.push((field.name(), value.to_string()));
-        } else {
-            self.push_string(field, &value.to_string());
+            self.fields.push((field.name(), value));
         }
-    }
-
-    fn record_i64(&mut self, field: &tracing::field::Field, value: i64) {
-        self.fields.push((field.name(), value.to_string()));
-    }
-
-    fn record_u64(&mut self, field: &tracing::field::Field, value: u64) {
-        self.fields.push((field.name(), value.to_string()));
-    }
-
-    fn record_bool(&mut self, field: &tracing::field::Field, value: bool) {
-        self.fields.push((field.name(), value.to_string()));
     }
 }
 
 /// Writes `fields` as JSON members, each one preceded by a comma. A field named `group.key`
 /// goes into a nested `"group": {"key": ...}` object.
-fn write_json_fields(w: &mut impl fmt::Write, fields: &[(&'static str, String)]) -> fmt::Result {
+fn write_json_fields(w: &mut impl fmt::Write, fields: &[(&'static str, f64)]) -> fmt::Result {
     let mut written_groups: Vec<&str> = Vec::new();
     for (name, value) in fields {
-        match name.split_once('.') {
-            None => {
-                w.write_str(",\"")?;
-                write_json_escaped(w, name)?;
-                write!(w, "\":{value}")?;
-            }
-            Some((group, _)) => {
-                if written_groups.contains(&group) {
-                    continue;
-                }
-                written_groups.push(group);
-                w.write_str(",\"")?;
-                write_json_escaped(w, group)?;
-                w.write_str("\":{")?;
-                let members = fields.iter().filter_map(|(n, v)| {
-                    n.split_once('.')
-                        .filter(|(g, _)| *g == group)
-                        .map(|(_, k)| (k, v))
-                });
-                for (i, (key, value)) in members.enumerate() {
-                    w.write_str(if i == 0 { "\"" } else { ",\"" })?;
-                    write_json_escaped(w, key)?;
-                    write!(w, "\":{value}")?;
-                }
-                w.write_str("}")?;
-            }
+        let Some((group, _)) = name.split_once('.') else {
+            w.write_str(",\"")?;
+            write_json_escaped(w, name)?;
+            write!(w, "\":{value}")?;
+            continue;
+        };
+        if written_groups.contains(&group) {
+            continue;
         }
+        written_groups.push(group);
+        w.write_str(",\"")?;
+        write_json_escaped(w, group)?;
+        w.write_str("\":{")?;
+        let members = fields
+            .iter()
+            .filter_map(|(n, v)| Some((n.strip_prefix(group)?.strip_prefix('.')?, v)));
+        for (i, (key, value)) in members.enumerate() {
+            w.write_str(if i == 0 { "\"" } else { ",\"" })?;
+            write_json_escaped(w, key)?;
+            write!(w, "\":{value}")?;
+        }
+        w.write_str("}")?;
     }
     Ok(())
 }
@@ -392,16 +360,23 @@ mod tests {
     }
 
     #[test]
-    fn test_formatter_writes_flat_fields_by_type() {
+    fn test_formatter_writes_only_finite_f64_fields() {
         let output = capture_log(|| {
-            tracing::info!(count = 3_u64, ok = true, name = "a \"b\"", "fields");
+            tracing::info!(
+                ms = 1.5_f64,
+                nan = f64::NAN,
+                count = 3_u64,
+                name = "x",
+                "fields"
+            );
         });
 
         let parsed: serde_json::Value =
             serde_json::from_str(output.trim()).expect("output should be valid JSON");
 
-        assert_eq!(parsed["count"].as_u64(), Some(3));
-        assert_eq!(parsed["ok"].as_bool(), Some(true));
-        assert_eq!(parsed["name"].as_str(), Some("a \"b\""));
+        assert_eq!(parsed["ms"].as_f64(), Some(1.5));
+        assert!(parsed.get("nan").is_none());
+        assert!(parsed.get("count").is_none());
+        assert!(parsed.get("name").is_none());
     }
 }
