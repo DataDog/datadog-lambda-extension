@@ -20,7 +20,7 @@
 #![cfg_attr(coverage_nightly, feature(coverage_attribute))]
 
 pub mod appsec;
-pub mod cold_start;
+pub mod cold_start_log;
 pub mod config;
 pub mod event_bus;
 pub mod extension;
