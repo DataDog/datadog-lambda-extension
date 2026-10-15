@@ -62,35 +62,26 @@ impl tracing::field::Visit for FieldVisitor {
     }
 }
 
-/// Writes `fields` as JSON members, each one preceded by a comma. A field named `group.key`
-/// goes into a nested `"group": {"key": ...}` object.
-fn write_json_fields(w: &mut impl fmt::Write, fields: &[(&'static str, f64)]) -> fmt::Result {
-    let mut written_groups: Vec<&str> = Vec::new();
+/// Groups `fields` into JSON members. A field named `group.key` goes into a nested
+/// `"group": {"key": ...}` object.
+fn fields_to_json(fields: &[(&'static str, f64)]) -> serde_json::Map<String, serde_json::Value> {
+    let mut members = serde_json::Map::new();
     for (name, value) in fields {
-        let Some((group, _)) = name.split_once('.') else {
-            w.write_str(",\"")?;
-            write_json_escaped(w, name)?;
-            write!(w, "\":{value}")?;
-            continue;
-        };
-        if written_groups.contains(&group) {
-            continue;
+        match name.split_once('.') {
+            None => {
+                members.insert((*name).to_string(), (*value).into());
+            }
+            Some((group, key)) => {
+                if let serde_json::Value::Object(group) = members
+                    .entry(group)
+                    .or_insert_with(|| serde_json::Map::new().into())
+                {
+                    group.insert(key.to_string(), (*value).into());
+                }
+            }
         }
-        written_groups.push(group);
-        w.write_str(",\"")?;
-        write_json_escaped(w, group)?;
-        w.write_str("\":{")?;
-        let members = fields
-            .iter()
-            .filter_map(|(n, v)| Some((n.strip_prefix(group)?.strip_prefix('.')?, v)));
-        for (i, (key, value)) in members.enumerate() {
-            w.write_str(if i == 0 { "\"" } else { ",\"" })?;
-            write_json_escaped(w, key)?;
-            write!(w, "\":{value}")?;
-        }
-        w.write_str("}")?;
     }
-    Ok(())
+    members
 }
 
 impl<S, N> FormatEvent<S, N> for Formatter
@@ -135,7 +126,9 @@ where
         write!(writer, "{{\"status\":\"{level}\",\"message\":\"")?;
         write_json_escaped(&mut writer, &message)?;
         writer.write_char('"')?;
-        write_json_fields(&mut writer, &visitor.fields)?;
+        for (key, value) in fields_to_json(&visitor.fields) {
+            write!(writer, ",{}:{value}", serde_json::Value::from(key))?;
+        }
         writeln!(writer, "}}")
     }
 }
