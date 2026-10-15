@@ -1,6 +1,6 @@
 use tokio::time::Instant;
 
-use crate::logger::COLD_START_DURATION;
+use super::COLD_START_DURATION;
 
 /// Duration of each cold start step in milliseconds. The steps go in one log line as numeric
 /// fields, so that Datadog can graph each step.

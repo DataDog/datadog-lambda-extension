@@ -21,7 +21,6 @@ use bottlecap::{
     appsec::processor::{
         Error::FeatureDisabled as AppSecFeatureDisabled, Processor as AppSecProcessor,
     },
-    cold_start_log::{ColdStartDurations, elapsed_ms},
     config::{
         self, Config,
         aws::{AwsConfig, build_lambda_function_arn},
@@ -45,7 +44,10 @@ use bottlecap::{
         invocation::processor_service::{InvocationProcessorHandle, InvocationProcessorService},
         listener::Listener as LifecycleListener,
     },
-    logger,
+    logger::{
+        self,
+        cold_start::{ColdStartDurations, elapsed_ms},
+    },
     logs::{
         agent::LogsAgent,
         aggregator_service::{

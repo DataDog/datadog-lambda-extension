@@ -6,6 +6,8 @@ use tracing_subscriber::fmt::{
 };
 use tracing_subscriber::registry::LookupSpan;
 
+pub mod cold_start;
+
 /// Tracing target for the duration of each cold start step.
 pub const COLD_START_DURATION: &str = "cold_start_duration";
 
