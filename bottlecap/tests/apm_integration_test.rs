@@ -487,11 +487,7 @@ async fn run_processor_pipeline(
 const COMPUTE_STATS_KEY: &str = "_dd.compute_stats";
 
 fn captured_compute_stats(traces: &[pb::AgentPayload]) -> Option<String> {
-    let span = traces
-        .iter()
-        .flat_map(|p| &p.tracer_payloads)
-        .flat_map(|tp| &tp.chunks)
-        .flat_map(|c| &c.spans)
+    let span = captured_trace_spans(traces)
         .find(|s| s.name == "web.request")
         .expect("web.request span should be present");
     span.meta.get(COMPUTE_STATS_KEY).cloned()
@@ -531,13 +527,7 @@ async fn e2e_error_sampler_rescues_only_errored_p0_traces() {
     )
     .await;
 
-    let captured_spans: Vec<&pb::Span> = outcome
-        .traces
-        .iter()
-        .flat_map(|payload| &payload.tracer_payloads)
-        .flat_map(|payload| &payload.chunks)
-        .flat_map(|chunk| &chunk.spans)
-        .collect();
+    let captured_spans: Vec<&pb::Span> = captured_trace_spans(&outcome.traces).collect();
     assert_eq!(
         captured_spans.len(),
         1,
@@ -558,35 +548,48 @@ async fn e2e_error_sampler_rescues_only_errored_p0_traces() {
     );
 }
 
+fn error_sampler_span(
+    trace_id: u64,
+    priority: f64,
+    error: i32,
+    decision_maker: Option<&str>,
+) -> pb::Span {
+    let mut span = pb::Span {
+        service: "fake-intake-trace-service".to_string(),
+        name: "web.request".to_string(),
+        resource: "GET /fake".to_string(),
+        trace_id,
+        span_id: trace_id,
+        parent_id: 0,
+        start: STATS_SPAN_START_NS,
+        duration: 5_000_000,
+        error,
+        r#type: "web".to_string(),
+        ..pb::Span::default()
+    };
+    span.metrics.insert("_top_level".to_string(), 1.0);
+    span.metrics
+        .insert("_sampling_priority_v1".to_string(), priority);
+    if let Some(dm) = decision_maker {
+        span.meta.insert("_dd.p.dm".to_string(), dm.to_string());
+    }
+    span
+}
+
+fn captured_trace_spans(traces: &[pb::AgentPayload]) -> impl Iterator<Item = &pb::Span> {
+    traces
+        .iter()
+        .flat_map(|payload| &payload.tracer_payloads)
+        .flat_map(|payload| &payload.chunks)
+        .flat_map(|chunk| &chunk.spans)
+}
+
 /// APMSVLS-674: with `error_rare_sample_tracer_drop` enabled, an errored tracer
 /// rule drop (priority -1, no decision maker) is rescued and reaches the intake
 /// with `_dd.errors_sr`, while an errored manual drop (decision maker "-4") and
 /// a nonerrored drop are excluded. Dropped inputs remain represented in stats.
 #[tokio::test]
 async fn e2e_error_rare_sample_tracer_drop_rescues_tracer_drops_selectively() {
-    let make_span = |trace_id: u64, priority: f64, error: i32, decision_maker: Option<&str>| {
-        let mut span = pb::Span {
-            service: "fake-intake-trace-service".to_string(),
-            name: "web.request".to_string(),
-            resource: "GET /fake".to_string(),
-            trace_id,
-            span_id: trace_id,
-            parent_id: 0,
-            start: STATS_SPAN_START_NS,
-            duration: 5_000_000,
-            error,
-            r#type: "web".to_string(),
-            ..pb::Span::default()
-        };
-        span.metrics.insert("_top_level".to_string(), 1.0);
-        span.metrics
-            .insert("_sampling_priority_v1".to_string(), priority);
-        if let Some(dm) = decision_maker {
-            span.meta.insert("_dd.p.dm".to_string(), dm.to_string());
-        }
-        span
-    };
-
     let rescued_trace_id = 1; // errored tracer rule drop
     let manual_drop_trace_id = 2; // errored manual tracer drop
     let nonerrored_trace_id = 3; // nonerrored tracer rule drop
@@ -597,22 +600,21 @@ async fn e2e_error_rare_sample_tracer_drop_rescues_tracer_drops_selectively() {
         false,
         true,
         vec![
-            vec![make_span(rescued_trace_id, -1.0, 1, None)],
-            vec![make_span(manual_drop_trace_id, -1.0, 1, Some("-4"))],
-            vec![make_span(nonerrored_trace_id, -1.0, 0, None)],
-            vec![make_span(kept_trace_id, 1.0, 0, None)],
+            vec![error_sampler_span(rescued_trace_id, -1.0, 1, None)],
+            vec![error_sampler_span(
+                manual_drop_trace_id,
+                -1.0,
+                1,
+                Some("-4"),
+            )],
+            vec![error_sampler_span(nonerrored_trace_id, -1.0, 0, None)],
+            vec![error_sampler_span(kept_trace_id, 1.0, 0, None)],
         ],
     )
     .await;
 
-    let captured_trace_ids: Vec<u64> = outcome
-        .traces
-        .iter()
-        .flat_map(|payload| &payload.tracer_payloads)
-        .flat_map(|payload| &payload.chunks)
-        .flat_map(|chunk| &chunk.spans)
-        .map(|span| span.trace_id)
-        .collect();
+    let captured_spans: Vec<_> = captured_trace_spans(&outcome.traces).collect();
+    let captured_trace_ids: Vec<u64> = captured_spans.iter().map(|span| span.trace_id).collect();
     assert_eq!(
         captured_trace_ids.len(),
         2,
@@ -627,12 +629,8 @@ async fn e2e_error_rare_sample_tracer_drop_rescues_tracer_drops_selectively() {
         "normally kept trace must reach intake"
     );
 
-    let rescued_root = outcome
-        .traces
+    let rescued_root = captured_spans
         .iter()
-        .flat_map(|payload| &payload.tracer_payloads)
-        .flat_map(|payload| &payload.chunks)
-        .flat_map(|chunk| &chunk.spans)
         .find(|span| span.trace_id == rescued_trace_id)
         .expect("rescued trace present");
     assert!(
@@ -653,43 +651,18 @@ async fn e2e_error_rare_sample_tracer_drop_rescues_tracer_drops_selectively() {
 /// errored tracer rule drop is not rescued.
 #[tokio::test]
 async fn e2e_error_rare_sample_tracer_drop_feature_off_leaves_tracer_drops_dropped() {
-    let make_span = |trace_id: u64, priority: f64, error: i32| {
-        let mut span = pb::Span {
-            service: "fake-intake-trace-service".to_string(),
-            name: "web.request".to_string(),
-            resource: "GET /fake".to_string(),
-            trace_id,
-            span_id: trace_id,
-            parent_id: 0,
-            start: STATS_SPAN_START_NS,
-            duration: 5_000_000,
-            error,
-            r#type: "web".to_string(),
-            ..pb::Span::default()
-        };
-        span.metrics.insert("_top_level".to_string(), 1.0);
-        span.metrics
-            .insert("_sampling_priority_v1".to_string(), priority);
-        span
-    };
-
     let outcome = run_processor_pipeline_with_settings(
         true,
         false,
         false,
         vec![
-            vec![make_span(1, -1.0, 1)], // errored tracer rule drop
-            vec![make_span(4, 1.0, 0)],  // normally kept trace
+            vec![error_sampler_span(1, -1.0, 1, None)], // errored tracer rule drop
+            vec![error_sampler_span(4, 1.0, 0, None)],  // normally kept trace
         ],
     )
     .await;
 
-    let captured_trace_ids: Vec<u64> = outcome
-        .traces
-        .iter()
-        .flat_map(|payload| &payload.tracer_payloads)
-        .flat_map(|payload| &payload.chunks)
-        .flat_map(|chunk| &chunk.spans)
+    let captured_trace_ids: Vec<u64> = captured_trace_spans(&outcome.traces)
         .map(|span| span.trace_id)
         .collect();
     assert_eq!(

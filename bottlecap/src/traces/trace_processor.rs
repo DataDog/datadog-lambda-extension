@@ -93,7 +93,7 @@ pub fn error_rare_sample_tracer_drop_enabled(config: &config::Config) -> bool {
 #[allow(clippy::module_name_repetitions)]
 pub struct ServerlessTraceProcessor {
     pub obfuscation_config: Arc<obfuscation_config::ObfuscationConfig>,
-    /// Rescues errored `AutoDrop` chunks on the `lambda_extension_compute_stats`
+    /// Rescues errored chunks on the `lambda_extension_compute_stats`
     /// path. Shared across invocations so a stateful mode (`RateLimited`) would
     /// keep its rolling window; a std Mutex rather than tokio because
     /// `process_traces` is synchronous.
@@ -139,9 +139,7 @@ pub fn new_error_sampler(enabled: bool) -> Arc<std::sync::Mutex<ErrorsSampler>> 
 impl ServerlessTraceProcessor {
     /// Removes sampled-out chunks so they won't be sent to Datadog, then drops
     /// any payload left without chunks. `SamplerPriority::None` (-128) means no
-    /// explicit priority was set and the trace is kept. Only
-    /// `SamplerPriority::AutoDrop` (0) chunks are rescue candidates; negative
-    /// priorities are explicit drops and are honored.
+    /// explicit priority was set and the trace is kept.
     fn drop_sampled_out_chunks(&self, tracer_payloads: &mut Vec<pb::TracerPayload>) {
         // Read once up front so non-errored and explicitly-dropped chunks never
         // touch the lock. Recover through poisoning: the sampler holds only
@@ -172,8 +170,6 @@ impl ServerlessTraceProcessor {
                 if chunk.priority > 0 || chunk.priority == SamplerPriority::None as i32 {
                     return true;
                 }
-                // A negative priority is an explicit drop (a tracer sampling rule
-                // or MANUAL_DROP): honor it and never rescue, as the Agent does.
                 // With `error_rare_sample_tracer_drop` only a manual drop is
                 // honored; other dropped chunks become rescue candidates, as
                 // the Agent does with the feature enabled.
@@ -201,8 +197,8 @@ impl ServerlessTraceProcessor {
                 == Some(MANUAL_SAMPLING_DECISION_MAKER)
     }
 
-    /// Consult the error sampler for a chunk that would otherwise be dropped
-    /// (`AutoDrop`). Returns `true` to keep (rescue) the chunk. Only errored
+    /// Consult the error sampler for a chunk that would otherwise be dropped.
+    /// Returns `true` to keep (rescue) the chunk. Only errored
     /// traces are candidates; on a keep, stamps `_dd.errors_sr` on the root span.
     fn rescue_error_chunk(&self, chunk: &mut pb::TraceChunk, env: &str, now_secs: i64) -> bool {
         // Only errored traces are rescue candidates (matches the Go agent, which
@@ -1570,18 +1566,7 @@ mod tests {
             create_test_processor(&config, enabled_error_sampler(), true);
         let header_tags = create_test_header_tags();
 
-        let mut span = pb::Span {
-            trace_id: 7,
-            span_id: 7,
-            parent_id: 0,
-            error: 1,
-            service: "svc".to_string(),
-            name: "op".to_string(),
-            resource: "res".to_string(),
-            ..Default::default()
-        };
-        span.metrics
-            .insert("_sampling_priority_v1".to_string(), -1.0);
+        let span = make_tracer_drop_span(7, -1.0, 1, None);
 
         let (payload_info, _stats) = processor.process_traces(
             config,
@@ -1766,34 +1751,22 @@ mod tests {
     fn test_error_rare_sample_tracer_drop_first_span_decision_maker_wins() {
         let config = create_compute_stats_config();
 
-        // First span says "-3" (nonmanual): rescued even though a later span
-        // says "-4".
-        let (tags_provider, processor) =
-            create_test_processor(&config, enabled_error_sampler(), true);
-        let mut root = make_tracer_drop_span(7, -1.0, 1, Some("-3"));
-        root.span_id = 1;
-        let mut child = make_tracer_drop_span(7, -1.0, 0, Some("-4"));
-        child.span_id = 2;
-        let (kept, _in_stats) =
-            run_single_trace(&processor, &config, tags_provider, vec![root, child]);
-        assert!(
-            kept.contains(&7),
-            "first span's nonmanual decision maker must win"
-        );
+        for (first_dm, second_dm, rescued) in [("-3", "-4", true), ("-4", "-3", false)] {
+            let (tags_provider, processor) =
+                create_test_processor(&config, enabled_error_sampler(), true);
+            let mut root = make_tracer_drop_span(7, -1.0, 1, Some(first_dm));
+            root.span_id = 1;
+            let mut child = make_tracer_drop_span(7, -1.0, 0, Some(second_dm));
+            child.span_id = 2;
+            let (kept, _in_stats) =
+                run_single_trace(&processor, &config, tags_provider, vec![root, child]);
 
-        // Reversed order: first span says "-4", so the trace is a manual drop.
-        let (tags_provider, processor) =
-            create_test_processor(&config, enabled_error_sampler(), true);
-        let mut root = make_tracer_drop_span(7, -1.0, 1, Some("-4"));
-        root.span_id = 1;
-        let mut child = make_tracer_drop_span(7, -1.0, 0, Some("-3"));
-        child.span_id = 2;
-        let (kept, _in_stats) =
-            run_single_trace(&processor, &config, tags_provider, vec![root, child]);
-        assert!(
-            !kept.contains(&7),
-            "first span's manual decision maker must win"
-        );
+            assert_eq!(
+                kept.contains(&7),
+                rescued,
+                "first span's decision maker {first_dm} must win over {second_dm}"
+            );
+        }
     }
 
     /// Without an error anywhere in the chunk, an eligible tracer drop is still
