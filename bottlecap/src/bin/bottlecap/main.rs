@@ -45,7 +45,7 @@ use bottlecap::{
         invocation::processor_service::{InvocationProcessorHandle, InvocationProcessorService},
         listener::Listener as LifecycleListener,
     },
-    logger::{self, COLD_START_DURATION},
+    logger,
     logs::{
         agent::LogsAgent,
         aggregator_service::{
@@ -501,9 +501,12 @@ async fn extension_loop_active(
     let mut flush_control = FlushControl::new(flush_strategy, config.flush_timeout);
 
     debug!(
-        target: COLD_START_DURATION,
         "Datadog Next-Gen Extension ready in {:}ms",
-        cold_start_durations.started_at.elapsed().as_millis().to_string()
+        cold_start_durations
+            .started_at
+            .elapsed()
+            .as_millis()
+            .to_string()
     );
     cold_start_durations.log();
 
