@@ -108,6 +108,7 @@ use tokio::time::Instant;
 use tokio::{sync::Mutex as TokioMutex, sync::mpsc::Sender};
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, warn};
+use tracing_subscriber::util::SubscriberInitExt;
 use ustr::Ustr;
 
 fn resolve_dsm_service(
@@ -234,9 +235,14 @@ fn enable_logging_subsystem() {
     )
     .unwrap_or(LogLevel::Info);
 
+    let http_libraries_off: Vec<String> = logger::HTTP_LIBRARY_TARGETS
+        .iter()
+        .map(|target| format!("{target}=off"))
+        .collect();
     let (env_filter, invalid_entries) = build_env_filter(
         &format!(
-            "h2=off,hyper=off,reqwest=off,rustls=off,datadog-trace-mini-agent=off,{log_level:?}"
+            "{},datadog-trace-mini-agent=off,{log_level:?}",
+            http_libraries_off.join(",")
         ),
         &std::env::var(LEVEL_BY_TARGET_ENV_VAR).unwrap_or_default(),
     )
@@ -252,7 +258,8 @@ fn enable_logging_subsystem() {
         .without_time()
         .event_format(logger::Formatter)
         .finish();
-    tracing::subscriber::set_global_default(subscriber).expect("setting default subscriber failed");
+    // `init` also forwards records from crates that log with the `log` crate to this subscriber.
+    subscriber.init();
 
     if !invalid_entries.is_empty() {
         warn!("Ignoring invalid {LEVEL_BY_TARGET_ENV_VAR} entries: {invalid_entries:?}");

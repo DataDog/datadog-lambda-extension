@@ -568,6 +568,7 @@ dependencies = [
  "tower-http",
  "tracing",
  "tracing-core",
+ "tracing-log",
  "tracing-subscriber",
  "ustr",
  "zstd",
