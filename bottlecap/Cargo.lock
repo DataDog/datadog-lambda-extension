@@ -501,6 +501,7 @@ dependencies = [
  "datadog-fips",
  "datadog-opentelemetry",
  "datadog-protos",
+ "datadog-serverless-logging",
  "ddsketch-agent",
  "dogstatsd",
  "figment",
@@ -888,7 +889,7 @@ dependencies = [
 [[package]]
 name = "datadog-agent-config"
 version = "0.1.0"
-source = "git+https://github.com/DataDog/serverless-components?rev=8156757470d0843a99fc5d19809ae021cd2c7178#8156757470d0843a99fc5d19809ae021cd2c7178"
+source = "git+https://github.com/DataDog/serverless-components?rev=19270f5dcbc2480824bdec25a1d30899edb3e09e#19270f5dcbc2480824bdec25a1d30899edb3e09e"
 dependencies = [
  "datadog-opentelemetry",
  "dogstatsd",
@@ -906,13 +907,14 @@ dependencies = [
 [[package]]
 name = "datadog-agent-trace-sampler"
 version = "0.1.0"
-source = "git+https://github.com/DataDog/serverless-components?rev=8156757470d0843a99fc5d19809ae021cd2c7178#8156757470d0843a99fc5d19809ae021cd2c7178"
+source = "git+https://github.com/DataDog/serverless-components?rev=19270f5dcbc2480824bdec25a1d30899edb3e09e#19270f5dcbc2480824bdec25a1d30899edb3e09e"
 
 [[package]]
 name = "datadog-fips"
 version = "0.1.0"
-source = "git+https://github.com/DataDog/serverless-components?rev=8156757470d0843a99fc5d19809ae021cd2c7178#8156757470d0843a99fc5d19809ae021cd2c7178"
+source = "git+https://github.com/DataDog/serverless-components?rev=19270f5dcbc2480824bdec25a1d30899edb3e09e#19270f5dcbc2480824bdec25a1d30899edb3e09e"
 dependencies = [
+ "aws-lc-rs",
  "reqwest",
  "rustls",
  "rustls-native-certs",
@@ -969,6 +971,14 @@ dependencies = [
  "protobuf-codegen",
  "tonic 0.13.1",
  "tonic-build",
+]
+
+[[package]]
+name = "datadog-serverless-logging"
+version = "0.1.0"
+source = "git+https://github.com/DataDog/serverless-components?rev=19270f5dcbc2480824bdec25a1d30899edb3e09e#19270f5dcbc2480824bdec25a1d30899edb3e09e"
+dependencies = [
+ "tracing-subscriber",
 ]
 
 [[package]]
@@ -1090,7 +1100,7 @@ dependencies = [
 [[package]]
 name = "dogstatsd"
 version = "0.1.0"
-source = "git+https://github.com/DataDog/serverless-components?rev=8156757470d0843a99fc5d19809ae021cd2c7178#8156757470d0843a99fc5d19809ae021cd2c7178"
+source = "git+https://github.com/DataDog/serverless-components?rev=19270f5dcbc2480824bdec25a1d30899edb3e09e#19270f5dcbc2480824bdec25a1d30899edb3e09e"
 dependencies = [
  "datadog-protos",
  "ddsketch-agent",
