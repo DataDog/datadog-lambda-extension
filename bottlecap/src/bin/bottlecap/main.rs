@@ -83,6 +83,7 @@ use bottlecap::{
     },
 };
 use datadog_fips::reqwest_adapter::create_reqwest_client_builder;
+use datadog_serverless_logging::{LEVEL_BY_TARGET_ENV_VAR, build_env_filter};
 use decrypt::{
     has_additional_endpoints_secrets, resolve_additional_endpoints_secrets, resolve_secrets,
 };
@@ -107,7 +108,6 @@ use tokio::time::Instant;
 use tokio::{sync::Mutex as TokioMutex, sync::mpsc::Sender};
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, warn};
-use tracing_subscriber::EnvFilter;
 use ustr::Ustr;
 
 fn resolve_dsm_service(
@@ -226,6 +226,11 @@ fn init_ustr() {
     });
 }
 
+/// HTTP libraries that log each request. The extension sends its own logs to Datadog, so their
+/// logs would add lines to each flush. They stay off, and `DD_LOG_LEVEL_BY_TARGET` cannot turn
+/// them on.
+const LOCKED_LOG_TARGETS: &[&str] = &["h2", "hyper", "reqwest", "rustls"];
+
 fn enable_logging_subsystem() {
     let log_level = LogLevel::from_str(
         std::env::var("DD_LOG_LEVEL")
@@ -234,13 +239,21 @@ fn enable_logging_subsystem() {
     )
     .unwrap_or(LogLevel::Info);
 
-    let env_filter = format!(
-        "h2=off,hyper=off,reqwest=off,rustls=off,datadog-trace-mini-agent=off,{log_level:?}",
-    );
+    let locked_off: Vec<String> = LOCKED_LOG_TARGETS
+        .iter()
+        .map(|target| format!("{target}=off"))
+        .collect();
+    let (env_filter, invalid_entries) = build_env_filter(
+        &format!(
+            "{},datadog-trace-mini-agent=off,{log_level:?}",
+            locked_off.join(",")
+        ),
+        &std::env::var(LEVEL_BY_TARGET_ENV_VAR).unwrap_or_default(),
+        LOCKED_LOG_TARGETS,
+    )
+    .expect("could not parse log level in configuration");
     let subscriber = tracing_subscriber::fmt::Subscriber::builder()
-        .with_env_filter(
-            EnvFilter::try_new(env_filter).expect("could not parse log level in configuration"),
-        )
+        .with_env_filter(env_filter)
         .with_level(true)
         .with_thread_names(false)
         .with_thread_ids(false)
@@ -252,6 +265,9 @@ fn enable_logging_subsystem() {
         .finish();
     tracing::subscriber::set_global_default(subscriber).expect("setting default subscriber failed");
 
+    if !invalid_entries.is_empty() {
+        warn!("Ignoring invalid {LEVEL_BY_TARGET_ENV_VAR} entries: {invalid_entries:?}");
+    }
     debug!("Logging subsystem enabled");
 }
 
