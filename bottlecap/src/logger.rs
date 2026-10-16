@@ -1,4 +1,4 @@
-use std::fmt;
+use std::fmt::{self, Write as _};
 use tracing_core::{Event, Subscriber};
 use tracing_subscriber::fmt::{
     FmtContext, FormattedFields,
@@ -23,22 +23,68 @@ fn write_json_escaped(w: &mut impl fmt::Write, s: &str) -> fmt::Result {
     Ok(())
 }
 
+/// HTTP libraries that log each request, including the requests that send the extension's own
+/// logs to Datadog. The extension does not send their lines to Datadog, so that a flush cannot
+/// log lines for the next flush to send.
+pub const HTTP_LIBRARY_TARGETS: &[&str] = &["h2", "hyper", "reqwest", "rustls"];
+
+/// Starts each line that the formatter writes for an [`HTTP_LIBRARY_TARGETS`] target.
+const HTTP_LIBRARY_LINE_PREFIX: &str = "{\"target\":\"";
+
+fn is_http_library_target(target: &str) -> bool {
+    HTTP_LIBRARY_TARGETS
+        .iter()
+        .any(|library| target.starts_with(library))
+}
+
+/// Returns true if `record`, an `extension` record from the Telemetry API, is a line that the
+/// formatter wrote for an [`HTTP_LIBRARY_TARGETS`] target. The message check keeps the lines of
+/// other extensions.
+#[must_use]
+pub fn is_http_library_record(record: &serde_json::Value) -> bool {
+    const MESSAGE_PREFIX: &str = "DD_EXTENSION | ";
+    match record {
+        serde_json::Value::String(line) => {
+            line.starts_with(HTTP_LIBRARY_LINE_PREFIX)
+                && line.contains(&format!(",\"message\":\"{MESSAGE_PREFIX}"))
+        }
+        serde_json::Value::Object(obj) => {
+            obj.contains_key("target")
+                && obj
+                    .get("message")
+                    .and_then(serde_json::Value::as_str)
+                    .is_some_and(|message| message.starts_with(MESSAGE_PREFIX))
+        }
+        _ => false,
+    }
+}
+
 #[derive(Debug, Clone, Copy)]
 pub struct Formatter;
 
-/// Visitor that captures the message from tracing event fields.
-struct MessageVisitor(String);
+/// Visitor that captures the message from tracing event fields, and the other fields as
+/// ` name=value` text, which only HTTP library lines write.
+#[derive(Default)]
+struct MessageVisitor {
+    message: String,
+    /// h2, for example, logs each frame in a `frame` field.
+    other_fields: String,
+}
 
 impl tracing::field::Visit for MessageVisitor {
     fn record_debug(&mut self, field: &tracing::field::Field, value: &dyn fmt::Debug) {
         if field.name() == "message" {
-            self.0 = format!("{value:?}");
+            self.message = format!("{value:?}");
+        } else {
+            let _ = write!(self.other_fields, " {}={value:?}", field.name());
         }
     }
 
     fn record_str(&mut self, field: &tracing::field::Field, value: &str) {
         if field.name() == "message" {
-            self.0 = value.to_string();
+            self.message = value.to_string();
+        } else {
+            let _ = write!(self.other_fields, " {}={value}", field.name());
         }
     }
 }
@@ -57,7 +103,7 @@ where
         let metadata = event.metadata();
         let level = metadata.level();
 
-        let mut visitor = MessageVisitor(String::new());
+        let mut visitor = MessageVisitor::default();
         event.record(&mut visitor);
 
         // Build span context prefix
@@ -77,12 +123,27 @@ where
             }
         }
 
-        let message = format!("DD_EXTENSION | {level} | {span_prefix}{}", visitor.0);
+        let is_http_library = is_http_library_target(metadata.target());
+        let other_fields = if is_http_library {
+            visitor.other_fields.as_str()
+        } else {
+            ""
+        };
+        let message = format!(
+            "DD_EXTENSION | {level} | {span_prefix}{}{other_fields}",
+            visitor.message
+        );
 
         // Setting specifically `status` as opposed to `level` since AWS
         // filters out logs by the `level` field. This allows our logs to
         // appear in CWL regardless of the log level.
-        write!(writer, "{{\"status\":\"{level}\",\"message\":\"")?;
+        writer.write_char('{')?;
+        if is_http_library {
+            writer.write_str("\"target\":\"")?;
+            write_json_escaped(&mut writer, metadata.target())?;
+            writer.write_str("\",")?;
+        }
+        write!(writer, "\"status\":\"{level}\",\"message\":\"")?;
         write_json_escaped(&mut writer, &message)?;
         writeln!(writer, "\"}}")
     }
@@ -263,5 +324,49 @@ mod tests {
             msg.contains('\n'),
             "parsed message should contain literal newline"
         );
+    }
+
+    #[test]
+    fn test_formatter_starts_http_library_line_with_target() {
+        let output = capture_log(|| {
+            tracing::debug!(
+                target: "hyper_util::client::legacy::connect::http",
+                "connecting to 34.149.115.168:443"
+            );
+        });
+
+        assert!(output.starts_with(
+            r#"{"target":"hyper_util::client::legacy::connect::http","status":"DEBUG","#
+        ));
+        let parsed: serde_json::Value = serde_json::from_str(output.trim()).unwrap();
+        assert!(is_http_library_record(&serde_json::Value::String(
+            output.trim().to_string()
+        )));
+        assert!(is_http_library_record(&parsed));
+    }
+
+    #[test]
+    fn test_formatter_writes_other_fields_only_for_http_library_lines() {
+        let output = capture_log(|| {
+            tracing::debug!(target: "h2::codec::framed_write", frame = ?("Headers", 1), "send");
+            tracing::debug!(target: "bottlecap::traces", attempt = 1_u64, "Attempting request");
+        });
+        let lines: Vec<&str> = output.lines().collect();
+
+        assert!(lines[0].contains(r#"DD_EXTENSION | DEBUG | send frame=(\"Headers\", 1)""#));
+        assert!(lines[1].starts_with(r#"{"status":"DEBUG","#));
+        assert!(lines[1].contains(r#"DD_EXTENSION | DEBUG | Attempting request""#));
+    }
+
+    #[test]
+    fn test_is_http_library_record_keeps_other_extension_lines() {
+        let other_extension = serde_json::json!({"target": "app", "message": "started"});
+        assert!(!is_http_library_record(&other_extension));
+        assert!(!is_http_library_record(&serde_json::Value::String(
+            r#"{"target":"app","message":"started"}"#.to_string()
+        )));
+        assert!(!is_http_library_record(&serde_json::Value::String(
+            "plain text line".to_string()
+        )));
     }
 }

@@ -199,9 +199,14 @@ fn enable_logging_subsystem() {
     )
     .unwrap_or(LogLevel::Info);
 
-    let env_filter = format!(
-        "h2=off,hyper=off,reqwest=off,rustls=off,datadog-trace-mini-agent=off,{log_level:?}",
-    );
+    // At debug level, also log each TCP connect and each HTTP/2 frame of the flushes to Datadog.
+    // The logs processor keeps these lines out of the flushes.
+    let http_libraries = if matches!(log_level, LogLevel::Debug | LogLevel::Trace) {
+        "h2=debug,hyper_util=debug,hyper=off,reqwest=off,rustls=off"
+    } else {
+        "h2=off,hyper=off,reqwest=off,rustls=off"
+    };
+    let env_filter = format!("{http_libraries},datadog-trace-mini-agent=off,{log_level:?}");
     let subscriber = tracing_subscriber::fmt::Subscriber::builder()
         .with_env_filter(
             EnvFilter::try_new(env_filter).expect("could not parse log level in configuration"),

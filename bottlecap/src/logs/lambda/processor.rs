@@ -12,6 +12,7 @@ use crate::event_bus::Event;
 use crate::extension::telemetry::events::ReportMetrics;
 use crate::extension::telemetry::events::{Status, TelemetryEvent, TelemetryRecord};
 use crate::lifecycle::invocation::context::Context as InvocationContext;
+use crate::logger;
 use crate::logs::aggregator_service::AggregatorHandle;
 use crate::logs::processor::{Processor, Rule};
 use crate::tags::provider;
@@ -242,6 +243,9 @@ impl LambdaProcessor {
                 Err("Unable to parse log".into())
             }
             TelemetryRecord::Extension(v) => {
+                if logger::is_http_library_record(&v) {
+                    return Err("HTTP library log, kept out of Datadog".into());
+                }
                 let message = match v {
                     serde_json::Value::Object(obj) => Some(serde_json::to_string(&obj).unwrap_or_default()),
                     serde_json::Value::String(s) => Some(s),
@@ -2283,6 +2287,28 @@ mod tests {
         // The intake log should preserve the "error" status (message is not JSON)
         let intake_log = processor.get_intake_log(lambda_message).unwrap();
         assert_eq!(intake_log.message.status, "error");
+    }
+
+    #[tokio::test]
+    async fn test_http_library_log_is_not_sent() {
+        let config = Arc::new(config::Config::default());
+        let tags_provider = Arc::new(provider::Provider::new(
+            Arc::clone(&config),
+            LAMBDA_RUNTIME_SLUG.to_string(),
+            &HashMap::from([("function_arn".to_string(), "test-arn".to_string())]),
+        ));
+        let (tx, _rx) = tokio::sync::mpsc::channel(2);
+        let mut processor =
+            LambdaProcessor::new(tags_provider, Arc::clone(&config), tx.clone(), true);
+
+        let event = TelemetryEvent {
+            time: Utc.with_ymd_and_hms(2023, 1, 7, 3, 23, 47).unwrap(),
+            record: TelemetryRecord::Extension(Value::String(
+                r#"{"target":"hyper_util::client::legacy::connect::http","status":"DEBUG","message":"DD_EXTENSION | DEBUG | connecting to 34.149.115.168:443"}"#
+                    .to_string(),
+            )),
+        };
+        assert!(processor.make_log(event).await.is_err());
     }
 
     #[tokio::test]
