@@ -10,6 +10,7 @@ pub mod cold_start;
 
 // `DD_LOG_LEVEL_BY_TARGET` matches a target by text prefix, so no target name may start with
 // another one: an entry for `trace_flush` would also match `trace_flush_duration`.
+// `README.md` in this folder documents `DD_LOG_LEVEL_BY_TARGET`.
 
 /// Tracing target for the duration of each cold start step.
 pub const COLD_START_DURATION: &str = "cold_start_duration";
