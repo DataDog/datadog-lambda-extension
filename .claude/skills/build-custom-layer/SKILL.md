@@ -1,6 +1,6 @@
 ---
 name: build-custom-layer
-description: Build a custom Lambda extension layer from this repository and publish it to the serverless sandbox AWS account. Then make it public and give its ARN to a customer. The customer uses it to test a fix or collect debug logs for a support ticket. Use it when a support ticket needs a build that is not released.
+description: Build a custom Lambda extension layer from this repository and publish it to the serverless sandbox AWS account. Then make it public and return its ARN to the person who asked. That person sends the ARN to the customer, who uses it to test a fix or collect debug logs. Use it when a support ticket needs a build that is not released.
 ---
 
 # Build a custom extension layer for a support ticket
@@ -10,7 +10,8 @@ a candidate fix or a build with more logs. Follow these steps in order.
 
 ## 1. Get the facts about the customer's function
 
-Ask for these before you build. A layer that does not match the function does not work.
+Ask the person who requested the layer for these before you build. Do not contact the customer.
+A layer that does not match the function does not work.
 
 | Fact | Why it matters | Value to use |
 | --- | --- | --- |
@@ -65,8 +66,9 @@ aws-vault exec sso-serverless-sandbox-account-admin -- aws lambda add-layer-vers
   --principal '*'
 ```
 
-`--principal '*'` lets every AWS account use this layer version. If the customer gives you their
-AWS account ID, use that ID as the principal, so that only their account can use it.
+`--principal '*'` lets every AWS account use this layer version. If the person who asked gives
+you the customer's AWS account ID, use that ID as the principal, so that only that account can
+use it.
 
 ## 5. Get the layer ARN
 
@@ -78,9 +80,10 @@ aws-vault exec sso-serverless-sandbox-account-admin -- aws lambda get-layer-vers
   --query LayerVersionArn --output text
 ```
 
-## 6. Send the ARN to the customer
+## 6. Return the ARN
 
-Tell the customer to:
+Give the ARN to the person who asked. Do not send it to the customer yourself. With the ARN, give
+these steps, which that person can forward to the customer:
 
 1. Replace the Datadog extension layer of the function with the ARN from step 5. They keep the
    other layers and all `DD_*` environment variables.
@@ -90,7 +93,8 @@ Tell the customer to:
 
 ## 7. Clean up after the ticket closes
 
-Tell the customer before you remove access. Then remove the public permission:
+Do this only when the person who asked tells you to. That person tells the customer first. Then
+remove the public permission:
 
 ```sh
 aws-vault exec sso-serverless-sandbox-account-admin -- aws lambda remove-layer-version-permission \
