@@ -226,11 +226,6 @@ fn init_ustr() {
     });
 }
 
-/// HTTP libraries that log each request. The extension sends its own logs to Datadog, so their
-/// logs would add lines to each flush. They stay off, and `DD_LOG_LEVEL_BY_TARGET` cannot turn
-/// them on.
-const LOCKED_LOG_TARGETS: &[&str] = &["h2", "hyper", "reqwest", "rustls"];
-
 fn enable_logging_subsystem() {
     let log_level = LogLevel::from_str(
         std::env::var("DD_LOG_LEVEL")
@@ -239,17 +234,11 @@ fn enable_logging_subsystem() {
     )
     .unwrap_or(LogLevel::Info);
 
-    let locked_off: Vec<String> = LOCKED_LOG_TARGETS
-        .iter()
-        .map(|target| format!("{target}=off"))
-        .collect();
     let (env_filter, invalid_entries) = build_env_filter(
         &format!(
-            "{},datadog-trace-mini-agent=off,{log_level:?}",
-            locked_off.join(",")
+            "h2=off,hyper=off,reqwest=off,rustls=off,datadog-trace-mini-agent=off,{log_level:?}"
         ),
         &std::env::var(LEVEL_BY_TARGET_ENV_VAR).unwrap_or_default(),
-        LOCKED_LOG_TARGETS,
     )
     .expect("could not parse log level in configuration");
     let subscriber = tracing_subscriber::fmt::Subscriber::builder()
