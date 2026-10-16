@@ -9,7 +9,7 @@ Set these environment variables on the Lambda function:
 | `DD_LOG_LEVEL` | The level for all other logs, for example `info`. The default is `info`. |
 | `DD_LOG_LEVEL_BY_TARGET` | A comma-separated list of `<target>=<level>` entries |
 
-A level is `off`, `error`, `warn`, `info`, `debug` or `trace`. For example, `cold_start_duration=debug` adds the duration of each cold start step to the `info` logs.
+A level is `off`, `error`, `warn`, `info`, `debug` or `trace`. For example, if `DD_LOG_LEVEL` is `info` and `DD_LOG_LEVEL_BY_TARGET` is `cold_start_duration=debug`, the extension logs at `info` level as usual, and also logs the duration of each cold start step.
 
 An entry matches each target that starts with its text. The extension skips an entry that is not valid, and logs a warning that names the entry.
 
