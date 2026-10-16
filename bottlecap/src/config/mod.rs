@@ -741,6 +741,62 @@ mod lambda_config_tests {
         assert!(config.ext.serverless_error_sampler_enabled);
     }
 
+    // ---- APM features (DD_APM_FEATURES, error_rare_sample_tracer_drop) ----
+
+    #[test]
+    fn apm_features_defaults_to_empty() {
+        let config = load(|_| Ok(()));
+        assert!(config.apm_features.is_empty());
+        assert!(!crate::traces::trace_processor::error_rare_sample_tracer_drop_enabled(&config));
+    }
+
+    #[test]
+    fn apm_features_error_rare_sample_tracer_drop_from_env() {
+        let config = load(|jail| {
+            jail.set_env("DD_APM_FEATURES", "error_rare_sample_tracer_drop");
+            Ok(())
+        });
+        assert_eq!(
+            config.apm_features,
+            vec!["error_rare_sample_tracer_drop".to_string()]
+        );
+        assert!(crate::traces::trace_processor::error_rare_sample_tracer_drop_enabled(&config));
+        // The feature only widens rescue eligibility; enabling it must not
+        // enable the sampler.
+        assert!(!config.ext.serverless_error_sampler_enabled);
+    }
+
+    #[test]
+    fn apm_features_comma_separated_list_from_env() {
+        let config = load(|jail| {
+            jail.set_env(
+                "DD_APM_FEATURES",
+                "some_other_feature,error_rare_sample_tracer_drop",
+            );
+            Ok(())
+        });
+        assert_eq!(
+            config.apm_features,
+            vec![
+                "some_other_feature".to_string(),
+                "error_rare_sample_tracer_drop".to_string()
+            ]
+        );
+        assert!(crate::traces::trace_processor::error_rare_sample_tracer_drop_enabled(&config));
+    }
+
+    #[test]
+    fn apm_features_unrelated_feature_does_not_enable_error_rare_sample_tracer_drop() {
+        let config = load(|jail| {
+            jail.set_env(
+                "DD_APM_FEATURES",
+                "disable_operation_and_resource_name_logic_v2",
+            );
+            Ok(())
+        });
+        assert!(!crate::traces::trace_processor::error_rare_sample_tracer_drop_enabled(&config));
+    }
+
     // ---- Duration fields ----
 
     #[test]
