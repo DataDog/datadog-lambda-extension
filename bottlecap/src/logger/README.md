@@ -15,4 +15,4 @@ An entry matches each target that starts with its text. For an entry that is not
 
 Use the targets that `mod.rs` defines, such as `cold_start_duration`. Other targets are module paths and crate names, which change when the code moves.
 
-The logs of `h2`, `hyper`, `reqwest` and `rustls` appear only in CloudWatch. The extension does not send them to Datadog, because these libraries log each request, including the requests that send the extension's logs. They are off by default. For example, `hyper_util=debug,h2=debug` shows each TCP connect and each HTTP/2 frame of the flushes to Datadog.
+The logs of `h2`, `hyper`, `reqwest` and `rustls` appear only in CloudWatch Logs. The extension does not send them to Datadog, because these libraries log each request, including the requests that send the extension's logs. They are off by default. For example, `hyper_util=debug,h2=debug` shows each TCP connect and each HTTP/2 frame of the flushes to Datadog.
