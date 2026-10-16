@@ -126,7 +126,7 @@ impl TelemetryListener {
             Ok(events) => events,
             // The Telemetry API splits an oversized record across two POSTs, and neither half
             // parses alone. See `stitch`.
-            Err(e) => match state.fragments.stitch(&body, &e) {
+            Err(e) => match state.fragments.stitch(&body) {
                 Stitch::Complete(events) => {
                     debug!(
                         "TELEMETRY API | Reassembled a split payload, recovered {} events",
