@@ -428,12 +428,19 @@ impl LambdaProcessor {
                             message = format!("{message} Init Duration: {init_duration_ms:.2} ms");
                         }
 
+                        let result_status = if status == Status::Timeout {
+                            message.push_str(" Status: timeout");
+                            Some("error".to_string())
+                        } else {
+                            None
+                        };
+
                         Ok(Message::new(
                             message,
                             Some(request_id),
                             self.function_arn.clone(),
                             event.time.timestamp_millis(),
-                            None,
+                            result_status,
                         ))
                     }
                 }
@@ -1091,6 +1098,37 @@ mod tests {
                     },
                     timestamp: 1_673_061_827_000,
                     status: "info".to_string(),
+                },
+        ),
+
+        // platform report - OnDemand timeout
+        platform_report_timeout: (
+            &TelemetryEvent {
+                time: Utc.with_ymd_and_hms(2023, 1, 7, 3, 23, 47).unwrap(),
+                record: TelemetryRecord::PlatformReport {
+                    error_type: None,
+                    status: Status::Timeout,
+                    request_id: "test-request-id".to_string(),
+                    metrics: ReportMetrics::OnDemand(OnDemandReportMetrics {
+                        duration_ms: 3000.0,
+                        billed_duration_ms: 3000,
+                        memory_size_mb: 256,
+                        max_memory_used_mb: 64,
+                        init_duration_ms: None,
+                        restore_duration_ms: None
+                    }),
+                    spans: None,
+                }
+            },
+            Message {
+                    message: "REPORT RequestId: test-request-id Duration: 3000.00 ms Runtime Duration: 0.00 ms Post Runtime Duration: 0.00 ms Billed Duration: 3000 ms Memory Size: 256 MB Max Memory Used: 64 MB Status: timeout".to_string(),
+                    lambda: Lambda {
+                        arn: "test-arn".to_string(),
+                        request_id: Some("test-request-id".to_string()),
+                    ..Lambda::default()
+                    },
+                    timestamp: 1_673_061_827_000,
+                    status: "error".to_string(),
                 },
         ),
 
