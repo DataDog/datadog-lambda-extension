@@ -545,6 +545,57 @@ async fn e2e_error_sampler_rescues_only_errored_p0_traces() {
     );
 }
 
+/// A sampling decision maker in span meta is promoted into the chunk tags that
+/// reach the intake, and the source span meta is left intact. Uses a normally
+/// kept positive-priority trace and no special config.
+#[tokio::test]
+async fn e2e_decision_maker_promoted_into_chunk_tags() {
+    const DECISION_MAKER_TAG: &str = "_dd.p.dm";
+    let trace_id = 0x3333_3333_3333_3333;
+
+    let mut span = pb::Span {
+        service: "fake-intake-trace-service".to_string(),
+        name: "web.request".to_string(),
+        resource: "GET /fake".to_string(),
+        trace_id,
+        span_id: 0x4444_4444_4444_4444,
+        parent_id: 0,
+        start: STATS_SPAN_START_NS,
+        duration: 5_000_000,
+        error: 0,
+        r#type: "web".to_string(),
+        ..pb::Span::default()
+    };
+    span.metrics.insert("_top_level".to_string(), 1.0);
+    span.metrics
+        .insert("_sampling_priority_v1".to_string(), 1.0);
+    span.meta
+        .insert(DECISION_MAKER_TAG.to_string(), "-4".to_string());
+
+    let outcome = run_processor_pipeline_with_traces(true, false, vec![vec![span]]).await;
+
+    let chunk = outcome
+        .traces
+        .iter()
+        .flat_map(|p| &p.tracer_payloads)
+        .flat_map(|tp| &tp.chunks)
+        .find(|c| c.spans.iter().any(|s| s.trace_id == trace_id))
+        .expect("the trace must reach the intake");
+    assert_eq!(
+        chunk.tags.get(DECISION_MAKER_TAG).map(String::as_str),
+        Some("-4"),
+        "the decision maker must be promoted into the chunk tags"
+    );
+    assert_eq!(
+        chunk.spans[0]
+            .meta
+            .get(DECISION_MAKER_TAG)
+            .map(String::as_str),
+        Some("-4"),
+        "the source span meta must be left intact"
+    );
+}
+
 /// T3.1: `client_computed_stats=true` → captured span meta has `_dd.compute_stats` absent.
 #[tokio::test]
 async fn e2e_client_computed_stats_leaves_compute_stats_absent() {

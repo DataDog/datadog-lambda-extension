@@ -40,6 +40,10 @@ use crate::traces::stats_generator::StatsGenerator;
 use crate::traces::trace_aggregator::{OwnedTracerHeaderTags, SendDataBuilderInfo};
 use libdd_trace_normalization::normalizer::SamplerPriority;
 
+/// Span meta and chunk tag carrying which party made the sampling decision.
+/// "sampling mechanism" aka "decision maker"
+const DECISION_MAKER_TAG: &str = "_dd.p.dm";
+
 /// Which party is responsible for computing trace stats for a trace, derived from
 /// `lambda_extension_compute_stats` and the tracer's `Datadog-Client-Computed-Stats`
 /// signal. Exactly one party computes, so the per-span `_dd.compute_stats` stamp and the
@@ -211,6 +215,23 @@ struct ChunkProcessor {
 
 impl TraceChunkProcessor for ChunkProcessor {
     fn process(&mut self, chunk: &mut pb::TraceChunk, root_span_index: usize) {
+        // Promote the decision maker from span metadata into chunk tags before
+        // filtering can remove the span that carries it. Bottlecap's pinned
+        // normalization copies priority and origin but not the decision maker;
+        // the Go agent's `setChunkAttributes` performs the same promotion.
+        // First span carrying the key wins; an existing chunk tag takes
+        // precedence and span meta is left intact.
+        if !chunk.tags.contains_key(DECISION_MAKER_TAG)
+            && let Some(decision_maker) = chunk
+                .spans
+                .iter()
+                .find_map(|span| span.meta.get(DECISION_MAKER_TAG))
+        {
+            chunk
+                .tags
+                .insert(DECISION_MAKER_TAG.to_string(), decision_maker.clone());
+        }
+
         if let Some(root_span) = chunk.spans.get(root_span_index)
             && filter_span_by_tags(root_span, &self.config)
         {
@@ -1851,6 +1872,164 @@ mod tests {
             span_pointers: None,
             client_computed_stats,
         }
+    }
+
+    /// Single-span trace chunk with an optional decision maker in span meta.
+    fn dm_chunk(spans: Vec<pb::Span>, chunk_tags: HashMap<String, String>) -> pb::TraceChunk {
+        pb::TraceChunk {
+            priority: -1,
+            origin: "lambda".to_string(),
+            spans,
+            tags: chunk_tags,
+            dropped_trace: false,
+        }
+    }
+
+    fn dm_span(span_id: u64, decision_maker: Option<&str>) -> pb::Span {
+        let mut span = pb::Span {
+            trace_id: 7,
+            span_id,
+            parent_id: 0,
+            service: "svc".to_string(),
+            name: "op".to_string(),
+            resource: "res".to_string(),
+            ..Default::default()
+        };
+        if let Some(decision_maker) = decision_maker {
+            span.meta
+                .insert(DECISION_MAKER_TAG.to_string(), decision_maker.to_string());
+        }
+        span
+    }
+
+    /// The decision maker is promoted from span meta into chunk tags, and the
+    /// source span meta is left intact.
+    #[test]
+    fn test_decision_maker_promoted_to_chunk_tags() {
+        let mut processor = create_chunk_processor(Arc::new(Config::default()));
+        let mut chunk = dm_chunk(vec![dm_span(1, Some("-4"))], HashMap::new());
+
+        processor.process(&mut chunk, 0);
+
+        assert_eq!(
+            chunk.tags.get(DECISION_MAKER_TAG).map(String::as_str),
+            Some("-4"),
+            "decision maker must be promoted into chunk tags"
+        );
+        assert_eq!(
+            chunk.spans[0]
+                .meta
+                .get(DECISION_MAKER_TAG)
+                .map(String::as_str),
+            Some("-4"),
+            "source span meta must be left intact"
+        );
+    }
+
+    /// An existing chunk tag takes precedence over span meta and is never
+    /// overwritten.
+    #[test]
+    fn test_existing_chunk_decision_maker_tag_takes_precedence() {
+        let mut processor = create_chunk_processor(Arc::new(Config::default()));
+        let mut chunk = dm_chunk(
+            vec![dm_span(1, Some("-4"))],
+            HashMap::from([(DECISION_MAKER_TAG.to_string(), "-3".to_string())]),
+        );
+
+        processor.process(&mut chunk, 0);
+
+        assert_eq!(
+            chunk.tags.get(DECISION_MAKER_TAG).map(String::as_str),
+            Some("-3"),
+            "existing chunk tag must win over span meta"
+        );
+        assert_eq!(
+            chunk.spans[0]
+                .meta
+                .get(DECISION_MAKER_TAG)
+                .map(String::as_str),
+            Some("-4"),
+            "source span meta must be left intact"
+        );
+    }
+
+    /// The first span in input order carrying the key wins, even when it is a
+    /// child span and the root carries a different decision maker.
+    #[test]
+    fn test_decision_maker_first_span_in_input_order_wins() {
+        let mut processor = create_chunk_processor(Arc::new(Config::default()));
+        let mut root = dm_span(1, Some("-4"));
+        root.parent_id = 2;
+        let child = dm_span(2, Some("-3"));
+        let mut chunk = dm_chunk(vec![root, child], HashMap::new());
+
+        processor.process(&mut chunk, 1);
+
+        assert_eq!(
+            chunk.tags.get(DECISION_MAKER_TAG).map(String::as_str),
+            Some("-4"),
+            "first span in input order must win over the root"
+        );
+    }
+
+    /// A decision maker on a child span is promoted when the root carries none.
+    #[test]
+    fn test_decision_maker_promoted_from_child_span() {
+        let mut processor = create_chunk_processor(Arc::new(Config::default()));
+        let mut root = dm_span(1, None);
+        root.parent_id = 2;
+        let child = dm_span(2, Some("-4"));
+        let mut chunk = dm_chunk(vec![root, child], HashMap::new());
+
+        processor.process(&mut chunk, 0);
+
+        assert_eq!(
+            chunk.tags.get(DECISION_MAKER_TAG).map(String::as_str),
+            Some("-4"),
+            "child-span decision maker must be promoted"
+        );
+    }
+
+    /// No chunk tag is invented when no span carries a decision maker.
+    #[test]
+    fn test_no_decision_maker_leaves_chunk_tags_untouched() {
+        let mut processor = create_chunk_processor(Arc::new(Config::default()));
+        let mut chunk = dm_chunk(vec![dm_span(1, None)], HashMap::new());
+
+        processor.process(&mut chunk, 0);
+
+        assert!(
+            !chunk.tags.contains_key(DECISION_MAKER_TAG),
+            "no decision maker tag must be invented"
+        );
+    }
+
+    /// Promotion happens before filtering: the chunk tag survives even when the
+    /// span that carried the decision maker is removed by runtime-span
+    /// filtering.
+    #[test]
+    fn test_decision_maker_promoted_before_span_filtering() {
+        let mut processor = create_chunk_processor(Arc::new(Config::default()));
+        let mut filtered_child = dm_span(2, Some("-4"));
+        filtered_child.meta.insert(
+            "http.url".to_string(),
+            "http://127.0.0.1:9001/2018-06-01/runtime/invocation/next".to_string(),
+        );
+        let root = dm_span(1, None);
+        let mut chunk = dm_chunk(vec![root, filtered_child], HashMap::new());
+
+        processor.process(&mut chunk, 0);
+
+        assert_eq!(
+            chunk.spans.iter().filter(|s| s.span_id == 2).count(),
+            0,
+            "the runtime span must have been filtered out"
+        );
+        assert_eq!(
+            chunk.tags.get(DECISION_MAKER_TAG).map(String::as_str),
+            Some("-4"),
+            "promoted chunk tag must survive the span filtering"
+        );
     }
 
     #[test]
