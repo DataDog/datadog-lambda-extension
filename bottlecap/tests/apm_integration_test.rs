@@ -621,8 +621,9 @@ fn error_sampler_span(
     span.metrics.insert("_top_level".to_string(), 1.0);
     span.metrics
         .insert("_sampling_priority_v1".to_string(), priority);
-    if let Some(dm) = decision_maker {
-        span.meta.insert("_dd.p.dm".to_string(), dm.to_string());
+    if let Some(decision_maker) = decision_maker {
+        span.meta
+            .insert("_dd.p.dm".to_string(), decision_maker.to_string());
     }
     span
 }

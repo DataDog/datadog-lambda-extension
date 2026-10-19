@@ -1570,16 +1570,8 @@ mod tests {
         );
         let payload_info = payload_info.expect("errored tracer drop must be rescued");
         let backend_send_data = payload_info.builder.build();
-        let TracerPayloadCollection::V07(backend_payloads) = backend_send_data.get_payloads()
-        else {
-            panic!("expected V07");
-        };
-
-        let rescued = backend_payloads
-            .iter()
-            .flat_map(|tp| tp.chunks.iter())
-            .flat_map(|c| c.spans.iter())
-            .find(|s| s.trace_id == 7)
+        let rescued = trace_spans(backend_send_data.get_payloads())
+            .find(|span| span.trace_id == 7)
             .expect("rescued trace present");
         assert!(
             rescued.metrics.contains_key("_dd.errors_sr"),
@@ -1607,10 +1599,21 @@ mod tests {
         };
         span.metrics
             .insert("_sampling_priority_v1".to_string(), priority);
-        if let Some(dm) = decision_maker {
-            span.meta.insert("_dd.p.dm".to_string(), dm.to_string());
+        if let Some(decision_maker) = decision_maker {
+            span.meta
+                .insert("_dd.p.dm".to_string(), decision_maker.to_string());
         }
         span
+    }
+
+    fn trace_spans(collection: &TracerPayloadCollection) -> impl Iterator<Item = &pb::Span> {
+        let TracerPayloadCollection::V07(payloads) = collection else {
+            panic!("expected V07");
+        };
+        payloads
+            .iter()
+            .flat_map(|payload| &payload.chunks)
+            .flat_map(|chunk| &chunk.spans)
     }
 
     /// Runs one trace through the processor and returns (backend kept trace ids,
@@ -1634,29 +1637,13 @@ mod tests {
         let kept = payload_info
             .map(|info| {
                 let backend_send_data = info.builder.build();
-                let TracerPayloadCollection::V07(backend_payloads) =
-                    backend_send_data.get_payloads()
-                else {
-                    panic!("expected V07");
-                };
-                backend_payloads
-                    .iter()
-                    .flat_map(|tp| tp.chunks.iter())
-                    .flat_map(|c| c.spans.iter())
-                    .map(|s| s.trace_id)
+                trace_spans(backend_send_data.get_payloads())
+                    .map(|span| span.trace_id)
                     .collect()
             })
             .unwrap_or_default();
 
-        let TracerPayloadCollection::V07(stats_payloads) = stats else {
-            panic!("expected V07");
-        };
-        let in_stats = stats_payloads
-            .iter()
-            .flat_map(|tp| tp.chunks.iter())
-            .flat_map(|c| c.spans.iter())
-            .map(|s| s.trace_id)
-            .collect();
+        let in_stats = trace_spans(&stats).map(|span| span.trace_id).collect();
         (kept, in_stats)
     }
 
