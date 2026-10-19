@@ -77,9 +77,10 @@ docker_build() {
         --build-arg DEBUG="${DEBUG}" \
         . -o $BINARY_PATH
 
-    # Copy the compiled binary to the target directory with the expected name
-    # If it already exist, it will be replaced
+    # Copy the compiled binaries to the target directory with the expected names
+    # If they already exist, they will be replaced
     cp $BINARY_PATH/bottlecap $TARGET_DIR/bottlecap-$FILE_SUFFIX
+    cp $BINARY_PATH/launcher $TARGET_DIR/launcher-$FILE_SUFFIX
 }
 
 docker_build $ARCHITECTURE $COMPILE_IMAGE

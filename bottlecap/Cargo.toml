@@ -123,6 +123,9 @@ flate2 = { version = "1.1", default-features = false, features = ["rust_backend"
 [[bin]]
 name = "bottlecap"
 
+[[bin]]
+name = "launcher"
+
 [profile.dev]
 debug = true   # same as debuginfo=2 and no stripping
 strip = false

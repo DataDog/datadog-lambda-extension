@@ -6,10 +6,11 @@ RUN apt-get update && apt-get install -y zip binutils
 RUN mkdir /extensions
 WORKDIR /extensions
 
-RUN --mount=type=bind,source=.binaries/bottlecap-${FILE_SUFFIX},target=/extensions/datadog-agent \
+RUN --mount=type=bind,source=.binaries/launcher-${FILE_SUFFIX},target=/extensions/datadog-agent \
+    --mount=type=bind,source=.binaries/bottlecap-${FILE_SUFFIX},target=/datadog-agent \
     --mount=type=bind,source=./scripts/datadog_wrapper,target=/datadog_wrapper,rw \
     chmod +x /datadog_wrapper && \
-    zip -r datadog_extension.zip /extensions /datadog_wrapper
+    zip -r datadog_extension.zip /extensions /datadog-agent /datadog_wrapper
 
 # Keep the smallest possible docker image
 FROM scratch

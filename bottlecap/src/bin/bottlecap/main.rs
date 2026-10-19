@@ -157,13 +157,18 @@ async fn main() -> anyhow::Result<()> {
     let managed_instance_mode = aws_config.is_managed_instance_mode();
     let response = tokio::task::spawn(async move {
         let step_start_time = Instant::now();
-        let response = extension::register(
-            &cloned_client,
-            &runtime_api,
-            extension::EXTENSION_NAME,
-            managed_instance_mode,
-        )
-        .await;
+        let response = match extension::launcher_registration() {
+            Some(registration) => Ok(registration),
+            None => {
+                extension::register(
+                    &cloned_client,
+                    &runtime_api,
+                    extension::EXTENSION_NAME,
+                    managed_instance_mode,
+                )
+                .await
+            }
+        };
         (response, elapsed_ms(step_start_time))
     });
     // First load the AWS configuration
