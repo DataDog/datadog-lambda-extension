@@ -66,14 +66,14 @@ impl StatsComputedBy {
 pub const ERROR_RARE_SAMPLE_TRACER_DROP: &str = "error_rare_sample_tracer_drop";
 
 /// Span meta and chunk tag carrying which party made the sampling decision.
+/// "sampling mechanism" aka "decision maker"
 const DECISION_MAKER_TAG: &str = "_dd.p.dm";
 
-/// Decision maker value meaning the tracer dropped the trace manually
+/// Sampling mechanism value meaning the tracer dropped the trace manually
 /// (Go agent `manualSampling`).
 const MANUAL_SAMPLING_DECISION_MAKER: &str = "-4";
 
-/// Sampling priority for a tracer's explicit user (manual) drop. libdd's
-/// `SamplerPriority` has no variant for it.
+/// Sampling priority for a tracer's explicit user (manual) drop.
 const USER_DROP_PRIORITY: i32 = -1;
 
 /// Returns true when `config.apm_features` contains
