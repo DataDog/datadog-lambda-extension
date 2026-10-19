@@ -124,8 +124,8 @@ impl TelemetryListener {
 
         let mut telemetry_events: Vec<TelemetryEvent> = match serde_json::from_slice(&body) {
             Ok(events) => events,
-            // The Telemetry API splits an oversized record across two POSTs, and neither half
-            // parses alone. See `stitch`.
+            // Lambda cuts a long log line into pieces, and a payload that holds a piece does not
+            // parse. See `stitch`.
             Err(e) => match state.fragments.stitch(&body) {
                 Stitch::Complete(events) => {
                     debug!(
