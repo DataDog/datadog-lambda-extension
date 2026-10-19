@@ -14,5 +14,21 @@
     "@opentelemetry/sdk-trace-base": "^1.28.0",
     "@opentelemetry/sdk-trace-node": "^1.28.0",
     "@opentelemetry/semantic-conventions": "^1.28.0"
+  },
+  "overrides": {
+    "@opentelemetry/exporter-trace-otlp-grpc": {
+      "@grpc/grpc-js": "^1.14.6",
+      "@opentelemetry/otlp-grpc-exporter-base": {
+        "@grpc/grpc-js": "^1.14.6"
+      }
+    },
+    "@opentelemetry/sdk-node": {
+      "@opentelemetry/exporter-logs-otlp-grpc": {
+        "@grpc/grpc-js": "^1.14.6",
+        "@opentelemetry/otlp-grpc-exporter-base": {
+          "@grpc/grpc-js": "^1.14.6"
+        }
+      }
+    }
   }
 }
