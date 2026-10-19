@@ -1874,7 +1874,7 @@ mod tests {
         }
     }
 
-    /// Single-span trace chunk with an optional decision maker in span meta.
+    /// Builds a trace chunk for decision-maker promotion tests.
     fn dm_chunk(spans: Vec<pb::Span>, chunk_tags: HashMap<String, String>) -> pb::TraceChunk {
         pb::TraceChunk {
             priority: -1,
@@ -1958,10 +1958,10 @@ mod tests {
     #[test]
     fn test_decision_maker_first_span_in_input_order_wins() {
         let mut processor = create_chunk_processor(Arc::new(Config::default()));
-        let mut root = dm_span(1, Some("-4"));
-        root.parent_id = 2;
-        let child = dm_span(2, Some("-3"));
-        let mut chunk = dm_chunk(vec![root, child], HashMap::new());
+        let mut child = dm_span(1, Some("-4"));
+        child.parent_id = 2;
+        let root = dm_span(2, Some("-3"));
+        let mut chunk = dm_chunk(vec![child, root], HashMap::new());
 
         processor.process(&mut chunk, 1);
 
@@ -1976,9 +1976,9 @@ mod tests {
     #[test]
     fn test_decision_maker_promoted_from_child_span() {
         let mut processor = create_chunk_processor(Arc::new(Config::default()));
-        let mut root = dm_span(1, None);
-        root.parent_id = 2;
-        let child = dm_span(2, Some("-4"));
+        let root = dm_span(1, None);
+        let mut child = dm_span(2, Some("-4"));
+        child.parent_id = 1;
         let mut chunk = dm_chunk(vec![root, child], HashMap::new());
 
         processor.process(&mut chunk, 0);
@@ -2020,9 +2020,8 @@ mod tests {
 
         processor.process(&mut chunk, 0);
 
-        assert_eq!(
-            chunk.spans.iter().filter(|s| s.span_id == 2).count(),
-            0,
+        assert!(
+            !chunk.spans.iter().any(|s| s.span_id == 2),
             "the runtime span must have been filtered out"
         );
         assert_eq!(
