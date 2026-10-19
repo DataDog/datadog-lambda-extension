@@ -756,10 +756,7 @@ mod lambda_config_tests {
             jail.set_env("DD_APM_FEATURES", "error_rare_sample_tracer_drop");
             Ok(())
         });
-        assert_eq!(
-            config.apm_features,
-            vec!["error_rare_sample_tracer_drop".to_string()]
-        );
+        assert_eq!(config.apm_features, ["error_rare_sample_tracer_drop"]);
         assert!(crate::traces::trace_processor::error_rare_sample_tracer_drop_enabled(&config));
         // The feature only widens rescue eligibility; enabling it must not
         // enable the sampler.
@@ -777,10 +774,7 @@ mod lambda_config_tests {
         });
         assert_eq!(
             config.apm_features,
-            vec![
-                "some_other_feature".to_string(),
-                "error_rare_sample_tracer_drop".to_string()
-            ]
+            ["some_other_feature", "error_rare_sample_tracer_drop"]
         );
         assert!(crate::traces::trace_processor::error_rare_sample_tracer_drop_enabled(&config));
     }

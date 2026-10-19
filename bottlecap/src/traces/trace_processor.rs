@@ -1681,8 +1681,7 @@ mod tests {
         let mut child = make_tracer_drop_span(7, -1.0, 1, Some("-4"));
         child.span_id = 2;
         child.parent_id = 1;
-        let (kept, _in_stats) =
-            run_single_trace(&processor, &config, tags_provider, vec![root, child]);
+        let (kept, _) = run_single_trace(&processor, &config, tags_provider, vec![root, child]);
 
         assert!(
             !kept.contains(&7),
@@ -1699,7 +1698,7 @@ mod tests {
             create_test_processor(&config, enabled_error_sampler(), true);
 
         let trace = vec![make_tracer_drop_span(7, -1.0, 1, Some("-3"))];
-        let (kept, _in_stats) = run_single_trace(&processor, &config, tags_provider, trace);
+        let (kept, _) = run_single_trace(&processor, &config, tags_provider, trace);
 
         assert!(
             kept.contains(&7),
@@ -1716,7 +1715,7 @@ mod tests {
             create_test_processor(&config, enabled_error_sampler(), true);
 
         let trace = vec![make_tracer_drop_span(7, -2.0, 1, Some("-4"))];
-        let (kept, _in_stats) = run_single_trace(&processor, &config, tags_provider, trace);
+        let (kept, _) = run_single_trace(&processor, &config, tags_provider, trace);
 
         assert!(
             kept.contains(&7),
@@ -1737,8 +1736,7 @@ mod tests {
             root.span_id = 1;
             let mut child = make_tracer_drop_span(7, -1.0, 0, Some(second_dm));
             child.span_id = 2;
-            let (kept, _in_stats) =
-                run_single_trace(&processor, &config, tags_provider, vec![root, child]);
+            let (kept, _) = run_single_trace(&processor, &config, tags_provider, vec![root, child]);
 
             assert_eq!(
                 kept.contains(&7),
@@ -1775,7 +1773,7 @@ mod tests {
             create_test_processor(&config, new_error_sampler(false), true);
 
         let trace = vec![make_tracer_drop_span(7, -1.0, 1, None)];
-        let (kept, _in_stats) = run_single_trace(&processor, &config, tags_provider, trace);
+        let (kept, _) = run_single_trace(&processor, &config, tags_provider, trace);
 
         assert!(
             !kept.contains(&7),
