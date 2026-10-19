@@ -428,11 +428,28 @@ impl LambdaProcessor {
                             message = format!("{message} Init Duration: {init_duration_ms:.2} ms");
                         }
 
-                        let result_status = if status == Status::Timeout {
-                            message.push_str(" Status: timeout");
-                            Some("error".to_string())
-                        } else {
-                            None
+                        // Match CloudWatch REPORT status suffixes so non-success outcomes
+                        // remain visible when START/END lines are excluded.
+                        let result_status = match status {
+                            Status::Timeout => {
+                                message.push_str(" Status: timeout");
+                                Some("error".to_string())
+                            }
+                            Status::Error => {
+                                message.push_str(" Status: error");
+                                if let Some(error_type) = error_type.as_ref() {
+                                    let _ = write!(message, " Error Type: {error_type}");
+                                }
+                                Some("error".to_string())
+                            }
+                            Status::Failure => {
+                                message.push_str(" Status: failure");
+                                if let Some(error_type) = error_type.as_ref() {
+                                    let _ = write!(message, " Error Type: {error_type}");
+                                }
+                                Some("error".to_string())
+                            }
+                            Status::Success => None,
                         };
 
                         Ok(Message::new(
@@ -1122,6 +1139,68 @@ mod tests {
             },
             Message {
                     message: "REPORT RequestId: test-request-id Duration: 3000.00 ms Runtime Duration: 0.00 ms Post Runtime Duration: 0.00 ms Billed Duration: 3000 ms Memory Size: 256 MB Max Memory Used: 64 MB Status: timeout".to_string(),
+                    lambda: Lambda {
+                        arn: "test-arn".to_string(),
+                        request_id: Some("test-request-id".to_string()),
+                    ..Lambda::default()
+                    },
+                    timestamp: 1_673_061_827_000,
+                    status: "error".to_string(),
+                },
+        ),
+
+        // platform report - OnDemand error
+        platform_report_error: (
+            &TelemetryEvent {
+                time: Utc.with_ymd_and_hms(2023, 1, 7, 3, 23, 47).unwrap(),
+                record: TelemetryRecord::PlatformReport {
+                    error_type: Some("Runtime.ExitError".to_string()),
+                    status: Status::Error,
+                    request_id: "test-request-id".to_string(),
+                    metrics: ReportMetrics::OnDemand(OnDemandReportMetrics {
+                        duration_ms: 100.0,
+                        billed_duration_ms: 100,
+                        memory_size_mb: 256,
+                        max_memory_used_mb: 64,
+                        init_duration_ms: None,
+                        restore_duration_ms: None
+                    }),
+                    spans: None,
+                }
+            },
+            Message {
+                    message: "REPORT RequestId: test-request-id Duration: 100.00 ms Runtime Duration: 0.00 ms Post Runtime Duration: 0.00 ms Billed Duration: 100 ms Memory Size: 256 MB Max Memory Used: 64 MB Status: error Error Type: Runtime.ExitError".to_string(),
+                    lambda: Lambda {
+                        arn: "test-arn".to_string(),
+                        request_id: Some("test-request-id".to_string()),
+                    ..Lambda::default()
+                    },
+                    timestamp: 1_673_061_827_000,
+                    status: "error".to_string(),
+                },
+        ),
+
+        // platform report - OnDemand failure
+        platform_report_failure: (
+            &TelemetryEvent {
+                time: Utc.with_ymd_and_hms(2023, 1, 7, 3, 23, 47).unwrap(),
+                record: TelemetryRecord::PlatformReport {
+                    error_type: Some("Runtime.Unknown".to_string()),
+                    status: Status::Failure,
+                    request_id: "test-request-id".to_string(),
+                    metrics: ReportMetrics::OnDemand(OnDemandReportMetrics {
+                        duration_ms: 100.0,
+                        billed_duration_ms: 100,
+                        memory_size_mb: 256,
+                        max_memory_used_mb: 64,
+                        init_duration_ms: None,
+                        restore_duration_ms: None
+                    }),
+                    spans: None,
+                }
+            },
+            Message {
+                    message: "REPORT RequestId: test-request-id Duration: 100.00 ms Runtime Duration: 0.00 ms Post Runtime Duration: 0.00 ms Billed Duration: 100 ms Memory Size: 256 MB Max Memory Used: 64 MB Status: failure Error Type: Runtime.Unknown".to_string(),
                     lambda: Lambda {
                         arn: "test-arn".to_string(),
                         request_id: Some("test-request-id".to_string()),
