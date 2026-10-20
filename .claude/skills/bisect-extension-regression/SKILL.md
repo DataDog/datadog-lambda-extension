@@ -1,0 +1,162 @@
+---
+name: bisect-extension-regression
+description: Find the release and then the commit that made the extension's layer size, init duration, duration or post-runtime duration larger. Use it when the release dashboard or a measurement shows a regression between two versions.
+---
+
+# Find the change that caused a regression
+
+This skill uses two other skills:
+
+- `check-extension-overhead` gives the numbers of released versions.
+- `measure-extension-layer` measures layers in the sandbox account. It has `layer_size.py`,
+  `measure.py` and `summarize.py`, which this skill calls.
+
+## 1. Define the regression
+
+Write down these facts before you start:
+
+| Fact | Example |
+| --- | --- |
+| Metric | Init duration overhead |
+| Good version and bad version | `v99` and `v101` |
+| Size of the change | +15 ms |
+| Runtime, architecture, FIPS | Python, `arm64`, not FIPS |
+
+If you do not know the versions, get them from the time series of the release dashboard with
+`check-extension-overhead`.
+
+## 2. Check that the change follows the version, not a date
+
+A change in the dashboard can come from outside the extension, for example from the Datadog
+intake or from AWS. Before you measure or build anything, check when the change started. Query
+the metric through the logged-in browser, as in `check-extension-overhead`, in steps of 3 hours.
+Compare these series:
+
+| Series | Filter | What it tells you |
+| --- | --- | --- |
+| The bad version | `env:prod,extension_version:<bad>` | When the change started |
+| The good version | `env:prod,extension_version:<good>` | The level before the change |
+| Dev functions | `env:dev`, by `extension_version` | Dev functions use dev layers, with their own version numbers. Find a version that did not change at that time. |
+| Container functions | `extension_version:N/A`, `runtime:container-rust-alpine` | Not a control. Their image uses the tag `latest-alpine`, so they also get new releases. |
+
+The change comes from the bad version only if both of these are true:
+
+- It starts when the functions change to the bad version.
+- It does not start at the same time in functions whose extension did not change.
+
+If not, stop. Report the time of the change and the series that show it. Do not bisect.
+
+Example: post-runtime duration of `traffic:1min` was 76 ms for v99 and 86 ms for v100. But v100
+was at 75 to 81 ms for 4 days after its deploy on 2026-09-16. The change started at about
+2026-09-20 12:00 UTC. At that time, dev functions on dev version 13 had the same step.
+
+## 3. Reproduce it with the released layers
+
+Measure the good and the bad release in one run:
+
+```sh
+aws-vault exec sso-serverless-sandbox-account-admin -- python3 .claude/skills/measure-extension-layer/scripts/measure.py \
+  --out /tmp/extension-perf/repro -n 20 --warm 3 noext=none good=v99 bad=v101
+python3 .claude/skills/measure-extension-layer/scripts/summarize.py /tmp/extension-perf/repro --compare good bad
+```
+
+For a size regression, `layer_size.py v99 v101` is enough. Size has no noise.
+
+Measure the traffic pattern that changed. For `traffic:1min` in post-runtime duration, use
+`--warm 8 --warm-interval 60`, and read `each_warm_duration_ms`. The dashboard functions are
+`x86_64`. Use `--arch x86_64` if the change can depend on the architecture.
+
+If the 95% interval of `bad minus good` contains 0, run again with `-n 40`. If it still contains
+0, stop and report that the harness does not show the regression. Give the numbers. Do not
+bisect a change that you cannot measure.
+
+## 4. Find the release
+
+If more than one release is between good and bad, measure the releases between them in one run,
+for example `good=v99 mid=v100 bad=v101`. Released layers need no build. Continue with the first
+release that shows the regression and the release before it.
+
+## 5. Find the commit
+
+Release tags are on `main`, and `main` has no merge commits. So `git bisect` works between two
+tags. First read the list. It can show the cause:
+
+```sh
+git log --oneline v100..v101
+git diff --stat v100 v101 -- bottlecap/Cargo.lock bottlecap/Cargo.toml
+```
+
+For a size regression, look at dependency changes first. For a cold start regression, look at
+changes to the init path in `bottlecap/src/bin/bottlecap/main.rs`.
+
+To search, use a separate worktree, so that you do not change the user's checkout. Old commits
+do not have these skills, so keep the path of the scripts from the current checkout:
+
+```sh
+SKILLS="$PWD/.claude/skills"
+git worktree add --detach ../dle-bisect v100
+```
+
+The build scripts at an old commit can be different from the current ones. If a build fails,
+read `scripts/build_bottlecap_layer.sh` at that commit.
+
+Do not test commits that cannot change the binary. A commit that changes only CI, tests or docs
+is not a candidate. List the candidates with the files that each commit changes in `bottlecap/src`
+and `bottlecap/Cargo.*`.
+
+### Test many cut points in one round
+
+A build and publish took about 70 s for each commit. A measurement run takes longer, and it can
+test many layers at the same time. So build several cut points in one batch, and measure them all
+in one run:
+
+1. Choose 3 to 6 cut points that divide the candidates into groups of about the same size. Add
+   the good and the bad tag as the two ends, so that all variants come from the same build
+   process.
+2. Build and publish them. The script writes `<commit> <layer ARN>` lines to `layers.txt` in the
+   worktree:
+
+   ```sh
+   $SKILLS/bisect-extension-regression/scripts/build_layers.sh ../dle-bisect <your-name>-bisect v99 <cut1> <cut2> <cut3> v100
+   ```
+
+3. Measure all of them in one run, with one variant for each line of `layers.txt`, for example
+   `good=<arn> c1=<arn> c2=<arn> c3=<arn> bad=<arn>`. Compare each cut point with `good`.
+4. The regression is in the group after the last cut point that is near `good`. Its interval of
+   `cut minus good` contains 0. If no cut point is clearly near `good` or clearly near `bad`,
+   run again with a larger `-n`.
+5. Repeat with cut points inside that group, until one commit is left.
+
+For a size regression, build only, and run `layer_size.py --zip` after each build. Size has no
+noise, so one cut point at a time is fast enough.
+
+When you finish, remove the worktree.
+
+### Test the cause with a revert
+
+When one commit is left, revert only that commit on top of the bad tag, in the worktree. Do not
+push it. Build the bad tag and the revert in the same batch, and measure them in one run with
+the good release:
+
+```sh
+git -C ../dle-bisect checkout --detach v98
+git -C ../dle-bisect revert --no-edit <commit>
+REVERT=$(git -C ../dle-bisect rev-parse HEAD)  # the script checks out v98 first, so HEAD moves
+$SKILLS/bisect-extension-regression/scripts/build_layers.sh ../dle-bisect <your-name>-revert v98 "$REVERT"
+```
+
+The commit is the cause if `revert minus bad` shows the regression with the opposite sign, and
+the interval of `revert minus good` contains 0. Example: for v98, `revert minus v98` was
+-13.7 ms [-20.4, -6.9], and `revert minus v97` was +1.4 ms [-4.8, +7.4].
+
+## 6. Report
+
+Give these facts:
+
+- The first bad commit, with its PR.
+- The numbers that show it: `cut minus good` for the cut points on each side, with intervals and `-n`.
+- Or, if step 2 stopped the search, the time of the change and the series that show it.
+- The cause, only if you checked it in the code. Say that it is a hypothesis if you did not
+  check it.
+- The functions and layer versions that you left in the sandbox account. Clean them up as in
+  step 4 of `measure-extension-layer`.
