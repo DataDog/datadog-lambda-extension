@@ -56,6 +56,17 @@ impl Aggregator {
         // Fill the batch with logs from the messages
         for _ in 0..self.max_batch_entries_size {
             if let Some(log) = self.messages.pop_front() {
+                // A log too big for any payload, even alone with the surrounding brackets,
+                // would stay at the head of the queue forever: drop it.
+                if log.len() + 2 > self.max_content_size_bytes {
+                    warn!(
+                        "Log size exceeds the {} byte payload limit: {}, dropping it.",
+                        self.max_content_size_bytes,
+                        log.len()
+                    );
+                    continue;
+                }
+
                 // Check if the buffer will be full after adding the log
                 if self.buffer.len() + log.len() > self.max_content_size_bytes {
                     // Put the log back in the queue
@@ -227,5 +238,46 @@ mod tests {
         // I really doubt someone would make a log that is 5MB long,
         // so we never send it, but we still keep it in the queue.
         assert_eq!(aggregator.messages.len(), 1);
+    }
+
+    #[test]
+    fn test_get_batch_drops_log_too_big_for_any_payload() {
+        let mut aggregator = Aggregator::new(10, 64, 1_024);
+        aggregator.add_batch(vec![
+            "\"small\"".to_string(),
+            format!("\"{}\"", "a".repeat(100)),
+            "\"after\"".to_string(),
+        ]);
+
+        assert_eq!(aggregator.get_batch(), br#"["small","after"]"#.to_vec());
+        assert!(aggregator.messages.is_empty());
+    }
+
+    /// Dropping the first log must not end the batch early: an empty `get_batch` makes the
+    /// aggregator service stop draining while logs are still queued.
+    #[test]
+    fn test_get_batch_keeps_filling_after_dropping_the_first_log() {
+        let mut aggregator = Aggregator::new(10, 64, 1_024);
+        aggregator.add_batch(vec![
+            format!("\"{}\"", "a".repeat(100)),
+            "\"after\"".to_string(),
+        ]);
+
+        assert_eq!(aggregator.get_batch(), br#"["after"]"#.to_vec());
+    }
+
+    /// A log that exactly fills a payload with its brackets is sent; one byte more is dropped.
+    #[test]
+    fn test_get_batch_payload_size_boundary() {
+        let mut aggregator = Aggregator::new(10, 64, 1_024);
+        let largest = format!("\"{}\"", "a".repeat(60)); // 62 bytes + 2 brackets = 64
+        aggregator.add_batch(vec![largest.clone()]);
+        let batch = aggregator.get_batch();
+        assert_eq!(batch.len(), 64);
+        assert_eq!(batch, format!("[{largest}]").into_bytes());
+
+        aggregator.add_batch(vec![format!("\"{}\"", "a".repeat(61))]); // 63 + 2 = 65
+        assert!(aggregator.get_batch().is_empty());
+        assert!(aggregator.messages.is_empty());
     }
 }
