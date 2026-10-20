@@ -44,7 +44,10 @@ use bottlecap::{
         invocation::processor_service::{InvocationProcessorHandle, InvocationProcessorService},
         listener::Listener as LifecycleListener,
     },
-    logger,
+    logger::{
+        self,
+        cold_start::{ColdStartDurations, elapsed_ms},
+    },
     logs::{
         agent::LogsAgent,
         aggregator_service::{
@@ -80,7 +83,9 @@ use bottlecap::{
     },
 };
 use datadog_fips::reqwest_adapter::create_reqwest_client_builder;
-use decrypt::{resolve_additional_endpoints_secrets, resolve_secrets};
+use decrypt::{
+    has_additional_endpoints_secrets, resolve_additional_endpoints_secrets, resolve_secrets,
+};
 use dogstatsd::{
     aggregator::{
         AggregatorHandle as MetricsAggregatorHandle, AggregatorService as MetricsAggregatorService,
@@ -117,11 +122,14 @@ fn resolve_dsm_service(
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    let start_time = Instant::now();
+    let mut cold_start_durations = ColdStartDurations::new(Instant::now());
     init_ustr();
     enable_logging_subsystem();
-    let aws_config = AwsConfig::from_env(start_time);
+    cold_start_durations.enable_logging_ms = elapsed_ms(cold_start_durations.start_time);
+    let step_start_time = Instant::now();
+    let aws_config = AwsConfig::from_env(cold_start_durations.start_time);
     log_fips_status(&aws_config.region);
+    cold_start_durations.load_aws_config_ms = elapsed_ms(step_start_time);
     let version_without_next = EXTENSION_VERSION.split('-').next().unwrap_or("NA");
     debug!("Starting Datadog Extension v{version_without_next}");
 
@@ -135,32 +143,43 @@ async fn main() -> anyhow::Result<()> {
         debug!("DD_DEBUG_WAIT_FOR_ATTACH: Continuing execution...");
     }
 
+    let step_start_time = Instant::now();
     prepare_client_provider()?;
     let client = create_reqwest_client_builder()
         .map_err(|e| anyhow::anyhow!("Failed to create client builder: {e:?}"))?
         .no_proxy()
         .build()
         .map_err(|e| anyhow::anyhow!("Failed to create client: {e:?}"))?;
+    cold_start_durations.create_extensions_api_client_ms = elapsed_ms(step_start_time);
 
     let cloned_client = client.clone();
     let runtime_api = aws_config.runtime_api.clone();
     let managed_instance_mode = aws_config.is_managed_instance_mode();
     let response = tokio::task::spawn(async move {
-        extension::register(
+        let step_start_time = Instant::now();
+        let response = extension::register(
             &cloned_client,
             &runtime_api,
             extension::EXTENSION_NAME,
             managed_instance_mode,
         )
-        .await
+        .await;
+        (response, elapsed_ms(step_start_time))
     });
     // First load the AWS configuration
     let lambda_directory: String =
         env::var("LAMBDA_TASK_ROOT").unwrap_or_else(|_| "/var/task".to_string());
     let aws_config = Arc::new(aws_config);
 
+    let step_start_time = Instant::now();
     let mut lambda_config = config::get_config(Path::new(&lambda_directory));
-    resolve_additional_endpoints_secrets(&mut lambda_config, &aws_config).await;
+    cold_start_durations.load_config_ms = elapsed_ms(step_start_time);
+    if has_additional_endpoints_secrets(&lambda_config) {
+        let step_start_time = Instant::now();
+        resolve_additional_endpoints_secrets(&mut lambda_config, &aws_config).await;
+        cold_start_durations.resolve_additional_endpoint_secrets_ms =
+            Some(elapsed_ms(step_start_time));
+    }
     let config = Arc::new(lambda_config);
 
     // Build one shared reqwest::Client for metrics, logs, trace proxy flushing, and calls to
@@ -169,10 +188,13 @@ async fn main() -> anyhow::Result<()> {
     let shared_client = bottlecap::http::get_client(&config);
     let api_key_factory = create_api_key_factory(&config, &aws_config, &shared_client);
 
-    let r = response
+    let step_start_time = Instant::now();
+    let (response, register_extension_ms) = response
         .await
-        .map_err(|e| anyhow::anyhow!("Failed to join task: {e:?}"))?
-        .map_err(|e| anyhow::anyhow!("Failed to register extension: {e:?}"))?;
+        .map_err(|e| anyhow::anyhow!("Failed to join task: {e:?}"))?;
+    let r = response.map_err(|e| anyhow::anyhow!("Failed to register extension: {e:?}"))?;
+    cold_start_durations.register_extension_ms = register_extension_ms;
+    cold_start_durations.wait_for_register_ms = elapsed_ms(step_start_time);
 
     match extension_loop_active(
         Arc::clone(&aws_config),
@@ -181,7 +203,7 @@ async fn main() -> anyhow::Result<()> {
         shared_client,
         &r,
         Arc::clone(&api_key_factory),
-        start_time,
+        cold_start_durations,
     )
     .await
     {
@@ -312,7 +334,7 @@ async fn extension_loop_active(
     shared_client: reqwest::Client,
     r: &RegisterResponse,
     api_key_factory: Arc<ApiKeyFactory>,
-    start_time: Instant,
+    mut cold_start_durations: ColdStartDurations,
 ) -> anyhow::Result<()> {
     let (mut event_bus, event_bus_tx) = EventBus::run();
 
@@ -334,6 +356,7 @@ async fn extension_loop_active(
         &shared_client,
     );
 
+    let step_start_time = Instant::now();
     let (metrics_flushers, metrics_aggregator_handle, dogstatsd_cancel_token) = start_dogstatsd(
         tags_provider.clone(),
         Arc::clone(&api_key_factory),
@@ -341,6 +364,7 @@ async fn extension_loop_active(
         &shared_client,
     )
     .await;
+    cold_start_durations.start_dogstatsd_ms = elapsed_ms(step_start_time);
 
     let propagator = Arc::new(DatadogCompositePropagator::new(Arc::clone(config)));
 
@@ -406,10 +430,15 @@ async fn extension_loop_active(
     });
 
     // AppSec processor (if enabled)
+    let step_start_time = Instant::now();
     let appsec_processor = match AppSecProcessor::new(config) {
-        Ok(p) => Some(Arc::new(TokioMutex::new(p))),
+        Ok(p) => {
+            cold_start_durations.create_appsec_processor_ms = Some(elapsed_ms(step_start_time));
+            Some(Arc::new(TokioMutex::new(p)))
+        }
         Err(AppSecFeatureDisabled) => None,
         Err(e) => {
+            cold_start_durations.create_appsec_processor_ms = Some(elapsed_ms(step_start_time));
             error!(
                 "AAP | error creating App & API Protection processor, the feature will be disabled: {e}"
             );
@@ -454,6 +483,7 @@ async fn extension_loop_active(
         }
     });
 
+    let step_start_time = Instant::now();
     let telemetry_listener_cancel_token = setup_telemetry_client(
         client,
         &r.extension_id,
@@ -464,6 +494,7 @@ async fn extension_loop_active(
         aws_config.is_managed_instance_mode(),
     )
     .await?;
+    cold_start_durations.start_telemetry_listener_ms = elapsed_ms(step_start_time);
 
     let otlp_cancel_token = start_otlp_agent(
         config,
@@ -481,8 +512,13 @@ async fn extension_loop_active(
 
     debug!(
         "Datadog Next-Gen Extension ready in {:}ms",
-        start_time.elapsed().as_millis().to_string()
+        cold_start_durations
+            .start_time
+            .elapsed()
+            .as_millis()
+            .to_string()
     );
+    cold_start_durations.log();
 
     if aws_config.is_managed_instance_mode() {
         // Clone Arc references for the background flusher task
