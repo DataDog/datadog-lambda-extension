@@ -729,9 +729,8 @@ async fn additional_endpoints_receive_the_same_logs() {
     counts.assert(0, 0);
 }
 
-/// Pins a known bug on purpose (a later change fixes it): with OPW enabled, additional
-/// endpoints are posted to `https://host:port` with no path, without DD-PROTOCOL and
-/// uncompressed.
+/// With OPW enabled, only the primary goes to the worker. Additional endpoints are Datadog
+/// intakes: `/api/v2/logs`, DD-PROTOCOL, and compression per `logs_config_use_compression`.
 #[tokio::test(flavor = "current_thread")]
 async fn observability_pipelines_worker_with_additional_endpoint() {
     let (counts, _guard) = LevelCounts::install();
@@ -750,18 +749,67 @@ async fn observability_pipelines_worker_with_additional_endpoint() {
 
     let primary_requests = primary.requests();
     assert_eq!(primary_requests.len(), 1);
-    assert_eq!(primary_requests[0].path, "/opw");
-    assert_eq!(
-        primary_requests[0].json(),
-        Value::Array(h.invocation_start_logs())
-    );
+    let p = &primary_requests[0];
+    assert_eq!(p.path, "/opw");
+    assert_eq!(p.header("DD-PROTOCOL"), None);
+    assert_eq!(p.header("Content-Encoding"), None);
+    assert_eq!(p.json(), Value::Array(h.invocation_start_logs()));
     let requests = extra.requests();
     assert_eq!(requests.len(), 1);
     let r = &requests[0];
-    assert_eq!(r.path, "/");
+    assert_eq!(r.method, "POST");
+    assert_eq!(r.path, "/api/v2/logs");
+    assert_eq!(
+        header_names(r),
+        BTreeSet::from([
+            "accept".to_string(),
+            "content-encoding".to_string(),
+            "content-type".to_string(),
+            "dd-api-key".to_string(),
+            "dd-protocol".to_string()
+        ])
+    );
     assert_eq!(r.header("DD-API-KEY"), Some("extra-key-1"));
-    assert_eq!(r.header("DD-PROTOCOL"), None);
+    assert_eq!(r.header("DD-PROTOCOL"), Some("agent-json"));
     assert_eq!(r.header("Content-Type"), Some("application/json"));
+    assert_eq!(r.header("Content-Encoding"), Some("zstd"));
+    assert_eq!(r.json(), Value::Array(h.invocation_start_logs()));
+    counts.assert(0, 0);
+}
+
+/// Same as above with compression off: the additional endpoint still gets the Datadog
+/// intake path and DD-PROTOCOL, uncompressed.
+#[tokio::test(flavor = "current_thread")]
+async fn observability_pipelines_worker_with_uncompressed_additional_endpoint() {
+    let (counts, _guard) = LevelCounts::install();
+    let primary = FakeLogsIntake::start_http().await;
+    let extra = FakeLogsIntake::start_https().await;
+    let mut h = Harness::new(Config {
+        observability_pipelines_worker_logs_enabled: true,
+        observability_pipelines_worker_logs_url: format!("{}/opw", primary.base_url()),
+        logs_config_use_compression: false,
+        logs_config_additional_endpoints: vec![additional_endpoint(&extra, "extra-key-1")],
+        ..base_config(&primary)
+    });
+
+    h.send_invocation_start().await;
+    assert!(h.flush().await.is_empty());
+
+    assert_eq!(primary.requests().len(), 1);
+    let requests = extra.requests();
+    assert_eq!(requests.len(), 1);
+    let r = &requests[0];
+    assert_eq!(r.path, "/api/v2/logs");
+    assert_eq!(
+        header_names(r),
+        BTreeSet::from([
+            "accept".to_string(),
+            "content-type".to_string(),
+            "dd-api-key".to_string(),
+            "dd-protocol".to_string()
+        ])
+    );
+    assert_eq!(r.header("DD-PROTOCOL"), Some("agent-json"));
     assert_eq!(r.header("Content-Encoding"), None);
     assert_eq!(r.json(), Value::Array(h.invocation_start_logs()));
     counts.assert(0, 0);
