@@ -77,7 +77,7 @@ use bottlecap::{
     startup::build_trace_agent,
     tags::{lambda::tags::FUNCTION_ARN_KEY, provider::Provider as TagProvider},
     traces::{
-        TRACE_INTAKE_ROUTE, proxy_aggregator,
+        intake_base_url, proxy_aggregator,
         trace_agent::{IngestBarrier, RouterExtension, TRACE_AGENT_PORT},
     },
 };
@@ -391,11 +391,7 @@ fn receiver_port(value: Option<&str>) -> anyhow::Result<u16> {
 /// before appending the stats one. With `DD_APM_DD_URL` unset this
 /// reproduces the site-derived default.
 fn stats_url_from_trace_intake(apm_dd_url: &str) -> String {
-    libdd_trace_utils::config_utils::trace_stats_url_prefixed(
-        apm_dd_url
-            .trim_end_matches('/')
-            .trim_end_matches(TRACE_INTAKE_ROUTE),
-    )
+    libdd_trace_utils::config_utils::trace_stats_url_prefixed(intake_base_url(apm_dd_url))
 }
 
 /// The work `POST /flush` performs, returning `true` when payloads were lost.

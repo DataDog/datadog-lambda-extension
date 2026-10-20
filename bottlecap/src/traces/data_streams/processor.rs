@@ -21,12 +21,12 @@ use reqwest::header::{CONTENT_ENCODING, CONTENT_TYPE, HeaderMap, HeaderValue};
 use tokio::sync::Mutex as TokioMutex;
 use tracing::{debug, warn};
 
-use crate::traces::TRACE_INTAKE_ROUTE;
 use crate::traces::data_streams::aggregator::Aggregator;
 use crate::traces::data_streams::checkpoint::compute_consume_checkpoint;
 use crate::traces::data_streams::context::{
     DD_PATHWAY_CTX_BASE64_KEY, DD_PATHWAY_CTX_KEY, DsmContext,
 };
+use crate::traces::intake_base_url;
 use crate::traces::proxy_aggregator::{Aggregator as ProxyAggregator, ProxyRequest};
 
 /// gzip level used by the tracer for pipeline stats.
@@ -58,16 +58,7 @@ impl DsmProcessor {
             env,
             aggregator: Mutex::new(aggregator),
             proxy_aggregator,
-            // config.apm_dd_url is a fully-resolved trace endpoint that already
-            // ends with TRACE_INTAKE_ROUTE (e.g. ".../api/v0.2/traces"). Strip
-            // that suffix to recover the base URL before appending the DSM route;
-            // without this the target becomes .../api/v0.2/traces/api/v0.1/pipeline_stats.
-            target_url: format!(
-                "{}/api/v0.1/pipeline_stats",
-                apm_dd_url
-                    .trim_end_matches('/')
-                    .trim_end_matches(TRACE_INTAKE_ROUTE)
-            ),
+            target_url: format!("{}/api/v0.1/pipeline_stats", intake_base_url(apm_dd_url)),
         }
     }
 
