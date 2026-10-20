@@ -147,6 +147,10 @@ pub trait RouterExtension: Send + Sync {
 /// returns once every payload enqueued before the call has reached its
 /// aggregator, which makes a flush issued afterwards observe it.
 ///
+/// Each forwarder acknowledges the barrier only when its payload channel is
+/// empty. Sustained ingest can therefore keep [`wait`] pending indefinitely;
+/// callers must let ingest go quiet or bound the wait with a timeout.
+///
 /// A forwarder task exits once its payload channel closes, which happens as
 /// soon as the last payload sender is dropped: the [`TraceAgent`] itself holds
 /// two of them, so it drops them when its listener task finishes. The barrier
