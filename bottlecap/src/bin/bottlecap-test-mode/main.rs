@@ -17,6 +17,15 @@
 //! | `/info`        | GET       | trace agent                              |
 //! | `/flush`       | POST      | this binary's `FlushRouterExtension`     |
 //!
+//! `POST /flush` returns `204` on success, `502` for reported payload loss,
+//! `500` for a task failure, or `504` after a 30-second timeout. A timeout or
+//! handler cancellation (for example, when a disconnect drops the handler)
+//! aborts the flush and can discard payloads already drained from aggregators.
+//! That possible loss is not retained for later requests: a subsequent `204`
+//! does not confirm delivery of payloads from the interrupted flush. Harnesses
+//! must treat an interrupted flush as a failed run, not retry it as proof of
+//! delivery.
+//!
 //! The inherited `TraceAgent` router also serves its proxy routes (DSM,
 //! profiling, LLM observability, debugger, diagnostics, and instrumentation
 //! telemetry). They are not what this binary exists to exercise, but they
