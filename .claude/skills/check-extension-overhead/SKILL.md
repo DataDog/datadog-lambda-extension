@@ -87,7 +87,8 @@ The dashboard puts each version on its own line, so a change can look like it co
 release. It can also come from outside the extension, for example the Datadog intake or AWS.
 Before you report a regression for a version, find the time when the change started, in steps of
 3 hours. Then check whether functions whose extension did not change have the same step at the
-same time, for example `env:dev` functions that stayed on one dev version.
+same time, for example `env:dev` functions that stayed on one dev version. Step 2 of
+`bisect-extension-regression` has the details.
 
 The prod `stack:agent` functions of `traffic:1min` were all `x86_64`, on 7 runtimes, in `us-east-1`.
 
@@ -110,4 +111,4 @@ release while the layer version updater ran, so `layer_size.py` is more complete
 
 For each metric, give the value of each version that you compared and the time range. A change
 between two versions is a finding only if it is larger than the spread of the time series for
-one version.
+one version. To find the cause, use the `bisect-extension-regression` skill.
