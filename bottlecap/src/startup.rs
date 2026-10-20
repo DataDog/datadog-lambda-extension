@@ -205,8 +205,7 @@ pub fn build_trace_agent(
 /// further configure the `TraceAgent` before spawning it.
 ///
 /// Errors from `TraceAgent::start` (TCP bind failures, router-extension
-/// failures, axum serve errors) are logged and discarded; this preserves
-/// the pre-extraction behavior from `main.rs` and means the surrounding
+/// failures, axum serve errors) are logged and discarded; the surrounding
 /// pipeline keeps running with a dead trace channel. Callers that need to
 /// react to startup errors should use [`build_trace_agent`] and spawn the
 /// agent themselves.
@@ -235,9 +234,6 @@ pub fn start_trace_agent(
         None,
     );
 
-    // Log-only error handling preserved from the pre-extraction code in
-    // main.rs. See the doc comment above for callers that need reactive
-    // error handling.
     tokio::spawn(async move {
         if let Err(e) = trace_agent.start().await {
             error!("Error starting trace agent: {e:?}");
