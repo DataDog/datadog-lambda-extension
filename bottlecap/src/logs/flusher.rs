@@ -26,10 +26,14 @@ pub struct Flusher {
     endpoint: String,
     config: Arc<config::Config>,
     api_key_factory: Arc<ApiKeyFactory>,
+    /// Sends to an Observability Pipelines Worker: the endpoint is used as-is, uncompressed,
+    /// without DD-PROTOCOL. Otherwise the endpoint is a Datadog logs intake.
+    opw: bool,
     headers: OnceCell<HeaderMap>,
 }
 
 impl Flusher {
+    /// A flusher for a Datadog logs intake at `endpoint`; `/api/v2/logs` is appended.
     #[must_use]
     pub fn new(
         api_key_factory: Arc<ApiKeyFactory>,
@@ -42,8 +46,28 @@ impl Flusher {
             endpoint,
             config,
             api_key_factory,
+            opw: false,
             headers: OnceCell::new(),
         }
+    }
+
+    /// A flusher for an Observability Pipelines Worker at `url`, used as-is.
+    #[must_use]
+    pub fn new_opw(
+        api_key_factory: Arc<ApiKeyFactory>,
+        url: String,
+        config: Arc<config::Config>,
+        client: reqwest::Client,
+    ) -> Self {
+        Flusher {
+            opw: true,
+            ..Self::new(api_key_factory, url, config, client)
+        }
+    }
+
+    /// Whether this flusher sends zstd-compressed batches.
+    fn compresses(&self) -> bool {
+        self.config.logs_config_use_compression && !self.opw
     }
 
     pub async fn flush(&self, batches: Option<Arc<Vec<Vec<u8>>>>) -> Vec<reqwest::RequestBuilder> {
@@ -89,7 +113,7 @@ impl Flusher {
     }
 
     async fn create_request(&self, data: Vec<u8>, api_key: &str) -> reqwest::RequestBuilder {
-        let url = if self.config.observability_pipelines_worker_logs_enabled {
+        let url = if self.opw {
             self.endpoint.clone()
         } else {
             format!("{}/api/v2/logs", self.endpoint)
@@ -176,7 +200,7 @@ impl Flusher {
                     "DD-API-KEY",
                     api_key.parse().expect("failed to parse header"),
                 );
-                if !self.config.observability_pipelines_worker_logs_enabled {
+                if !self.opw {
                     headers.insert(
                         "DD-PROTOCOL",
                         "agent-json".parse().expect("failed to parse header"),
@@ -187,9 +211,7 @@ impl Flusher {
                     "application/json".parse().expect("failed to parse header"),
                 );
 
-                if self.config.logs_config_use_compression
-                    && !self.config.observability_pipelines_worker_logs_enabled
-                {
+                if self.compresses() {
                     headers.insert(
                         "Content-Encoding",
                         "zstd".parse().expect("failed to parse header"),
@@ -218,22 +240,26 @@ impl LogsFlusher {
     ) -> Self {
         let mut flushers = Vec::new();
 
-        let endpoint = if config.observability_pipelines_worker_logs_enabled {
+        // Create primary flusher
+        let primary = if config.observability_pipelines_worker_logs_enabled {
             if config.observability_pipelines_worker_logs_url.is_empty() {
                 error!("LOGS | Observability Pipelines Worker URL is empty");
             }
-            config.observability_pipelines_worker_logs_url.clone()
+            Flusher::new_opw(
+                Arc::clone(&api_key_factory),
+                config.observability_pipelines_worker_logs_url.clone(),
+                config.clone(),
+                client.clone(),
+            )
         } else {
-            config.logs_config_logs_dd_url.clone()
+            Flusher::new(
+                Arc::clone(&api_key_factory),
+                config.logs_config_logs_dd_url.clone(),
+                config.clone(),
+                client.clone(),
+            )
         };
-
-        // Create primary flusher
-        flushers.push(Flusher::new(
-            Arc::clone(&api_key_factory),
-            endpoint,
-            config.clone(),
-            client.clone(),
-        ));
+        flushers.push(primary);
 
         // Create flushers for additional endpoints
         for endpoint in &config.logs_config_additional_endpoints {
@@ -275,22 +301,43 @@ impl LogsFlusher {
                 );
             }
         } else {
-            let logs_batches = Arc::new({
-                match self.aggregator_handle.get_batches().await {
-                    Ok(batches) => batches
-                        .into_iter()
-                        .map(|batch| self.compress(batch))
-                        .collect(),
-                    Err(e) => {
-                        debug!("Failed to flush from aggregator: {}", e);
-                        Vec::new()
-                    }
+            let batches = match self.aggregator_handle.get_batches().await {
+                Ok(batches) => batches,
+                Err(e) => {
+                    debug!("Failed to flush from aggregator: {}", e);
+                    Vec::new()
                 }
-            });
+            };
+            let any_compress = self.flushers.iter().any(Flusher::compresses);
+            let all_compress = self.flushers.iter().all(Flusher::compresses);
+            // Compress each batch once and share it; keep the raw batches only when some
+            // flusher sends uncompressed (an OPW primary, or compression turned off).
+            let (compressed, raw) = if all_compress {
+                // Consume the raw batches so each is freed once compressed.
+                (
+                    batches
+                        .into_iter()
+                        .map(|batch| self.compress(&batch))
+                        .collect(),
+                    Vec::new(),
+                )
+            } else if any_compress {
+                (
+                    batches.iter().map(|batch| self.compress(batch)).collect(),
+                    batches,
+                )
+            } else {
+                (Vec::new(), batches)
+            };
+            let (compressed, raw) = (Arc::new(compressed), Arc::new(raw));
 
             // Send batches to each flusher
             let futures = self.flushers.iter().map(|flusher| {
-                let batches = Arc::clone(&logs_batches);
+                let batches = Arc::clone(if flusher.compresses() {
+                    &compressed
+                } else {
+                    &raw
+                });
                 let flusher = flusher.clone();
                 async move { flusher.flush(Some(batches)).await }
             });
@@ -303,18 +350,12 @@ impl LogsFlusher {
         failed_requests
     }
 
-    fn compress(&self, data: Vec<u8>) -> Vec<u8> {
-        if !self.config.logs_config_use_compression
-            || self.config.observability_pipelines_worker_logs_enabled
-        {
-            return data;
-        }
-
-        match self.encode(&data) {
+    fn compress(&self, data: &[u8]) -> Vec<u8> {
+        match self.encode(data) {
             Ok(compressed_data) => compressed_data,
             Err(e) => {
                 debug!("LOGS | Failed to compress data: {}", e);
-                data
+                data.to_vec()
             }
         }
     }
@@ -595,5 +636,38 @@ mod tests {
             "after retry exhaustion, the failed request must be returned for redrive on the next flush cycle"
         );
         mock.assert_hits(FLUSH_RETRY_COUNT);
+    }
+
+    /// An additional-endpoint flusher (`Flusher::new`) is always a Datadog intake, even when
+    /// OPW is enabled for the primary.
+    #[tokio::test]
+    async fn additional_endpoint_flusher_ignores_the_opw_setting() {
+        use crate::config::Config;
+
+        let server = MockServer::start();
+        let mock = server.mock(|when, then| {
+            when.method(POST)
+                .path("/api/v2/logs")
+                .header("DD-API-KEY", "extra-key")
+                .header("DD-PROTOCOL", "agent-json")
+                .header("Content-Encoding", "zstd");
+            then.status(202);
+        });
+        let config = Arc::new(Config {
+            observability_pipelines_worker_logs_enabled: true,
+            logs_config_use_compression: true,
+            ..Config::default()
+        });
+        let flusher = Flusher::new(
+            Arc::new(ApiKeyFactory::new("extra-key")),
+            server.url(""),
+            config,
+            reqwest::Client::new(),
+        );
+
+        let failed = flusher.flush(Some(Arc::new(vec![b"[]".to_vec()]))).await;
+
+        assert!(failed.is_empty());
+        mock.assert_hits(1);
     }
 }
