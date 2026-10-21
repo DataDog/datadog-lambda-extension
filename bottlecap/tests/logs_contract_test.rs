@@ -1191,10 +1191,10 @@ async fn log_between_1_and_5_mib_is_sent_with_one_warning() {
     counts.assert(1, 0);
 }
 
-/// Pins a known bug on purpose (a later change fixes it): a log too large for any payload
-/// stays at the head of the queue forever, so every log behind it is never sent.
+/// A log too large for any payload, even on its own, is dropped with one warning. The logs
+/// around it are still sent and nothing stays queued.
 #[tokio::test(flavor = "current_thread")]
-async fn log_over_5_mib_blocks_later_logs() {
+async fn log_over_5_mib_is_dropped_with_one_warning() {
     let (counts, _guard) = LevelCounts::install();
     let intake = FakeLogsIntake::start_http().await;
     let mut h = Harness::new(base_config(&intake));
@@ -1203,15 +1203,17 @@ async fn log_over_5_mib_blocks_later_logs() {
     h.send(&[&function_log("a".repeat(6 * MIB)), &function_log("after")])
         .await;
     assert!(h.flush().await.is_empty());
-    assert!(h.flush().await.is_empty());
 
     let actual = single_request_logs(&intake);
-    let expected = Value::Array(h.invocation_start_logs());
+    let mut expected = h.invocation_start_logs();
+    expected.push(h.log("after", Some(REQUEST_ID), TS_FUNCTION, "info"));
+    let expected = Value::Array(expected);
     assert!(
         actual == expected,
-        "only the logs queued before the huge one are sent: logs differ\n--- actual ---\n{}\n--- expected ---\n{}",
+        "logs differ\n--- actual ---\n{}\n--- expected ---\n{}",
         summarize(&actual),
         summarize(&expected)
     );
-    counts.assert(0, 0);
+    assert_eq!(h.drain_pending_batches().await, 0, "nothing stays queued");
+    counts.assert(1, 0);
 }
