@@ -1,12 +1,22 @@
-# These rustls advisories are fixed in rustls >= 0.23.45 (RUSTSEC-2026-0285) or
-# >= 0.23.46 (the other three), but those versions require aws-lc-rs >= 1.18,
-# which pulls in AWS-LC-FIPS 4.x, pending FIPS 140-3 certification. Remove these
-# ignores once a FIPS-certified aws-lc-rs is available. Trivy reports
+# RUSTSEC-2026-0285 is fixed in rustls >= 0.23.45, and RUSTSEC-2026-0346,
+# RUSTSEC-2026-0348, and RUSTSEC-2026-0349 in >= 0.23.46, but those versions
+# require aws-lc-rs >= 1.18, which pulls in AWS-LC-FIPS 4.x, pending FIPS
+# 140-3 certification. RUSTSEC-2026-0382 (rustls-webpki) is likewise only
+# patched in 0.103.16, which requires aws-lc-rs ^1.18. Remove these ignores
+# once a FIPS-certified aws-lc-rs is available. Trivy reports
 # RUSTSEC-2026-0285 as GHSA-2mjx-qc3c-rqvc, ignored in .trivyignore.yaml.
+#
+# RUSTSEC-2026-0381 (webpki-roots) is a false positive: the locked 0.26.11 is
+# a semver-trick shim whose only dependency is webpki-roots ^1 (resolved to
+# 1.0.10, which removes the distrusted emSign root), and no 0.26.x release
+# exists that updates the shim itself. It enters the lock via
+# hyper-http-proxy's rustls-tls-webpki-roots feature.
 [advisories]
 ignore = [
     "RUSTSEC-2026-0285",
     "RUSTSEC-2026-0346",
     "RUSTSEC-2026-0348",
     "RUSTSEC-2026-0349",
+    "RUSTSEC-2026-0381",
+    "RUSTSEC-2026-0382",
 ]
