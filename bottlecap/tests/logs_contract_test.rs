@@ -179,6 +179,25 @@ impl Harness {
         Self::build(config, false, factory)
     }
 
+    /// An on-demand pipeline whose API key factory reloads the key on the next read after
+    /// 1 ms, as `api_key_secret_reload_interval` does. Reads return `keys` in order; the
+    /// last key repeats.
+    fn with_reloading_api_key(config: Config, keys: &'static [&'static str]) -> Self {
+        let reads = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let resolver: dogstatsd::api_key::ApiKeyResolverFn = Arc::new(
+            move || -> std::pin::Pin<Box<dyn std::future::Future<Output = Option<String>> + Send>> {
+                let n = reads.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                let key = keys.get(n).or(keys.last()).map(|k| (*k).to_string());
+                Box::pin(async move { key })
+            },
+        );
+        let factory = Arc::new(ApiKeyFactory::new_from_resolver(
+            resolver,
+            Some(Duration::from_millis(1)),
+        ));
+        Self::build(config, false, factory)
+    }
+
     fn build(
         config: Config,
         is_managed_instance_mode: bool,
@@ -1073,6 +1092,30 @@ async fn api_key_resolution_failure_still_sends_to_additional_endpoints() {
     assert_eq!(requests[0].header("DD-API-KEY"), Some("extra-key-1"));
     assert_eq!(requests[0].json(), Value::Array(h.invocation_start_logs()));
     counts.assert(0, 1);
+}
+
+/// A reloaded API key (`api_key_secret_reload_interval`) is sent on the next flush.
+#[tokio::test(flavor = "current_thread")]
+async fn reloaded_api_key_is_used_on_the_next_flush() {
+    let (counts, _guard) = LevelCounts::install();
+    let intake = FakeLogsIntake::start_http().await;
+    let mut h = Harness::with_reloading_api_key(base_config(&intake), &["key-1", "key-2"]);
+
+    h.send_invocation_start().await;
+    assert!(h.flush().await.is_empty());
+    tokio::time::sleep(Duration::from_millis(10)).await; // past the reload interval
+    h.send(&[&function_log("after reload")]).await;
+    assert!(h.flush().await.is_empty());
+
+    let requests = intake.requests();
+    assert_eq!(requests.len(), 2);
+    assert_eq!(requests[0].header("DD-API-KEY"), Some("key-1"));
+    assert_eq!(requests[1].header("DD-API-KEY"), Some("key-2"));
+    assert_eq!(
+        requests[1].json(),
+        json!([h.log("after reload", Some(REQUEST_ID), TS_FUNCTION, "info")])
+    );
+    counts.assert(0, 0);
 }
 
 // ---------------------------------------------------------------------------------------
