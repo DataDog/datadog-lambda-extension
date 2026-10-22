@@ -552,7 +552,7 @@ async fn e2e_decision_maker_promoted_into_chunk_tags() {
     let trace_id = 0x3333_3333_3333_3333;
 
     let mut span = pb::Span {
-        service: "fake-intake-trace-service".to_string(),
+        service: "mock-intake-trace-service".to_string(),
         name: "web.request".to_string(),
         resource: "GET /fake".to_string(),
         trace_id,
@@ -601,7 +601,7 @@ fn error_sampler_span(
     decision_maker: Option<&str>,
 ) -> pb::Span {
     let mut span = pb::Span {
-        service: "fake-intake-trace-service".to_string(),
+        service: "mock-intake-trace-service".to_string(),
         name: "web.request".to_string(),
         resource: "GET /fake".to_string(),
         trace_id,
