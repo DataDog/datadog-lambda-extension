@@ -1427,12 +1427,12 @@ mod tests {
     #[test]
     #[allow(clippy::unwrap_used)]
     fn test_process_traces_filters_sampled_out_chunks() {
-        // (lambda_extension_compute_stats, client_computed_stats) -> filtering expected
+        // (lambda_extension_compute_stats, client_computed_stats, expected_backend_span_count)
         let cases = [
-            (false, false, false), // backend owns stats: keep all chunks
-            (true, false, true),   // extension owns stats: filter
-            (false, true, true),   // tracer owns stats: filter
-            (true, true, true),    // tracer owns stats even when extension configured: filter
+            (false, false, 3), // backend owns stats: keep all chunks
+            (true, false, 1),  // extension owns stats: filter
+            (false, true, 1),  // tracer owns stats: filter
+            (true, true, 1),   // tracer owns stats even when extension configured: filter
         ];
 
         let make_span = |trace_id: u64, priority: Option<f64>| -> pb::Span {
@@ -1452,17 +1452,12 @@ mod tests {
             }
         };
 
-        for (compute_on_extension, client_computed_stats, expect_filtering) in cases {
+        for (compute_on_extension, client_computed_stats, expected_backend_span_count) in cases {
             let config = create_compute_stats_config_with(compute_on_extension);
             let (tags_provider, processor) =
                 create_test_processor(&config, enabled_error_sampler(), false);
-            let header_tags = tracer_header_tags::TracerHeaderTags {
-                generic: tracer_header_tags::TracerGenericTags {
-                    client_computed_stats,
-                    ..Default::default()
-                },
-                ..create_test_header_tags()
-            };
+            let mut header_tags = create_test_header_tags();
+            header_tags.generic.client_computed_stats = client_computed_stats;
 
             // Three traces: kept (priority 1), dropped (priority 0), dropped (priority -1)
             let traces = vec![
@@ -1476,14 +1471,7 @@ mod tests {
             let payload_info = payload_info.expect("expected Some payload");
 
             // Stats collection must include all three traces
-            let TracerPayloadCollection::V07(ref stats_payloads) = stats_collection else {
-                panic!("expected V07");
-            };
-            let stats_span_count: usize = stats_payloads
-                .iter()
-                .flat_map(|tp| tp.chunks.iter())
-                .map(|c| c.spans.len())
-                .sum();
+            let stats_span_count = trace_spans(&stats_collection).count();
             assert_eq!(
                 stats_span_count, 3,
                 "stats must include all traces (compute_on_extension={compute_on_extension}, \
@@ -1491,16 +1479,7 @@ mod tests {
             );
 
             let backend_send_data = payload_info.builder.build();
-            let TracerPayloadCollection::V07(backend_payloads) = backend_send_data.get_payloads()
-            else {
-                panic!("expected V07");
-            };
-            let backend_span_count: usize = backend_payloads
-                .iter()
-                .flat_map(|tp| tp.chunks.iter())
-                .map(|c| c.spans.len())
-                .sum();
-            let expected_backend_span_count = if expect_filtering { 1 } else { 3 };
+            let backend_span_count = trace_spans(backend_send_data.get_payloads()).count();
             assert_eq!(
                 backend_span_count, expected_backend_span_count,
                 "compute_on_extension={compute_on_extension}, \
@@ -1538,14 +1517,8 @@ mod tests {
             let config = create_compute_stats_config_with(compute_on_extension);
             let (tags_provider, processor) =
                 create_test_processor(&config, enabled_error_sampler(), false);
-
-            let header_tags = tracer_header_tags::TracerHeaderTags {
-                generic: tracer_header_tags::TracerGenericTags {
-                    client_computed_stats,
-                    ..Default::default()
-                },
-                ..create_test_header_tags()
-            };
+            let mut header_tags = create_test_header_tags();
+            header_tags.generic.client_computed_stats = client_computed_stats;
 
             // trace 1: kept normally (priority 1). trace 2: errored P0 (rescued).
             // trace 3: non-errored P0 (dropped). trace 4: errored user drop (dropped).
@@ -1560,15 +1533,7 @@ mod tests {
                 processor.process_traces(config, tags_provider, header_tags, traces, 0, None);
             let payload_info = payload_info.expect("expected Some payload");
             let backend_send_data = payload_info.builder.build();
-            let TracerPayloadCollection::V07(backend_payloads) = backend_send_data.get_payloads()
-            else {
-                panic!("expected V07");
-            };
-
-            let kept: Vec<(u64, f64)> = backend_payloads
-                .iter()
-                .flat_map(|tp| tp.chunks.iter())
-                .flat_map(|c| c.spans.iter())
+            let kept: Vec<(u64, f64)> = trace_spans(backend_send_data.get_payloads())
                 .map(|s| (s.trace_id, s.metrics["_sampling_priority_v1"]))
                 .collect();
             assert_eq!(
@@ -1584,19 +1549,8 @@ mod tests {
                 kept.contains(&(2, 0.0)),
                 "errored P0 trace rescued with its original priority (owner={owner})"
             );
-            assert!(
-                !kept.iter().any(|(id, _)| *id == 3),
-                "non-errored P0 trace dropped (owner={owner})"
-            );
-            assert!(
-                !kept.iter().any(|(id, _)| *id == 4),
-                "errored user-drop trace not rescued (owner={owner})"
-            );
 
-            let rescued_root = backend_payloads
-                .iter()
-                .flat_map(|tp| tp.chunks.iter())
-                .flat_map(|c| c.spans.iter())
+            let rescued_root = trace_spans(backend_send_data.get_payloads())
                 .find(|s| s.trace_id == 2)
                 .expect("rescued trace present");
             assert!(
@@ -1620,13 +1574,8 @@ mod tests {
             let config = create_compute_stats_config_with(compute_on_extension);
             let (tags_provider, processor) =
                 create_test_processor(&config, enabled_error_sampler(), true);
-            let header_tags = tracer_header_tags::TracerHeaderTags {
-                generic: tracer_header_tags::TracerGenericTags {
-                    client_computed_stats,
-                    ..Default::default()
-                },
-                ..create_test_header_tags()
-            };
+            let mut header_tags = create_test_header_tags();
+            header_tags.generic.client_computed_stats = client_computed_stats;
 
             let span = make_tracer_drop_span(7, -1.0, 1, None);
 

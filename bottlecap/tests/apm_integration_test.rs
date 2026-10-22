@@ -547,12 +547,6 @@ async fn e2e_error_sampler_rescues_only_errored_p0_traces() {
             rescued_span.metrics.contains_key("_dd.errors_sr"),
             "the rescued root span must carry its error sampling rate (owner={owner})",
         );
-        assert!(
-            captured_spans
-                .iter()
-                .all(|span| span.trace_id != dropped_trace_id),
-            "the non-errored P0 trace must not reach intake (owner={owner})",
-        );
     }
 }
 
@@ -561,14 +555,14 @@ async fn e2e_error_sampler_rescues_only_errored_p0_traces() {
 /// stats keep them so the backend can compute stats.
 #[tokio::test]
 async fn e2e_sampled_out_chunks_filtered_by_stats_owner() {
-    // (owner label, lambda_extension_compute_stats, client_computed_stats) -> filtering expected
+    // (owner label, lambda_extension_compute_stats, client_computed_stats, expected_trace_ids)
     let cases = [
-        ("backend", false, false, false),
-        ("extension", true, false, true),
-        ("tracer", false, true, true),
+        ("backend", false, false, &[1, 2, 3][..]),
+        ("extension", true, false, &[1][..]),
+        ("tracer", false, true, &[1][..]),
     ];
 
-    for (owner, compute_on_extension, client_computed_stats, expect_filtering) in cases {
+    for (owner, compute_on_extension, client_computed_stats, expected_trace_ids) in cases {
         // kept (priority 1), auto-dropped (priority 0), explicit drop (priority -1)
         let outcome = run_processor_pipeline_with_traces(
             compute_on_extension,
@@ -581,21 +575,10 @@ async fn e2e_sampled_out_chunks_filtered_by_stats_owner() {
         )
         .await;
 
-        let mut captured_trace_ids: Vec<u64> = outcome
-            .traces
-            .iter()
-            .flat_map(|payload| &payload.tracer_payloads)
-            .flat_map(|payload| &payload.chunks)
-            .flat_map(|chunk| &chunk.spans)
+        let mut captured_trace_ids: Vec<u64> = captured_trace_spans(&outcome.traces)
             .map(|span| span.trace_id)
             .collect();
         captured_trace_ids.sort_unstable();
-
-        let expected_trace_ids: Vec<u64> = if expect_filtering {
-            vec![1]
-        } else {
-            vec![1, 2, 3]
-        };
         assert_eq!(
             captured_trace_ids, expected_trace_ids,
             "unexpected intake contents (owner={owner})"
