@@ -137,7 +137,10 @@ impl TelemetryListener {
         };
 
         for event in telemetry_events.drain(..) {
-            state.logs_tx.send(event).await.expect("infallible");
+            // The logs agent stops receiving once its shutdown drain times out.
+            if state.logs_tx.send(event).await.is_err() {
+                return (StatusCode::SERVICE_UNAVAILABLE, "Shutting down").into_response();
+            }
         }
 
         (StatusCode::OK, "OK").into_response()
@@ -202,6 +205,23 @@ mod tests {
             runtime_version: Some("nodejs:20.v22".to_string()),
             runtime_version_arn: Some("arn:aws:lambda:us-east-1::runtime:da57c20c4b965d5b75540f6865a35fc8030358e33ec44ecfed33e90901a27a72".to_string()),
         });
+    }
+
+    #[tokio::test]
+    async fn test_handle_after_receiver_dropped() {
+        let (tx, rx) = tokio::sync::mpsc::channel(1);
+        drop(rx);
+
+        let response = TelemetryListener::handle(
+            axum::extract::State(state(tx)),
+            post(r#"[{"time":"2024-04-25T17:35:59.944Z","type":"platform.initStart","record":{"initializationType":"on-demand","phase":"init"}}]"#),
+        )
+        .await;
+
+        assert_eq!(
+            response.status(),
+            axum::http::StatusCode::SERVICE_UNAVAILABLE
+        );
     }
 
     /// A split payload is held on the first POST and forwarded whole on the second.
