@@ -2,7 +2,7 @@ use crate::{
     event_bus,
     extension::telemetry::{
         events::TelemetryEvent,
-        stitch::{FragmentBuffer, Stitch, rejoin_split_that_parsed},
+        stitch::{FragmentBuffer, Stitch},
     },
     http::{extract_request_body, handler_not_found},
 };
@@ -122,8 +122,8 @@ impl TelemetryListener {
             }
         };
 
-        let mut telemetry_events = match serde_json::from_slice::<Vec<TelemetryEvent>>(&body) {
-            Ok(events) => rejoin_split_that_parsed(&body, events.len()).unwrap_or(events),
+        let mut telemetry_events: Vec<TelemetryEvent> = match serde_json::from_slice(&body) {
+            Ok(events) => events,
             // Lambda cuts a long log line into pieces, and a payload that holds a piece does not
             // parse. See `stitch`.
             Err(e) => match state.fragments.stitch(&body) {
@@ -185,19 +185,6 @@ mod tests {
             .expect("failed to build request")
     }
 
-    /// A record cut after a full 262,118-byte piece, inside the number `23`, so its payload still
-    /// parses: the next piece's envelope reads as an item of the array. Returns the payload and
-    /// the whole record.
-    fn split_that_parses() -> (String, String) {
-        let pad = "x".repeat(262_118 - r#"{"items":[{"pad":""},{"id":2"#.len());
-        let first = format!(r#"{{"items":[{{"pad":"{pad}"}},{{"id":2"#);
-        let rest = r#"3,"ok":true}],"n":5}"#;
-        let body = format!(
-            r#"[{{"time":"2026-09-03T14:29:52.929Z","type":"function","record":{first}}},{{"time":"2026-09-03T14:29:52.930Z","type":"function","record":{rest}}},{{"time":"2026-09-03T14:29:52.950Z","type":"platform.runtimeDone","record":{{"requestId":"abc123","status":"success"}}}}]"#
-        );
-        (body, format!("{first}{rest}"))
-    }
-
     #[tokio::test]
     #[allow(clippy::unwrap_used)]
     async fn test_handle() {
@@ -255,23 +242,5 @@ mod tests {
             rx.try_recv().expect("runtimeDone record").record,
             TelemetryRecord::PlatformRuntimeDone { .. }
         ));
-    }
-
-    /// A seam that happens to be valid JSON still has its pieces rejoined.
-    #[tokio::test]
-    async fn test_handle_split_payload_that_parses() {
-        let (body, record) = split_that_parses();
-        serde_json::from_str::<Vec<TelemetryEvent>>(&body).expect("the seam parses");
-
-        let (tx, mut rx) = tokio::sync::mpsc::channel(2);
-        let response =
-            TelemetryListener::handle(axum::extract::State(state(tx)), post(&body)).await;
-        assert_eq!(response.status(), StatusCode::OK);
-
-        let record = serde_json::from_str(&record).expect("valid record");
-        assert_eq!(
-            rx.try_recv().expect("function record").record,
-            TelemetryRecord::Function(record)
-        );
     }
 }

@@ -65,10 +65,6 @@ const MAX_ENVELOPE_BYTES: usize = 128;
 /// Bounds the re-parsing of one record: a 4 MiB payload of 256 KiB pieces has 16 seams.
 const MAX_SEAMS: usize = 64;
 
-/// Lambda cuts a long log line at 262,118 bytes (256 KiB less 26 bytes of per-event overhead), so
-/// a split record's first piece is at least this long, with a margin.
-const MIN_FIRST_PIECE_BYTES: usize = 255 * 1024;
-
 /// What came of pairing an unparseable body with a held fragment.
 #[derive(Debug)]
 pub(crate) enum Stitch {
@@ -126,7 +122,7 @@ fn parse_or_hold(slot: &mut Option<Fragment>, mut body: Vec<u8>) -> Stitch {
         Err(_) => {}
     }
 
-    if drop_seams(&mut body, 0) && body.len() <= MAX_FRAGMENT_BYTES {
+    if drop_seams(&mut body) && body.len() <= MAX_FRAGMENT_BYTES {
         *slot = Some(Fragment {
             body,
             received: Instant::now(),
@@ -134,21 +130,6 @@ fn parse_or_hold(slot: &mut Option<Fragment>, mut body: Vec<u8>) -> Stitch {
         return Stitch::Pending;
     }
     serde_json::from_slice(&body).map_or(Stitch::Discarded, Stitch::Complete)
-}
-
-/// Rejoins a split record whose payload parsed anyway: a cut inside a number in an array of
-/// objects leaves valid JSON, with the next piece's envelope read as part of the record.
-pub(crate) fn rejoin_split_that_parsed(body: &[u8], parsed: usize) -> Option<Vec<TelemetryEvent>> {
-    if body.len() < MIN_FIRST_PIECE_BYTES || split_events(body)?.len() <= parsed {
-        return None;
-    }
-    let mut rebuilt = body.to_vec();
-    drop_seams(&mut rebuilt, MIN_FIRST_PIECE_BYTES);
-    // Dropping a seam shortens the payload; if it didn't, there was nothing to rejoin.
-    if rebuilt.len() == body.len() {
-        return None;
-    }
-    serde_json::from_slice(&rebuilt).ok()
 }
 
 /// The leading half of a split payload.
@@ -193,9 +174,8 @@ fn find(haystack: &[u8], needle: &[u8]) -> Option<usize> {
 /// hold for the rest.
 ///
 /// A cut record continues in the next event of its type. A whole event of another type in
-/// between, such as an extension log line, is moved ahead of it. A record only counts as cut if
-/// its first piece is at least `min_first_piece` bytes.
-fn drop_seams(body: &mut Vec<u8>, min_first_piece: usize) -> bool {
+/// between, such as an extension log line, is moved ahead of it.
+fn drop_seams(body: &mut Vec<u8>) -> bool {
     let Some(events) = split_events(body) else {
         return false;
     };
@@ -208,9 +188,7 @@ fn drop_seams(body: &mut Vec<u8>, min_first_piece: usize) -> bool {
         match &mut cut {
             None => match parse_record(event.value) {
                 Record::Whole => push_event(&mut joined, event.envelope, event.value),
-                Record::Cut if event.kind.is_some() && event.value.len() >= min_first_piece => {
-                    cut = Some((event, event.value.to_vec()));
-                }
+                Record::Cut if event.kind.is_some() => cut = Some((event, event.value.to_vec())),
                 _ => return false,
             },
             Some((record, _)) if event.kind != record.kind => {
@@ -610,18 +588,6 @@ mod tests {
             events[1].record,
             TelemetryRecord::Function(serde_json::json!({"message": "AABB"}))
         );
-    }
-
-    /// A log line can hold telemetry-shaped JSON as data. In a payload that parses, that's only
-    /// taken for a split record after a full first piece.
-    #[test]
-    fn leaves_telemetry_shaped_data_alone_in_a_payload_that_parses() {
-        let filler = vec![piece("900", &format!(r#""{}""#, "y".repeat(1024))); 256].join(",");
-        let nested = r#"{"events":[{"time":"2026-09-03T14:29:52.900Z","type":"function","record":1},{"time":"2026-09-03T14:29:52.901Z","type":"function","record":2}]}"#;
-        let body = format!("[{filler},{},{RUNTIME_DONE}]", piece("929", nested));
-
-        let events: Vec<TelemetryEvent> = serde_json::from_str(&body).expect("valid payload");
-        assert!(rejoin_split_that_parsed(body.as_bytes(), events.len()).is_none());
     }
 
     #[test]
