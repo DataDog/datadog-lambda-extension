@@ -384,7 +384,7 @@ impl LambdaProcessor {
                                     )
                                 )
                             }
-                            _ => (
+                            Status::Success => (
                                 "info",
                                 format!(
                                     "REPORT RequestId: {} Runtime Duration: {:.2} ms",
