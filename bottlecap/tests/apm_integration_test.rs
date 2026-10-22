@@ -334,6 +334,18 @@ async fn run_processor_pipeline_with_traces(
     client_computed_stats: bool,
     traces: Vec<Vec<pb::Span>>,
 ) -> PipelineOutcome {
+    run_processor_pipeline_with_settings(compute_on_extension, client_computed_stats, false, traces)
+        .await
+}
+
+/// Like [`run_processor_pipeline_with_traces`], but also controls whether the
+/// `error_rare_sample_tracer_drop` APM feature is enabled on the processor.
+async fn run_processor_pipeline_with_settings(
+    compute_on_extension: bool,
+    client_computed_stats: bool,
+    error_rare_sample_tracer_drop: bool,
+    traces: Vec<Vec<pb::Span>>,
+) -> PipelineOutcome {
     let fake_intake = FakeIntake::start().await;
 
     let config = Arc::new(Config {
@@ -366,6 +378,7 @@ async fn run_processor_pipeline_with_traces(
                 ObfuscationConfig::new().expect("Failed to create ObfuscationConfig"),
             ),
             error_sampler: new_error_sampler(true),
+            error_rare_sample_tracer_drop,
         }),
         trace_tx,
         stats_generator: Arc::new(StatsGenerator::new(concentrator_handle.clone())),
@@ -474,11 +487,7 @@ async fn run_processor_pipeline(
 const COMPUTE_STATS_KEY: &str = "_dd.compute_stats";
 
 fn captured_compute_stats(traces: &[pb::AgentPayload]) -> Option<String> {
-    let span = traces
-        .iter()
-        .flat_map(|p| &p.tracer_payloads)
-        .flat_map(|tp| &tp.chunks)
-        .flat_map(|c| &c.spans)
+    let span = captured_trace_spans(traces)
         .find(|s| s.name == "web.request")
         .expect("web.request span should be present");
     span.meta.get(COMPUTE_STATS_KEY).cloned()
@@ -518,13 +527,7 @@ async fn e2e_error_sampler_rescues_only_errored_p0_traces() {
     )
     .await;
 
-    let captured_spans: Vec<&pb::Span> = outcome
-        .traces
-        .iter()
-        .flat_map(|payload| &payload.tracer_payloads)
-        .flat_map(|payload| &payload.chunks)
-        .flat_map(|chunk| &chunk.spans)
-        .collect();
+    let captured_spans: Vec<&pb::Span> = captured_trace_spans(&outcome.traces).collect();
     assert_eq!(
         captured_spans.len(),
         1,
@@ -593,6 +596,128 @@ async fn e2e_decision_maker_promoted_into_chunk_tags() {
             .map(String::as_str),
         Some("-4"),
         "the source span meta must be left intact"
+    );
+}
+
+fn error_sampler_span(
+    trace_id: u64,
+    priority: f64,
+    error: i32,
+    decision_maker: Option<&str>,
+) -> pb::Span {
+    let mut span = pb::Span {
+        service: "fake-intake-trace-service".to_string(),
+        name: "web.request".to_string(),
+        resource: "GET /fake".to_string(),
+        trace_id,
+        span_id: trace_id,
+        parent_id: 0,
+        start: STATS_SPAN_START_NS,
+        duration: 5_000_000,
+        error,
+        r#type: "web".to_string(),
+        ..pb::Span::default()
+    };
+    span.metrics.insert("_top_level".to_string(), 1.0);
+    span.metrics
+        .insert("_sampling_priority_v1".to_string(), priority);
+    if let Some(decision_maker) = decision_maker {
+        span.meta
+            .insert("_dd.p.dm".to_string(), decision_maker.to_string());
+    }
+    span
+}
+
+fn captured_trace_spans(traces: &[pb::AgentPayload]) -> impl Iterator<Item = &pb::Span> {
+    traces
+        .iter()
+        .flat_map(|payload| &payload.tracer_payloads)
+        .flat_map(|payload| &payload.chunks)
+        .flat_map(|chunk| &chunk.spans)
+}
+
+/// APMSVLS-674: with `error_rare_sample_tracer_drop` enabled, an errored tracer
+/// rule drop (priority -1, no decision maker) is rescued and reaches the intake
+/// with `_dd.errors_sr`, while an errored manual drop (decision maker "-4") and
+/// a nonerrored drop are excluded. Dropped inputs remain represented in stats.
+#[tokio::test]
+async fn e2e_error_rare_sample_tracer_drop_rescues_tracer_drops_selectively() {
+    let rescued_trace_id = 1; // errored tracer rule drop
+    let manual_drop_trace_id = 2; // errored manual tracer drop
+    let nonerrored_trace_id = 3; // nonerrored tracer rule drop
+    let kept_trace_id = 4; // normal priority-1 trace
+
+    let outcome = run_processor_pipeline_with_settings(
+        true,
+        false,
+        true,
+        vec![
+            vec![error_sampler_span(rescued_trace_id, -1.0, 1, None)],
+            vec![error_sampler_span(
+                manual_drop_trace_id,
+                -1.0,
+                1,
+                Some("-4"),
+            )],
+            vec![error_sampler_span(nonerrored_trace_id, -1.0, 0, None)],
+            vec![error_sampler_span(kept_trace_id, 1.0, 0, None)],
+        ],
+    )
+    .await;
+
+    let captured_spans: Vec<_> = captured_trace_spans(&outcome.traces).collect();
+    assert_eq!(
+        captured_spans.len(),
+        2,
+        "only the rescued tracer drop and the normally kept trace reach intake"
+    );
+    assert!(
+        captured_spans
+            .iter()
+            .any(|span| span.trace_id == kept_trace_id),
+        "normally kept trace must reach intake"
+    );
+
+    let rescued_root = captured_spans
+        .iter()
+        .find(|span| span.trace_id == rescued_trace_id)
+        .expect("rescued trace present");
+    assert!(
+        rescued_root.metrics.contains_key("_dd.errors_sr"),
+        "the rescued root span must carry its error sampling rate",
+    );
+
+    // Dropped inputs must still be accounted for in stats: four hits, two of
+    // them errored.
+    let grouped = captured_grouped_stats(&outcome.stats);
+    let total_hits: u64 = grouped.iter().map(|g| g.hits).sum();
+    let total_errors: u64 = grouped.iter().map(|g| g.errors).sum();
+    assert_eq!(total_hits, 4, "all traces must be represented in stats");
+    assert_eq!(total_errors, 2, "both errored traces must be counted");
+}
+
+/// APMSVLS-674 control: with the feature disabled (shipping default), the
+/// errored tracer rule drop is not rescued.
+#[tokio::test]
+async fn e2e_error_rare_sample_tracer_drop_feature_off_leaves_tracer_drops_dropped() {
+    let outcome = run_processor_pipeline_with_settings(
+        true,
+        false,
+        false,
+        vec![
+            vec![error_sampler_span(1, -1.0, 1, None)], // errored tracer rule drop
+            vec![error_sampler_span(4, 1.0, 0, None)],  // normally kept trace
+        ],
+    )
+    .await;
+
+    let captured_trace_ids: Vec<u64> = captured_trace_spans(&outcome.traces)
+        .map(|span| span.trace_id)
+        .collect();
+    assert_eq!(
+        captured_trace_ids,
+        vec![4],
+        "with the feature off, only the normally kept trace reaches intake"
     );
 }
 
