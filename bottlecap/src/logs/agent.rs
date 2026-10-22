@@ -1,5 +1,5 @@
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 use tokio::sync::mpsc::{self, Sender};
 use tokio_util::sync::CancellationToken;
 use tracing::debug;
@@ -10,7 +10,8 @@ use crate::logs::{aggregator_service::AggregatorHandle, processor::LogsProcessor
 use crate::tags;
 use crate::{LAMBDA_RUNTIME_SLUG, config};
 
-const DRAIN_LOG_INTERVAL: Duration = Duration::from_millis(100);
+/// Upper bound on waiting for the Telemetry API listener to close the channel at shutdown.
+const DRAIN_TIMEOUT: Duration = Duration::from_millis(250);
 
 use crate::logs::lambda::DurableContextUpdate;
 
@@ -20,6 +21,7 @@ pub struct LogsAgent {
     durable_context_rx: mpsc::Receiver<DurableContextUpdate>,
     processor: LogsProcessor,
     aggregator_handle: AggregatorHandle,
+    event_bus: Sender<Event>,
     cancel_token: CancellationToken,
 }
 
@@ -35,7 +37,7 @@ impl LogsAgent {
         let processor = LogsProcessor::new(
             Arc::clone(&datadog_config),
             tags_provider,
-            event_bus,
+            event_bus.clone(),
             LAMBDA_RUNTIME_SLUG.to_string(),
             is_managed_instance_mode,
         );
@@ -49,6 +51,7 @@ impl LogsAgent {
             durable_context_rx,
             processor,
             aggregator_handle,
+            event_bus,
             cancel_token,
         };
 
@@ -67,26 +70,22 @@ impl LogsAgent {
                 () = self.cancel_token.cancelled() => {
                     debug!("LOGS_AGENT | Received shutdown signal, draining remaining events");
 
-                    // Drain remaining telemetry events
-                    let mut last_drain_log_time = Instant::now().checked_sub(DRAIN_LOG_INTERVAL).expect("Failed to subtract interval from now");
-                    'drain_logs_loop: loop {
-                        match self.rx.try_recv() {
-                            Ok(event) => {
+                    // Drain until the listener has shut down and dropped its sender, so every
+                    // telemetry event reaches the event bus ahead of the Tombstone.
+                    let deadline = tokio::time::Instant::now() + DRAIN_TIMEOUT;
+                    loop {
+                        match tokio::time::timeout_at(deadline, self.rx.recv()).await {
+                            Ok(Some(event)) => {
                                 self.processor.process(event, &self.aggregator_handle).await;
                             }
-                            Err(tokio::sync::mpsc::error::TryRecvError::Disconnected) => {
+                            Ok(None) => {
                                 debug!("LOGS_AGENT | Channel disconnected, finished draining");
-                                break 'drain_logs_loop;
-                            },
-                            // Empty signals there are still outstanding senders
-                            Err(tokio::sync::mpsc::error::TryRecvError::Empty) => {
-                                // Log at most once every 100ms to avoid spamming the logs
-                                let now = Instant::now();
-                                if now.duration_since(last_drain_log_time) >= DRAIN_LOG_INTERVAL {
-                                    debug!("LOGS_AGENT | No more events to process but still have senders, continuing to drain...");
-                                    last_drain_log_time = now;
-                                }
-                            },
+                                break;
+                            }
+                            Err(_) => {
+                                debug!("LOGS_AGENT | Timed out waiting for channel to disconnect");
+                                break;
+                            }
                         }
                     }
 
@@ -98,6 +97,10 @@ impl LogsAgent {
 
                     // Drain remaining held logs without durable context tags so no logs are lost.
                     self.processor.drain_held_logs(&self.aggregator_handle);
+
+                    if let Err(e) = self.event_bus.send(Event::Tombstone).await {
+                        debug!("LOGS_AGENT | Failed to send tombstone event: {e}");
+                    }
 
                     break;
                 }
@@ -121,5 +124,72 @@ impl LogsAgent {
     #[must_use]
     pub fn cancel_token(&self) -> CancellationToken {
         self.cancel_token.clone()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::event_bus::EventBus;
+    use crate::extension::telemetry::events::TelemetryRecord;
+    use crate::logs::aggregator_service::AggregatorService;
+    use std::collections::HashMap;
+
+    const RUNTIME_DONE: &str = r#"{"time":"2022-10-21T14:05:05.764Z","type":"platform.runtimeDone","record":{"requestId":"459921b5-681c-4a96-beb0-81e0aa586026","status":"timeout","metrics":{"durationMs":3000.0,"producedBytes":0}}}"#;
+
+    fn agent() -> (LogsAgent, Sender<TelemetryEvent>, EventBus) {
+        let config = Arc::new(config::Config::default());
+        let tags_provider = Arc::new(tags::provider::Provider::new(
+            Arc::clone(&config),
+            LAMBDA_RUNTIME_SLUG.to_string(),
+            &HashMap::from([("function_arn".to_string(), "test-arn".to_string())]),
+        ));
+        let (event_bus, event_bus_tx) = EventBus::run();
+        let (aggregator_service, aggregator_handle) = AggregatorService::default();
+        tokio::spawn(aggregator_service.run());
+        let (agent, logs_tx, _) = LogsAgent::new(
+            tags_provider,
+            config,
+            event_bus_tx,
+            aggregator_handle,
+            false,
+        );
+        (agent, logs_tx, event_bus)
+    }
+
+    #[tokio::test]
+    async fn test_tombstone_follows_events_sent_after_cancel() {
+        let (mut agent, logs_tx, mut event_bus) = agent();
+        let cancel_token = agent.cancel_token();
+        let handle = tokio::spawn(async move { agent.spin().await });
+
+        // A telemetry POST that is still in flight when shutdown starts.
+        cancel_token.cancel();
+        tokio::task::yield_now().await;
+        logs_tx
+            .send(serde_json::from_str(RUNTIME_DONE).expect("valid event"))
+            .await
+            .expect("agent is draining");
+        drop(logs_tx);
+
+        let first = event_bus.rx.recv().await.expect("event");
+        assert!(matches!(
+            first,
+            Event::Telemetry(TelemetryEvent {
+                record: TelemetryRecord::PlatformRuntimeDone { .. },
+                ..
+            })
+        ));
+        assert!(matches!(event_bus.rx.recv().await, Some(Event::Tombstone)));
+        handle.await.expect("agent task");
+    }
+
+    #[tokio::test]
+    async fn test_tombstone_sent_when_sender_never_closes() {
+        let (mut agent, _logs_tx, mut event_bus) = agent();
+        agent.cancel_token().cancel();
+        agent.spin().await;
+
+        assert!(matches!(event_bus.rx.try_recv(), Ok(Event::Tombstone)));
     }
 }
