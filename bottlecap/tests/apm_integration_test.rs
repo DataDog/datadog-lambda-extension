@@ -495,7 +495,7 @@ fn captured_compute_stats(traces: &[pb::AgentPayload]) -> Option<String> {
 
 /// Single-span trace root with the given sampling priority and error flag.
 fn sampled_root_span(trace_id: u64, priority: f64, error: i32) -> pb::Span {
-    let mut span = pb::Span {
+    pb::Span {
         service: "fake-intake-trace-service".to_string(),
         name: "web.request".to_string(),
         resource: "GET /fake".to_string(),
@@ -506,11 +506,9 @@ fn sampled_root_span(trace_id: u64, priority: f64, error: i32) -> pb::Span {
         duration: 5_000_000,
         error,
         r#type: "web".to_string(),
+        metrics: HashMap::from([("_sampling_priority_v1".to_string(), priority)]),
         ..pb::Span::default()
-    };
-    span.metrics
-        .insert("_sampling_priority_v1".to_string(), priority);
-    span
+    }
 }
 
 /// An errored P0 trace is rescued and reaches the intake, while a non-errored P0 trace is
@@ -643,22 +641,8 @@ fn error_sampler_span(
     error: i32,
     decision_maker: Option<&str>,
 ) -> pb::Span {
-    let mut span = pb::Span {
-        service: "fake-intake-trace-service".to_string(),
-        name: "web.request".to_string(),
-        resource: "GET /fake".to_string(),
-        trace_id,
-        span_id: trace_id,
-        parent_id: 0,
-        start: STATS_SPAN_START_NS,
-        duration: 5_000_000,
-        error,
-        r#type: "web".to_string(),
-        ..pb::Span::default()
-    };
+    let mut span = sampled_root_span(trace_id, priority, error);
     span.metrics.insert("_top_level".to_string(), 1.0);
-    span.metrics
-        .insert("_sampling_priority_v1".to_string(), priority);
     if let Some(decision_maker) = decision_maker {
         span.meta
             .insert("_dd.p.dm".to_string(), decision_maker.to_string());

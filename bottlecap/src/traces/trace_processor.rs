@@ -1435,23 +1435,6 @@ mod tests {
             (true, true, 1),   // tracer owns stats even when extension configured: filter
         ];
 
-        let make_span = |trace_id: u64, priority: Option<f64>| -> pb::Span {
-            let mut metrics = HashMap::new();
-            if let Some(p) = priority {
-                metrics.insert("_sampling_priority_v1".to_string(), p);
-            }
-            pb::Span {
-                trace_id,
-                span_id: trace_id,
-                parent_id: 0,
-                metrics,
-                service: "svc".to_string(),
-                name: "op".to_string(),
-                resource: "res".to_string(),
-                ..Default::default()
-            }
-        };
-
         for (compute_on_extension, client_computed_stats, expected_backend_span_count) in cases {
             let config = create_compute_stats_config_with(compute_on_extension);
             let (tags_provider, processor) =
@@ -1461,9 +1444,9 @@ mod tests {
 
             // Three traces: kept (priority 1), dropped (priority 0), dropped (priority -1)
             let traces = vec![
-                vec![make_span(1, Some(1.0))],
-                vec![make_span(2, Some(0.0))],
-                vec![make_span(3, Some(-1.0))],
+                vec![make_tracer_drop_span(1, 1.0, 0, None)],
+                vec![make_tracer_drop_span(2, 0.0, 0, None)],
+                vec![make_tracer_drop_span(3, -1.0, 0, None)],
             ];
 
             let (payload_info, stats_collection) =
@@ -1497,22 +1480,6 @@ mod tests {
         // (owner label, lambda_extension_compute_stats, client_computed_stats)
         let cases = [("extension", true, false), ("tracer", false, true)];
 
-        let make_span = |trace_id: u64, priority: f64, error: i32| -> pb::Span {
-            let mut metrics = HashMap::new();
-            metrics.insert("_sampling_priority_v1".to_string(), priority);
-            pb::Span {
-                trace_id,
-                span_id: trace_id,
-                parent_id: 0,
-                error,
-                metrics,
-                service: "svc".to_string(),
-                name: "op".to_string(),
-                resource: "res".to_string(),
-                ..Default::default()
-            }
-        };
-
         for (owner, compute_on_extension, client_computed_stats) in cases {
             let config = create_compute_stats_config_with(compute_on_extension);
             let (tags_provider, processor) =
@@ -1523,10 +1490,10 @@ mod tests {
             // trace 1: kept normally (priority 1). trace 2: errored P0 (rescued).
             // trace 3: non-errored P0 (dropped). trace 4: errored user drop (dropped).
             let traces = vec![
-                vec![make_span(1, 1.0, 0)],
-                vec![make_span(2, 0.0, 1)],
-                vec![make_span(3, 0.0, 0)],
-                vec![make_span(4, -1.0, 1)],
+                vec![make_tracer_drop_span(1, 1.0, 0, None)],
+                vec![make_tracer_drop_span(2, 0.0, 1, None)],
+                vec![make_tracer_drop_span(3, 0.0, 0, None)],
+                vec![make_tracer_drop_span(4, -1.0, 1, None)],
             ];
 
             let (payload_info, _stats) =
