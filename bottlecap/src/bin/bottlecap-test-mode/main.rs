@@ -139,16 +139,13 @@ async fn main() -> anyhow::Result<()> {
         Arc::clone(&proxy_aggregator),
         Some(stats_url_from_trace_intake(&config.apm_dd_url)),
     );
-    let trace_flusher = Arc::clone(&pipeline.trace_flusher);
-    let stats_flusher = Arc::clone(&pipeline.stats_flusher);
-    let proxy_flusher = Arc::clone(&pipeline.proxy_flusher);
-    let shutdown_token = pipeline.shutdown_token.clone();
+    let shutdown_token = pipeline.shutdown_token;
 
     // FlushingService::new takes six non-optional owned values. Test-mode only
     // exercises the trace/stats/proxy flushers; the logs and metrics stubs
     // below stand up real services with empty queues so flushes are no-ops.
     let (logs_aggregator_service, logs_aggregator_handle) = LogsAggregatorService::default();
-    tokio::spawn(async move { logs_aggregator_service.run().await });
+    tokio::spawn(logs_aggregator_service.run());
     let logs_flusher = LogsFlusher::new(
         Arc::clone(&api_key_factory),
         logs_aggregator_handle,
@@ -158,14 +155,14 @@ async fn main() -> anyhow::Result<()> {
 
     let (metrics_aggregator_service, metrics_aggregator_handle) =
         MetricsAggregatorService::new(EMPTY_TAGS, CONTEXTS).expect("metrics aggregator");
-    tokio::spawn(async move { metrics_aggregator_service.run().await });
+    tokio::spawn(metrics_aggregator_service.run());
     let metrics_flushers: Arc<Vec<MetricsFlusher>> = Arc::new(Vec::new());
 
     let flushing_service = Arc::new(FlushingService::new(
         logs_flusher,
-        trace_flusher,
-        stats_flusher,
-        proxy_flusher,
+        pipeline.trace_flusher,
+        pipeline.stats_flusher,
+        pipeline.proxy_flusher,
         metrics_flushers,
         metrics_aggregator_handle,
         None,

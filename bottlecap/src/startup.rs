@@ -209,11 +209,6 @@ pub fn build_trace_agent(
 /// pipeline keeps running with a dead trace channel. Callers that need to
 /// react to startup errors should use [`build_trace_agent`] and spawn the
 /// agent themselves.
-///
-/// Callers that need to customize the `TraceAgent` (for example via
-/// [`trace_agent::TraceAgent::with_router_extension`]) should use
-/// [`build_trace_agent`] directly and spawn the returned `TraceAgent`
-/// themselves after applying the extra configuration.
 pub fn start_trace_agent(
     config: &Arc<Config>,
     api_key_factory: &Arc<ApiKeyFactory>,

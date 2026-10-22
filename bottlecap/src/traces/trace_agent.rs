@@ -284,22 +284,20 @@ impl TraceAgent {
             trace_rx,
             trace_barrier_rx,
             move |tracer_payload_info| {
-                let aggregator_handle = aggregator_handle.clone();
-                async move {
-                    // An error here means the aggregator task is gone and the
-                    // payload is lost. Stop the forwarder so a pending barrier
-                    // reports the loss via IngestBarrierError instead of
-                    // acknowledging a flush that would silently drop payloads.
-                    if aggregator_handle
-                        .insert_payload(tracer_payload_info)
-                        .is_err()
-                    {
-                        error!("TRACE_AGENT | Aggregator stopped, dropping trace forwarder");
-                        false
-                    } else {
-                        true
-                    }
-                }
+                // An error here means the aggregator task is gone and the
+                // payload is lost. Stop the forwarder so a pending barrier
+                // reports the loss via IngestBarrierError instead of
+                // acknowledging a flush that would silently drop payloads.
+                let forwarded = if aggregator_handle
+                    .insert_payload(tracer_payload_info)
+                    .is_err()
+                {
+                    error!("TRACE_AGENT | Aggregator stopped, dropping trace forwarder");
+                    false
+                } else {
+                    true
+                };
+                std::future::ready(forwarded)
             },
         ));
 
