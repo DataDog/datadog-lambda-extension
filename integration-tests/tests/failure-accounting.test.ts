@@ -11,7 +11,7 @@ import { IDENTIFIER } from '../config';
  * switched from End-of-invocation flushing to periodic/continuous flushing.
  * The Default strategy only adapts after ~20 invocations in one execution
  * environment, and a timeout/crash resets the environment (new extension
- * process, back in End mode). Failures are therefore spaced 50 invocations
+ * process, back in End mode). Failures are therefore spaced 30 invocations
  * apart so each fresh environment has adapted before the next failure.
  * Reserved concurrency 1 plus sequential invokes keep everything in one
  * environment at a time.
@@ -34,8 +34,9 @@ const cases: FailureCase[] = [
 
 type Mode = 'ok' | 'timeout' | 'crash';
 
-const FAILURE_SPACING = 50;
-const FAILURE_COUNT = 6;
+const FAILURE_SPACING = 30;
+// The loss is a race, so run enough resets to hit it reliably.
+const FAILURE_COUNT = 12;
 // Trailing successes so the environment created after the last failure also runs.
 const TOTAL_INVOCATIONS = FAILURE_SPACING * FAILURE_COUNT + 10;
 
@@ -48,7 +49,7 @@ const POLL_INTERVAL_MS = 30 * 1000;  // re-query cadence
 const TOTAL_BUDGET_MS = 12 * 60 * 1000; // polling ceiling, measured from the last invoke
 const INVOKE_PHASE_BUDGET_MS = 15 * 60 * 1000;
 
-// Failure k (1-based) lands on invocation 50k; odd k times out, even k crashes.
+// Failure k (1-based) lands on invocation 30k; odd k times out, even k crashes.
 function modeFor(invocation: number): Mode {
   if (invocation % FAILURE_SPACING !== 0 || invocation / FAILURE_SPACING > FAILURE_COUNT) {
     return 'ok';
