@@ -30,7 +30,8 @@ export class FailureAccounting extends cdk.Stack {
     const { DD_SERVERLESS_FLUSH_STRATEGY: _, ...envWithoutFlushStrategy } = defaultDatadogEnvVariables;
 
     const variants = [
-      { name: 'default', env: envWithoutFlushStrategy },
+      // Debug logs show whether runtimeDone reaches the extension before or after shutdown.
+      { name: 'default', env: { ...envWithoutFlushStrategy, DD_LOG_LEVEL: 'debug' } },
       { name: 'end', env: { ...envWithoutFlushStrategy, DD_SERVERLESS_FLUSH_STRATEGY: 'end' } },
     ];
 
