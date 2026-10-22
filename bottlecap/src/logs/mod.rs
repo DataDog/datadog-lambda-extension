@@ -4,4 +4,5 @@ pub mod aggregator_service;
 pub mod constants;
 pub mod flusher;
 pub mod lambda;
+pub mod pipeline;
 pub mod processor;
