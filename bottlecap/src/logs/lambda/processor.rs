@@ -370,7 +370,7 @@ impl LambdaProcessor {
                                     managed_instance_metrics.duration_ms / 1000.0
                                 )
                             ),
-                            Status::Error => {
+                            Status::Error | Status::Failure => {
                                 let error_detail = error_type
                                     .as_ref()
                                     .map_or_else(|| " Task failed with an unknown error".to_string(), |e| format!(" Task failed: {e}"));
@@ -1247,6 +1247,32 @@ mod tests {
                         duration_ms: 200.0,
                     }),
                     status: Status::Error,
+                    error_type: Some("RuntimeError".to_string()),
+                    spans: None,
+                }
+            },
+            Message {
+                message: "REPORT RequestId: test-request-id Runtime Duration: 200.00 ms Task failed: RuntimeError".to_string(),
+                lambda: Lambda {
+                    arn: "test-arn".to_string(),
+                    request_id: Some("test-request-id".to_string()),
+                ..Lambda::default()
+                },
+                timestamp: 1_673_058_627_000,
+                status: "error".to_string(),
+            },
+        ),
+
+        // platform report - managed instance mode failure with error_type
+        platform_report_managed_instance_failure: (
+            &TelemetryEvent {
+                time: Utc.with_ymd_and_hms(2023, 1, 7, 2, 30, 27).unwrap(),
+                record: TelemetryRecord::PlatformReport {
+                    request_id: "test-request-id".to_string(),
+                    metrics: ReportMetrics::ManagedInstance(ManagedInstanceReportMetrics {
+                        duration_ms: 200.0,
+                    }),
+                    status: Status::Failure,
                     error_type: Some("RuntimeError".to_string()),
                     spans: None,
                 }
