@@ -12,6 +12,7 @@ import {CustomMetrics} from '../lib/stacks/custom-metrics';
 import {PayloadSize} from '../lib/stacks/payload-size';
 import {Dsm} from '../lib/stacks/dsm';
 import {DurableColdStart} from '../lib/stacks/durable-cold-start';
+import {FailureAccounting} from '../lib/stacks/failure-accounting';
 import {AuthRoleStack} from '../lib/auth-role';
 import {ACCOUNT, IDENTIFIER, REGION} from '../config';
 import {CapacityProviderStack} from "../lib/capacity-provider";
@@ -65,6 +66,9 @@ const stacks = [
         env,
     }),
     new Dsm(app, `${IDENTIFIER}-dsm`, {
+        env,
+    }),
+    new FailureAccounting(app, `${IDENTIFIER}-failure-accounting`, {
         env,
     }),
 ]
