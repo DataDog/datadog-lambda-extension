@@ -60,19 +60,18 @@ async fn main() -> anyhow::Result<()> {
 /// Parse an environment variable via `FromStr`, falling back to `default` when
 /// unset. `expected` describes the accepted format for the error message.
 fn parse_env_or<T: std::str::FromStr>(name: &str, default: T, expected: &str) -> anyhow::Result<T> {
-    let value = match std::env::var(name) {
+    match std::env::var(name) {
         Ok(raw) => raw.parse::<T>().map_err(|_| {
             anyhow::anyhow!("mock-intake: invalid {name} value '{raw}', expected {expected}")
-        })?,
-        Err(std::env::VarError::NotPresent) => default,
+        }),
+        Err(std::env::VarError::NotPresent) => Ok(default),
         Err(std::env::VarError::NotUnicode(raw)) => {
             bail!(
                 "mock-intake: {name} is not valid Unicode: {}",
                 raw.display()
             )
         }
-    };
-    Ok(value)
+    }
 }
 
 fn parse_options() -> anyhow::Result<MockIntakeOptions> {
@@ -87,13 +86,11 @@ fn parse_options() -> anyhow::Result<MockIntakeOptions> {
         "a non-negative integer",
     )?;
 
-    let dump_dir = std::env::var_os("MOCK_INTAKE_DUMP_DIR").map(PathBuf::from);
-
     Ok(MockIntakeOptions {
         port,
         request_summaries: true,
         fail_stats_first_n,
-        dump_dir,
+        dump_dir: std::env::var_os("MOCK_INTAKE_DUMP_DIR").map(PathBuf::from),
     })
 }
 
