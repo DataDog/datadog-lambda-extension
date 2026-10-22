@@ -40,10 +40,6 @@ use crate::traces::stats_generator::StatsGenerator;
 use crate::traces::trace_aggregator::{OwnedTracerHeaderTags, SendDataBuilderInfo};
 use libdd_trace_normalization::normalizer::SamplerPriority;
 
-/// Span meta and chunk tag carrying which party made the sampling decision.
-/// "sampling mechanism" aka "decision maker"
-const DECISION_MAKER_TAG: &str = "_dd.p.dm";
-
 /// Which party is responsible for computing trace stats for a trace, derived from
 /// `lambda_extension_compute_stats` and the tracer's `Datadog-Client-Computed-Stats`
 /// signal. Exactly one party computes, so the per-span `_dd.compute_stats` stamp and the
@@ -65,15 +61,48 @@ impl StatsComputedBy {
     }
 }
 
+/// Value within `DD_APM_FEATURES` that widens error rescue to include chunks the
+/// tracer dropped itself, matching the Go agent feature of the same name.
+pub const ERROR_RARE_SAMPLE_TRACER_DROP: &str = "error_rare_sample_tracer_drop";
+
+/// Span meta and chunk tag carrying which party made the sampling decision.
+/// "sampling mechanism" aka "decision maker"
+const DECISION_MAKER_TAG: &str = "_dd.p.dm";
+
+/// Sampling mechanism value meaning the tracer dropped the trace manually
+/// (Go agent `manualSampling`).
+const MANUAL_SAMPLING_DECISION_MAKER: &str = "-4";
+
+/// Sampling priority for a tracer's explicit user (manual) drop.
+const USER_DROP_PRIORITY: i32 = -1;
+
+/// Returns true when `config.apm_features` contains
+/// [`ERROR_RARE_SAMPLE_TRACER_DROP`].
+///
+/// `DD_APM_FEATURES` is parsed upstream as a comma-separated list, so matching
+/// is exact per entry; space-separated values are not supported.
+#[must_use]
+pub fn error_rare_sample_tracer_drop_enabled(config: &config::Config) -> bool {
+    config
+        .apm_features
+        .iter()
+        .any(|feature| feature == ERROR_RARE_SAMPLE_TRACER_DROP)
+}
+
 #[derive(Clone)]
 #[allow(clippy::module_name_repetitions)]
 pub struct ServerlessTraceProcessor {
     pub obfuscation_config: Arc<obfuscation_config::ObfuscationConfig>,
-    /// Rescues errored `AutoDrop` chunks on the `lambda_extension_compute_stats`
+    /// Rescues errored chunks on the `lambda_extension_compute_stats`
     /// path. Shared across invocations so a stateful mode (`RateLimited`) would
     /// keep its rolling window; a std Mutex rather than tokio because
     /// `process_traces` is synchronous.
     pub error_sampler: Arc<std::sync::Mutex<ErrorsSampler>>,
+    /// Whether `DD_APM_FEATURES` enables [`ERROR_RARE_SAMPLE_TRACER_DROP`]. When
+    /// true, chunks with a negative priority are rescued like `AutoDrop` chunks
+    /// unless they are an explicit tracer manual drop (priority -1 with decision
+    /// maker "-4"), matching the Go agent.
+    pub error_rare_sample_tracer_drop: bool,
 }
 
 /// Borrow-only view of a span for the error sampler.
@@ -110,9 +139,7 @@ pub fn new_error_sampler(enabled: bool) -> Arc<std::sync::Mutex<ErrorsSampler>> 
 impl ServerlessTraceProcessor {
     /// Removes sampled-out chunks so they won't be sent to Datadog, then drops
     /// any payload left without chunks. `SamplerPriority::None` (-128) means no
-    /// explicit priority was set and the trace is kept. Only
-    /// `SamplerPriority::AutoDrop` (0) chunks are rescue candidates; negative
-    /// priorities are explicit drops and are honored.
+    /// explicit priority was set and the trace is kept.
     fn drop_sampled_out_chunks(&self, tracer_payloads: &mut Vec<pb::TracerPayload>) {
         // Read once up front so non-errored and explicitly-dropped chunks never
         // touch the lock. Recover through poisoning: the sampler holds only
@@ -143,9 +170,12 @@ impl ServerlessTraceProcessor {
                 if chunk.priority > 0 || chunk.priority == SamplerPriority::None as i32 {
                     return true;
                 }
-                // A negative priority is an explicit drop (a tracer sampling rule
-                // or MANUAL_DROP): honor it and never rescue, as the Agent does.
-                if chunk.priority < 0 {
+                // With `error_rare_sample_tracer_drop` only a manual drop is
+                // honored; other dropped chunks become rescue candidates, as
+                // the Agent does with the feature enabled.
+                if chunk.priority < 0
+                    && (!self.error_rare_sample_tracer_drop || Self::is_manual_tracer_drop(chunk))
+                {
                     return false;
                 }
                 if !rescue_enabled {
@@ -157,8 +187,18 @@ impl ServerlessTraceProcessor {
         tracer_payloads.retain(|tp| !tp.chunks.is_empty());
     }
 
-    /// Consult the error sampler for a chunk that would otherwise be dropped
-    /// (`AutoDrop`). Returns `true` to keep (rescue) the chunk. Only errored
+    /// Whether the chunk is an explicit tracer manual drop: priority exactly -1
+    /// with decision maker "-4", matching the Go agent's `isManualUserDrop`.
+    /// The decision maker must already be in the chunk tags; the promotion from
+    /// span metadata happens in [`ChunkProcessor::process`].
+    fn is_manual_tracer_drop(chunk: &pb::TraceChunk) -> bool {
+        chunk.priority == USER_DROP_PRIORITY
+            && chunk.tags.get(DECISION_MAKER_TAG).map(String::as_str)
+                == Some(MANUAL_SAMPLING_DECISION_MAKER)
+    }
+
+    /// Consult the error sampler for a chunk that would otherwise be dropped.
+    /// Returns `true` to keep (rescue) the chunk. Only errored
     /// traces are candidates; on a keep, stamps `_dd.errors_sr` on the root span.
     fn rescue_error_chunk(&self, chunk: &mut pb::TraceChunk, env: &str, now_secs: i64) -> bool {
         // Only errored traces are rescue candidates (matches the Go agent, which
@@ -814,6 +854,7 @@ mod tests {
     fn create_test_processor(
         config: &Arc<Config>,
         error_sampler: Arc<std::sync::Mutex<ErrorsSampler>>,
+        error_rare_sample_tracer_drop: bool,
     ) -> (Arc<Provider>, ServerlessTraceProcessor) {
         let tags_provider = Arc::new(Provider::new(
             config.clone(),
@@ -825,6 +866,7 @@ mod tests {
                 ObfuscationConfig::new().expect("Failed to create ObfuscationConfig"),
             ),
             error_sampler,
+            error_rare_sample_tracer_drop,
         };
         (tags_provider, processor)
     }
@@ -920,6 +962,7 @@ mod tests {
                 ObfuscationConfig::new().expect("Failed to create ObfuscationConfig"),
             ),
             error_sampler: enabled_error_sampler(),
+            error_rare_sample_tracer_drop: false,
         };
         let config = create_test_config();
         let tags_provider = create_tags_provider(config.clone());
@@ -1377,7 +1420,8 @@ mod tests {
     #[allow(clippy::unwrap_used)]
     fn test_process_traces_filters_sampled_out_chunks() {
         let config = create_compute_stats_config();
-        let (tags_provider, processor) = create_test_processor(&config, enabled_error_sampler());
+        let (tags_provider, processor) =
+            create_test_processor(&config, enabled_error_sampler(), false);
         let header_tags = create_test_header_tags();
 
         let make_span = |trace_id: u64, priority: Option<f64>| -> pb::Span {
@@ -1442,7 +1486,8 @@ mod tests {
     #[test]
     fn test_error_sampler_rescues_errored_p0_chunks() {
         let config = create_compute_stats_config();
-        let (tags_provider, processor) = create_test_processor(&config, enabled_error_sampler());
+        let (tags_provider, processor) =
+            create_test_processor(&config, enabled_error_sampler(), false);
         let header_tags = create_test_header_tags();
 
         let make_span = |trace_id: u64, priority: f64, error: i32| -> pb::Span {
@@ -1503,12 +1548,246 @@ mod tests {
         );
     }
 
+    /// With `error_rare_sample_tracer_drop` enabled, an errored chunk the tracer
+    /// dropped itself (priority -1, no decision maker) is rescued like an
+    /// `AutoDrop` chunk, matching the Go agent.
+    #[test]
+    fn test_error_rare_sample_tracer_drop_rescues_errored_user_drop() {
+        let config = create_compute_stats_config();
+        let (tags_provider, processor) =
+            create_test_processor(&config, enabled_error_sampler(), true);
+        let header_tags = create_test_header_tags();
+
+        let span = make_tracer_drop_span(7, -1.0, 1, None);
+
+        let (payload_info, _stats) = processor.process_traces(
+            config,
+            tags_provider,
+            header_tags,
+            vec![vec![span]],
+            0,
+            None,
+        );
+        let payload_info = payload_info.expect("errored tracer drop must be rescued");
+        let backend_send_data = payload_info.builder.build();
+        let rescued = trace_spans(backend_send_data.get_payloads())
+            .find(|span| span.trace_id == 7)
+            .expect("rescued trace present");
+        assert!(
+            rescued.metrics.contains_key("_dd.errors_sr"),
+            "_dd.errors_sr stamped on rescued root"
+        );
+    }
+
+    /// Span factory for tracer-drop tests: a single-span trace with an explicit
+    /// sampling priority and an optional decision maker in span meta.
+    fn make_tracer_drop_span(
+        trace_id: u64,
+        priority: f64,
+        error: i32,
+        decision_maker: Option<&str>,
+    ) -> pb::Span {
+        let mut span = pb::Span {
+            trace_id,
+            span_id: trace_id,
+            parent_id: 0,
+            error,
+            service: "svc".to_string(),
+            name: "op".to_string(),
+            resource: "res".to_string(),
+            ..Default::default()
+        };
+        span.metrics
+            .insert("_sampling_priority_v1".to_string(), priority);
+        if let Some(decision_maker) = decision_maker {
+            span.meta
+                .insert("_dd.p.dm".to_string(), decision_maker.to_string());
+        }
+        span
+    }
+
+    fn trace_spans(collection: &TracerPayloadCollection) -> impl Iterator<Item = &pb::Span> {
+        let TracerPayloadCollection::V07(payloads) = collection else {
+            panic!("expected V07");
+        };
+        payloads
+            .iter()
+            .flat_map(|payload| &payload.chunks)
+            .flat_map(|chunk| &chunk.spans)
+    }
+
+    /// Runs one trace through the processor and returns (backend kept trace ids,
+    /// stats trace ids).
+    fn run_single_trace(
+        processor: &ServerlessTraceProcessor,
+        config: &Arc<Config>,
+        tags_provider: Arc<Provider>,
+        trace: Vec<pb::Span>,
+    ) -> (Vec<u64>, Vec<u64>) {
+        let header_tags = create_test_header_tags();
+        let (payload_info, stats) = processor.process_traces(
+            config.clone(),
+            tags_provider,
+            header_tags,
+            vec![trace],
+            0,
+            None,
+        );
+
+        let kept = payload_info
+            .map(|info| {
+                let backend_send_data = info.builder.build();
+                trace_spans(backend_send_data.get_payloads())
+                    .map(|span| span.trace_id)
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        let in_stats = trace_spans(&stats).map(|span| span.trace_id).collect();
+        (kept, in_stats)
+    }
+
+    /// A manual tracer drop (priority -1 with decision maker "-4" in the root
+    /// span meta) is never rescued, even with the feature enabled, matching the
+    /// Go agent's `isManualUserDrop`.
+    #[test]
+    fn test_error_rare_sample_tracer_drop_excludes_manual_drop() {
+        let config = create_compute_stats_config();
+        let (tags_provider, processor) =
+            create_test_processor(&config, enabled_error_sampler(), true);
+
+        let trace = vec![make_tracer_drop_span(7, -1.0, 1, Some("-4"))];
+        let (kept, in_stats) = run_single_trace(&processor, &config, tags_provider, trace);
+
+        assert!(!kept.contains(&7), "manual tracer drop must not be rescued");
+        assert!(
+            in_stats.contains(&7),
+            "dropped manual tracer drop must remain in stats"
+        );
+    }
+
+    /// The decision maker is promoted from the first span carrying it, which
+    /// need not be the root: a manual decision maker on a child span still
+    /// marks the chunk as a manual drop.
+    #[test]
+    fn test_error_rare_sample_tracer_drop_manual_drop_on_child_span() {
+        let config = create_compute_stats_config();
+        let (tags_provider, processor) =
+            create_test_processor(&config, enabled_error_sampler(), true);
+
+        // Root is fine and carries no decision maker; the errored child does.
+        let mut root = make_tracer_drop_span(7, -1.0, 0, None);
+        root.span_id = 1;
+        let mut child = make_tracer_drop_span(7, -1.0, 1, Some("-4"));
+        child.span_id = 2;
+        child.parent_id = 1;
+        let (kept, _) = run_single_trace(&processor, &config, tags_provider, vec![root, child]);
+
+        assert!(
+            !kept.contains(&7),
+            "manual decision maker on a child span must still exclude the trace"
+        );
+    }
+
+    /// A decision maker other than "-4" is not a manual drop: the trace stays
+    /// rescue-eligible.
+    #[test]
+    fn test_error_rare_sample_tracer_drop_nonmanual_decision_maker_rescued() {
+        let config = create_compute_stats_config();
+        let (tags_provider, processor) =
+            create_test_processor(&config, enabled_error_sampler(), true);
+
+        let trace = vec![make_tracer_drop_span(7, -1.0, 1, Some("-3"))];
+        let (kept, _) = run_single_trace(&processor, &config, tags_provider, trace);
+
+        assert!(
+            kept.contains(&7),
+            "nonmanual decision maker must not exclude the trace"
+        );
+    }
+
+    /// Negative priorities other than -1 are rescue-eligible even with a manual
+    /// decision maker, matching the Go agent which only special-cases -1.
+    #[test]
+    fn test_error_rare_sample_tracer_drop_other_negative_priority_rescued() {
+        let config = create_compute_stats_config();
+        let (tags_provider, processor) =
+            create_test_processor(&config, enabled_error_sampler(), true);
+
+        let trace = vec![make_tracer_drop_span(7, -2.0, 1, Some("-4"))];
+        let (kept, _) = run_single_trace(&processor, &config, tags_provider, trace);
+
+        assert!(
+            kept.contains(&7),
+            "priority -2 must stay rescue-eligible even with a manual decision maker"
+        );
+    }
+
+    /// When several spans carry a decision maker, the first span in input order
+    /// wins, mirroring the Go agent's promotion loop.
+    #[test]
+    fn test_error_rare_sample_tracer_drop_first_span_decision_maker_wins() {
+        let config = create_compute_stats_config();
+
+        for (first_dm, second_dm, rescued) in [("-3", "-4", true), ("-4", "-3", false)] {
+            let (tags_provider, processor) =
+                create_test_processor(&config, enabled_error_sampler(), true);
+            let mut root = make_tracer_drop_span(7, -1.0, 1, Some(first_dm));
+            root.span_id = 1;
+            let mut child = make_tracer_drop_span(7, -1.0, 0, Some(second_dm));
+            child.span_id = 2;
+            let (kept, _) = run_single_trace(&processor, &config, tags_provider, vec![root, child]);
+
+            assert_eq!(
+                kept.contains(&7),
+                rescued,
+                "first span's decision maker {first_dm} must win over {second_dm}"
+            );
+        }
+    }
+
+    /// Without an error anywhere in the chunk, an eligible tracer drop is still
+    /// dropped: the feature only widens eligibility, it does not keep traces.
+    #[test]
+    fn test_error_rare_sample_tracer_drop_nonerrored_still_dropped() {
+        let config = create_compute_stats_config();
+        let (tags_provider, processor) =
+            create_test_processor(&config, enabled_error_sampler(), true);
+
+        let trace = vec![make_tracer_drop_span(7, -1.0, 0, None)];
+        let (kept, in_stats) = run_single_trace(&processor, &config, tags_provider, trace);
+
+        assert!(
+            !kept.contains(&7),
+            "nonerrored tracer drop must stay dropped"
+        );
+        assert!(in_stats.contains(&7), "dropped trace must remain in stats");
+    }
+
+    /// The feature flag only widens eligibility: with the sampler disabled the
+    /// errored tracer drop is still dropped.
+    #[test]
+    fn test_error_rare_sample_tracer_drop_requires_sampler_enabled() {
+        let config = create_compute_stats_config();
+        let (tags_provider, processor) =
+            create_test_processor(&config, new_error_sampler(false), true);
+
+        let trace = vec![make_tracer_drop_span(7, -1.0, 1, None)];
+        let (kept, _) = run_single_trace(&processor, &config, tags_provider, trace);
+
+        assert!(
+            !kept.contains(&7),
+            "sampler disabled must keep the tracer drop dropped"
+        );
+    }
+
     /// An error on a child span (root not errored) still makes the chunk a rescue
     /// candidate, matching the Go agent's `traceContainsError`.
     #[test]
     fn test_error_sampler_rescues_chunk_with_errored_child_span() {
         let config = create_compute_stats_config();
-        let (tags_provider, processor) = create_test_processor(&config, enabled_error_sampler());
+        let (tags_provider, processor) =
+            create_test_processor(&config, enabled_error_sampler(), false);
         let header_tags = create_test_header_tags();
 
         let make_span = |span_id: u64, parent_id: u64, error: i32| -> pb::Span {
@@ -1557,7 +1836,8 @@ mod tests {
     #[test]
     fn test_disabled_error_sampler_drops_errored_p0_chunks() {
         let config = create_compute_stats_config();
-        let (tags_provider, processor) = create_test_processor(&config, new_error_sampler(false));
+        let (tags_provider, processor) =
+            create_test_processor(&config, new_error_sampler(false), false);
         let header_tags = create_test_header_tags();
 
         let mut metrics = HashMap::new();
@@ -1588,7 +1868,8 @@ mod tests {
     #[test]
     fn test_disabled_error_sampler_keeps_dropped_errored_p0_chunk_in_stats() {
         let config = create_compute_stats_config();
-        let (tags_provider, processor) = create_test_processor(&config, new_error_sampler(false));
+        let (tags_provider, processor) =
+            create_test_processor(&config, new_error_sampler(false), false);
         let header_tags = create_test_header_tags();
 
         let make_span = |trace_id: u64, priority: f64, error: i32| -> pb::Span {
@@ -1655,7 +1936,8 @@ mod tests {
     #[test]
     fn test_process_traces_returns_none_when_all_sampled_out() {
         let config = create_compute_stats_config();
-        let (tags_provider, processor) = create_test_processor(&config, enabled_error_sampler());
+        let (tags_provider, processor) =
+            create_test_processor(&config, enabled_error_sampler(), false);
         let header_tags = create_test_header_tags();
 
         let make_dropped_span = |trace_id: u64| -> pb::Span {
@@ -1705,7 +1987,8 @@ mod tests {
         use prost::Message as _;
 
         let config = create_compute_stats_config();
-        let (tags_provider, processor) = create_test_processor(&config, enabled_error_sampler());
+        let (tags_provider, processor) =
+            create_test_processor(&config, enabled_error_sampler(), false);
         let header_tags = create_test_header_tags();
 
         let make_span = |trace_id: u64, priority: f64| -> pb::Span {
@@ -1788,7 +2071,8 @@ mod tests {
             apm_dd_url: "https://trace.agent.datadoghq.com".to_string(),
             ..Config::default()
         });
-        let (tags_provider, processor) = create_test_processor(&config, enabled_error_sampler());
+        let (tags_provider, processor) =
+            create_test_processor(&config, enabled_error_sampler(), false);
         let header_tags = create_test_header_tags();
 
         let span = pb::Span {
@@ -2345,6 +2629,7 @@ mod tests {
                         ObfuscationConfig::new().expect("Failed to create ObfuscationConfig"),
                     ),
                     error_sampler: enabled_error_sampler(),
+                    error_rare_sample_tracer_drop: false,
                 }),
                 trace_tx,
                 stats_generator: Arc::new(StatsGenerator::new(concentrator_handle.clone())),

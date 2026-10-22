@@ -1270,11 +1270,22 @@ fn start_trace_agent(
         );
     }
 
+    // One-time startup warning: the feature only widens rescue eligibility, it
+    // does not enable the sampler.
+    let error_rare_sample_tracer_drop =
+        trace_processor::error_rare_sample_tracer_drop_enabled(config);
+    if error_rare_sample_tracer_drop && !config.ext.serverless_error_sampler_enabled {
+        warn!(
+            "DD_APM_FEATURES includes error_rare_sample_tracer_drop, but DD_SERVERLESS_ERROR_SAMPLER_ENABLED is false: errored traces dropped by the tracer will not be rescued"
+        );
+    }
+
     let trace_processor = Arc::new(trace_processor::ServerlessTraceProcessor {
         obfuscation_config: Arc::new(obfuscation_config),
         error_sampler: trace_processor::new_error_sampler(
             config.ext.serverless_error_sampler_enabled,
         ),
+        error_rare_sample_tracer_drop,
     });
 
     let (span_dedup_service, span_dedup_handle) = span_dedup_service::DedupService::new();
