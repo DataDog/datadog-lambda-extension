@@ -675,8 +675,8 @@ async fn extension_loop_active(
         // Shutdown sequence
         debug!("Initiating shutdown sequence");
 
-        // Wait for tombstone event from telemetry listener to ensure all events are processed
-        // This is the result of code refactoring which is shared by OnDemand mode as well.
+        // Process remaining events. The logs agent isn't cancelled in this mode, so no Tombstone
+        // arrives and this ends on the idle timeout.
         wait_for_tombstone_event(
             &mut event_bus,
             &invocation_processor_handle,
