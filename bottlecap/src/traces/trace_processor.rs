@@ -1608,33 +1608,46 @@ mod tests {
 
     /// With `error_rare_sample_tracer_drop` enabled, an errored chunk the tracer
     /// dropped itself (priority -1, no decision maker) is rescued like an
-    /// `AutoDrop` chunk, matching the Go agent.
+    /// `AutoDrop` chunk, matching the Go agent. Runs for both stats owners: the
+    /// tracer-owned path reaches the rescue only when filtering also applies to
+    /// tracer-computed stats.
     #[test]
     fn test_error_rare_sample_tracer_drop_rescues_errored_user_drop() {
-        let config = create_compute_stats_config();
-        let (tags_provider, processor) =
-            create_test_processor(&config, enabled_error_sampler(), true);
-        let header_tags = create_test_header_tags();
+        // (owner label, lambda_extension_compute_stats, client_computed_stats)
+        let cases = [("extension", true, false), ("tracer", false, true)];
 
-        let span = make_tracer_drop_span(7, -1.0, 1, None);
+        for (owner, compute_on_extension, client_computed_stats) in cases {
+            let config = create_compute_stats_config_with(compute_on_extension);
+            let (tags_provider, processor) =
+                create_test_processor(&config, enabled_error_sampler(), true);
+            let header_tags = tracer_header_tags::TracerHeaderTags {
+                generic: tracer_header_tags::TracerGenericTags {
+                    client_computed_stats,
+                    ..Default::default()
+                },
+                ..create_test_header_tags()
+            };
 
-        let (payload_info, _stats) = processor.process_traces(
-            config,
-            tags_provider,
-            header_tags,
-            vec![vec![span]],
-            0,
-            None,
-        );
-        let payload_info = payload_info.expect("errored tracer drop must be rescued");
-        let backend_send_data = payload_info.builder.build();
-        let rescued = trace_spans(backend_send_data.get_payloads())
-            .find(|span| span.trace_id == 7)
-            .expect("rescued trace present");
-        assert!(
-            rescued.metrics.contains_key("_dd.errors_sr"),
-            "_dd.errors_sr stamped on rescued root"
-        );
+            let span = make_tracer_drop_span(7, -1.0, 1, None);
+
+            let (payload_info, _stats) = processor.process_traces(
+                config,
+                tags_provider,
+                header_tags,
+                vec![vec![span]],
+                0,
+                None,
+            );
+            let payload_info = payload_info.expect("errored tracer drop must be rescued");
+            let backend_send_data = payload_info.builder.build();
+            let rescued = trace_spans(backend_send_data.get_payloads())
+                .find(|span| span.trace_id == 7)
+                .expect("rescued trace present");
+            assert!(
+                rescued.metrics.contains_key("_dd.errors_sr"),
+                "_dd.errors_sr stamped on rescued root (owner={owner})"
+            );
+        }
     }
 
     /// Span factory for tracer-drop tests: a single-span trace with an explicit
