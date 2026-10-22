@@ -478,7 +478,6 @@ async fn extension_loop_active(
         &r.extension_id,
         &aws_config.runtime_api,
         logs_agent_channel,
-        event_bus_tx.clone(),
         config.ext.serverless_logs_enabled,
         aws_config.is_managed_instance_mode(),
     )
@@ -807,12 +806,9 @@ async fn extension_loop_active(
         }
 
         if let NextEventResponse::Shutdown { .. } = maybe_shutdown_event {
-            // Cancel Telemetry API listener
-            // Important to do this first, so we can receive the Tombstone event which signals
-            // that there are no more Telemetry events to process
+            // Stop the Telemetry API listener, then let the logs agent drain. The agent sends the
+            // Tombstone only after it has forwarded every telemetry event to the event bus.
             telemetry_listener_cancel_token.cancel();
-
-            // Cancel Logs Agent which might have Telemetry API events to process
             logs_agent_cancel_token.cancel();
 
             // Drop the event bus sender to allow the channel to close properly
@@ -820,7 +816,7 @@ async fn extension_loop_active(
 
             // Redrive/block on any failed payloads
             flushing_service.await_handles().await;
-            // Wait for tombstone event from telemetry listener to ensure all events are processed
+            // Wait for the Tombstone from the logs agent to ensure all events are processed
             wait_for_tombstone_event(
                 &mut event_bus,
                 &invocation_processor_handle,
@@ -862,7 +858,7 @@ async fn extension_loop_active(
     }
 }
 
-/// Wait for the `Tombstone` event from telemetry listener to ensure all events are processed.
+/// Wait for the `Tombstone` event from the logs agent to ensure all events are processed.
 /// This function will timeout after the specified duration to prevent hanging indefinitely.
 #[allow(clippy::too_many_arguments)]
 async fn wait_for_tombstone_event(
@@ -1338,16 +1334,15 @@ async fn setup_telemetry_client(
     extension_id: &str,
     runtime_api: &str,
     logs_tx: Sender<TelemetryEvent>,
-    event_bus_tx: Sender<Event>,
     logs_enabled: bool,
     managed_instance_mode: bool,
 ) -> anyhow::Result<CancellationToken> {
-    let listener = TelemetryListener::new(EXTENSION_HOST_IP, TELEMETRY_PORT, logs_tx, event_bus_tx);
+    let listener = TelemetryListener::new(EXTENSION_HOST_IP, TELEMETRY_PORT, logs_tx);
 
     let cancel_token = listener.cancel_token();
     match listener.start() {
         Ok(()) => {
-            // Drop the listener, so event_bus_tx is closed
+            // Drop the listener, so its `logs_tx` doesn't keep the logs agent's channel open
             drop(listener);
         }
         Err(e) => {
