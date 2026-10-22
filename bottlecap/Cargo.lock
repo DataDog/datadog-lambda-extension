@@ -888,7 +888,7 @@ dependencies = [
 [[package]]
 name = "datadog-agent-config"
 version = "0.1.0"
-source = "git+https://github.com/DataDog/serverless-components?rev=8156757470d0843a99fc5d19809ae021cd2c7178#8156757470d0843a99fc5d19809ae021cd2c7178"
+source = "git+https://github.com/DataDog/serverless-components?rev=5859602d609405a9de4d32638673a643caf37534#5859602d609405a9de4d32638673a643caf37534"
 dependencies = [
  "datadog-opentelemetry",
  "dogstatsd",
@@ -906,13 +906,14 @@ dependencies = [
 [[package]]
 name = "datadog-agent-trace-sampler"
 version = "0.1.0"
-source = "git+https://github.com/DataDog/serverless-components?rev=8156757470d0843a99fc5d19809ae021cd2c7178#8156757470d0843a99fc5d19809ae021cd2c7178"
+source = "git+https://github.com/DataDog/serverless-components?rev=5859602d609405a9de4d32638673a643caf37534#5859602d609405a9de4d32638673a643caf37534"
 
 [[package]]
 name = "datadog-fips"
 version = "0.1.0"
-source = "git+https://github.com/DataDog/serverless-components?rev=8156757470d0843a99fc5d19809ae021cd2c7178#8156757470d0843a99fc5d19809ae021cd2c7178"
+source = "git+https://github.com/DataDog/serverless-components?rev=5859602d609405a9de4d32638673a643caf37534#5859602d609405a9de4d32638673a643caf37534"
 dependencies = [
+ "aws-lc-rs",
  "reqwest",
  "rustls",
  "rustls-native-certs",
@@ -1090,7 +1091,7 @@ dependencies = [
 [[package]]
 name = "dogstatsd"
 version = "0.1.0"
-source = "git+https://github.com/DataDog/serverless-components?rev=8156757470d0843a99fc5d19809ae021cd2c7178#8156757470d0843a99fc5d19809ae021cd2c7178"
+source = "git+https://github.com/DataDog/serverless-components?rev=5859602d609405a9de4d32638673a643caf37534#5859602d609405a9de4d32638673a643caf37534"
 dependencies = [
  "datadog-protos",
  "ddsketch-agent",
@@ -1751,7 +1752,7 @@ dependencies = [
  "tokio",
  "tokio-rustls",
  "tower-service",
- "webpki-roots 1.0.6",
+ "webpki-roots 1.0.10",
 ]
 
 [[package]]
@@ -3571,7 +3572,7 @@ dependencies = [
  "wasm-bindgen",
  "wasm-bindgen-futures",
  "web-sys",
- "webpki-roots 1.0.6",
+ "webpki-roots 1.0.10",
 ]
 
 [[package]]
@@ -5004,9 +5005,9 @@ dependencies = [
 
 [[package]]
 name = "webpki-root-certs"
-version = "1.0.8"
+version = "1.0.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0d46a5a140e6f7afeccd8eae97eff335163939eac8b929834875168b29b3d267"
+checksum = "58ec80e73fd8baf57bf0d9615554c75348bda990d6d5bbeab964dd068319fecb"
 dependencies = [
  "rustls-pki-types",
 ]
@@ -5017,14 +5018,14 @@ version = "0.26.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "521bc38abb08001b01866da9f51eb7c5d647a19260e00054a8c7fd5f9e57f7a9"
 dependencies = [
- "webpki-roots 1.0.6",
+ "webpki-roots 1.0.10",
 ]
 
 [[package]]
 name = "webpki-roots"
-version = "1.0.6"
+version = "1.0.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "22cfaf3c063993ff62e73cb4311efde4db1efb31ab78a3e5c457939ad5cc0bed"
+checksum = "1c1c8e20c8a38fc7d65abfe74eb7280e4aa667e8eec8bc84996d2874810748d9"
 dependencies = [
  "rustls-pki-types",
 ]
