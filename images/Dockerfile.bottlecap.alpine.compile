@@ -57,10 +57,11 @@ RUN --mount=type=cache,target=/root/.cargo/git \
         --features="${FEATURES}" \
         --profile="${PROFILE:-release}" && \
     mkdir -p /tmp/out && \
-    cp "/tmp/dd/bottlecap/target/${PROFILE:-release}/bottlecap" /tmp/out/bottlecap
+    cp "/tmp/dd/bottlecap/target/${PROFILE:-release}/bottlecap" /tmp/out/bottlecap && \
+    cp "/tmp/dd/bottlecap/target/${PROFILE:-release}/launcher" /tmp/out/launcher
 
 # Use the smallest image possible
 FROM scratch
-COPY --from=compiler /tmp/out/bottlecap /
+COPY --from=compiler /tmp/out/bottlecap /tmp/out/launcher /
 ENTRYPOINT ["/bottlecap"]
 

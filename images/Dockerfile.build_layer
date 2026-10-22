@@ -21,15 +21,17 @@ RUN ARCH=$(uname -m) && \
 RUN mkdir /extensions
 WORKDIR /extensions
 
-# Copy Rust Agent binary
-COPY .binaries/bottlecap-$FILE_SUFFIX /extensions/datadog-agent
+# Lambda starts the launcher, which registers the extension and then runs the Rust Agent binary.
+# The Rust Agent binary must be outside /extensions, or Lambda starts it as a second extension.
+COPY .binaries/launcher-$FILE_SUFFIX /extensions/datadog-agent
+COPY .binaries/bottlecap-$FILE_SUFFIX /datadog-agent
 
 # Copy wrapper script
 COPY ./scripts/$DATADOG_WRAPPER /$DATADOG_WRAPPER
 RUN chmod +x /$DATADOG_WRAPPER
 
 # Zip all binaries together
-RUN  zip -r datadog_extension.zip /extensions /$DATADOG_WRAPPER
+RUN  zip -r datadog_extension.zip /extensions /datadog-agent /$DATADOG_WRAPPER
 
 # Use smallest image possible
 FROM scratch

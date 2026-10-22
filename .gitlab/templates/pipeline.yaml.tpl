@@ -87,6 +87,7 @@ bottlecap ({{ $flavor.name }}):
     expire_in: 1 week
     paths:
       - .binaries/bottlecap-{{ $flavor.suffix }}
+      - .binaries/launcher-{{ $flavor.suffix }}
   variables:
     ARCHITECTURE: {{ $flavor.arch }}
     ALPINE: {{ $flavor.alpine }}

@@ -16,6 +16,11 @@ pub const EXTENSION_ROUTE: &str = "2020-01-01/extension";
 const EXTENSION_ON_DEMAND_EVENTS: &[&str] = &["INVOKE", "SHUTDOWN"];
 const EXTENSION_MANAGED_INSTANCE_EVENTS: &[&str] = &["SHUTDOWN"];
 
+/// The launcher registers the extension and passes the result to the extension binary in these
+/// environment variables.
+pub const LAUNCHER_EXTENSION_ID_ENV_VAR: &str = "_DD_LAUNCHER_EXTENSION_ID";
+pub const LAUNCHER_ACCOUNT_ID_ENV_VAR: &str = "_DD_LAUNCHER_ACCOUNT_ID";
+
 /// Error conditions that can arise from extension operations
 #[derive(thiserror::Error, Debug)]
 pub enum ExtensionError {
@@ -83,13 +88,23 @@ pub fn base_url(route: &str, runtime_api: &str) -> String {
     format!("http://{runtime_api}/{route}")
 }
 
-fn get_subscription_event_types(managed_instance_mode: bool) -> Vec<&'static str> {
+#[must_use]
+pub fn get_subscription_event_types(managed_instance_mode: bool) -> Vec<&'static str> {
     (if managed_instance_mode {
         EXTENSION_MANAGED_INSTANCE_EVENTS
     } else {
         EXTENSION_ON_DEMAND_EVENTS
     })
     .to_vec()
+}
+
+/// Returns the registration that the launcher made, when the launcher started this process.
+#[must_use]
+pub fn launcher_registration() -> Option<RegisterResponse> {
+    Some(RegisterResponse {
+        extension_id: std::env::var(LAUNCHER_EXTENSION_ID_ENV_VAR).ok()?,
+        account_id: std::env::var(LAUNCHER_ACCOUNT_ID_ENV_VAR).ok(),
+    })
 }
 
 pub async fn register(
