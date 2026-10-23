@@ -829,6 +829,12 @@ async fn extension_loop_active(
             )
             .await;
 
+            // Make sure the processor has handled every earlier command, including the
+            // fire-and-forget shutdown and OOM events, before the final flush.
+            if let Err(e) = invocation_processor_handle.barrier().await {
+                error!("Failed to wait for the invocation processor: {e}");
+            }
+
             // Cancel background services
             cancel_background_services(
                 api_runtime_proxy_shutdown_signal.as_ref(),
@@ -1000,7 +1006,7 @@ async fn handle_event_bus_event(
                 }
                 TelemetryRecord::PlatformRuntimeDone {
                     ref request_id,
-                    metrics: Some(metrics),
+                    metrics,
                     status,
                     ref error_type,
                     ..

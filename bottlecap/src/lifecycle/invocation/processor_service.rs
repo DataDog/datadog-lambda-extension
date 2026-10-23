@@ -59,7 +59,7 @@ pub enum ProcessorCommand {
     },
     PlatformRuntimeDone {
         request_id: String,
-        metrics: RuntimeDoneMetrics,
+        metrics: Option<RuntimeDoneMetrics>,
         status: Status,
         error_type: Option<String>,
         tags_provider: Arc<provider::Provider>,
@@ -127,6 +127,9 @@ pub enum ProcessorCommand {
         timestamp: i64,
     },
     OnShutdownEvent,
+    Barrier {
+        response: oneshot::Sender<()>,
+    },
     SendCtxSpans {
         tags_provider: Arc<provider::Provider>,
         trace_sender: Arc<SendingTraceProcessor>,
@@ -180,7 +183,8 @@ impl InvocationProcessorHandle {
                         let _ = response.send(Ok(None));
                     }
                     ProcessorCommand::PlatformRuntimeDone { response, .. }
-                    | ProcessorCommand::PlatformReport { response, .. } => {
+                    | ProcessorCommand::PlatformReport { response, .. }
+                    | ProcessorCommand::Barrier { response } => {
                         let _ = response.send(());
                     }
                     // Fire-and-forget commands: drop silently.
@@ -279,7 +283,7 @@ impl InvocationProcessorHandle {
     pub async fn on_platform_runtime_done(
         &self,
         request_id: String,
-        metrics: RuntimeDoneMetrics,
+        metrics: Option<RuntimeDoneMetrics>,
         status: Status,
         error_type: Option<String>,
         tags_provider: Arc<provider::Provider>,
@@ -506,6 +510,18 @@ impl InvocationProcessorHandle {
 
     pub async fn on_shutdown_event(&self) -> Result<(), mpsc::error::SendError<ProcessorCommand>> {
         self.sender.send(ProcessorCommand::OnShutdownEvent).await
+    }
+
+    /// Resolves once the processor has handled this and every earlier command.
+    pub async fn barrier(&self) -> Result<(), ProcessorError> {
+        let (tx, rx) = oneshot::channel();
+        self.sender
+            .send(ProcessorCommand::Barrier { response: tx })
+            .await
+            .map_err(|e| ProcessorError::ChannelSend(e.to_string()))?;
+        rx.await
+            .map_err(|e| ProcessorError::ChannelReceive(e.to_string()))?;
+        Ok(())
     }
 
     pub async fn send_ctx_spans(
@@ -746,6 +762,9 @@ impl InvocationProcessorService {
                 ProcessorCommand::OnShutdownEvent => {
                     self.processor.on_shutdown_event();
                 }
+                ProcessorCommand::Barrier { response } => {
+                    let _ = response.send(());
+                }
                 ProcessorCommand::SendCtxSpans {
                     tags_provider,
                     trace_sender,
@@ -878,10 +897,10 @@ mod tests {
             timeout_dur,
             handle.on_platform_runtime_done(
                 "rid".to_string(),
-                RuntimeDoneMetrics {
+                Some(RuntimeDoneMetrics {
                     duration_ms: 0.0,
                     produced_bytes: None,
-                },
+                }),
                 Status::Success,
                 None,
                 Arc::clone(&tags_provider),
@@ -892,6 +911,11 @@ mod tests {
         .await
         .expect("on_platform_runtime_done timed out")
         .expect("on_platform_runtime_done");
+
+        timeout(timeout_dur, handle.barrier())
+            .await
+            .expect("barrier timed out")
+            .expect("barrier");
 
         timeout(
             timeout_dur,

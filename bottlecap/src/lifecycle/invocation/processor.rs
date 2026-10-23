@@ -580,7 +580,7 @@ impl Processor {
     pub async fn on_platform_runtime_done(
         &mut self,
         request_id: &String,
-        metrics: RuntimeDoneMetrics,
+        metrics: Option<RuntimeDoneMetrics>,
         status: Status,
         error_type: Option<String>,
         tags_provider: Arc<provider::Provider>,
@@ -588,8 +588,10 @@ impl Processor {
         timestamp: i64,
     ) {
         // Set the runtime duration metric
-        self.enhanced_metrics
-            .set_runtime_done_metrics(&metrics, timestamp);
+        if let Some(metrics) = &metrics {
+            self.enhanced_metrics
+                .set_runtime_done_metrics(metrics, timestamp);
+        }
 
         if status != Status::Success {
             // Increment the error metric
@@ -614,6 +616,11 @@ impl Processor {
             self.enhanced_metrics.set_usage_enhanced_metrics();
         }
 
+        // Without a duration the invocation span would be sent with zero length, so skip span
+        // processing. `runtime_done_received` stays false so reparenting doesn't send it either.
+        let Some(metrics) = metrics else {
+            return;
+        };
         self.context_buffer
             .add_runtime_duration(request_id, metrics.duration_ms);
 
@@ -1014,7 +1021,7 @@ impl Processor {
         if self.context_buffer.get(request_id).is_some() {
             self.on_platform_runtime_done(
                 request_id,
-                runtime_done_metrics,
+                Some(runtime_done_metrics),
                 status,
                 error_type,
                 tags_provider,
@@ -1735,6 +1742,7 @@ mod tests {
     use super::*;
     use crate::LAMBDA_RUNTIME_SLUG;
     use crate::extension::telemetry::events::ManagedInstanceReportMetrics;
+    use crate::metrics::enhanced::constants::{ERRORS_METRIC, TIMEOUTS_METRIC};
     use crate::traces::stats_concentrator_service::StatsConcentratorService;
     use crate::traces::stats_generator::StatsGenerator;
     use crate::traces::trace_processor;
@@ -3195,10 +3203,10 @@ mod tests {
 
         p.on_platform_runtime_done(
             &request_id,
-            RuntimeDoneMetrics {
+            Some(RuntimeDoneMetrics {
                 duration_ms: 100.0,
                 produced_bytes: None,
-            },
+            }),
             Status::Timeout,
             None,
             tags_provider,
@@ -3713,5 +3721,60 @@ mod tests {
                 "compute_on_extension={compute_on_extension}, client_computed_stats={client_computed_stats}"
             );
         }
+    }
+
+    async fn metric_sum(p: &Processor, metric: &str, timestamp: i64) -> Option<f64> {
+        p.enhanced_metrics
+            .aggr_handle
+            .get_entry_by_id(metric.into(), None, (timestamp / 10) * 10)
+            .await
+            .unwrap()
+            .map(|entry| {
+                entry
+                    .value
+                    .get_sketch()
+                    .expect("distribution sketch")
+                    .sum()
+                    .expect("sketch sum")
+            })
+    }
+
+    #[tokio::test]
+    async fn test_runtime_done_without_metrics_counts_timeout_without_span() {
+        let request_id = String::from("req-no-metrics");
+        let mut p = setup();
+        p.context_buffer.start_context(&request_id, Span::default());
+        p.tracer_detected = true;
+        let config = Arc::clone(&p.config);
+        let tags_provider = Arc::new(provider::Provider::new(
+            Arc::clone(&config),
+            LAMBDA_RUNTIME_SLUG.to_string(),
+            &HashMap::from([("function_arn".to_string(), "test-arn".to_string())]),
+        ));
+        let (trace_sender, mut trace_rx) = make_trace_sender_with_rx(config);
+        let now = chrono::Utc::now().timestamp();
+
+        p.on_platform_runtime_done(
+            &request_id,
+            None,
+            Status::Timeout,
+            None,
+            tags_provider,
+            Arc::clone(&trace_sender),
+            now,
+        )
+        .await;
+
+        assert_eq!(metric_sum(&p, ERRORS_METRIC, now).await, Some(1.0));
+        assert_eq!(metric_sum(&p, TIMEOUTS_METRIC, now).await, Some(1.0));
+        // Without a duration no zero-length invocation span is sent, and the span isn't marked
+        // complete, so reparenting won't send it either.
+        assert!(trace_rx.try_recv().is_err());
+        assert!(
+            !p.context_buffer
+                .get(&request_id)
+                .expect("context")
+                .runtime_done_received
+        );
     }
 }
