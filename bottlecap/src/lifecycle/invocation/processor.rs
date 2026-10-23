@@ -98,6 +98,9 @@ pub struct Processor {
     /// Tracks whether if first invocation after init has been received in Managed Instance mode.
     /// Used to determine if we should search for the empty context on an invocation.
     awaiting_first_invocation: bool,
+    /// Request ID of the most recent INVOKE. In On-Demand mode this is the invocation still in
+    /// flight when Lambda shuts the environment down.
+    last_invoked_request_id: Option<String>,
     /// Sender used to forward durable execution context extracted from `aws.lambda` spans to the
     /// logs agent. Decouples the trace agent from the logs agent: the trace agent sends spans
     /// to the lifecycle processor, which extracts durable context and relays it here.
@@ -183,6 +186,7 @@ impl Processor {
             dynamic_tags: HashMap::new(),
             active_invocations: 0,
             awaiting_first_invocation: false,
+            last_invoked_request_id: None,
             durable_context_tx,
             restore_time: None,
             init_duration_metric_emitted: false,
@@ -290,6 +294,7 @@ impl Processor {
             }
         }
         self.enhanced_metrics.set_invoked_received();
+        self.last_invoked_request_id = Some(request_id.clone());
 
         // Both modes: check for buffered UniversalInstrumentationStart by request_id first.
         // Falls back to FIFO for on-demand when the tracer does not send the header.
@@ -580,7 +585,7 @@ impl Processor {
     pub async fn on_platform_runtime_done(
         &mut self,
         request_id: &String,
-        metrics: RuntimeDoneMetrics,
+        metrics: Option<RuntimeDoneMetrics>,
         status: Status,
         error_type: Option<String>,
         tags_provider: Arc<provider::Provider>,
@@ -588,8 +593,10 @@ impl Processor {
         timestamp: i64,
     ) {
         // Set the runtime duration metric
-        self.enhanced_metrics
-            .set_runtime_done_metrics(&metrics, timestamp);
+        if let Some(metrics) = &metrics {
+            self.enhanced_metrics
+                .set_runtime_done_metrics(metrics, timestamp);
+        }
 
         if status != Status::Success {
             // Increment the error metric
@@ -614,6 +621,14 @@ impl Processor {
             self.enhanced_metrics.set_usage_enhanced_metrics();
         }
 
+        // Without a duration the invocation span would be sent with zero length, so count the
+        // invocation as done but skip span processing.
+        let Some(metrics) = metrics else {
+            if let Some(context) = self.context_buffer.get_mut(request_id) {
+                context.runtime_done_received = true;
+            }
+            return;
+        };
         self.context_buffer
             .add_runtime_duration(request_id, metrics.duration_ms);
 
@@ -1014,7 +1029,7 @@ impl Processor {
         if self.context_buffer.get(request_id).is_some() {
             self.on_platform_runtime_done(
                 request_id,
-                runtime_done_metrics,
+                Some(runtime_done_metrics),
                 status,
                 error_type,
                 tags_provider,
@@ -1094,6 +1109,42 @@ impl Processor {
         if self.aws_config.is_managed_instance_mode() {
             self.enhanced_metrics.set_max_enhanced_metrics(); // Emit system limits (fd_max, threads_max, tmp_max)
             self.enhanced_metrics.set_usage_enhanced_metrics(); // Emit sandbox-wide peak usage
+        }
+    }
+
+    /// Counts the error, and the timeout, for the invocation that caused a `timeout` or
+    /// `failure` shutdown when its `platform.runtimeDone` never arrived. Must run after the
+    /// remaining telemetry has been processed, so a late `runtimeDone` isn't double counted.
+    ///
+    /// A `failure` reset that lands within the telemetry buffering window after a successful
+    /// response, such as another extension crashing, is also counted, because its
+    /// `runtimeDone` is refused once the listener has shut down.
+    pub fn on_shutdown_reason(&mut self, reason: &str, timestamp: i64) {
+        if self.aws_config.is_managed_instance_mode() {
+            return;
+        }
+        let is_timeout = reason.eq_ignore_ascii_case("timeout");
+        if !is_timeout && !reason.eq_ignore_ascii_case("failure") {
+            return;
+        }
+        let Some(context) = self
+            .last_invoked_request_id
+            .as_ref()
+            .and_then(|request_id| self.context_buffer.get_mut(request_id))
+        else {
+            return;
+        };
+        if context.runtime_done_received {
+            return;
+        }
+        context.runtime_done_received = true;
+        debug!(
+            "Invocation Processor | No runtimeDone for {} before {reason} shutdown, counting error",
+            context.request_id
+        );
+        self.enhanced_metrics.increment_errors_metric(timestamp);
+        if is_timeout {
+            self.enhanced_metrics.increment_timeout_metric(timestamp);
         }
     }
 
@@ -1735,6 +1786,7 @@ mod tests {
     use super::*;
     use crate::LAMBDA_RUNTIME_SLUG;
     use crate::extension::telemetry::events::ManagedInstanceReportMetrics;
+    use crate::metrics::enhanced::constants::{ERRORS_METRIC, TIMEOUTS_METRIC};
     use crate::traces::stats_concentrator_service::StatsConcentratorService;
     use crate::traces::stats_generator::StatsGenerator;
     use crate::traces::trace_processor;
@@ -3195,10 +3247,10 @@ mod tests {
 
         p.on_platform_runtime_done(
             &request_id,
-            RuntimeDoneMetrics {
+            Some(RuntimeDoneMetrics {
                 duration_ms: 100.0,
                 produced_bytes: None,
-            },
+            }),
             Status::Timeout,
             None,
             tags_provider,
@@ -3713,5 +3765,141 @@ mod tests {
                 "compute_on_extension={compute_on_extension}, client_computed_stats={client_computed_stats}"
             );
         }
+    }
+
+    async fn metric_sum(p: &Processor, metric: &str, timestamp: i64) -> Option<f64> {
+        p.enhanced_metrics
+            .aggr_handle
+            .get_entry_by_id(metric.into(), None, (timestamp / 10) * 10)
+            .await
+            .unwrap()
+            .map(|entry| {
+                entry
+                    .value
+                    .get_sketch()
+                    .expect("distribution sketch")
+                    .sum()
+                    .expect("sketch sum")
+            })
+    }
+
+    fn setup_in_flight_invocation(request_id: &str) -> Processor {
+        let mut p = setup();
+        p.context_buffer.start_context(request_id, Span::default());
+        p.last_invoked_request_id = Some(request_id.to_string());
+        p
+    }
+
+    #[tokio::test]
+    async fn test_shutdown_reason_timeout_counts_missing_runtime_done_once() {
+        let mut p = setup_in_flight_invocation("req-timeout");
+        let now = chrono::Utc::now().timestamp();
+
+        p.on_shutdown_reason("TIMEOUT", now);
+        p.on_shutdown_reason("TIMEOUT", now);
+
+        assert_eq!(metric_sum(&p, ERRORS_METRIC, now).await, Some(1.0));
+        assert_eq!(metric_sum(&p, TIMEOUTS_METRIC, now).await, Some(1.0));
+    }
+
+    #[tokio::test]
+    async fn test_shutdown_reason_resolves_last_invoked_request() {
+        let request_id = String::from("req-invoked");
+        let mut p = setup();
+        p.on_invoke_event(request_id.clone());
+
+        p.on_shutdown_reason("TIMEOUT", chrono::Utc::now().timestamp());
+
+        assert!(
+            p.context_buffer
+                .get(&request_id)
+                .expect("context")
+                .runtime_done_received
+        );
+    }
+
+    #[tokio::test]
+    async fn test_shutdown_reason_ignored_in_managed_instance_mode() {
+        let request_id = String::from("req-managed");
+        let mut p = setup_managed_instance();
+        p.on_invoke_event(request_id.clone());
+
+        p.on_shutdown_reason("TIMEOUT", chrono::Utc::now().timestamp());
+
+        assert!(
+            !p.context_buffer
+                .get(&request_id)
+                .expect("context")
+                .runtime_done_received
+        );
+    }
+
+    #[tokio::test]
+    async fn test_shutdown_reason_failure_counts_error_only() {
+        let mut p = setup_in_flight_invocation("req-failure");
+        let now = chrono::Utc::now().timestamp();
+
+        p.on_shutdown_reason("FAILURE", now);
+
+        assert_eq!(metric_sum(&p, ERRORS_METRIC, now).await, Some(1.0));
+        assert_eq!(metric_sum(&p, TIMEOUTS_METRIC, now).await, None);
+    }
+
+    #[tokio::test]
+    async fn test_shutdown_reason_ignored_when_runtime_done_received() {
+        let request_id = "req-done";
+        let mut p = setup_in_flight_invocation(request_id);
+        p.context_buffer
+            .get_mut(&request_id.to_string())
+            .expect("context")
+            .runtime_done_received = true;
+        let now = chrono::Utc::now().timestamp();
+
+        p.on_shutdown_reason("TIMEOUT", now);
+
+        assert_eq!(metric_sum(&p, ERRORS_METRIC, now).await, None);
+    }
+
+    #[tokio::test]
+    async fn test_shutdown_reason_spindown_counts_nothing() {
+        let mut p = setup_in_flight_invocation("req-spindown");
+        let now = chrono::Utc::now().timestamp();
+
+        p.on_shutdown_reason("SPINDOWN", now);
+
+        assert_eq!(metric_sum(&p, ERRORS_METRIC, now).await, None);
+    }
+
+    #[tokio::test]
+    async fn test_runtime_done_without_metrics_counts_timeout_without_span() {
+        let request_id = String::from("req-no-metrics");
+        let mut p = setup_in_flight_invocation(&request_id);
+        p.tracer_detected = true;
+        let config = Arc::clone(&p.config);
+        let tags_provider = Arc::new(provider::Provider::new(
+            Arc::clone(&config),
+            LAMBDA_RUNTIME_SLUG.to_string(),
+            &HashMap::from([("function_arn".to_string(), "test-arn".to_string())]),
+        ));
+        let (trace_sender, mut trace_rx) = make_trace_sender_with_rx(config);
+        let now = chrono::Utc::now().timestamp();
+
+        p.on_platform_runtime_done(
+            &request_id,
+            None,
+            Status::Timeout,
+            None,
+            tags_provider,
+            Arc::clone(&trace_sender),
+            now,
+        )
+        .await;
+        // The runtimeDone was received, so a later TIMEOUT shutdown must not count again.
+        p.on_shutdown_reason("TIMEOUT", now);
+
+        assert_eq!(metric_sum(&p, ERRORS_METRIC, now).await, Some(1.0));
+        assert_eq!(metric_sum(&p, TIMEOUTS_METRIC, now).await, Some(1.0));
+        // Without a duration, no zero-length invocation span is sent.
+        assert!(trace_rx.try_recv().is_err());
     }
 }
