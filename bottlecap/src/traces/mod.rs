@@ -38,6 +38,19 @@ const DNS_LOCAL_HOST_ADDRESS_URL_PREFIX: &str = "127.0.0.1";
 // URL from the `_AWS_XRAY_DAEMON_ADDRESS` for DNS traces
 const AWS_XRAY_DAEMON_ADDRESS_URL_PREFIX: &str = "169.254.79.129";
 
+/// The trace intake path the config crate appends to `DD_APM_DD_URL` to build
+/// `apm_dd_url`. Must be stripped from that field before deriving any
+/// non-trace endpoint (stats, DSM) from it.
+pub const TRACE_INTAKE_ROUTE: &str = "/api/v0.2/traces";
+
+/// Returns the base URL of a resolved trace intake for non-trace endpoints.
+#[must_use]
+pub fn intake_base_url(apm_dd_url: &str) -> &str {
+    apm_dd_url
+        .trim_end_matches('/')
+        .trim_end_matches(TRACE_INTAKE_ROUTE)
+}
+
 // Name of the placeholder invocation span set by Java and Go tracers
 pub(crate) const INVOCATION_SPAN_RESOURCE: &str = "dd-tracer-serverless-span";
 
@@ -47,3 +60,36 @@ pub(crate) const INVOCATION_SPAN_RESOURCE: &str = "dd-tracer-serverless-span";
 /// Used when we are appending Lambda specific tags to incoming APM data from
 /// products like DSM, Profiling, LLMObs, Live Debugger, and more.
 const DD_ADDITIONAL_TAGS_HEADER: &str = "X-Datadog-Additional-Tags";
+
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+mod tests {
+    use super::intake_base_url;
+
+    #[test]
+    fn intake_base_url_strips_trace_route_and_trailing_slashes() {
+        let cases = [
+            (
+                "http://localhost:8080/api/v0.2/traces",
+                "http://localhost:8080",
+            ),
+            (
+                "http://localhost:8080/api/v0.2/traces///",
+                "http://localhost:8080",
+            ),
+            (
+                "https://trace.agent.datadoghq.com/api/v0.2/traces",
+                "https://trace.agent.datadoghq.com",
+            ),
+            (
+                "http://localhost:8080/prefix/api/v0.2/traces",
+                "http://localhost:8080/prefix",
+            ),
+            ("http://localhost:8080/", "http://localhost:8080"),
+            ("http://localhost:8080", "http://localhost:8080"),
+        ];
+        for (input, expected) in cases {
+            assert_eq!(intake_base_url(input), expected, "input: {input:?}");
+        }
+    }
+}
