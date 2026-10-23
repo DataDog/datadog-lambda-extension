@@ -127,9 +127,7 @@ pub enum ProcessorCommand {
         timestamp: i64,
     },
     OnShutdownEvent,
-    OnShutdownReason {
-        reason: String,
-        timestamp: i64,
+    Barrier {
         response: oneshot::Sender<()>,
     },
     SendCtxSpans {
@@ -186,7 +184,7 @@ impl InvocationProcessorHandle {
                     }
                     ProcessorCommand::PlatformRuntimeDone { response, .. }
                     | ProcessorCommand::PlatformReport { response, .. }
-                    | ProcessorCommand::OnShutdownReason { response, .. } => {
+                    | ProcessorCommand::Barrier { response } => {
                         let _ = response.send(());
                     }
                     // Fire-and-forget commands: drop silently.
@@ -515,18 +513,10 @@ impl InvocationProcessorHandle {
     }
 
     /// Resolves once the processor has handled this and every earlier command.
-    pub async fn on_shutdown_reason(
-        &self,
-        reason: String,
-        timestamp: i64,
-    ) -> Result<(), ProcessorError> {
+    pub async fn barrier(&self) -> Result<(), ProcessorError> {
         let (tx, rx) = oneshot::channel();
         self.sender
-            .send(ProcessorCommand::OnShutdownReason {
-                reason,
-                timestamp,
-                response: tx,
-            })
+            .send(ProcessorCommand::Barrier { response: tx })
             .await
             .map_err(|e| ProcessorError::ChannelSend(e.to_string()))?;
         rx.await
@@ -772,12 +762,7 @@ impl InvocationProcessorService {
                 ProcessorCommand::OnShutdownEvent => {
                     self.processor.on_shutdown_event();
                 }
-                ProcessorCommand::OnShutdownReason {
-                    reason,
-                    timestamp,
-                    response,
-                } => {
-                    self.processor.on_shutdown_reason(&reason, timestamp);
+                ProcessorCommand::Barrier { response } => {
                     let _ = response.send(());
                 }
                 ProcessorCommand::SendCtxSpans {
@@ -927,13 +912,10 @@ mod tests {
         .expect("on_platform_runtime_done timed out")
         .expect("on_platform_runtime_done");
 
-        timeout(
-            timeout_dur,
-            handle.on_shutdown_reason("timeout".to_string(), 0),
-        )
-        .await
-        .expect("on_shutdown_reason timed out")
-        .expect("on_shutdown_reason");
+        timeout(timeout_dur, handle.barrier())
+            .await
+            .expect("barrier timed out")
+            .expect("barrier");
 
         timeout(
             timeout_dur,

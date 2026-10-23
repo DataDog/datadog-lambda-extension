@@ -98,10 +98,6 @@ pub struct Processor {
     /// Tracks whether if first invocation after init has been received in Managed Instance mode.
     /// Used to determine if we should search for the empty context on an invocation.
     awaiting_first_invocation: bool,
-    /// Request ID of the most recent INVOKE, until its errors/timeouts are counted from its
-    /// `platform.runtimeDone` or the SHUTDOWN reason. Kept separate from
-    /// `Context::runtime_done_received`, which also marks the invocation span ready to send.
-    uncounted_invocation: Option<String>,
     /// Sender used to forward durable execution context extracted from `aws.lambda` spans to the
     /// logs agent. Decouples the trace agent from the logs agent: the trace agent sends spans
     /// to the lifecycle processor, which extracts durable context and relays it here.
@@ -187,7 +183,6 @@ impl Processor {
             dynamic_tags: HashMap::new(),
             active_invocations: 0,
             awaiting_first_invocation: false,
-            uncounted_invocation: None,
             durable_context_tx,
             restore_time: None,
             init_duration_metric_emitted: false,
@@ -295,7 +290,6 @@ impl Processor {
             }
         }
         self.enhanced_metrics.set_invoked_received();
-        self.uncounted_invocation = Some(request_id.clone());
 
         // Both modes: check for buffered UniversalInstrumentationStart by request_id first.
         // Falls back to FIFO for on-demand when the tracer does not send the header.
@@ -597,10 +591,6 @@ impl Processor {
         if let Some(metrics) = &metrics {
             self.enhanced_metrics
                 .set_runtime_done_metrics(metrics, timestamp);
-        }
-
-        if self.uncounted_invocation.as_ref() == Some(request_id) {
-            self.uncounted_invocation = None;
         }
 
         if status != Status::Success {
@@ -1111,36 +1101,6 @@ impl Processor {
         if self.aws_config.is_managed_instance_mode() {
             self.enhanced_metrics.set_max_enhanced_metrics(); // Emit system limits (fd_max, threads_max, tmp_max)
             self.enhanced_metrics.set_usage_enhanced_metrics(); // Emit sandbox-wide peak usage
-        }
-    }
-
-    /// Counts the error, and the timeout, for the invocation that caused a `timeout` or
-    /// `failure` shutdown when its `platform.runtimeDone` never arrived. Must run after the
-    /// remaining telemetry has been processed, so a late `runtimeDone` isn't double counted.
-    ///
-    /// A `failure` reset that lands within the telemetry buffering window after a successful
-    /// response, such as another extension crashing, is also counted, because its
-    /// `runtimeDone` is refused once the listener has shut down.
-    pub fn on_shutdown_reason(&mut self, reason: &str, timestamp: i64) {
-        if self.aws_config.is_managed_instance_mode() {
-            return;
-        }
-        let is_timeout = reason.eq_ignore_ascii_case("timeout");
-        if !is_timeout && !reason.eq_ignore_ascii_case("failure") {
-            return;
-        }
-        let Some(request_id) = self
-            .uncounted_invocation
-            .take_if(|request_id| self.context_buffer.get(request_id).is_some())
-        else {
-            return;
-        };
-        debug!(
-            "Invocation Processor | No runtimeDone for {request_id} before {reason} shutdown, counting error"
-        );
-        self.enhanced_metrics.increment_errors_metric(timestamp);
-        if is_timeout {
-            self.enhanced_metrics.increment_timeout_metric(timestamp);
         }
     }
 
@@ -3779,92 +3739,11 @@ mod tests {
             })
     }
 
-    fn setup_in_flight_invocation(request_id: &str) -> Processor {
-        let mut p = setup();
-        p.context_buffer.start_context(request_id, Span::default());
-        p.uncounted_invocation = Some(request_id.to_string());
-        p
-    }
-
-    #[tokio::test]
-    async fn test_shutdown_reason_timeout_counts_missing_runtime_done_once() {
-        let mut p = setup_in_flight_invocation("req-timeout");
-        let now = chrono::Utc::now().timestamp();
-
-        p.on_shutdown_reason("TIMEOUT", now);
-        p.on_shutdown_reason("TIMEOUT", now);
-
-        assert_eq!(metric_sum(&p, ERRORS_METRIC, now).await, Some(1.0));
-        assert_eq!(metric_sum(&p, TIMEOUTS_METRIC, now).await, Some(1.0));
-    }
-
-    #[tokio::test]
-    async fn test_shutdown_reason_resolves_last_invoked_request() {
-        let request_id = String::from("req-invoked");
-        let mut p = setup();
-        p.on_invoke_event(request_id.clone());
-        assert_eq!(p.uncounted_invocation.as_ref(), Some(&request_id));
-
-        p.on_shutdown_reason("TIMEOUT", chrono::Utc::now().timestamp());
-
-        assert_eq!(p.uncounted_invocation, None);
-        // Counting must not mark the span complete, or reparenting would send it unfinished.
-        assert!(
-            !p.context_buffer
-                .get(&request_id)
-                .expect("context")
-                .runtime_done_received
-        );
-    }
-
-    #[tokio::test]
-    async fn test_shutdown_reason_ignored_in_managed_instance_mode() {
-        let request_id = String::from("req-managed");
-        let mut p = setup_managed_instance();
-        p.on_invoke_event(request_id.clone());
-
-        p.on_shutdown_reason("TIMEOUT", chrono::Utc::now().timestamp());
-
-        assert_eq!(p.uncounted_invocation, Some(request_id));
-    }
-
-    #[tokio::test]
-    async fn test_shutdown_reason_failure_counts_error_only() {
-        let mut p = setup_in_flight_invocation("req-failure");
-        let now = chrono::Utc::now().timestamp();
-
-        p.on_shutdown_reason("FAILURE", now);
-
-        assert_eq!(metric_sum(&p, ERRORS_METRIC, now).await, Some(1.0));
-        assert_eq!(metric_sum(&p, TIMEOUTS_METRIC, now).await, None);
-    }
-
-    #[tokio::test]
-    async fn test_shutdown_reason_ignored_after_context_released() {
-        let request_id = String::from("req-released");
-        let mut p = setup_in_flight_invocation(&request_id);
-        p.context_buffer.remove(&request_id);
-        let now = chrono::Utc::now().timestamp();
-
-        p.on_shutdown_reason("TIMEOUT", now);
-
-        assert_eq!(metric_sum(&p, ERRORS_METRIC, now).await, None);
-    }
-
-    #[tokio::test]
-    async fn test_shutdown_reason_spindown_counts_nothing() {
-        let mut p = setup_in_flight_invocation("req-spindown");
-        let now = chrono::Utc::now().timestamp();
-
-        p.on_shutdown_reason("SPINDOWN", now);
-
-        assert_eq!(metric_sum(&p, ERRORS_METRIC, now).await, None);
-    }
-
     #[tokio::test]
     async fn test_runtime_done_without_metrics_counts_timeout_without_span() {
         let request_id = String::from("req-no-metrics");
-        let mut p = setup_in_flight_invocation(&request_id);
+        let mut p = setup();
+        p.context_buffer.start_context(&request_id, Span::default());
         p.tracer_detected = true;
         let config = Arc::clone(&p.config);
         let tags_provider = Arc::new(provider::Provider::new(
@@ -3885,8 +3764,6 @@ mod tests {
             now,
         )
         .await;
-        // The runtimeDone was received, so a later TIMEOUT shutdown must not count again.
-        p.on_shutdown_reason("TIMEOUT", now);
 
         assert_eq!(metric_sum(&p, ERRORS_METRIC, now).await, Some(1.0));
         assert_eq!(metric_sum(&p, TIMEOUTS_METRIC, now).await, Some(1.0));

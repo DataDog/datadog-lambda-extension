@@ -805,11 +805,7 @@ async fn extension_loop_active(
             }
         }
 
-        if let NextEventResponse::Shutdown {
-            ref shutdown_reason,
-            ..
-        } = maybe_shutdown_event
-        {
+        if let NextEventResponse::Shutdown { .. } = maybe_shutdown_event {
             // Stop the Telemetry API listener, then let the logs agent drain. The agent sends the
             // Tombstone only after it has forwarded every telemetry event to the event bus.
             telemetry_listener_cancel_token.cancel();
@@ -833,13 +829,10 @@ async fn extension_loop_active(
             )
             .await;
 
-            // Count a timeout or failure whose runtimeDone never arrived. Awaiting the reply also
-            // ensures the processor has handled every earlier command before the final flush.
-            if let Err(e) = invocation_processor_handle
-                .on_shutdown_reason(shutdown_reason.clone(), chrono::Utc::now().timestamp())
-                .await
-            {
-                error!("Failed to send shutdown reason to processor: {e}");
+            // Make sure the processor has handled every earlier command, including the
+            // fire-and-forget shutdown and OOM events, before the final flush.
+            if let Err(e) = invocation_processor_handle.barrier().await {
+                error!("Failed to wait for the invocation processor: {e}");
             }
 
             // Cancel background services
