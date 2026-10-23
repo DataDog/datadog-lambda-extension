@@ -136,6 +136,8 @@ mod tests {
     use std::collections::HashMap;
 
     const RUNTIME_DONE: &str = r#"{"time":"2022-10-21T14:05:05.764Z","type":"platform.runtimeDone","record":{"requestId":"459921b5-681c-4a96-beb0-81e0aa586026","status":"timeout","metrics":{"durationMs":3000.0,"producedBytes":0}}}"#;
+    const FUNCTION_LOG: &str =
+        r#"{"time":"2022-10-21T14:05:04.000Z","type":"function","record":"hello"}"#;
 
     fn agent() -> (LogsAgent, Sender<TelemetryEvent>, EventBus) {
         let config = Arc::new(config::Config::default());
@@ -191,5 +193,46 @@ mod tests {
         agent.spin().await;
 
         assert!(matches!(event_bus.rx.try_recv(), Ok(Event::Tombstone)));
+    }
+
+    #[tokio::test]
+    async fn test_queued_events_forwarded_after_drain_timeout() {
+        const FILL: usize = 150;
+        let (mut agent, logs_tx, mut event_bus) = agent();
+        let runtime_done: TelemetryEvent = serde_json::from_str(RUNTIME_DONE).expect("valid event");
+        let function_log: TelemetryEvent = serde_json::from_str(FUNCTION_LOG).expect("valid event");
+        // Events still queued when the drain deadline passes must be forwarded before the
+        // Tombstone: `timeout_at` polls `recv` first, and `recv` is ready while events are
+        // queued. The run of function logs, which aren't forwarded, makes the agent drain past
+        // the deadline without yielding.
+        for _ in 0..FILL {
+            logs_tx
+                .send(runtime_done.clone())
+                .await
+                .expect("channel open");
+        }
+        for _ in 0..500 {
+            logs_tx
+                .send(function_log.clone())
+                .await
+                .expect("channel open");
+        }
+        logs_tx.send(runtime_done).await.expect("channel open");
+        agent.cancel_token().cancel();
+        let handle = tokio::spawn(async move { agent.spin().await });
+
+        // Leave the event bus full until the drain deadline has passed.
+        tokio::time::sleep(DRAIN_TIMEOUT + Duration::from_millis(50)).await;
+
+        let mut forwarded = 0;
+        loop {
+            match event_bus.rx.recv().await.expect("event") {
+                Event::Telemetry(_) => forwarded += 1,
+                Event::Tombstone => break,
+                Event::OutOfMemory { .. } => {}
+            }
+        }
+        assert_eq!(forwarded, FILL + 1);
+        handle.await.expect("agent task");
     }
 }
