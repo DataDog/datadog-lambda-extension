@@ -98,9 +98,10 @@ pub struct Processor {
     /// Tracks whether if first invocation after init has been received in Managed Instance mode.
     /// Used to determine if we should search for the empty context on an invocation.
     awaiting_first_invocation: bool,
-    /// Request ID of the most recent INVOKE. In On-Demand mode this is the invocation still in
-    /// flight when Lambda shuts the environment down.
-    last_invoked_request_id: Option<String>,
+    /// Request ID of the most recent INVOKE, until its errors/timeouts are counted from its
+    /// `platform.runtimeDone` or the SHUTDOWN reason. Kept separate from
+    /// `Context::runtime_done_received`, which also marks the invocation span ready to send.
+    uncounted_invocation: Option<String>,
     /// Sender used to forward durable execution context extracted from `aws.lambda` spans to the
     /// logs agent. Decouples the trace agent from the logs agent: the trace agent sends spans
     /// to the lifecycle processor, which extracts durable context and relays it here.
@@ -186,7 +187,7 @@ impl Processor {
             dynamic_tags: HashMap::new(),
             active_invocations: 0,
             awaiting_first_invocation: false,
-            last_invoked_request_id: None,
+            uncounted_invocation: None,
             durable_context_tx,
             restore_time: None,
             init_duration_metric_emitted: false,
@@ -294,7 +295,7 @@ impl Processor {
             }
         }
         self.enhanced_metrics.set_invoked_received();
-        self.last_invoked_request_id = Some(request_id.clone());
+        self.uncounted_invocation = Some(request_id.clone());
 
         // Both modes: check for buffered UniversalInstrumentationStart by request_id first.
         // Falls back to FIFO for on-demand when the tracer does not send the header.
@@ -598,6 +599,10 @@ impl Processor {
                 .set_runtime_done_metrics(metrics, timestamp);
         }
 
+        if self.uncounted_invocation.as_ref() == Some(request_id) {
+            self.uncounted_invocation = None;
+        }
+
         if status != Status::Success {
             // Increment the error metric
             self.enhanced_metrics.increment_errors_metric(timestamp);
@@ -621,12 +626,9 @@ impl Processor {
             self.enhanced_metrics.set_usage_enhanced_metrics();
         }
 
-        // Without a duration the invocation span would be sent with zero length, so count the
-        // invocation as done but skip span processing.
+        // Without a duration the invocation span would be sent with zero length, so skip span
+        // processing. `runtime_done_received` stays false so reparenting doesn't send it either.
         let Some(metrics) = metrics else {
-            if let Some(context) = self.context_buffer.get_mut(request_id) {
-                context.runtime_done_received = true;
-            }
             return;
         };
         self.context_buffer
@@ -1127,20 +1129,14 @@ impl Processor {
         if !is_timeout && !reason.eq_ignore_ascii_case("failure") {
             return;
         }
-        let Some(context) = self
-            .last_invoked_request_id
-            .as_ref()
-            .and_then(|request_id| self.context_buffer.get_mut(request_id))
+        let Some(request_id) = self
+            .uncounted_invocation
+            .take_if(|request_id| self.context_buffer.get(request_id).is_some())
         else {
             return;
         };
-        if context.runtime_done_received {
-            return;
-        }
-        context.runtime_done_received = true;
         debug!(
-            "Invocation Processor | No runtimeDone for {} before {reason} shutdown, counting error",
-            context.request_id
+            "Invocation Processor | No runtimeDone for {request_id} before {reason} shutdown, counting error"
         );
         self.enhanced_metrics.increment_errors_metric(timestamp);
         if is_timeout {
@@ -3786,7 +3782,7 @@ mod tests {
     fn setup_in_flight_invocation(request_id: &str) -> Processor {
         let mut p = setup();
         p.context_buffer.start_context(request_id, Span::default());
-        p.last_invoked_request_id = Some(request_id.to_string());
+        p.uncounted_invocation = Some(request_id.to_string());
         p
     }
 
@@ -3807,11 +3803,14 @@ mod tests {
         let request_id = String::from("req-invoked");
         let mut p = setup();
         p.on_invoke_event(request_id.clone());
+        assert_eq!(p.uncounted_invocation.as_ref(), Some(&request_id));
 
         p.on_shutdown_reason("TIMEOUT", chrono::Utc::now().timestamp());
 
+        assert_eq!(p.uncounted_invocation, None);
+        // Counting must not mark the span complete, or reparenting would send it unfinished.
         assert!(
-            p.context_buffer
+            !p.context_buffer
                 .get(&request_id)
                 .expect("context")
                 .runtime_done_received
@@ -3826,12 +3825,7 @@ mod tests {
 
         p.on_shutdown_reason("TIMEOUT", chrono::Utc::now().timestamp());
 
-        assert!(
-            !p.context_buffer
-                .get(&request_id)
-                .expect("context")
-                .runtime_done_received
-        );
+        assert_eq!(p.uncounted_invocation, Some(request_id));
     }
 
     #[tokio::test]
@@ -3846,13 +3840,10 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_shutdown_reason_ignored_when_runtime_done_received() {
-        let request_id = "req-done";
-        let mut p = setup_in_flight_invocation(request_id);
-        p.context_buffer
-            .get_mut(&request_id.to_string())
-            .expect("context")
-            .runtime_done_received = true;
+    async fn test_shutdown_reason_ignored_after_context_released() {
+        let request_id = String::from("req-released");
+        let mut p = setup_in_flight_invocation(&request_id);
+        p.context_buffer.remove(&request_id);
         let now = chrono::Utc::now().timestamp();
 
         p.on_shutdown_reason("TIMEOUT", now);
@@ -3899,7 +3890,14 @@ mod tests {
 
         assert_eq!(metric_sum(&p, ERRORS_METRIC, now).await, Some(1.0));
         assert_eq!(metric_sum(&p, TIMEOUTS_METRIC, now).await, Some(1.0));
-        // Without a duration, no zero-length invocation span is sent.
+        // Without a duration no zero-length invocation span is sent, and the span isn't marked
+        // complete, so reparenting won't send it either.
         assert!(trace_rx.try_recv().is_err());
+        assert!(
+            !p.context_buffer
+                .get(&request_id)
+                .expect("context")
+                .runtime_done_received
+        );
     }
 }
