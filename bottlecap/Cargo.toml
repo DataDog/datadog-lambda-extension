@@ -149,6 +149,12 @@ opt-level = 3
 [target.'cfg(not(target_env = "msvc"))'.dependencies]
 tikv-jemallocator = "0.5"
 
+# libddwaf is used only when App and API Protection is enabled. On glibc, embed it and load it on
+# first use, so that other functions do not read it at startup. The musl build is a static binary,
+# which cannot load a shared library, so it keeps the static link.
+[target.'cfg(target_env = "gnu")'.dependencies]
+libddwaf = { version = "1.28.1", git = "https://github.com/DataDog/libddwaf-rust", rev = "d1534a158d976bd4f747bf9fcc58e0712d2d17fc", default-features = false, features = ["dynamic"] }
+
 [features]
 default = [
     # Use webpki-roots (compiled-in Mozilla CA bundle) rather than

@@ -2551,10 +2551,14 @@ dependencies = [
  "bindgen",
  "flate2",
  "hyper-rustls",
+ "lazy_static",
  "libc",
+ "libloading",
  "reqwest",
  "rustls",
  "tar",
+ "tempfile",
+ "tracing",
  "zstd",
 ]
 
