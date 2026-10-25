@@ -49,12 +49,10 @@ use bottlecap::{
         cold_start::{ColdStartDurations, elapsed_ms},
     },
     logs::{
-        agent::LogsAgent,
-        aggregator_service::{
-            AggregatorHandle as LogsAggregatorHandle, AggregatorService as LogsAggregatorService,
-        },
+        aggregator_service::AggregatorHandle as LogsAggregatorHandle,
         flusher::LogsFlusher,
         lambda::DurableContextUpdate,
+        pipeline::{LogsPipeline, build_logs_pipeline},
     },
     otlp::{agent::Agent as OtlpAgent, should_enable_otlp_agent},
     proxy::{interceptor, should_start_proxy},
@@ -1149,18 +1147,19 @@ fn start_logs_agent(
     LogsAggregatorHandle,
     Sender<DurableContextUpdate>,
 ) {
-    let (aggregator_service, aggregator_handle) = LogsAggregatorService::default();
-    // Start service in background
-    tokio::spawn(async move {
-        aggregator_service.run().await;
-    });
-
-    let (mut agent, tx, durable_context_tx) = LogsAgent::new(
-        Arc::clone(tags_provider),
-        Arc::clone(config),
+    let LogsPipeline {
+        mut agent,
+        telemetry_tx,
+        durable_context_tx,
+        flusher,
+        aggregator_handle,
+    } = build_logs_pipeline(
+        config,
+        api_key_factory,
+        tags_provider,
         event_bus,
-        aggregator_handle.clone(),
         is_managed_instance_mode,
+        client,
     );
     let cancel_token = agent.cancel_token();
     // Start logs agent in background
@@ -1171,14 +1170,8 @@ fn start_logs_agent(
         drop(agent);
     });
 
-    let flusher = LogsFlusher::new(
-        api_key_factory,
-        aggregator_handle.clone(),
-        config.clone(),
-        client.clone(),
-    );
     (
-        tx,
+        telemetry_tx,
         flusher,
         cancel_token,
         aggregator_handle,
