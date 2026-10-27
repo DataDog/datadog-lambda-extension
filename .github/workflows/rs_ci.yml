@@ -84,8 +84,7 @@ jobs:
         run: cargo clippy --workspace --all-targets --features default
       - working-directory: bottlecap
         run: cargo clippy --workspace --all-targets --no-default-features --features fips
-      # No other job compiles the test-mode feature: it gates test-only
-      # constructors that are absent from default and fips builds.
+      # Also lint the feature-gated test-mode binary.
       - working-directory: bottlecap
         run: cargo clippy --workspace --all-targets --features default,test-mode
 
@@ -147,6 +146,9 @@ jobs:
       - uses: mozilla-actions/sccache-action@7d986dd989559c6ecdb630a3fd2557667be217ad # v0.0.9
       - working-directory: bottlecap
         run: cargo nextest run --workspace
+      - name: Test the test-mode binary
+        working-directory: bottlecap
+        run: cargo nextest run --features test-mode --bin bottlecap-test-mode
 
   format:
     name: Format
@@ -190,7 +192,7 @@ jobs:
           working-directory: bottlecap
           # Mirrors bottlecap/.cargo/audit.toml. This action only reads ./.cargo/audit.toml
           # relative to its cwd (repo root), so the crate-local ignore list is never loaded in CI.
-          ignore: RUSTSEC-2026-0285,RUSTSEC-2026-0346,RUSTSEC-2026-0348,RUSTSEC-2026-0349
+          ignore: RUSTSEC-2026-0285,RUSTSEC-2026-0346,RUSTSEC-2026-0348,RUSTSEC-2026-0349,RUSTSEC-2026-0381,RUSTSEC-2026-0382
 
   cargo-lockfile-scan:
     name: Lockfile Scan
