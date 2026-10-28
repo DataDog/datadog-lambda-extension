@@ -131,7 +131,7 @@ def check_lock_unchanged():
         recorded = f.read().strip()
     if recorded != sha256_of(lock) and not force:
         die("Cargo.lock changed since the last patch-deps run (did you add or bump a dependency?). "
-            "Inspect it with `git diff bottlecap/Cargo.lock`, then re-run with --force to restore the backup anyway.", code=4)
+            "Inspect it with `git diff bottlecap/Cargo.lock`, then re-run with --force to go ahead anyway.", code=4)
 
 
 def restore_lock():
@@ -140,7 +140,7 @@ def restore_lock():
         print("patch-deps: restored Cargo.lock", file=sys.stderr)
 
 
-def resolve_and_report(state):
+def resolve_and_report(state, record=True):
     """Re-run cargo metadata on bottlecap so Cargo.lock updates, then show what is in effect."""
     meta, stderr = metadata(manifest, no_deps=False)
     unused = [l.strip() for l in stderr.splitlines() if "was not used in the crate graph" in l]
@@ -154,7 +154,8 @@ def resolve_and_report(state):
             print(f"  {crate:28s} locked {info['locked']:>8s}  local {info['local']:>8s}  {status}")
     for l in unused:
         print(f"  cargo: {l}", file=sys.stderr)
-    record_lock_hash()
+    if record:
+        record_lock_hash()
     return not unused
 
 
@@ -165,24 +166,32 @@ def cmd_add(checkout):
         die(f"{cm} not found")
     local, _ = metadata(cm, no_deps=True)
     local_pkgs = {p["name"]: p for p in local["packages"]}
+    name = os.path.basename(checkout.rstrip("/"))
+    state = load_state()
+    patched = state.get(name, {}).get("crates", {})
     graph, _ = metadata(manifest, no_deps=False)
     crates = {}
     for p in graph["packages"]:
-        if p["name"] in local_pkgs and p["source"]:
-            key = patch_key(p["source"])
-            if key is None:
-                continue
-            lp = local_pkgs[p["name"]]
-            crates[p["name"]] = {
-                "key": key,
-                "path": os.path.dirname(lp["manifest_path"]),
-                "locked": p["version"],
-                "local": lp["version"],
-            }
+        if p["name"] not in local_pkgs:
+            continue
+        if not p["source"]:
+            # Already patched by an earlier `add` of this checkout: cargo shows it as a path package.
+            prev = patched.get(p["name"])
+            if prev and os.path.dirname(p["manifest_path"]) == prev["path"]:
+                crates[p["name"]] = dict(prev, local=local_pkgs[p["name"]]["version"])
+            continue
+        key = patch_key(p["source"])
+        if key is None:
+            continue
+        lp = local_pkgs[p["name"]]
+        crates[p["name"]] = {
+            "key": key,
+            "path": os.path.dirname(lp["manifest_path"]),
+            "locked": p["version"],
+            "local": lp["version"],
+        }
     if not crates:
         die(f"no crate of {checkout} is in bottlecap's dependency graph")
-    name = os.path.basename(checkout.rstrip("/"))
-    state = load_state()
     fresh = not state
     new_state = dict(state)
     new_state[name] = {"checkout": checkout, "crates": crates}
@@ -204,6 +213,7 @@ def cmd_remove(which):
     name = which if which in state else os.path.basename(os.path.abspath(os.path.expanduser(which)).rstrip("/"))
     if name not in state:
         die(f"{which} is not patched (known: {', '.join(state) or 'none'})")
+    check_lock_unchanged()
     if len(state) == 1:
         cmd_restore()
         return
@@ -227,7 +237,7 @@ def cmd_status():
     if not state:
         print("patch-deps: nothing patched")
         return
-    resolve_and_report(state)
+    sys.exit(0 if resolve_and_report(state, record=False) else 3)
 
 
 if not args or args[0] in ("-h", "--help"):
