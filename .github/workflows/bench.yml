@@ -1,0 +1,163 @@
+# Criterion benchmarks (bottlecap/benches). Informational: no job here blocks
+# a PR. See bottlecap/benches/README.md, section "CI".
+#
+# - bench-build:   every PR, `cargo bench --no-run` with LTO off (compile only).
+# - bench-measure: PRs with the `bench` label, nightly on main, or manual.
+#                  Production profile. Nightly/full runs save the baseline
+#                  artifact `bench-baseline-main`; a PR run compares against it
+#                  with critcmp and writes the table to the step summary.
+name: Benchmarks
+
+on:
+  pull_request:
+    # `labeled` so the `bench` label starts bench-measure.
+    types: [opened, synchronize, reopened, labeled]
+    paths:
+      - "bottlecap/**"
+      - "scripts/ci/bench-measure.sh"
+      - ".github/workflows/bench.yml"
+  schedule:
+    # Nightly on main, after the vulnerability scan.
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "smoke: short list, compare with the main baseline. full: whole suite, save the baseline (main only)."
+        type: choice
+        default: smoke
+        options: [smoke, full]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  PB_VERSION: 25.3
+  PB_URL: https://github.com/protocolbuffers/protobuf/releases/download
+  PB_TARGET: linux-x86_64
+  CARGO_INCREMENTAL: "0"
+  SCCACHE_GHA_ENABLED: "true"
+  RUSTC_WRAPPER: "sccache"
+
+jobs:
+  bench-build:
+    name: Bench Build (informational)
+    # Not on `labeled`: a label must not rebuild; it starts bench-measure.
+    if: github.event_name == 'pull_request' && github.event.action != 'labeled'
+    runs-on: ubuntu-22.04
+    timeout-minutes: 45
+    env:
+      # Compile check only: skip the fat-LTO link, which is the slow part.
+      CARGO_PROFILE_BENCH_LTO: "false"
+      CARGO_PROFILE_BENCH_CODEGEN_UNITS: "16"
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions-rust-lang/setup-rust-toolchain@150fca883cd4034361b621bd4e6a9d34e5143606 # v1.15.4
+        with:
+          cache: false
+      # Nothing to compile before the criterion suite lands; a bench-profile
+      # build of the lib and bin harnesses would only fill the sccache cache.
+      - id: probe
+        working-directory: bottlecap
+        run: |
+          if cargo metadata --no-deps --format-version 1 --locked \
+            | jq -e '.packages[].targets[] | select(.kind | index("bench"))' > /dev/null; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+            echo "::notice title=No bench targets::no [[bench]] target in bottlecap; nothing to build."
+          fi
+
+      # Same protoc install as rs_ci.yml.
+      - if: steps.probe.outputs.present == 'true'
+        run: sudo apt-get update
+      - if: steps.probe.outputs.present == 'true'
+        run: sudo apt-get install -y curl unzip cmake
+      - if: steps.probe.outputs.present == 'true'
+        name: Install protobuf ${{ env.PB_VERSION }} compiler from binary for ${{ env.PB_TARGET }}
+        run: |
+          curl -LO "${{ env.PB_URL }}/v${{ env.PB_VERSION }}/protoc-${{ env.PB_VERSION }}-${{ env.PB_TARGET }}.zip"
+          unzip "protoc-${{ env.PB_VERSION }}-${{ env.PB_TARGET }}.zip" -d "$HOME/.local"
+          export PATH="$PATH:$HOME/.local/bin"
+
+      - if: steps.probe.outputs.present == 'true'
+        uses: mozilla-actions/sccache-action@7d986dd989559c6ecdb630a3fd2557667be217ad # v0.0.9
+      - id: build
+        if: steps.probe.outputs.present == 'true'
+        continue-on-error: true
+        working-directory: bottlecap
+        run: cargo bench --no-run --locked
+      - if: steps.build.outcome == 'failure'
+        run: |
+          echo "::warning title=Bench build failed::cargo bench --no-run failed; see the job log. Informational, does not block."
+          echo "### Bench build failed (informational)" >> "$GITHUB_STEP_SUMMARY"
+          echo "See the \`cargo bench --no-run\` step of this job." >> "$GITHUB_STEP_SUMMARY"
+
+  bench-measure:
+    name: Bench Measure (informational)
+    if: >-
+      github.event_name == 'schedule' ||
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'bench'))
+    runs-on: ubuntu-22.04
+    timeout-minutes: 120
+    permissions:
+      contents: read
+      # `gh run download` of the baseline artifact.
+      actions: read
+    env:
+      BENCH_MODE: ${{ (github.event_name == 'schedule' || inputs.mode == 'full') && 'full' || 'smoke' }}
+      BENCH_BASELINE_DIR: ${{ github.workspace }}/.bench-baseline
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - run: sudo apt-get update
+      - run: sudo apt-get install -y curl unzip cmake
+      - name: Install protobuf ${{ env.PB_VERSION }} compiler from binary for ${{ env.PB_TARGET }}
+        run: |
+          curl -LO "${{ env.PB_URL }}/v${{ env.PB_VERSION }}/protoc-${{ env.PB_VERSION }}-${{ env.PB_TARGET }}.zip"
+          unzip "protoc-${{ env.PB_VERSION }}-${{ env.PB_TARGET }}.zip" -d "$HOME/.local"
+          export PATH="$PATH:$HOME/.local/bin"
+
+      - uses: actions-rust-lang/setup-rust-toolchain@150fca883cd4034361b621bd4e6a9d34e5143606 # v1.15.4
+        with:
+          cache: false
+      - uses: mozilla-actions/sccache-action@7d986dd989559c6ecdb630a3fd2557667be217ad # v0.0.9
+      - name: Install critcmp
+        run: cargo install critcmp --locked --version 0.1.8
+
+      - name: Download the main baseline
+        if: env.BENCH_MODE == 'smoke'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: scripts/ci/bench-measure.sh download-baseline "$BENCH_BASELINE_DIR"
+
+      - id: measure
+        continue-on-error: true
+        working-directory: bottlecap
+        run: ../scripts/ci/bench-measure.sh run
+      - if: steps.measure.outcome == 'failure'
+        run: |
+          echo "::warning title=Bench measure failed::a bench panicked or did not build; see the job log. Informational, does not block."
+          echo "### Bench measure failed (informational)" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Save the main baseline
+        if: env.BENCH_MODE == 'full' && github.ref == 'refs/heads/main'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: bench-baseline-main
+          path: bottlecap/.bench-export/main.json
+          retention-days: 90
+          if-no-files-found: warn
+      - name: Upload the exported numbers
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: bench-export-${{ github.run_id }}
+          path: bottlecap/.bench-export/
+          retention-days: 14
+          if-no-files-found: ignore
