@@ -168,22 +168,23 @@ def cmd_add(checkout):
     local_pkgs = {p["name"]: p for p in local["packages"]}
     name = os.path.basename(checkout.rstrip("/"))
     state = load_state()
+    check_lock_unchanged()
     patched = state.get(name, {}).get("crates", {})
     graph, _ = metadata(manifest, no_deps=False)
     crates = {}
     for p in graph["packages"]:
         if p["name"] not in local_pkgs:
             continue
+        lp = local_pkgs[p["name"]]
         if not p["source"]:
             # Already patched by an earlier `add` of this checkout: cargo shows it as a path package.
             prev = patched.get(p["name"])
             if prev and os.path.dirname(p["manifest_path"]) == prev["path"]:
-                crates[p["name"]] = dict(prev, local=local_pkgs[p["name"]]["version"])
+                crates[p["name"]] = dict(prev, path=os.path.dirname(lp["manifest_path"]), local=lp["version"])
             continue
         key = patch_key(p["source"])
         if key is None:
             continue
-        lp = local_pkgs[p["name"]]
         crates[p["name"]] = {
             "key": key,
             "path": os.path.dirname(lp["manifest_path"]),
@@ -220,8 +221,9 @@ def cmd_remove(which):
     del state[name]
     write_region(state)
     save_state(state)
-    resolve_and_report(state)
+    ok = resolve_and_report(state)
     print(f"patch-deps: removed {name}", file=sys.stderr)
+    sys.exit(0 if ok else 3)
 
 
 def cmd_restore():
