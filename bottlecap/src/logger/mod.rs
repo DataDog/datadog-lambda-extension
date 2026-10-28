@@ -6,6 +6,11 @@ use tracing_subscriber::fmt::{
 };
 use tracing_subscriber::registry::LookupSpan;
 
+pub mod cold_start;
+
+/// Tracing target for the duration of each cold start step.
+pub const COLD_START_DURATION: &str = "cold_start_duration";
+
 /// Writes `s` to `w` with the 6 mandatory JSON string escape sequences applied.
 /// Handles: `"`, `\`, `\n`, `\r`, `\t`, and U+0000–U+001F control characters.
 fn write_json_escaped(w: &mut impl fmt::Write, s: &str) -> fmt::Result {
@@ -26,21 +31,57 @@ fn write_json_escaped(w: &mut impl fmt::Write, s: &str) -> fmt::Result {
 #[derive(Debug, Clone, Copy)]
 pub struct Formatter;
 
-/// Visitor that captures the message from tracing event fields.
-struct MessageVisitor(String);
+/// Visitor that captures the message and the `f64` fields of a tracing event, so that Datadog
+/// parses those fields as numbers. It drops fields of other types. To write another type, add
+/// its `record_*` method.
+#[derive(Default)]
+struct FieldVisitor {
+    message: String,
+    /// The `f64` fields, in the order of the event.
+    fields: Vec<(&'static str, f64)>,
+}
 
-impl tracing::field::Visit for MessageVisitor {
+impl tracing::field::Visit for FieldVisitor {
     fn record_debug(&mut self, field: &tracing::field::Field, value: &dyn fmt::Debug) {
         if field.name() == "message" {
-            self.0 = format!("{value:?}");
+            self.message = format!("{value:?}");
         }
     }
 
     fn record_str(&mut self, field: &tracing::field::Field, value: &str) {
         if field.name() == "message" {
-            self.0 = value.to_string();
+            self.message = value.to_string();
         }
     }
+
+    fn record_f64(&mut self, field: &tracing::field::Field, value: f64) {
+        // JSON has no NaN or infinity, so drop those values.
+        if value.is_finite() {
+            self.fields.push((field.name(), value));
+        }
+    }
+}
+
+/// Groups `fields` into JSON members. A field named `group.key` goes into a nested
+/// `"group": {"key": ...}` object.
+fn fields_to_json(fields: &[(&'static str, f64)]) -> serde_json::Map<String, serde_json::Value> {
+    let mut members = serde_json::Map::new();
+    for (name, value) in fields {
+        match name.split_once('.') {
+            None => {
+                members.insert((*name).to_string(), (*value).into());
+            }
+            Some((group, key)) => {
+                if let serde_json::Value::Object(group) = members
+                    .entry(group)
+                    .or_insert_with(|| serde_json::Map::new().into())
+                {
+                    group.insert(key.to_string(), (*value).into());
+                }
+            }
+        }
+    }
+    members
 }
 
 impl<S, N> FormatEvent<S, N> for Formatter
@@ -57,7 +98,7 @@ where
         let metadata = event.metadata();
         let level = metadata.level();
 
-        let mut visitor = MessageVisitor(String::new());
+        let mut visitor = FieldVisitor::default();
         event.record(&mut visitor);
 
         // Build span context prefix
@@ -77,14 +118,18 @@ where
             }
         }
 
-        let message = format!("DD_EXTENSION | {level} | {span_prefix}{}", visitor.0);
+        let message = format!("DD_EXTENSION | {level} | {span_prefix}{}", visitor.message);
 
         // Setting specifically `status` as opposed to `level` since AWS
         // filters out logs by the `level` field. This allows our logs to
         // appear in CWL regardless of the log level.
         write!(writer, "{{\"status\":\"{level}\",\"message\":\"")?;
         write_json_escaped(&mut writer, &message)?;
-        writeln!(writer, "\"}}")
+        writer.write_char('"')?;
+        for (key, value) in fields_to_json(&visitor.fields) {
+            write!(writer, ",{}:{value}", serde_json::Value::from(key))?;
+        }
+        writeln!(writer, "}}")
     }
 }
 
@@ -263,5 +308,68 @@ mod tests {
             msg.contains('\n'),
             "parsed message should contain literal newline"
         );
+    }
+
+    #[test]
+    fn test_formatter_nests_grouped_fields_as_numbers() {
+        let output = capture_log(|| {
+            tracing::event!(
+                tracing::Level::DEBUG,
+                cold_start.total_ms = 21.0_f64,
+                cold_start.load_config_ms = 1.61_f64,
+                "durations"
+            );
+        });
+
+        let parsed: serde_json::Value =
+            serde_json::from_str(output.trim()).expect("output should be valid JSON");
+
+        assert_eq!(parsed["cold_start"]["total_ms"].as_f64(), Some(21.0));
+        assert_eq!(parsed["cold_start"]["load_config_ms"].as_f64(), Some(1.61));
+        assert!(
+            parsed["message"]
+                .as_str()
+                .unwrap()
+                .contains("DD_EXTENSION | DEBUG | durations")
+        );
+    }
+
+    #[test]
+    fn test_formatter_omits_none_fields() {
+        let output = capture_log(|| {
+            tracing::event!(
+                tracing::Level::DEBUG,
+                cold_start.secrets_ms = None::<f64>,
+                cold_start.load_config_ms = 1.5_f64,
+                "durations"
+            );
+        });
+
+        let parsed: serde_json::Value =
+            serde_json::from_str(output.trim()).expect("output should be valid JSON");
+
+        assert!(parsed["cold_start"].get("secrets_ms").is_none());
+        assert_eq!(parsed["cold_start"]["load_config_ms"].as_f64(), Some(1.5));
+    }
+
+    #[test]
+    fn test_formatter_writes_only_finite_f64_fields() {
+        let output = capture_log(|| {
+            tracing::info!(
+                ms = 1.5_f64,
+                nan = f64::NAN,
+                count = 3_u64,
+                name = "x",
+                "fields"
+            );
+        });
+
+        let parsed: serde_json::Value =
+            serde_json::from_str(output.trim()).expect("output should be valid JSON");
+
+        assert_eq!(parsed["ms"].as_f64(), Some(1.5));
+        assert!(parsed.get("nan").is_none());
+        assert!(parsed.get("count").is_none());
+        assert!(parsed.get("name").is_none());
     }
 }

@@ -25,13 +25,15 @@ import {
  * Deploys one Lambda per OOM "shape" so the bottlecap dedup change
  * (Context::oom_emitted + try_increment_oom_metric, covering issue #1237)
  * can be exercised end-to-end across every supported runtime. Each function
- * intentionally allocates until it OOMs; the test then asserts the
- * `aws.lambda.enhanced.out_of_memory` metric increments by exactly 1.
+ * intentionally triggers an OOM, mostly by allocating until failure
+ * (Python instead requests a single oversized allocation); the test then
+ * asserts the `aws.lambda.enhanced.out_of_memory` metric increments by
+ * exactly 1.
  *
  * The detection paths exercised per case:
  *   - oom-node-v8-heap : log-line match `JavaScript heap out of memory`
  *   - oom-node-sigkill : PlatformRuntimeDone `error_type=Runtime.OutOfMemory`
- *   - oom-python       : log line `MemoryError` + PlatformRuntimeDone (dedup)
+ *   - oom-python       : log line `MemoryError` (PlatformRuntimeDone dedup)
  *   - oom-ruby         : log line `NoMemoryError` + PlatformRuntimeDone (dedup)
  *   - oom-java         : log line `java.lang.OutOfMemoryError`
  *   - oom-dotnet       : log line `OutOfMemoryException`
@@ -115,7 +117,8 @@ export class Oom extends cdk.Stack {
     nodeSigkillFunction.addLayers(extensionLayer);
     nodeSigkillFunction.addLayers(nodeLayer);
 
-    // Python — MemoryError; log path and PlatformRuntimeDone path both fire.
+    // Python: uncaught MemoryError; bottlecap deduplicates across the
+    // log-line and PlatformRuntimeDone paths to a single metric.
     const pythonFunctionName = `${id}-python-lambda`;
     const pythonFunction = new lambda.Function(this, pythonFunctionName, {
       runtime: defaultPythonRuntime,

@@ -95,10 +95,10 @@ libdd-trace-normalization = "3.0.1"
 libdd-trace-obfuscation = { version = "6.0.0", default-features = false }
 libdd-trace-stats = { version = "7.0.0", default-features = false }
 datadog-opentelemetry = { version = "0.5.2", default-features = false, features = ["_unstable_propagation"] }
-dogstatsd = { git = "https://github.com/DataDog/serverless-components", rev = "8156757470d0843a99fc5d19809ae021cd2c7178", default-features = false }
-datadog-fips = { git = "https://github.com/DataDog/serverless-components", rev = "8156757470d0843a99fc5d19809ae021cd2c7178", default-features = false }
-datadog-agent-config = { git = "https://github.com/DataDog/serverless-components", rev = "8156757470d0843a99fc5d19809ae021cd2c7178", default-features = false }
-datadog-agent-trace-sampler = { git = "https://github.com/DataDog/serverless-components", rev = "8156757470d0843a99fc5d19809ae021cd2c7178", default-features = false }
+dogstatsd = { git = "https://github.com/DataDog/serverless-components", rev = "5859602d609405a9de4d32638673a643caf37534", default-features = false }
+datadog-fips = { git = "https://github.com/DataDog/serverless-components", rev = "5859602d609405a9de4d32638673a643caf37534", default-features = false }
+datadog-agent-config = { git = "https://github.com/DataDog/serverless-components", rev = "5859602d609405a9de4d32638673a643caf37534", default-features = false }
+datadog-agent-trace-sampler = { git = "https://github.com/DataDog/serverless-components", rev = "5859602d609405a9de4d32638673a643caf37534", default-features = false }
 libddwaf = { version = "1.28.1", git = "https://github.com/DataDog/libddwaf-rust", rev = "d1534a158d976bd4f747bf9fcc58e0712d2d17fc", default-features = false, features = ["serde"] }
 
 [dev-dependencies]
@@ -122,6 +122,10 @@ flate2 = { version = "1.1", default-features = false, features = ["rust_backend"
 
 [[bin]]
 name = "bottlecap"
+
+[[bin]]
+name = "bottlecap-test-mode"
+required-features = ["test-mode"]
 
 [profile.dev]
 debug = true   # same as debuginfo=2 and no stripping
@@ -185,8 +189,10 @@ fips = [
 # `InvocationProcessorHandle::noop()`) to callers that need to drive the
 # trace-processing surface without Lambda lifecycle state.
 # Not enabled in `default` or `fips`, so the items it gates do not appear
-# in production builds.
-test-mode = []
+# in production builds. `tokio/signal` is pulled in here rather than in the
+# base dependency so the shipped extension does not carry the signal driver
+# for a binary only the test-mode build produces.
+test-mode = ["tokio/signal"]
 
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(coverage,coverage_nightly)'] }
