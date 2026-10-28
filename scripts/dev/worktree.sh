@@ -35,6 +35,8 @@ case "${1:-}" in
     [ $# -eq 2 ] || die "--remove needs a branch name"
     path="$WORKTREE_ROOT/$(slug "$2")"
     [ -d "$path" ] || die "no worktree at $path"
+    # slug() maps a/b and a-b to the same path; remove only the requested branch.
+    [ "$(git -C "$path" symbolic-ref --quiet --short HEAD || true)" = "$2" ] || die "$path does not have branch $2 checked out"
     g worktree remove "$path"
     log "removed $path (branch $2 still exists; delete it with: git branch -D $2)"
     exit 0 ;;

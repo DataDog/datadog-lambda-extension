@@ -27,8 +27,17 @@
 set -euo pipefail
 
 log() { printf '%s\n' "setup-build-cache: $*" >&2; }
-# `false` on stdout makes `eval "$(...)"` fail instead of exporting nothing.
-die() { log "error: $*"; printf 'false\n'; exit 1; }
+die() { log "error: $*"; exit 1; }
+
+TMP=""
+# On any failure, `false` on stdout makes `eval "$(...)"` fail instead of exporting nothing.
+# shellcheck disable=SC2317,SC2329  # invoked by the trap
+cleanup() {
+  local rc=$?
+  [ -z "$TMP" ] || rm -rf "$TMP"
+  [ "$rc" -eq 0 ] || printf 'false\n'
+}
+trap cleanup EXIT
 
 BOTTLECAP_CACHE_ROOT="${BOTTLECAP_CACHE_ROOT:-$HOME/.cache/bottlecap}"
 DEFAULT_TARGET_DIR="$BOTTLECAP_CACHE_ROOT/target"
@@ -86,11 +95,6 @@ prebuilt_triple() {
     *) return 1 ;;
   esac
 }
-
-TMP=""
-# shellcheck disable=SC2317,SC2329  # invoked by the trap
-cleanup() { [ -n "$TMP" ] && rm -rf "$TMP"; return 0; }
-trap cleanup EXIT
 
 install_prebuilt() {
   local triple base url want have
@@ -181,7 +185,7 @@ if [ "$wrapper" = 1 ]; then
   # starts. A client with a different SCCACHE_DIR silently uses the running
   # server. Detect that and tell the user how to fix it.
   realdir() { (cd "$1" 2>/dev/null && pwd -P) || printf '%s' "$1"; }
-  running_dir="$("$SCCACHE_BIN_PATH" --show-stats 2>/dev/null | sed -n 's/^Cache location *Local disk: "\(.*\)"$/\1/p' || true)"
+  running_dir="$(SCCACHE_DIR="$SCCACHE_DIR" SCCACHE_CACHE_SIZE="$SCCACHE_CACHE_SIZE" "$SCCACHE_BIN_PATH" --show-stats 2>/dev/null | sed -n 's/^Cache location *Local disk: "\(.*\)"$/\1/p' || true)"
   if [ -n "$running_dir" ] && [ "$(realdir "$running_dir")" != "$(realdir "$SCCACHE_DIR")" ]; then
     log "WARNING: an sccache server is already running with SCCACHE_DIR=$running_dir"
     log "         this shell asked for $SCCACHE_DIR. Run '$SCCACHE_BIN_PATH --stop-server' first,"
