@@ -48,7 +48,7 @@ async fn my_fault() {
     s.intake.set_mode(FaultMode::Status(503));              // the fault
     deliver_runtime_done(&s.api, "req-1", true).await.unwrap();
     assert!(s.api.wait_for_next_calls(2, secs(10)).await, "{}", bc.log_tail(40));
-    s.shutdown_cleanly(&mut bc).await;                      // SHUTDOWN, exit 0, no panic
+    s.shutdown_cleanly(&mut bc).await;                      // SHUTDOWN, exit 0 within 2 s, no panic
 }
 ```
 

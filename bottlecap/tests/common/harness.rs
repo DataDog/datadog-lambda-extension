@@ -54,6 +54,9 @@ pub const fn ms(n: u64) -> Duration {
     Duration::from_millis(n)
 }
 
+/// The deadline of the SHUTDOWN event, Lambda's default.
+const SHUTDOWN_DEADLINE: Duration = secs(2);
+
 /// A fake Extensions API and a fault intake, started together.
 ///
 /// ```ignore
@@ -111,22 +114,30 @@ impl Scenario {
         true
     }
 
-    /// Answer the open `/next` with a SHUTDOWN (2 s deadline, Lambda's
-    /// default) and wait for the process to exit. Returns the exit status,
-    /// `None` when it had to be killed.
+    /// Answer the open `/next` with a SHUTDOWN ([`SHUTDOWN_DEADLINE`]) and
+    /// wait for the process to exit. Returns the exit status, `None` when it
+    /// had to be killed.
     pub async fn shutdown(&self, bc: &mut BottlecapProcess) -> Option<ExitStatus> {
-        self.api.push_shutdown("spindown", secs(2));
+        self.api.push_shutdown("spindown", SHUTDOWN_DEADLINE);
         bc.wait_for_exit(bottlecap_process::EXIT_BUDGET).await
     }
 
-    /// [`shutdown`](Self::shutdown), then assert no panic and a clean exit.
+    /// [`shutdown`](Self::shutdown), then assert no panic and a clean exit
+    /// within the SHUTDOWN deadline.
     pub async fn shutdown_cleanly(&self, bc: &mut BottlecapProcess) {
+        let start = std::time::Instant::now();
         let exit = self.shutdown(bc).await;
+        let took = start.elapsed();
         bc.assert_no_panic();
         assert!(
             exit.is_some_and(|e| e.success()),
             "exit {exit:?} after SHUTDOWN. API: {:?}\n{}",
             self.api.request_lines(),
+            bc.log_tail(40)
+        );
+        assert!(
+            took <= SHUTDOWN_DEADLINE,
+            "exit took {took:?}, past the {SHUTDOWN_DEADLINE:?} SHUTDOWN deadline. {}",
             bc.log_tail(40)
         );
     }
