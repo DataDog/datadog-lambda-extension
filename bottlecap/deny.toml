@@ -1,0 +1,140 @@
+# cargo-deny configuration for bottlecap. Run from this directory:
+#
+#   cargo deny check            # all four checks
+#   cargo deny check advisories # RustSec only (replaces cargo-audit)
+#
+# CI runs this in `.github/workflows/rs_ci.yml` (job `cargo-deny`). The
+# advisory ignore list lives only here; `.trivyignore.yaml` carries the same
+# advisories under their GHSA ids for the Trivy lockfile scan.
+
+[graph]
+# The default and fips features are compile-time exclusive, but they resolve
+# together, so one graph covers the FIPS-only crates (aws-lc-rs,
+# rustls-native-certs) as well as the test-mode binary.
+all-features = true
+# Only the targets the extension ships on. This drops windows-*, wasm and
+# apple-only crates from the duplicate and license checks.
+targets = [
+    "x86_64-unknown-linux-gnu",
+    "aarch64-unknown-linux-gnu",
+    "x86_64-unknown-linux-musl",
+    "aarch64-unknown-linux-musl",
+]
+
+[advisories]
+db-urls = ["https://github.com/rustsec/advisory-db"]
+# A yank upstream shows as a warning and does not block an unrelated PR.
+yanked = "warn"
+# Unmaintained and unsound notices for transitive crates are not actionable
+# here; one on a direct dependency fails the check until it is listed below.
+# cargo-audit reported both classes as warnings only; set them to "none" for
+# strict parity.
+unmaintained = "workspace"
+unsound = "workspace"
+# RUSTSEC-2026-0285 is fixed in rustls >= 0.23.45, and RUSTSEC-2026-0346,
+# RUSTSEC-2026-0348, and RUSTSEC-2026-0349 in >= 0.23.46, but those versions
+# require aws-lc-rs >= 1.18, which pulls in AWS-LC-FIPS 4.x, pending FIPS
+# 140-3 certification. RUSTSEC-2026-0382 (rustls-webpki) is likewise only
+# patched in 0.103.16, which requires aws-lc-rs ^1.18. Remove these ignores
+# once a FIPS-certified aws-lc-rs is available. Trivy reports
+# RUSTSEC-2026-0285 as GHSA-2mjx-qc3c-rqvc, ignored in .trivyignore.yaml.
+#
+# The zstd advisories cover APIs this graph does not call: bottlecap, the
+# serverless-components crates and libdd-trace-utils compress through
+# `stream::write::Encoder` / the bulk API; the only decoding is
+# `stream::read::Decoder` on the embedded AppSec ruleset and `decode_all` in
+# a test helper, both excluded by RUSTSEC-2026-0403. Only libddwaf-sys's build
+# script enables zstd's default (legacy) features; build-dependency features
+# resolve separately, so the shipped binary has no legacy-frame support.
+# zstd-safe 7.2.4 also has unsound notices RUSTSEC-2026-0395 to 0406 that the
+# `workspace` scope does not report; the same zstd 0.14 / zstd-safe 8.2 bump
+# fixes them (needs the same bump in serverless-components and libdatadog);
+# drop these ignores with it.
+ignore = [
+    { id = "RUSTSEC-2026-0285", reason = "rustls fix needs aws-lc-rs >= 1.18 (AWS-LC-FIPS 4.x, uncertified)" },
+    { id = "RUSTSEC-2026-0346", reason = "rustls fix needs aws-lc-rs >= 1.18 (AWS-LC-FIPS 4.x, uncertified)" },
+    { id = "RUSTSEC-2026-0348", reason = "rustls fix needs aws-lc-rs >= 1.18 (AWS-LC-FIPS 4.x, uncertified)" },
+    { id = "RUSTSEC-2026-0349", reason = "rustls fix needs aws-lc-rs >= 1.18 (AWS-LC-FIPS 4.x, uncertified)" },
+    { id = "RUSTSEC-2026-0382", reason = "rustls-webpki fix needs aws-lc-rs ^1.18 (AWS-LC-FIPS 4.x, uncertified)" },
+    { id = "RUSTSEC-2026-0391", reason = "zstd `with_context` is not used anywhere in the graph; fix is zstd 0.14" },
+    { id = "RUSTSEC-2026-0398", reason = "zstd-safe `seekable` feature is not enabled; fix is zstd 0.14" },
+    { id = "RUSTSEC-2026-0403", reason = "only `stream::read::Decoder` and `decode_all` are used, which the advisory excludes; runtime zstd-sys is built without the `legacy` feature" },
+    { id = "RUSTSEC-2026-0410", reason = "wasm32 only; the extension ships on Linux" },
+    { id = "RUSTSEC-2023-0050", reason = "multipart 0.18 is unmaintained; it parses AppSec multipart request bodies; no maintained replacement is chosen yet" },
+    { id = "RUSTSEC-2025-0134", reason = "rustls-pemfile is unmaintained; replace with rustls-pki-types PEM parsing (code change, not a version bump)" },
+    { id = "RUSTSEC-2026-0386", reason = "tokio AsyncFd unsoundness; bottlecap does not construct AsyncFd. Fix: cargo update -p tokio (>= 1.53.3)" },
+]
+
+[bans]
+# Duplicates cost binary size and cold-start relocations, but a new one is a
+# review topic, not a failed PR. Known duplicates are listed in `skip` so the
+# warning only shows new ones.
+multiple-versions = "warn"
+wildcards = "allow"
+highlight = "all"
+# Today's duplicates, oldest version(s) listed, with the crate that holds it
+# back. Remove an entry when the holder moves.
+skip = [
+    { crate = "bitflags@1", reason = "nix 0.26 (bottlecap)" },
+    { crate = "foldhash@0.1", reason = "hashbrown 0.15 via datadog-opentelemetry, dogstatsd, libdd-*" },
+    { crate = "getrandom@0.2", reason = "rand 0.8 and ring" },
+    { crate = "getrandom@0.3", reason = "rand_core 0.9 (rand 0.9 via opentelemetry_sdk) and jobserver (build only)" },
+    { crate = "hashbrown@0.13", reason = "ordered_hash_map 0.4 (bottlecap)" },
+    { crate = "hashbrown@0.15", reason = "datadog-opentelemetry, dogstatsd, libdd-remote-config, libdd-telemetry" },
+    { crate = "itertools@0.11", reason = "bindgen and lalrpop (build only)" },
+    { crate = "linux-raw-sys@0.4", reason = "rustix 0.38 via which (build only)" },
+    { crate = "nix@0.26", reason = "bottlecap pins 0.26; libdd-common is on 0.29" },
+    { crate = "opentelemetry-semantic-conventions@0.30", reason = "bottlecap pins 0.30; datadog-opentelemetry is on 0.32" },
+    { crate = "ordered-float@2", reason = "serde-value via serde-aux" },
+    { crate = "prost@0.13", reason = "datadog-protos (saluki pin) and tonic 0.13" },
+    { crate = "prost-derive@0.13", reason = "prost 0.13" },
+    { crate = "prost-types@0.13", reason = "datadog-protos (saluki pin)" },
+    { crate = "rand@0.8", reason = "bottlecap, datadog-opentelemetry, libdd-trace-utils; opentelemetry_sdk is on 0.9" },
+    { crate = "rand_chacha@0.3", reason = "rand 0.8" },
+    { crate = "rand_core@0.6", reason = "rand 0.8" },
+    { crate = "rustix@0.38", reason = "which 4 (build only)" },
+    { crate = "thiserror@1", reason = "bottlecap, datadog-opentelemetry, dogstatsd, libdd-capabilities; libdd-remote-config and opentelemetry are on 2" },
+    { crate = "thiserror-impl@1", reason = "thiserror 1" },
+    { crate = "tonic@0.13", reason = "datadog-protos (saluki pin)" },
+    { crate = "webpki-roots@0.26", reason = "hyper-http-proxy; 0.26.11 is a shim over 1.x" },
+]
+skip-tree = []
+deny = []
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+allow-git = []
+
+[sources.allow-org]
+# serverless-components, saluki, libddwaf-rust.
+github = ["DataDog"]
+
+[licenses]
+# The set of licenses in today's graph. A crate with a new license fails the
+# check until the license is reviewed and added here.
+allow = [
+    "0BSD",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-2-Clause-Patent",
+    "BSD-3-Clause",
+    "BSL-1.0",
+    "CC0-1.0",
+    "CDLA-Permissive-2.0",
+    "ISC",
+    "MIT",
+    "MIT-0",
+    "Unicode-3.0",
+    "Unlicense",
+    "Zlib",
+]
+exceptions = [
+    # The AWS-LC FIPS module carries the OpenSSL license (fips feature only).
+    { crate = "aws-lc-fips-sys", allow = ["OpenSSL"] },
+]
+confidence-threshold = 0.8
+# bottlecap itself has no license field (publish = false).
+private = { ignore = true }

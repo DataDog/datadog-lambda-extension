@@ -33,7 +33,7 @@ serde_bytes = { version = "0.11", default-features = false, features = ["std"] }
 rmp-serde = { version = "1.3.1", default-features = false }
 flate2 = { version = "1.1", default-features = false, features = ["rust_backend"] }
 thiserror = { version = "1.0", default-features = false }
-# Transitive dependency (pulled in via cookie). Pinned to >=0.3.47 so cargo audit / CI passes (RUSTSEC-2026-0009).
+# Transitive dependency (pulled in via cookie). Pinned to >=0.3.47 so cargo deny / CI passes (RUSTSEC-2026-0009).
 time = { version = "0.3.47", default-features = false }
 tokio = { version = "1.47", default-features = false, features = ["macros", "rt-multi-thread", "time"] }
 tokio-util = { version = "0.7", default-features = false }
@@ -48,10 +48,10 @@ base64 = { version = "0.22", default-features = false }
 rustls = { version = ">=0.23.18, <0.23.45", default-features = false }
 # Constrain the transitive FIPS crypto backend: aws-lc-rs 1.18 switches to
 # AWS-LC-FIPS 4.x, pending FIPS 140-3 certification. Lift this bound only
-# after 4.x certification is verified. See .cargo/audit.toml and
+# after 4.x certification is verified. See deny.toml and
 # DataDog/serverless-components#173.
 aws-lc-rs = { version = ">=1, <1.18", default-features = false, optional = true }
-# Transitive via rustls. Pinned to >=0.103.13 so cargo audit passes (RUSTSEC-2026-0098, RUSTSEC-2026-0099, RUSTSEC-2026-0104).
+# Transitive via rustls. Pinned to >=0.103.13 so cargo deny passes (RUSTSEC-2026-0098, RUSTSEC-2026-0099, RUSTSEC-2026-0104).
 rustls-webpki = { version = "0.103.13", default-features = false }
 rustls-pemfile = { version = "2.0", default-features = false, features = ["std"] }
 rustls-pki-types = { version = "1.0", default-features = false }
