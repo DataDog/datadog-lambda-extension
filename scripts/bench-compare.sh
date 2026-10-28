@@ -32,6 +32,8 @@ set -euo pipefail
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 crate="$here/bottlecap"
 export CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-$crate/target}"
+# cargo and critcmp run from the crate, so a relative path must not resolve twice.
+[[ "$CARGO_TARGET_DIR" == /* ]] || CARGO_TARGET_DIR="$PWD/$CARGO_TARGET_DIR"
 
 critcmp_bin="${CRITCMP:-}"
 if [[ -z "$critcmp_bin" ]] && command -v critcmp >/dev/null 2>&1; then
@@ -49,6 +51,17 @@ need_critcmp() {
     echo "Or compare with criterion only: cargo bench -- --baseline <old>" >&2
     exit 1
   fi
+}
+
+# HEAD, plus a hash of the uncommitted diff when the tree has changes, so two baselines saved
+# on the same commit before and after an edit are not reported as the same code.
+git_note() {
+  local rev
+  rev="$(git -C "$here" rev-parse --short HEAD 2>/dev/null)" || { echo unknown; return; }
+  if [[ -n "$(git -C "$here" status --porcelain --untracked-files=no)" ]]; then
+    rev="$rev-dirty (diff $(git -C "$here" diff HEAD | git hash-object --stdin | cut -c1-12))"
+  fi
+  echo "$rev"
 }
 
 machine_note() {
@@ -94,7 +107,7 @@ case "$cmd" in
     (cd "$crate" && cargo bench ${benches[@]+"${benches[@]}"} -- --save-baseline "$name" ${extra[@]+"${extra[@]}"})
     mkdir -p "$CARGO_TARGET_DIR/criterion"
     printf '%s\nsaved: %s\ngit: %s\n' "$note" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-      "$(git -C "$here" rev-parse --short HEAD 2>/dev/null || echo unknown)" \
+      "$(git_note)" \
       > "$CARGO_TARGET_DIR/criterion/baseline-$name.txt"
     echo "saved baseline '$name' under $CARGO_TARGET_DIR/criterion (notes in baseline-$name.txt)"
     ;;

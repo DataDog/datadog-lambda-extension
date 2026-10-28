@@ -87,7 +87,7 @@ machine specific and 350 KB, so it is not in git (`benches/baselines/*.json` is 
 keeps exports as artifacts, and a local one compares with `critcmp old.json <new>` (critcmp
 accepts a file path in place of a baseline name).
 
-- Commit: `8a2cc021` plus this suite. Branch `jordan.gonzalez/benches/feature`.
+- Commit: `8a2cc021` on `main`, plus this suite.
 - Machine: Apple M4 Max, 16 cores, 64 GB, macOS 26.6. Recorded 2026-10-28 with a 1-minute
   load average of about 5 (other builds were running), so treat the numbers as +-10 %. The
   Linux-only `/proc` benches were skipped; see the Docker recipe.
