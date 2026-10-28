@@ -17,3 +17,18 @@ vulnerabilities:
       `bottlecap/.cargo/audit.toml`. The fix is in rustls >= 0.23.45, which
       requires aws-lc-rs >= 1.18 and so AWS-LC-FIPS 4.x, pending FIPS 140-3
       certification. Remove this entry together with that ignore.
+  - id: GHSA-c8m5-c952-6cm4
+    statement: |
+      Same advisory as RUSTSEC-2026-0346, which the Rust advisory check also
+      ignores. The fix is in rustls >= 0.23.46, which needs AWS-LC-FIPS 4.x like
+      GHSA-2mjx-qc3c-rqvc. Remove this entry together with that ignore.
+  - id: GHSA-h2v8-394m-p7vv
+    statement: |
+      Same advisory as RUSTSEC-2026-0348, which the Rust advisory check also
+      ignores. The fix is in rustls >= 0.23.46, which needs AWS-LC-FIPS 4.x like
+      GHSA-2mjx-qc3c-rqvc. Remove this entry together with that ignore.
+  - id: GHSA-w44r-93j7-qv28
+    statement: |
+      Same advisory as RUSTSEC-2026-0349, which the Rust advisory check also
+      ignores. The fix is in rustls >= 0.23.46, which needs AWS-LC-FIPS 4.x like
+      GHSA-2mjx-qc3c-rqvc. Remove this entry together with that ignore.
