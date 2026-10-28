@@ -23,6 +23,8 @@ local_tests/java/out/
 local_tests/java/.gradle/
 bottlecap/target
 bottlecap/proptest-regressions
+# scripts/dev/patch-deps.sh state and Cargo.lock backup
+bottlecap/.patch-deps
 # scripts/dev/worktree.sh default location
 .worktrees
 
