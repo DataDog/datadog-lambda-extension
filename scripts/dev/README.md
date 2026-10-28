@@ -7,6 +7,7 @@ None of them edits shell rc files, `~/.cargo/config.toml` or Docker settings.
 |--------|---------|
 | `setup-build-cache.sh` | Install or detect `sccache`, print the env vars for the shared compile cache |
 | `worktree.sh` | Create a git worktree that shares the compile cache |
+| `patch-deps.sh` | Point bottlecap at local checkouts of serverless-components, libdatadog, saluki or dd-trace-rs, and undo it |
 
 ## setup-build-cache.sh
 
@@ -121,6 +122,38 @@ on `origin` is checked out with tracking. The script prints the exact build
 commands for the new worktree. All worktrees build into the shared
 `CARGO_TARGET_DIR`; see the measurements above for why there is no per-worktree
 option, and `setup-build-cache.sh --tests` for the one case that needs one.
+
+## patch-deps.sh
+
+```sh
+scripts/dev/patch-deps.sh add ~/src/serverless-components   # or libdatadog, saluki, dd-trace-rs, libddwaf-rust
+scripts/dev/patch-deps.sh status
+scripts/dev/patch-deps.sh remove serverless-components
+scripts/dev/patch-deps.sh restore                           # remove all, restore Cargo.lock
+```
+
+`add` runs `cargo metadata` on the checkout and on bottlecap, takes every crate
+that is in both (transitive crates too, so types stay consistent), groups them
+by source and writes one managed region at the end of `bottlecap/Cargo.toml`:
+
+```toml
+# >>> patch-deps: managed by scripts/dev/patch-deps.sh. Do not commit. >>>
+[patch."https://github.com/DataDog/serverless-components"]
+datadog-agent-config = { path = "/Users/me/src/serverless-components/crates/datadog-agent-config" }  # serverless-components
+...
+# <<< patch-deps <<<
+```
+
+Cargo rewrites `Cargo.lock` for patched crates, so the first `add` (no patch
+active) backs the lock up in `bottlecap/.patch-deps/` (in `.gitignore`), after
+the manifest was written. `restore` puts it back. After each change the script
+resolves the graph, prints one line per crate with `active` or `NOT USED`, and
+records the sha256 of the patched lock. If the lock changed since then (you
+added or bumped a dependency), `restore` refuses (exit 4) so the backup does not
+erase that change; check `git diff bottlecap/Cargo.lock`, then `restore --force`.
+A crates.io patch is only used when the local version is semver compatible
+with the locked one; a libdatadog checkout that is behind the lock shows
+`NOT USED` for every crate. Exit code 3 means at least one patch is not used.
 
 ## CI release binaries per commit
 
