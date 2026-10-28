@@ -60,12 +60,18 @@ build_python_lambda() {
     # Install dependencies with Docker using ARM64 platform
     # Use the same image that CDK would use for consistency
     # Mount pip cache for faster package downloads
-    docker run --rm --platform linux/arm64 \
+    # set -e is off inside a function that an if condition calls, so check
+    # the exit status. The package/ check below cannot see
+    # a pip failure, because it runs after the .py files are copied in.
+    if ! docker run --rm --platform linux/arm64 \
       -v "$LAMBDA_DIR":/workspace \
       -v "$PIP_CACHE_DIR":/root/.cache/pip \
       -w /workspace \
       public.ecr.aws/sam/build-python3.12 \
-      pip install -r requirements.txt -t package/
+      pip install -r requirements.txt -t package/; then
+        echo "✗ Build failed: pip install failed"
+        return 1
+    fi
 
     # Copy source files to package directory
     cp -r "$LAMBDA_DIR"/*.py "$LAMBDA_DIR/package/" 2>/dev/null || true
