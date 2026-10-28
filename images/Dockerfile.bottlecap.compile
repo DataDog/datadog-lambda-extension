@@ -3,6 +3,10 @@ ARG PLATFORM
 
 ARG FIPS
 ARG DEBUG
+# KEEP_SYMBOLS=1 builds the same source and profile with strip disabled, so the
+# linker keeps the symbol table. Only the `bottlecap symbols` CI job sets it;
+# that output is never shipped.
+ARG KEEP_SYMBOLS=0
 
 # Install dependencies
 RUN --mount=type=cache,target=/var/cache/yum \
@@ -48,6 +52,9 @@ RUN --mount=type=cache,target=/usr/local/cargo/git \
     else \
         export BUILD_MODE=debug; \
         export BUILD_FLAG=""; \
+    fi; \
+    if [ "${KEEP_SYMBOLS}" = "1" ]; then \
+        export CARGO_PROFILE_RELEASE_STRIP=false; \
     fi; \
     # The `libddwaf` crate links against static objects that require `libclang_rt.builtins`, but
     # this is not presented to the linker by default on this platform, so we force it in.
