@@ -50,6 +50,10 @@ def crate_of(sym):
             for esc, ch in (("$LT$", "<"), ("$GT$", ">"), ("$RF$", "&"), ("$BP$", "*"), ("$u20$", " "), ("..", "::")):
                 first = first.replace(esc, ch)
             first = re.sub(r"^_?<[&*]?(?:mut |dyn |const )*", "", first)
+            m2 = IDENT.match(first)
+            # A receiver without a crate path (str, u8, T, [T], &T) names no crate: use the trait's.
+            if (not m2 or not first[m2.end():].startswith("::")) and " as " in first:
+                first = first.split(" as ", 1)[1]
         m2 = IDENT.match(first)
         return m2.group(0) if m2 else "[unknown]"
     if sym.startswith("_R"):
@@ -237,7 +241,7 @@ def diff(a, b, top):
         tb = {c["crate"]: c["text"] for c in b["crates"]}
         rows = [(c, tb.get(c, 0) - ta.get(c, 0)) for c in set(ta) | set(tb)]
         rows = [(c, v) for c, v in rows if v]
-        rows.sort(key=lambda cv: -abs(cv[1]))
+        rows.sort(key=lambda cv: (-abs(cv[1]), cv[0]))
         d["crates_text"] = [{"crate": c, "delta": v} for c, v in rows[:top]]
     return d
 
