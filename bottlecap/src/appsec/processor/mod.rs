@@ -10,7 +10,7 @@ use bytes::Bytes;
 use cookie::Cookie;
 use itertools::Itertools;
 use libdd_trace_protobuf::pb::Span;
-use libddwaf::object::{WafMap, WafOwned};
+use libddwaf::object::{WafMap, WafOwnedDefaultAllocator};
 use libddwaf::{Builder, Config as WafConfig, Handle};
 use tokio::sync::Mutex;
 use tracing::{debug, info};
@@ -66,22 +66,24 @@ impl Processor {
             );
         }
 
-        let Some(mut builder) = Builder::new(&WafConfig::default()) else {
+        let Some(mut builder) = Builder::new(Some(&WafConfig::default())) else {
             return Err(Error::WafBuilderCreationFailed);
         };
 
         let rules = Self::get_rules(cfg)?;
-        let mut diagnostics = WafOwned::<WafMap>::default();
+        let mut diagnostics = WafOwnedDefaultAllocator::<WafMap>::default();
         if !builder.add_or_update_config("rules", &rules, Some(&mut diagnostics)) {
             return Err(Error::WafRulesetLoadingError(diagnostics));
         }
-        let ruleset_version =
-            if let Some(version) = diagnostics.get(b"ruleset_version").and_then(|o| o.to_str()) {
-                debug!("aap: loaded ruleset version {version}");
-                version.to_string()
-            } else {
-                String::new()
-            };
+        let ruleset_version = if let Some(version) = diagnostics
+            .get_bstr(b"ruleset_version")
+            .and_then(|o| o.to_str())
+        {
+            debug!("aap: loaded ruleset version {version}");
+            version.to_string()
+        } else {
+            String::new()
+        };
 
         let Some(handle) = builder.build() else {
             return Err(Error::WafInitializationFailed);
@@ -299,7 +301,7 @@ pub enum Error {
     WafRulesetParseError(serde_json::Error),
     /// The App & API Protection ruleset could not be loaded into the WAF
     #[error("aap: failed to load configured WAF ruleset: {0:?}")]
-    WafRulesetLoadingError(WafOwned<WafMap>),
+    WafRulesetLoadingError(WafOwnedDefaultAllocator<WafMap>),
     /// The WAF initialization produced a [`None`] handle (this happens when the
     /// configured ruleset contains no active rule nor processor)
     #[error(

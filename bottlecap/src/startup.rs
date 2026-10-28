@@ -15,7 +15,9 @@
 use std::{env, sync::Arc};
 
 use dogstatsd::api_key::ApiKeyFactory;
+use libdd_common::regex_engine::{Regex, Replacer};
 use libdd_trace_obfuscation::obfuscation_config;
+use libdd_trace_obfuscation::replacer::ReplaceRule;
 use tokio::sync::{Mutex as TokioMutex, mpsc::Sender};
 use tokio_util::sync::CancellationToken;
 use tracing::{error, warn};
@@ -125,10 +127,28 @@ pub fn build_trace_agent(
         trace_http_client,
     ));
 
+    let tag_replace_rules = config
+        .apm_replace_tags
+        .as_ref()
+        .map_or_else(Vec::new, |rules| {
+            rules
+                .iter()
+                .map(|rule| {
+                    let replacement = rule.repl.clone();
+                    ReplaceRule {
+                        name: rule.name.clone(),
+                        re: Regex::new(rule.re.as_str())
+                            .expect("agent config has already validated replacement tag patterns"),
+                        no_expansion: Replacer::no_expansion(&mut replacement.as_str()).is_some(),
+                        repl: replacement,
+                    }
+                })
+                .collect()
+        });
     let obfuscation_config = obfuscation_config::ObfuscationConfig {
-        tag_replace_rules: config.apm_replace_tags.clone(),
+        tag_replace_rules,
         http: obfuscation_config::HttpConfig {
-            remove_paths_with_digits: config.apm_config_obfuscation_http_remove_paths_with_digits,
+            remove_path_digits: config.apm_config_obfuscation_http_remove_paths_with_digits,
             remove_query_string: config.apm_config_obfuscation_http_remove_query_string,
         },
         ..Default::default()

@@ -357,23 +357,14 @@ windows-strings,https://github.com/microsoft/windows-rs,MIT OR Apache-2.0,The wi
 windows-sys,https://github.com/microsoft/windows-rs,MIT OR Apache-2.0,Microsoft
 windows-sys,https://github.com/microsoft/windows-rs,MIT OR Apache-2.0,The windows-sys Authors
 windows-targets,https://github.com/microsoft/windows-rs,MIT OR Apache-2.0,Microsoft
-windows-targets,https://github.com/microsoft/windows-rs,MIT OR Apache-2.0,The windows-targets Authors
 windows_aarch64_gnullvm,https://github.com/microsoft/windows-rs,MIT OR Apache-2.0,Microsoft
-windows_aarch64_gnullvm,https://github.com/microsoft/windows-rs,MIT OR Apache-2.0,The windows_aarch64_gnullvm Authors
 windows_aarch64_msvc,https://github.com/microsoft/windows-rs,MIT OR Apache-2.0,Microsoft
-windows_aarch64_msvc,https://github.com/microsoft/windows-rs,MIT OR Apache-2.0,The windows_aarch64_msvc Authors
 windows_i686_gnu,https://github.com/microsoft/windows-rs,MIT OR Apache-2.0,Microsoft
-windows_i686_gnu,https://github.com/microsoft/windows-rs,MIT OR Apache-2.0,The windows_i686_gnu Authors
 windows_i686_gnullvm,https://github.com/microsoft/windows-rs,MIT OR Apache-2.0,Microsoft
-windows_i686_gnullvm,https://github.com/microsoft/windows-rs,MIT OR Apache-2.0,The windows_i686_gnullvm Authors
 windows_i686_msvc,https://github.com/microsoft/windows-rs,MIT OR Apache-2.0,Microsoft
-windows_i686_msvc,https://github.com/microsoft/windows-rs,MIT OR Apache-2.0,The windows_i686_msvc Authors
 windows_x86_64_gnu,https://github.com/microsoft/windows-rs,MIT OR Apache-2.0,Microsoft
-windows_x86_64_gnu,https://github.com/microsoft/windows-rs,MIT OR Apache-2.0,The windows_x86_64_gnu Authors
 windows_x86_64_gnullvm,https://github.com/microsoft/windows-rs,MIT OR Apache-2.0,Microsoft
-windows_x86_64_gnullvm,https://github.com/microsoft/windows-rs,MIT OR Apache-2.0,The windows_x86_64_gnullvm Authors
 windows_x86_64_msvc,https://github.com/microsoft/windows-rs,MIT OR Apache-2.0,Microsoft
-windows_x86_64_msvc,https://github.com/microsoft/windows-rs,MIT OR Apache-2.0,The windows_x86_64_msvc Authors
 winver,https://github.com/rhysd/winver,MIT,rhysd <lin90162@yahoo.co.jp>
 wit-bindgen,https://github.com/bytecodealliance/wit-bindgen,Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT,Alex Crichton <alex@alexcrichton.com>
 wit-bindgen-core,https://github.com/bytecodealliance/wit-bindgen,Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT,Alex Crichton <alex@alexcrichton.com>
@@ -394,6 +385,8 @@ zerotrie,https://github.com/unicode-org/icu4x,Unicode-3.0,The ICU4X Project Deve
 zerovec,https://github.com/unicode-org/icu4x,Unicode-3.0,The ICU4X Project Developers
 zerovec-derive,https://github.com/unicode-org/icu4x,Unicode-3.0,Manish Goregaokar <manishsmail@gmail.com>
 zmij,https://github.com/dtolnay/zmij,MIT,David Tolnay <dtolnay@gmail.com>
+zstd,https://github.com/gyscos/zstd-rs,BSD-3-Clause,Alexandre Bury <alexandre.bury@gmail.com>
 zstd,https://github.com/gyscos/zstd-rs,MIT,Alexandre Bury <alexandre.bury@gmail.com>
+zstd-safe,https://github.com/gyscos/zstd-rs,BSD-3-Clause,Alexandre Bury <alexandre.bury@gmail.com>
 zstd-safe,https://github.com/gyscos/zstd-rs,MIT OR Apache-2.0,Alexandre Bury <alexandre.bury@gmail.com>
-zstd-sys,https://github.com/gyscos/zstd-rs,MIT OR Apache-2.0,Alexandre Bury <alexandre.bury@gmail.com>
+zstd-sys,https://github.com/gyscos/zstd-rs,BSD-3-Clause,Alexandre Bury <alexandre.bury@gmail.com>
