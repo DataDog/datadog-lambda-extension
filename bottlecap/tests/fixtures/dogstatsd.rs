@@ -23,24 +23,24 @@ pub enum Kind {
     Distribution,
 }
 
-/// One metric line. The name cycles over 50 values and the `endpoint` tag over 100, so a
-/// stream of `n` lines has at most 5000 contexts.
+/// One metric line. The `endpoint` tag cycles over 100 values and the name moves to the next of
+/// 50 values every 100 lines, so a stream of `n` lines has `min(n, 5000)` contexts.
 pub fn line(kind: Kind, i: usize) -> String {
     match kind {
         Kind::Count => format!(
             "app.request.count{}:1|c|#endpoint:/api/v{},status:200,method:GET",
-            i % 50,
+            (i / 100) % 50,
             i % 100
         ),
         Kind::Gauge => format!(
             "app.queue.depth{}:{}|g|#endpoint:/api/v{},status:200,method:GET",
-            i % 50,
+            (i / 100) % 50,
             i % 900,
             i % 100
         ),
         Kind::Distribution => format!(
             "app.request.latency{}:{}|d|#endpoint:/api/v{},status:200,method:GET",
-            i % 50,
+            (i / 100) % 50,
             (i % 900) + 1,
             i % 100
         ),

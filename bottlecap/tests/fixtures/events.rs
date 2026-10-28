@@ -2,6 +2,7 @@
 //! SQS and DynamoDB events.
 
 use std::path::{Path, PathBuf};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde_json::{Value, json};
 
@@ -43,13 +44,24 @@ pub fn all_payloads() -> Vec<(String, Value)> {
         .collect()
 }
 
-/// An SQS batch of `records` messages, each with a `body_bytes` body and a `_datadog`
-/// message attribute carrying trace context.
+/// An SQS batch of `records` messages, each with a JSON array body of exactly `body_bytes`
+/// bytes (at least 2) and a `_datadog` message attribute carrying trace context.
 pub fn sqs_event(records: usize, body_bytes: usize) -> Value {
-    let body: String = (0..body_bytes / 40)
-        .map(|i| format!("{{\"k{i}\":\"v{i}xxxxxxxxxxxxxxxxxxxxxx\"}},"))
-        .collect();
-    let body = format!("[{}]", body.trim_end_matches(','));
+    let mut body = String::from("[");
+    for i in 0.. {
+        let item = format!("{{\"k{i}\":\"v{i}xxxxxxxxxxxxxxxxxxxxxx\"}},");
+        // Keep one byte for the closing `]`.
+        if body.len() + item.len() >= body_bytes {
+            break;
+        }
+        body.push_str(&item);
+    }
+    // Pad with spaces before the `]` to reach the exact size.
+    let body = format!(
+        "{:<width$}]",
+        body.trim_end_matches(','),
+        width = body_bytes.saturating_sub(1)
+    );
     let recs: Vec<Value> = (0..records)
         .map(|i| {
             json!({
@@ -80,7 +92,7 @@ pub fn sqs_event(records: usize, body_bytes: usize) -> Value {
     json!({ "Records": recs })
 }
 
-/// The reference SQS payload: 10 records of 22 KB, about 220 KB serialized.
+/// The reference SQS payload: 10 records of 22 KB, about 250 KB serialized.
 pub fn sqs_220kb() -> Value {
     sqs_event(10, 22_000)
 }
@@ -119,12 +131,18 @@ pub fn dynamodb_100_records() -> Value {
     dynamodb_event(100, 30)
 }
 
-/// Headers of the `GET /runtime/invocation/next` response that LWA intercepts.
+/// Headers of the `GET /runtime/invocation/next` response that LWA intercepts. The deadline is
+/// 60 s from now, so a runtime client that honors it does not time out at once.
 pub fn lwa_next_headers(request_id: &str) -> Vec<(&'static str, String)> {
+    let deadline_ms = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("clock after epoch")
+        .as_millis()
+        + 60_000;
     vec![
         ("content-type", "application/json".to_string()),
         ("lambda-runtime-aws-request-id", request_id.to_string()),
-        ("lambda-runtime-deadline-ms", "1741965555094".to_string()),
+        ("lambda-runtime-deadline-ms", deadline_ms.to_string()),
         (
             "lambda-runtime-invoked-function-arn",
             crate::fixtures::telemetry::FUNCTION_ARN.to_string(),

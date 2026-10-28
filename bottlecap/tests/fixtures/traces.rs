@@ -1,10 +1,11 @@
 //! Trace payloads as a tracer library POSTs them to `/v0.4/traces`.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use libdd_trace_protobuf::pb;
 use libdd_trace_utils::tracer_header_tags::TracerHeaderTags;
+use serde::Serialize;
 
 /// Headers a Python tracer sends with a v0.4 payload.
 pub const TRACE_HEADERS: &[(&str, &str)] = &[
@@ -17,7 +18,7 @@ pub const TRACE_HEADERS: &[(&str, &str)] = &[
 
 /// Fixed start time of the generated spans: 2026-10-27T12:00:00Z, the instant the log
 /// fixtures use. Fixed, so the encoded payload is the same on every run.
-pub const BASE_NS: i64 = 1_761_566_400_000_000_000;
+pub const BASE_NS: i64 = 1_793_102_400_000_000_000;
 
 /// The current time, for consumers that drop old spans (the stats concentrator keeps a time
 /// window): `make_traces_at(now_ns(), ...)`.
@@ -150,9 +151,60 @@ pub fn trace_2000_spans() -> Vec<Vec<pb::Span>> {
     make_traces(100, 20, true)
 }
 
+/// A [`pb::Span`] with `meta` and `metrics` in key order, so the encoded bytes are the same on
+/// every run (a `HashMap` iterates in a random order). Same fields and order as `pb::Span`
+/// encodes; the generated spans have no `meta_struct`, `span_links` or `span_events`.
+#[derive(Serialize)]
+struct V04Span<'a> {
+    service: &'a str,
+    name: &'a str,
+    resource: &'a str,
+    trace_id: u64,
+    span_id: u64,
+    parent_id: u64,
+    start: i64,
+    duration: i64,
+    #[serde(skip_serializing_if = "is_zero")]
+    error: i32,
+    meta: BTreeMap<&'a str, &'a str>,
+    metrics: BTreeMap<&'a str, f64>,
+    r#type: &'a str,
+}
+
+fn is_zero(n: &i32) -> bool {
+    *n == 0
+}
+
+impl<'a> From<&'a pb::Span> for V04Span<'a> {
+    fn from(s: &'a pb::Span) -> Self {
+        Self {
+            service: &s.service,
+            name: &s.name,
+            resource: &s.resource,
+            trace_id: s.trace_id,
+            span_id: s.span_id,
+            parent_id: s.parent_id,
+            start: s.start,
+            duration: s.duration,
+            error: s.error,
+            meta: s
+                .meta
+                .iter()
+                .map(|(k, v)| (k.as_str(), v.as_str()))
+                .collect(),
+            metrics: s.metrics.iter().map(|(k, v)| (k.as_str(), *v)).collect(),
+            r#type: &s.r#type,
+        }
+    }
+}
+
 /// Encodes traces as a v0.4 msgpack body (`rmp_serde::to_vec_named`, as tracers do).
 pub fn v04_msgpack(traces: &[Vec<pb::Span>]) -> Vec<u8> {
-    rmp_serde::to_vec_named(traces).expect("encode v0.4 msgpack")
+    let traces: Vec<Vec<V04Span<'_>>> = traces
+        .iter()
+        .map(|t| t.iter().map(V04Span::from).collect())
+        .collect();
+    rmp_serde::to_vec_named(&traces).expect("encode v0.4 msgpack")
 }
 
 /// The reference v0.4 body: 2000 spans, about 1 MB.

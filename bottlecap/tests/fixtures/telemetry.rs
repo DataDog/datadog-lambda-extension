@@ -157,9 +157,11 @@ pub fn function_event(kind: LogKind, i: usize) -> String {
     event(60 + i % 80, "function", &record)
 }
 
-/// An `extension` log event (bottlecap's own stdout as Lambda re-ingests it).
+/// An `extension` log event (bottlecap's own stdout as Lambda re-ingests it), in the JSON
+/// shape `logger::Formatter` writes.
 pub fn extension_event(i: usize) -> String {
-    let line = format!("[{}Z] DEBUG LOGS | processed batch {i}", time(60 + i % 80));
+    let line =
+        format!(r#"{{"status":"DEBUG","message":"DD_EXTENSION | DEBUG | processed batch {i}"}}"#);
     event(
         60 + i % 80,
         "extension",
