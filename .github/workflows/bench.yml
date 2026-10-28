@@ -28,7 +28,8 @@ on:
         options: [smoke, full]
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  # An unrelated label gets its own group, so it does not cancel a running measurement.
+  group: ${{ github.workflow }}-${{ github.ref }}${{ github.event.action == 'labeled' && github.event.label.name != 'bench' && format('-{0}', github.run_id) || '' }}
   cancel-in-progress: true
 
 permissions:
@@ -101,7 +102,8 @@ jobs:
     if: >-
       github.event_name == 'schedule' ||
       github.event_name == 'workflow_dispatch' ||
-      (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'bench'))
+      (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'bench') &&
+        (github.event.action != 'labeled' || github.event.label.name == 'bench'))
     runs-on: ubuntu-22.04
     timeout-minutes: 120
     permissions:
@@ -151,6 +153,7 @@ jobs:
         with:
           name: bench-baseline-main
           path: bottlecap/.bench-export/main.json
+          include-hidden-files: true
           retention-days: 90
           if-no-files-found: warn
       - name: Upload the exported numbers
@@ -159,5 +162,6 @@ jobs:
         with:
           name: bench-export-${{ github.run_id }}
           path: bottlecap/.bench-export/
+          include-hidden-files: true
           retention-days: 14
           if-no-files-found: ignore

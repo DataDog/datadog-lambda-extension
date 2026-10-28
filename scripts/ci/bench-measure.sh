@@ -23,17 +23,18 @@ case "${1:-}" in
 download-baseline)
   dir="${2:?usage: bench-measure.sh download-baseline <dir>}"
   mkdir -p "$dir"
-  run_id="$(gh run list --workflow bench.yml --branch main --event schedule --status success --limit 1 \
-    --json databaseId --jq '.[0].databaseId // empty' || true)"
-  if [ -z "$run_id" ]; then
-    echo "no successful nightly bench run on main yet; no baseline"
-    exit 0
-  fi
-  if gh run download "$run_id" --name bench-baseline-main --dir "$dir"; then
-    echo "baseline: run $run_id -> $dir/main.json"
-  else
-    echo "run $run_id has no bench-baseline-main artifact; no baseline"
-  fi
+  # A nightly whose measure step failed is still green but has no artifact, so walk back to
+  # the newest run that has one.
+  run_ids="$(gh run list --workflow bench.yml --branch main --event schedule --status success --limit 10 \
+    --json databaseId --jq '.[].databaseId' || true)"
+  for run_id in $run_ids; do
+    if gh run download "$run_id" --name bench-baseline-main --dir "$dir"; then
+      echo "baseline: run $run_id -> $dir/main.json"
+      exit 0
+    fi
+    echo "run $run_id has no bench-baseline-main artifact; trying an older run"
+  done
+  echo "no bench-baseline-main artifact in the last 10 successful nightly runs on main; no baseline"
   ;;
 
 run)
