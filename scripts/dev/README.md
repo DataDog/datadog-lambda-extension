@@ -8,6 +8,7 @@ None of them edits shell rc files, `~/.cargo/config.toml` or Docker settings.
 | `setup-build-cache.sh` | Install or detect `sccache`, print the env vars for the shared compile cache |
 | `worktree.sh` | Create a git worktree that shares the compile cache |
 | `patch-deps.sh` | Point bottlecap at local checkouts of serverless-components, libdatadog, saluki or dd-trace-rs, and undo it |
+| `binary-report.sh` | JSON report on a bottlecap ELF binary (sizes, relocations, NEEDED libs, BIND_NOW, top crates), with a diff mode |
 
 ## setup-build-cache.sh
 
@@ -154,6 +155,24 @@ erase that change; check `git diff bottlecap/Cargo.lock`, then `restore --force`
 A crates.io patch is only used when the local version is semver compatible
 with the locked one; a libdatadog checkout that is behind the lock shows
 `NOT USED` for every crate. Exit code 3 means at least one patch is not used.
+
+## binary-report.sh
+
+```sh
+scripts/dev/binary-report.sh .binaries/bottlecap-arm64-unstripped
+scripts/dev/binary-report.sh new/bottlecap --diff old/bottlecap
+scripts/dev/binary-report.sh bottlecap --top 30 --no-crates
+```
+
+Prints JSON for a Linux ELF binary without `readelf` or `cargo bloat`
+(it parses the ELF directly, so it runs on macOS too): file size, section
+sizes, dynamic relocation counts (`R_*_RELATIVE` from `.rela.dyn` and
+`.relr.dyn`), `NEEDED` libraries, `BIND_NOW` / `PIE` flags, and the top
+crates by `.text` size from the symbol table (only for an unstripped binary;
+a stripped one reports `"crates": null`). `--diff` adds a `diff` object with
+the deltas. Crate attribution follows the first path component of the
+demangled symbol, with C/C++ objects grouped as `[C libddwaf]`, `[C zstd]`,
+`[C jemalloc]` and `[C/asm ring]`.
 
 ## CI release binaries per commit
 
