@@ -67,7 +67,7 @@ const MAX_SEAMS: usize = 64;
 
 /// What came of pairing an unparseable body with a held fragment.
 #[derive(Debug)]
-pub(crate) enum Stitch {
+pub enum Stitch {
     /// The body completed a split payload.
     Complete(Vec<TelemetryEvent>),
     /// The body opens a split payload, and is held for its continuation.
@@ -78,13 +78,13 @@ pub(crate) enum Stitch {
 
 /// Holds the leading half of a split payload until its continuation arrives.
 #[derive(Clone, Default)]
-pub(crate) struct FragmentBuffer {
+pub struct FragmentBuffer {
     held: Arc<Mutex<Option<Fragment>>>,
 }
 
 impl FragmentBuffer {
     /// Joins `body` onto the held fragment, or holds `body` if it opens a split payload.
-    pub(crate) fn stitch(&self, body: &[u8]) -> Stitch {
+    pub fn stitch(&self, body: &[u8]) -> Stitch {
         let mut slot = self.held.lock().unwrap_or_else(PoisonError::into_inner);
 
         if let Some(stale) = slot.take_if(|held| held.received.elapsed() > FRAGMENT_TTL) {
