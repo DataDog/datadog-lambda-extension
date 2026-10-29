@@ -20,6 +20,8 @@ fn telemetry_batches_parse() {
             serde_json::from_slice(&telemetry::log_batch(kind, 10)).unwrap();
         assert_eq!(events.len(), 10, "{}", kind.name());
     }
+    // The largest shape, as `write_corpus` writes it, fits the 1 MiB `maxBytes`.
+    assert!(telemetry::log_batch(telemetry::LogKind::JsonString, 600).len() <= 1 << 20);
     let events: Vec<TelemetryEvent> =
         serde_json::from_slice(&telemetry::invocation_batch(telemetry::LogKind::Text, 5)).unwrap();
     assert_eq!(events.len(), 8);

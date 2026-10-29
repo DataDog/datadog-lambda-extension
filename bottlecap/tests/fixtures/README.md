@@ -49,8 +49,8 @@ Output goes to `bottlecap/tests/fixtures/generated/` (gitignored), or to `$BOTTL
 ```
 telemetry/platform_batch.json                 platform events of one cold start
 telemetry/function_text_1000.json             1000 text log events, one POST
-telemetry/function_json_object_1000.json      1000 JSON-object log events, one POST
-telemetry/function_json_string_1000.json      1000 JSON-in-string log events, one POST
+telemetry/function_json_object_600.json       600 JSON-object log events, one POST under 1 MiB
+telemetry/function_json_string_600.json       600 JSON-in-string log events, one POST under 1 MiB
 telemetry/invocation_batch_text_200.json      start + 200 lines + runtimeDone + report
 telemetry/split_record_1mib_post_{0..1}.json  a 1 MiB record in 256 KiB pieces, 3 per POST
 telemetry/split_record_1mib_single_post.json  the same pieces in one body

@@ -7,7 +7,8 @@ use libdd_trace_protobuf::pb;
 use libdd_trace_utils::tracer_header_tags::TracerHeaderTags;
 use serde::Serialize;
 
-/// Headers a Python tracer sends with a v0.4 payload.
+/// Headers a Python tracer sends with the reference payload ([`v04_2000_spans`], 100 traces).
+/// Set `X-Datadog-Trace-Count` to the trace count when sending another payload.
 pub const TRACE_HEADERS: &[(&str, &str)] = &[
     ("Content-Type", "application/msgpack"),
     ("Datadog-Meta-Lang", "python"),

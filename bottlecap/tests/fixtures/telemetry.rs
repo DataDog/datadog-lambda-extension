@@ -196,7 +196,8 @@ pub fn platform_batch(request_id: &str) -> Vec<u8> {
     ])
 }
 
-/// `n` function log events of one shape, as one POST body (`n` is at most 1000 in practice).
+/// `n` function log events of one shape, as one POST body. Lambda caps a POST at 1000 events
+/// and 1 MiB, so keep `n` at most 600 for the JSON shapes.
 pub fn log_batch(kind: LogKind, n: usize) -> Vec<u8> {
     let events: Vec<String> = (0..n).map(|i| function_event(kind, i)).collect();
     batch(&events)
