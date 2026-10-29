@@ -24,6 +24,8 @@
 # Why one shared CARGO_TARGET_DIR: sccache hashes the full rustc command line,
 # and cargo passes `-L dependency=<CARGO_TARGET_DIR>/debug/deps`. A different
 # target dir path gives 0 % Rust cache hits. See scripts/dev/README.md.
+# RUSTC_WORKSPACE_WRAPPER points at this worktree's rustc-workspace-wrapper.sh,
+# so bottlecap's own artifacts stay per worktree and only dependencies are shared.
 set -euo pipefail
 
 log() { printf '%s\n' "setup-build-cache: $*" >&2; }
@@ -47,6 +49,7 @@ CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-$DEFAULT_TARGET_DIR}"
 SCCACHE_VERSION="${SCCACHE_VERSION:-0.19.0}"
 SCCACHE_INSTALL="${SCCACHE_INSTALL:-prebuilt}"
 TOOLS_DIR="$BOTTLECAP_CACHE_ROOT/tools"
+WORKSPACE_WRAPPER="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)/rustc-workspace-wrapper.sh"
 PINNED_VERSION="0.19.0"
 mode="export"
 wrapper=1
@@ -62,7 +65,7 @@ case "${1:-}" in
   --check) mode="check" ;;
   --stats) mode="stats" ;;
   --stop) mode="stop" ;;
-  -h|--help) sed -n '2,26p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+  -h|--help) sed -n '2,28p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
   *) die "unknown option: $1 (see --help)" ;;
 esac
 
@@ -146,6 +149,7 @@ print_exports() {
   else
     printf 'unset RUSTC_WRAPPER\n'
   fi
+  printf 'export RUSTC_WORKSPACE_WRAPPER=%q\n' "$WORKSPACE_WRAPPER"
   printf 'export CARGO_TARGET_DIR=%q\n' "$CARGO_TARGET_DIR"
 }
 

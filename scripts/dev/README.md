@@ -18,7 +18,7 @@ cargo build
 
 The script installs `sccache` 0.19.0 (prebuilt release, sha256 checked; falls
 back to `cargo install`) into `~/.cache/bottlecap/tools/bin` if it is not on
-`PATH`, then prints four `export` lines:
+`PATH`, then prints five `export` lines:
 
 | Variable | Default | Why |
 |----------|---------|-----|
@@ -26,8 +26,9 @@ back to `cargo install`) into `~/.cache/bottlecap/tools/bin` if it is not on
 | `SCCACHE_DIR` | `~/.cache/bottlecap/sccache` | object store, shared by every clone and worktree |
 | `SCCACHE_CACHE_SIZE` | `20G` | size limit of the store |
 | `CARGO_TARGET_DIR` | `~/.cache/bottlecap/target` | one target dir for every clone and worktree |
+| `RUSTC_WORKSPACE_WRAPPER` | this worktree's `rustc-workspace-wrapper.sh` | cargo hashes its path into bottlecap's own artifacts, so each worktree keeps its own copy and only dependencies are shared |
 
-Override any of them in the environment before you run the script. An inherited
+Override any of them except `RUSTC_WORKSPACE_WRAPPER` in the environment before you run the script. An inherited
 `CARGO_TARGET_DIR` is kept, with a note. On an error the script prints `false`,
 so `eval` fails instead of exporting nothing.
 
@@ -97,7 +98,11 @@ Rules for the shared dir:
   `cargo build --message-format=json | jq -r 'select(.executable != null).executable'`.
   Tests that spawn that binary (`CARGO_BIN_EXE_bottlecap`) must run with
   `setup-build-cache.sh --tests`. Unit test and bench binaries in
-  `target/debug/deps/` carry a per-worktree hash and do not collide.
+  `target/debug/deps/` carry a per-worktree hash (from `RUSTC_WORKSPACE_WRAPPER`)
+  and do not collide. Run the `eval` in the worktree you build in. sccache
+  still caches dependencies; it runs bottlecap's own compiles uncached.
+- `cargo clippy` sets its own `RUSTC_WORKSPACE_WRAPPER`, so in the shared dir it
+  can replay another worktree's result. Run clippy with `setup-build-cache.sh --tests`.
 - `target/criterion/` is shared. Use `cargo bench -- --save-baseline <name>`.
 - Builds that wait on the lock print `Blocking waiting for file lock on build directory`.
   Give agent shells a long timeout or run builds in the background.
