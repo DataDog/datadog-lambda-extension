@@ -90,14 +90,14 @@ libdd-capabilities = "4.0.1"
 libdd-common = { version = "10.0.0", default-features = false }
 libdd-trace-protobuf = "5.1.1"
 libdd-trace-utils = { version = "16.0.0", default-features = false, features = ["mini_agent"] }
-libdd-trace-normalization = "3.0.1"
+libdd-trace-normalization = "4.3.1"
 libdd-trace-obfuscation = { version = "12.0.0", default-features = false }
 libdd-trace-stats = { version = "13.0.0", default-features = false }
-datadog-opentelemetry = { version = "0.5.4", default-features = false, features = ["_unstable_propagation"] }
-dogstatsd = { git = "https://github.com/DataDog/serverless-components", rev = "fd24c365ade64078b697e00f57f823aff32a65f7", default-features = false }
-datadog-fips = { git = "https://github.com/DataDog/serverless-components", rev = "fd24c365ade64078b697e00f57f823aff32a65f7", default-features = false }
-datadog-agent-config = { git = "https://github.com/DataDog/serverless-components", rev = "fd24c365ade64078b697e00f57f823aff32a65f7", default-features = false }
-datadog-agent-trace-sampler = { git = "https://github.com/DataDog/serverless-components", rev = "fd24c365ade64078b697e00f57f823aff32a65f7", default-features = false }
+datadog-opentelemetry = { version = "0.6.0", default-features = false, features = ["_unstable_propagation"] }
+dogstatsd = { git = "https://github.com/DataDog/serverless-components", rev = "e462105e918904e6b1ad2ebc153ae561cebe5a34", default-features = false }
+datadog-fips = { git = "https://github.com/DataDog/serverless-components", rev = "e462105e918904e6b1ad2ebc153ae561cebe5a34", default-features = false }
+datadog-agent-config = { git = "https://github.com/DataDog/serverless-components", rev = "e462105e918904e6b1ad2ebc153ae561cebe5a34", default-features = false }
+datadog-agent-trace-sampler = { git = "https://github.com/DataDog/serverless-components", rev = "e462105e918904e6b1ad2ebc153ae561cebe5a34", default-features = false }
 libddwaf = { version = "2.1.0", git = "https://github.com/DataDog/libddwaf-rust", rev = "bbada5255bf8e9105c06b03ce6d5d63a7c337e2a", default-features = false, features = ["serde"] }
 # Enables the crypto provider libddwaf-sys needs to download prebuilt WAF binaries.
 libddwaf-sys = { version = "2.1.0", git = "https://github.com/DataDog/libddwaf-rust", rev = "bbada5255bf8e9105c06b03ce6d5d63a7c337e2a", default-features = false, features = ["aws-lc-rs"] }

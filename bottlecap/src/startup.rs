@@ -53,6 +53,27 @@ pub struct TraceAgentPipeline {
     pub trace_aggregator_handle: TraceAggregatorHandle,
 }
 
+fn build_tag_replace_rules(config: &Config) -> Vec<ReplaceRule> {
+    config
+        .apm_replace_tags
+        .as_ref()
+        .map_or_else(Vec::new, |rules| {
+            rules
+                .iter()
+                .map(|rule| {
+                    let replacement = rule.repl.clone();
+                    ReplaceRule {
+                        name: rule.name.clone(),
+                        re: Regex::new(rule.re.as_str())
+                            .expect("agent config has already validated replacement tag patterns"),
+                        no_expansion: Replacer::no_expansion(&mut replacement.as_str()).is_some(),
+                        repl: replacement,
+                    }
+                })
+                .collect()
+        })
+}
+
 /// Builds the full trace-processing pipeline (trace + stats + proxy
 /// aggregators, services, flushers) and the [`trace_agent::TraceAgent`] that
 /// owns the HTTP listener. Spawns the aggregator/concentrator/dedup services
@@ -127,26 +148,8 @@ pub fn build_trace_agent(
         trace_http_client,
     ));
 
-    let tag_replace_rules = config
-        .apm_replace_tags
-        .as_ref()
-        .map_or_else(Vec::new, |rules| {
-            rules
-                .iter()
-                .map(|rule| {
-                    let replacement = rule.repl.clone();
-                    ReplaceRule {
-                        name: rule.name.clone(),
-                        re: Regex::new(rule.re.as_str())
-                            .expect("agent config has already validated replacement tag patterns"),
-                        no_expansion: Replacer::no_expansion(&mut replacement.as_str()).is_some(),
-                        repl: replacement,
-                    }
-                })
-                .collect()
-        });
     let obfuscation_config = obfuscation_config::ObfuscationConfig {
-        tag_replace_rules,
+        tag_replace_rules: build_tag_replace_rules(config),
         http: obfuscation_config::HttpConfig {
             remove_path_digits: config.apm_config_obfuscation_http_remove_paths_with_digits,
             remove_query_string: config.apm_config_obfuscation_http_remove_query_string,
@@ -256,4 +259,41 @@ pub fn start_trace_agent(
     });
 
     pipeline
+}
+
+#[cfg(test)]
+mod tests {
+    use libdd_trace_obfuscation::replacer::{parse_rules_from_string, replace_span_tags};
+    use libdd_trace_protobuf::pb::Span;
+
+    use super::{Config, build_tag_replace_rules};
+
+    #[test]
+    fn build_tag_replace_rules_preserves_literal_and_capture_replacements() {
+        let mut config = Config::default();
+        assert!(build_tag_replace_rules(&config).is_empty());
+
+        config.apm_replace_tags = Some(
+            parse_rules_from_string(
+                r#"[
+                    {"name":"literal","pattern":"secret","repl":"[REDACTED]"},
+                    {"name":"capture","pattern":"token=([^&]+)","repl":"value=$1"}
+                ]"#,
+            )
+            .expect("valid replacement rules"),
+        );
+
+        let rules = build_tag_replace_rules(&config);
+        assert!(rules[0].no_expansion);
+        assert!(!rules[1].no_expansion);
+
+        let mut span = Span::default();
+        span.meta.insert("literal".to_owned(), "secret".to_owned());
+        span.meta
+            .insert("capture".to_owned(), "token=example".to_owned());
+        replace_span_tags(&mut span, &rules, &mut String::new());
+
+        assert_eq!(span.meta["literal"], "[REDACTED]");
+        assert_eq!(span.meta["capture"], "value=example");
+    }
 }
