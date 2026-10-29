@@ -41,11 +41,13 @@ cleanup() {
 }
 trap cleanup EXIT
 
-BOTTLECAP_CACHE_ROOT="${BOTTLECAP_CACHE_ROOT:-$HOME/.cache/bottlecap}"
+# Exported paths must not depend on the directory cargo later runs from.
+abspath() { case "$1" in /*) printf '%s' "$1" ;; *) printf '%s/%s' "$PWD" "$1" ;; esac; }
+BOTTLECAP_CACHE_ROOT="$(abspath "${BOTTLECAP_CACHE_ROOT:-$HOME/.cache/bottlecap}")"
 DEFAULT_TARGET_DIR="$BOTTLECAP_CACHE_ROOT/target"
-SCCACHE_DIR="${SCCACHE_DIR:-$BOTTLECAP_CACHE_ROOT/sccache}"
+SCCACHE_DIR="$(abspath "${SCCACHE_DIR:-$BOTTLECAP_CACHE_ROOT/sccache}")"
 SCCACHE_CACHE_SIZE="${SCCACHE_CACHE_SIZE:-20G}"
-CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-$DEFAULT_TARGET_DIR}"
+CARGO_TARGET_DIR="$(abspath "${CARGO_TARGET_DIR:-$DEFAULT_TARGET_DIR}")"
 SCCACHE_VERSION="${SCCACHE_VERSION:-0.19.0}"
 SCCACHE_INSTALL="${SCCACHE_INSTALL:-prebuilt}"
 TOOLS_DIR="$BOTTLECAP_CACHE_ROOT/tools"
@@ -104,7 +106,7 @@ install_prebuilt() {
   if ! triple="$(prebuilt_triple)"; then log "no prebuilt sccache for $(uname -s)-$(uname -m)"; return 1; fi
   base="sccache-v${SCCACHE_VERSION}-${triple}"
   url="https://github.com/mozilla/sccache/releases/download/v${SCCACHE_VERSION}/${base}.tar.gz"
-  TMP="$(mktemp -d)"
+  TMP="$(mktemp -d)" || return 1
   log "downloading $url"
   if ! curl -fsSL --retry 3 -o "$TMP/$base.tar.gz" "$url"; then log "download failed"; return 1; fi
   if [ "$SCCACHE_VERSION" = "$PINNED_VERSION" ]; then
@@ -116,9 +118,10 @@ install_prebuilt() {
   fi
   have="$(sha256_file "$TMP/$base.tar.gz")"
   [ "$want" = "$have" ] || die "sha256 mismatch for $base.tar.gz: expected $want, got $have"
-  tar -xzf "$TMP/$base.tar.gz" -C "$TMP"
-  mkdir -p "$TOOLS_DIR/bin"
-  install -m 0755 "$TMP/$base/sccache" "$TOOLS_DIR/bin/sccache"
+  # errexit is off here (called from `if !`), so return on each failure to reach the cargo fallback.
+  tar -xzf "$TMP/$base.tar.gz" -C "$TMP" || return 1
+  mkdir -p "$TOOLS_DIR/bin" || return 1
+  install -m 0755 "$TMP/$base/sccache" "$TOOLS_DIR/bin/sccache" || return 1
   log "installed sccache $SCCACHE_VERSION to $TOOLS_DIR/bin/sccache"
 }
 
@@ -147,7 +150,8 @@ print_exports() {
       esac
     fi
   else
-    printf 'unset RUSTC_WRAPPER\n'
+    # Empty, not unset: an empty RUSTC_WRAPPER also overrides build.rustc-wrapper in cargo config.
+    printf 'export RUSTC_WRAPPER=\n'
   fi
   printf 'export RUSTC_WORKSPACE_WRAPPER=%q\n' "$WORKSPACE_WRAPPER"
   printf 'export CARGO_TARGET_DIR=%q\n' "$CARGO_TARGET_DIR"
@@ -156,7 +160,7 @@ print_exports() {
 SCCACHE_BIN_PATH="$(find_sccache || true)"
 
 case "$mode" in
-  stats) [ -n "$SCCACHE_BIN_PATH" ] || die "sccache not found; run without options to install it"; exec "$SCCACHE_BIN_PATH" --show-stats ;;
+  stats) [ -n "$SCCACHE_BIN_PATH" ] || die "sccache not found; run without options to install it"; export SCCACHE_DIR SCCACHE_CACHE_SIZE; exec "$SCCACHE_BIN_PATH" --show-stats ;;
   stop) [ -n "$SCCACHE_BIN_PATH" ] || die "sccache not found"; exec "$SCCACHE_BIN_PATH" --stop-server ;;
   check)
     if [ -z "$SCCACHE_BIN_PATH" ]; then

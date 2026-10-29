@@ -35,7 +35,7 @@ so `eval` fails instead of exporting nothing.
 | Option | Effect |
 |--------|--------|
 | `--tests` | Same exports, but `CARGO_TARGET_DIR=<worktree>/bottlecap/target`. Use it for tests that spawn the `bottlecap` binary (`CARGO_BIN_EXE_bottlecap`, the process-level harness): `target/debug/bottlecap` in the shared dir is overwritten by whichever worktree built last. This dir gets no Rust cache hits (see below), so expect one cold build per worktree. |
-| `--no-wrapper` | Shared `CARGO_TARGET_DIR` only, `unset RUSTC_WRAPPER`. |
+| `--no-wrapper` | Shared `CARGO_TARGET_DIR` only, `export RUSTC_WRAPPER=` (empty also overrides a `build.rustc-wrapper` in cargo config). |
 | `--check` | Print what would be exported. No install, no directories, no server query. |
 | `--stats` / `--stop` | `sccache --show-stats` / `sccache --stop-server`. |
 
@@ -107,7 +107,7 @@ Rules for the shared dir:
 - Builds that wait on the lock print `Blocking waiting for file lock on build directory`.
   Give agent shells a long timeout or run builds in the background.
 - The sccache wrapper adds about 2 s to an incremental build (6.3 s vs 4.4 s).
-  For a long edit-compile loop in one worktree, `unset RUSTC_WRAPPER` and keep `CARGO_TARGET_DIR`.
+  For a long edit-compile loop in one worktree, `export RUSTC_WRAPPER=` and keep `CARGO_TARGET_DIR`.
 - The sccache server reads `SCCACHE_DIR` and `SCCACHE_CACHE_SIZE` once, at start.
   A client with another `SCCACHE_DIR` silently uses the running server. The script warns about that.
 
