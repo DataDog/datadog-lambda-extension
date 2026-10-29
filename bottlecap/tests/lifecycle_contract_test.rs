@@ -48,23 +48,27 @@ async fn invoke_then_shutdown_exits_cleanly() {
         bc.log_tail(40)
     );
 
-    s.shutdown_cleanly(&mut bc).await;
-    // The end-of-invocation flush reached the intake with the configured key.
+    // Read the intake before SHUTDOWN: its final flush would hide a missing
+    // end-of-invocation flush.
     let with_key = s
         .intake
         .requests()
         .iter()
         .filter(|r| r.api_key() == Some(TEST_API_KEY))
         .count();
+    // Enhanced metrics are distributions, so they land on the sketches path.
+    let metrics = s.intake.count("/api/beta/sketches") + s.intake.count("/api/v2/series");
+    s.shutdown_cleanly(&mut bc).await;
+
+    // The end-of-invocation flush reached the intake with the configured key.
     assert!(
         with_key > 0,
-        "no intake request carried the API key. Intake:\n{}",
+        "no intake request carried the API key before SHUTDOWN. Intake:\n{}",
         s.intake.summary()
     );
-    // Enhanced metrics are distributions, so they land on the sketches path.
     assert!(
-        s.intake.count("/api/beta/sketches") + s.intake.count("/api/v2/series") > 0,
-        "no metrics flushed. Intake:\n{}",
+        metrics > 0,
+        "no metrics flushed before SHUTDOWN. Intake:\n{}",
         s.intake.summary()
     );
 }

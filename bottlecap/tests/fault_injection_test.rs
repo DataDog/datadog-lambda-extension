@@ -102,7 +102,7 @@ async fn oversized_trace_is_dropped_and_later_traces_flow() {
         .await
         .unwrap();
     eprintln!("trace agent answered {status} to a 4 MB span");
-    let (released, _) = end_invocation_and_wait(&s, "req-1", 2, invoked, secs(15)).await;
+    let (released, _) = end_invocation_and_wait(&s, "req-1", 2, invoked, secs(10)).await;
     assert!(
         released,
         "the oversized trace held /next. {}",
@@ -123,7 +123,7 @@ async fn oversized_trace_is_dropped_and_later_traces_flow() {
     post_trace(msgpack_trace(2, 0), STARTUP_BUDGET)
         .await
         .unwrap();
-    let (released, _) = end_invocation_and_wait(&s, "req-2", 3, invoked, secs(15)).await;
+    let (released, _) = end_invocation_and_wait(&s, "req-2", 3, invoked, secs(10)).await;
     assert!(released, "no /next after the second invocation");
     let later_trace = s
         .intake
@@ -138,6 +138,18 @@ async fn oversized_trace_is_dropped_and_later_traces_flow() {
     assert!(
         rejected,
         "the 4 MB trace never reached the intake (accepted by the agent: {status}). Intake:\n{}",
+        s.intake.summary()
+    );
+    // The flusher retries the 413 within its flush today; the contract is
+    // that the 4 MB trace is never sent again once the rejection is lifted.
+    let redriven = s
+        .intake
+        .requests()
+        .iter()
+        .any(|r| r.path.contains(TRACES_PATH) && r.body_len > 1_000_000 && r.status != 413);
+    assert!(
+        !redriven,
+        "the rejected trace was redriven after the fault cleared. Intake:\n{}",
         s.intake.summary()
     );
     assert!(
