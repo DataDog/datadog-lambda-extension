@@ -6,6 +6,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde_json::{Value, json};
 
+use crate::fixtures::traces::BASE_NS;
+
 fn payloads_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("tests")
@@ -45,7 +47,8 @@ pub fn all_payloads() -> Vec<(String, Value)> {
 }
 
 /// An SQS batch of `records` messages, each with a JSON array body of exactly `body_bytes`
-/// bytes (at least 2) and a `_datadog` message attribute carrying trace context.
+/// bytes (at least 2) and a `_datadog` message attribute carrying trace context. Sent at
+/// [`BASE_NS`].
 pub fn sqs_event(records: usize, body_bytes: usize) -> Value {
     let mut body = String::from("[");
     for i in 0.. {
@@ -62,6 +65,7 @@ pub fn sqs_event(records: usize, body_bytes: usize) -> Value {
         body.trim_end_matches(','),
         width = body_bytes.saturating_sub(1)
     );
+    let sent_ms = BASE_NS / 1_000_000;
     let recs: Vec<Value> = (0..records)
         .map(|i| {
             json!({
@@ -70,9 +74,9 @@ pub fn sqs_event(records: usize, body_bytes: usize) -> Value {
                 "body": body,
                 "attributes": {
                     "ApproximateReceiveCount": "1",
-                    "SentTimestamp": "1545082649183",
+                    "SentTimestamp": sent_ms.to_string(),
                     "SenderId": "AIDAIENQZJOLO23YVJ4VO",
-                    "ApproximateFirstReceiveTimestamp": "1545082649185"
+                    "ApproximateFirstReceiveTimestamp": (sent_ms + 2).to_string()
                 },
                 "messageAttributes": {
                     "_datadog": {
@@ -97,7 +101,8 @@ pub fn sqs_220kb() -> Value {
     sqs_event(10, 22_000)
 }
 
-/// A DynamoDB stream batch of `records` INSERT records with `attrs` attributes each.
+/// A DynamoDB stream batch of `records` INSERT records with `attrs` attributes each, created
+/// at [`BASE_NS`].
 pub fn dynamodb_event(records: usize, attrs: usize) -> Value {
     let recs: Vec<Value> = (0..records)
         .map(|i| {
@@ -112,7 +117,7 @@ pub fn dynamodb_event(records: usize, attrs: usize) -> Value {
                 "eventSource": "aws:dynamodb",
                 "awsRegion": "us-east-1",
                 "dynamodb": {
-                    "ApproximateCreationDateTime": 1_428_537_600,
+                    "ApproximateCreationDateTime": BASE_NS / 1_000_000_000,
                     "Keys": {"Id": {"N": "101"}},
                     "NewImage": Value::Object(img),
                     "SequenceNumber": format!("{i}00000000000000000"),

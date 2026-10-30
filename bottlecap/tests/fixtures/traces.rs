@@ -7,6 +7,8 @@ use libdd_trace_protobuf::pb;
 use libdd_trace_utils::tracer_header_tags::TracerHeaderTags;
 use serde::Serialize;
 
+use crate::fixtures::telemetry::REQUEST_ID;
+
 /// Headers a Python tracer sends with the reference payload ([`v04_2000_spans`], 100 traces).
 /// Set `X-Datadog-Trace-Count` to the trace count when sending another payload.
 pub const TRACE_HEADERS: &[(&str, &str)] = &[
@@ -66,7 +68,7 @@ pub fn make_traces_at(
                                 "serverless",
                                 vec![
                                     ("span.kind", "server"),
-                                    ("request_id", "8f5a7e2c-1b2c-4d5e-9f00-0123456789ab"),
+                                    ("request_id", REQUEST_ID),
                                     ("function_trigger.event_source", "api-gateway"),
                                     ("http.method", "GET"),
                                     ("http.status_code", "200"),
@@ -200,6 +202,7 @@ impl<'a> From<&'a pb::Span> for V04Span<'a> {
 }
 
 /// Encodes traces as a v0.4 msgpack body (`rmp_serde::to_vec_named`, as tracers do).
+/// For generated spans only: `meta_struct`, `span_links` and `span_events` are not encoded.
 pub fn v04_msgpack(traces: &[Vec<pb::Span>]) -> Vec<u8> {
     let traces: Vec<Vec<V04Span<'_>>> = traces
         .iter()
