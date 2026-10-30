@@ -1,6 +1,6 @@
 """Force cold starts of test functions, one or more per variant, and save the CloudWatch log events.
 
-Usage (through aws-vault, so boto3 gets credentials):
+Usage (through aws-vault, so boto3 gets credentials). DD_API_KEY must hold a Datadog API key:
   aws-vault exec sso-serverless-sandbox-account-admin -- python3 measure.py \
       --out runs/<label> -n 20 noext=none old=v100 new=<layer-arn>
 
@@ -27,10 +27,6 @@ from botocore.exceptions import ConnectionError as BotoConnectionError
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from layer_size import REGION, layer_sizes, resolve  # noqa: E402
 
-ACCOUNT = "425362996713"
-# The secret exists only in us-east-2. The extension reads a secret from another region too.
-API_KEY_SECRET_ARN = f"arn:aws:secretsmanager:{REGION}:{ACCOUNT}:secret:/dev/shared/serverless-sample-dd-api-key"
-
 # Same handlers as the default handlers of the self-monitoring functions.
 RUNTIMES = {
     "python": {
@@ -51,7 +47,6 @@ RUNTIMES = {
 }
 
 BASE_ENV = {
-    "DD_API_KEY_SECRET_ARN": API_KEY_SECRET_ARN,
     "DD_SITE": "datadoghq.com",
     "DD_SERVICE": "extension-perf-test",
     "DD_ENV": "test",
@@ -69,34 +64,56 @@ def zip_bytes(rt):
     return buf.getvalue()
 
 
-def ensure_role(iam):
+def api_key_secret_name():
+    return f"{owner()}-extension-perf-api-key"
+
+
+def ensure_api_key_secret(sm):
+    """Store DD_API_KEY in this user's secret and return its ARN.
+
+    The functions read the key from Secrets Manager, as the self-monitoring functions do.
+    """
+    try:
+        return sm.put_secret_value(SecretId=api_key_secret_name(), SecretString=os.environ["DD_API_KEY"])["ARN"]
+    except sm.exceptions.ResourceNotFoundException:
+        return sm.create_secret(Name=api_key_secret_name(), SecretString=os.environ["DD_API_KEY"])["ARN"]
+
+
+def ensure_role(iam, secret_arn):
     name = f"{owner()}-extension-perf-role"
     try:
-        return iam.get_role(RoleName=name)["Role"]["Arn"]
+        arn = iam.get_role(RoleName=name)["Role"]["Arn"]
     except iam.exceptions.NoSuchEntityException:
-        pass
-    arn = iam.create_role(
-        RoleName=name,
-        AssumeRolePolicyDocument=json.dumps({
-            "Version": "2012-10-17",
-            "Statement": [{"Effect": "Allow", "Principal": {"Service": "lambda.amazonaws.com"}, "Action": "sts:AssumeRole"}],
-        }),
-    )["Role"]["Arn"]
-    iam.attach_role_policy(RoleName=name, PolicyArn="arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole")
-    iam.put_role_policy(
-        RoleName=name,
-        PolicyName="read-api-key",
-        PolicyDocument=json.dumps({
-            "Version": "2012-10-17",
-            "Statement": [{"Effect": "Allow", "Action": "secretsmanager:GetSecretValue", "Resource": API_KEY_SECRET_ARN + "*"}],
-        }),
-    )
-    print(f"created role {name}, waiting for IAM to propagate", flush=True)
-    time.sleep(12)
+        arn = iam.create_role(
+            RoleName=name,
+            AssumeRolePolicyDocument=json.dumps({
+                "Version": "2012-10-17",
+                "Statement": [{"Effect": "Allow", "Principal": {"Service": "lambda.amazonaws.com"}, "Action": "sts:AssumeRole"}],
+            }),
+        )["Role"]["Arn"]
+        iam.attach_role_policy(RoleName=name, PolicyArn="arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole")
+    try:
+        old_policy = iam.get_role_policy(RoleName=name, PolicyName="read-api-key")["PolicyDocument"]
+    except iam.exceptions.NoSuchEntityException:
+        old_policy = None
+    # The secret has the same name in each region, so one policy covers every region.
+    account = secret_arn.split(":")[4]
+    policy = {
+        "Version": "2012-10-17",
+        "Statement": [{
+            "Effect": "Allow",
+            "Action": "secretsmanager:GetSecretValue",
+            "Resource": f"arn:aws:secretsmanager:*:{account}:secret:{api_key_secret_name()}-*",
+        }],
+    }
+    if old_policy != policy:
+        iam.put_role_policy(RoleName=name, PolicyName="read-api-key", PolicyDocument=json.dumps(policy))
+        print(f"updated role {name}, waiting for IAM to propagate", flush=True)
+        time.sleep(12)
     return arn
 
 
-def ensure_function(lam, name, rt, arch, role_arn, layers):
+def ensure_function(lam, name, rt, arch, role_arn, layers, env):
     try:
         lam.get_function(FunctionName=name)
     except lam.exceptions.ResourceNotFoundException:
@@ -110,7 +127,7 @@ def ensure_function(lam, name, rt, arch, role_arn, layers):
             Timeout=30,
             MemorySize=1024,
             Layers=layers,
-            Environment={"Variables": BASE_ENV},
+            Environment={"Variables": env},
         )
         lam.get_waiter("function_active_v2").wait(FunctionName=name)
     # As in the self-monitoring functions. Without this and the pause between warm invocations,
@@ -134,8 +151,10 @@ def invoke(lam, fn):
 
 
 def collect_logs(logs, name, start_ms, expected_reports):
-    """Return the log events of one function. Stream names get the function name as a prefix."""
-    """Poll CloudWatch until every invocation's REPORT line arrived, or 3 minutes passed."""
+    """Return the log events of one function. Stream names get the function name as a prefix.
+
+    Poll CloudWatch until every invocation's REPORT line arrived, or 3 minutes passed.
+    """
     deadline = time.time() + 180
     while True:
         events = []
@@ -166,10 +185,11 @@ def main():
     p.add_argument("--copies", type=int, default=1, help="functions per variant, to get more samples in the same time")
     p.add_argument("--env", action="append", default=[], help="KEY=VALUE for every variant")
     args = p.parse_args()
+    if not os.environ.get("DD_API_KEY"):
+        sys.exit("Set DD_API_KEY to a Datadog API key. The test functions send their data to the org of that key.")
 
     rt = RUNTIMES[args.runtime]
     layer_arch = "arm64" if args.arch == "arm64" else "amd64"
-    env = {**BASE_ENV, **dict(kv.split("=", 1) for kv in args.env)}
     variants = {}
     for v in args.variants:
         vname, spec = v.split("=", 1)
@@ -177,7 +197,9 @@ def main():
 
     lam = boto3.client("lambda", region_name=args.region)
     logs = boto3.client("logs", region_name=args.region)
-    role_arn = ensure_role(boto3.client("iam"))
+    secret_arn = ensure_api_key_secret(boto3.client("secretsmanager", region_name=args.region))
+    env = {**BASE_ENV, "DD_API_KEY_SECRET_ARN": secret_arn, **dict(kv.split("=", 1) for kv in args.env)}
+    role_arn = ensure_role(boto3.client("iam"), secret_arn)
     os.makedirs(args.out, exist_ok=True)
 
     meta = {"args": vars(args), "env": env, "variants": {}}
@@ -185,7 +207,7 @@ def main():
         fns = []
         for k in range(1, args.copies + 1):
             fn = f"{owner()}-extperf-{args.runtime}-{args.arch}-{vname}" + (f"-{k}" if args.copies > 1 else "")
-            ensure_function(lam, fn[:64], rt, args.arch, role_arn, layers)
+            ensure_function(lam, fn[:64], rt, args.arch, role_arn, layers, env)
             fns.append(fn[:64])
         sizes = layer_sizes(lam, layers[0]) if layers else (0, 0)
         meta["variants"][vname] = {"functions": fns, "layers": layers, "zipped_bytes": sizes[0], "unzipped_bytes": sizes[1]}

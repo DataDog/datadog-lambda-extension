@@ -14,6 +14,12 @@ variants the same way.
 Run the scripts through `aws-vault exec sso-serverless-sandbox-account-admin --`. They need
 `boto3`.
 
+`measure.py` needs a Datadog API key in the environment variable `DD_API_KEY`. Without a key,
+the extension does not flush, so the run measures no flush time. The test functions send their
+data to the org of that key. The script stores the key in a Secrets Manager secret,
+`<user>-extension-perf-api-key`, in the region of the run. The functions read the key from that
+secret, as the self-monitoring functions do.
+
 ## 1. Get the layers
 
 Each variant is `NAME=SPEC`. SPEC is one of these:
@@ -133,6 +139,7 @@ REGION=us-east-2
 for f in $(awsv lambda list-functions --region $REGION --query "Functions[?starts_with(FunctionName, '<user>-extperf-')].FunctionName" --output text); do
   awsv lambda delete-function --region $REGION --function-name "$f" > /dev/null
 done
+awsv secretsmanager delete-secret --region $REGION --secret-id <user>-extension-perf-api-key --force-delete-without-recovery
 awsv iam delete-role-policy --role-name <user>-extension-perf-role --policy-name read-api-key
 awsv iam detach-role-policy --role-name <user>-extension-perf-role --policy-arn arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
 awsv iam delete-role --role-name <user>-extension-perf-role
