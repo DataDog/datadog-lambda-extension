@@ -51,11 +51,14 @@ def main():
     p.add_argument("--fips", action="store_true")
     args = p.parse_args()
 
-    lam = boto3.client("lambda", region_name=REGION) if args.specs else None
+    clients = {}
     print(f"{'layer':80} {'zipped':>10} {'unzipped':>10}")
     for spec in args.specs:
         arn = resolve(spec, args.arch, args.fips)
-        print(f"{arn:80} {'%10d %10d' % layer_sizes(lam, arn)}")
+        region = arn.split(":")[3]
+        if region not in clients:
+            clients[region] = boto3.client("lambda", region_name=region)
+        print(f"{arn:80} {'%10d %10d' % layer_sizes(clients[region], arn)}")
     for path in args.zip:
         with open(path, "rb") as f:
             print(f"{path:80} {'%10d %10d' % zip_sizes(f.read())}")

@@ -85,7 +85,9 @@ python3 .claude/skills/measure-extension-layer/scripts/summarize.py /tmp/extensi
 ```
 
 The output has the layer sizes, the medians of each variant, and differences. Each difference
-is the difference of two medians, with a bootstrap 95% interval. If the interval contains 0, the
+is the difference of two medians, with a bootstrap 95% interval. The bootstrap resamples whole
+execution environments, because invocations in one environment are not independent. If the
+interval contains 0, the
 run does not show a difference. Run again with a larger `-n` before you report a change.
 
 How the metrics relate to the release dashboard, Lambda Extension Overhead per Runtime:
@@ -95,7 +97,7 @@ How the metrics relate to the release dashboard, Lambda Extension Overhead per R
 | `init_duration_ms`, variant minus `noext` | Init Duration Overhead |
 | `cold_duration_ms` | Duration Overhead. That widget shows the duration of the extension function itself. |
 | `warm_duration_ms` or `cold_duration_ms`, variant minus `noext` | Post Runtime Extension Duration. This is an estimate, see below. |
-| `each_warm_duration_ms` | The same as `warm_duration_ms`, but each warm invocation is one sample. Use it for a run with few cold starts and many warm invocations. |
+| `each_warm_duration_ms` | The median of all warm invocations, not of one median per environment. Use it for a run with few cold starts and many warm invocations. |
 | `zipped` | The layer size, `CodeSize` in AWS. |
 | `ext.*` | No widget. These are the steps of the extension's init, from the cold start log line. |
 
@@ -116,9 +118,11 @@ Other setups gave slower flushes, and the cause is not known. In `us-east-2` on 
 invocation took about 210 ms with 60 s gaps and about 125 ms with 1 s gaps. In the prod setup with
 gaps of about 95 s, it took about 137 ms.
 
-With 60 s between warm invocations, one warm duration had a standard deviation of about 30 ms.
-To see a change of about 10 ms, get about 300 warm invocations for each variant, for example
-`--copies 8 -n 1 --warm 35 --warm-interval 60`.
+The width of the interval depends mostly on the number of execution environments, because
+environments differ from each other. So add copies before you add warm invocations. In one run
+with 6 to 8 environments for each variant, the interval of a warm duration difference was about
+23 ms wide per environment, and about 12 ms wide per invocation. For a change of about 10 ms, use
+more environments than that, for example `--copies 16 -n 1 --warm 20 --warm-interval 60`.
 
 Outside the prod setup, do not compare the numbers from this harness with the dashboard
 numbers. In all setups, compare variants within one run.

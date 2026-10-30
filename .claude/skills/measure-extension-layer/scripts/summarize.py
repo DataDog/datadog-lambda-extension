@@ -5,7 +5,8 @@ Usage:
   python3 summarize.py runs/<label> --compare old new    # also `new` minus `old`
 
 A difference is the difference of the two medians, with a bootstrap 95% confidence interval.
-An interval that contains 0 means the run did not show a difference.
+The bootstrap resamples whole execution environments, because invocations in one environment
+are not independent. An interval that contains 0 means the run did not show a difference.
 """
 
 import argparse
@@ -53,17 +54,22 @@ def parse(path):
     return rows
 
 
-def boot_median_diff(a, b, n=2000):
-    """Bootstrap 95% interval of median(b) - median(a)."""
+def boot_median_diff(base_rows, rows, key, n=2000):
+    """Bootstrap 95% interval of the difference of the medians, resampling execution environments."""
     diffs = sorted(
-        statistics.median(random.choices(b, k=len(b))) - statistics.median(random.choices(a, k=len(a)))
+        statistics.median(values(random.choices(rows, k=len(rows)), key))
+        - statistics.median(values(random.choices(base_rows, k=len(base_rows)), key))
         for _ in range(n)
     )
     return diffs[int(0.025 * n)], diffs[int(0.975 * n)]
 
 
+def has(row, key):
+    return bool(row.get("_warm_durations")) if key == "each_warm_duration_ms" else key in row
+
+
 def values(rows, key):
-    # Each warm invocation on its own. Use it when a run has few cold starts and many warm invocations.
+    # All warm invocations of the rows, for a run with few cold starts and many warm invocations.
     if key == "each_warm_duration_ms":
         return [x for r in rows for x in r.get("_warm_durations", [])]
     return [r[key] for r in rows if key in r]
@@ -73,11 +79,11 @@ def print_diff(title, base_rows, rows, keys):
     print(f"\n## {title}")
     print(f"{'metric':42} {'difference':>11} {'95% interval':>20}")
     for k in keys + ["each_warm_duration_ms"]:
-        a, b = values(base_rows, k), values(rows, k)
+        a, b = [r for r in base_rows if has(r, k)], [r for r in rows if has(r, k)]
         if len(a) < 3 or len(b) < 3:
             continue
-        lo, hi = boot_median_diff(a, b)
-        diff = statistics.median(b) - statistics.median(a)
+        lo, hi = boot_median_diff(a, b, k)
+        diff = statistics.median(values(b, k)) - statistics.median(values(a, k))
         print(f"{k:42} {diff:11.2f} {f'[{lo:.2f}, {hi:.2f}]':>20}")
 
 

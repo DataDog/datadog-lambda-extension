@@ -136,6 +136,7 @@ def ensure_function(lam, name, rt, arch, role_arn, layers, env):
 
 
 def invoke(lam, fn):
+    """Invoke the function once. Return False if the invocation failed."""
     # A DNS failure on the local machine once stopped a 35-minute run, so retry connection errors.
     for attempt in range(5):
         try:
@@ -145,9 +146,11 @@ def invoke(lam, fn):
             print(f"{fn}: {e}, retrying", flush=True)
             time.sleep(5 * (attempt + 1))
     else:
-        return
+        return False
     if r.get("FunctionError"):
         print(f"{fn}: function error: {r['Payload'].read()[:300]!r}", flush=True)
+        return False
+    return True
 
 
 def collect_logs(logs, name, start_ms, expected_reports):
@@ -193,7 +196,15 @@ def main():
     variants = {}
     for v in args.variants:
         vname, spec = v.split("=", 1)
-        variants[vname] = [] if spec == "none" else [resolve(spec, layer_arch, args.fips, args.region)]
+        layers = [] if spec == "none" else [resolve(spec, layer_arch, args.fips, args.region)]
+        fns = [
+            f"{owner()}-extperf-{args.runtime}-{args.arch}-{vname}" + (f"-{k}" if args.copies > 1 else "")
+            for k in range(1, args.copies + 1)
+        ]
+        for fn in fns:
+            if len(fn) > 64:
+                sys.exit(f"The function name {fn} is longer than 64 characters. Use a shorter variant name.")
+        variants[vname] = (layers, fns)
 
     lam = boto3.client("lambda", region_name=args.region)
     logs = boto3.client("logs", region_name=args.region)
@@ -203,17 +214,15 @@ def main():
     os.makedirs(args.out, exist_ok=True)
 
     meta = {"args": vars(args), "env": env, "variants": {}}
-    for vname, layers in variants.items():
-        fns = []
-        for k in range(1, args.copies + 1):
-            fn = f"{owner()}-extperf-{args.runtime}-{args.arch}-{vname}" + (f"-{k}" if args.copies > 1 else "")
-            ensure_function(lam, fn[:64], rt, args.arch, role_arn, layers, env)
-            fns.append(fn[:64])
+    for vname, (layers, fns) in variants.items():
+        for fn in fns:
+            ensure_function(lam, fn, rt, args.arch, role_arn, layers, env)
         sizes = layer_sizes(lam, layers[0]) if layers else (0, 0)
         meta["variants"][vname] = {"functions": fns, "layers": layers, "zipped_bytes": sizes[0], "unzipped_bytes": sizes[1]}
 
     start_ms = int(time.time() * 1000)
     all_fns = [fn for v in meta["variants"].values() for fn in v["functions"]]
+    failed = []
     try:
         with ThreadPoolExecutor(max_workers=16) as pool:
             for i in range(1, args.n + 1):
@@ -229,7 +238,8 @@ def main():
                 step_start = time.time()
                 for j in range(1 + args.warm):
                     time.sleep(max(0, step_start + j * args.warm_interval - time.time()))
-                    list(pool.map(lambda fn: invoke(lam, fn), all_fns))
+                    ok = list(pool.map(lambda fn: invoke(lam, fn), all_fns))
+                    failed += [fn for fn, good in zip(all_fns, ok) if not good]
                 print(f"round {i}/{args.n} done", flush=True)
     finally:
         # Save what CloudWatch has, also after an error, so that a long run is not lost.
@@ -244,6 +254,9 @@ def main():
             print(f"{vname}: saved {len(events)} log events, {reports} REPORT lines", flush=True)
         with open(os.path.join(args.out, "meta.json"), "w") as f:
             json.dump(meta, f, indent=2)
+    # summarize.py counts the REPORT line of a failed invocation like any other, so the results need a rerun.
+    if failed:
+        sys.exit(f"{len(failed)} invocations failed, for example in {failed[0]}. Run the measurement again.")
 
 
 if __name__ == "__main__":
