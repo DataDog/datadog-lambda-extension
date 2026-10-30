@@ -21,6 +21,11 @@ Write down these facts before you start:
 | Good version and bad version | `v99` and `v101` |
 | Size of the change | +15 ms |
 | Runtime, architecture, region, FIPS | Python 3.14, `x86_64`, us-east-1, not FIPS |
+| Dashboard stack and traffic, for a dashboard regression | `stack:agent`, `traffic:1min` |
+
+The harness covers only `stack:agent`: its functions have the extension layer, no tracer, and no
+traces. For a regression only in `stack:tracing`, the harness cannot show it. Report that, and
+give the dashboard numbers.
 
 If you do not know the versions, get them from the time series of the release dashboard with
 `check-extension-overhead`.
@@ -74,8 +79,12 @@ python3 .claude/skills/measure-extension-layer/scripts/summarize.py /tmp/extensi
   Lambda does. `layer_size.py` and the build scripts' `ARCHITECTURE` take `amd64` or `arm64`. So
   for an `x86_64` regression, use `amd64` for those two.
 
-Measure the traffic pattern that changed. For `traffic:1min` in post-runtime duration, use
-`--warm 8 --warm-interval 60`, and read `each_warm_duration_ms`.
+Measure the traffic pattern that changed, and read `each_warm_duration_ms`:
+
+| Dashboard traffic | Harness options | Why |
+| --- | --- | --- |
+| `traffic:1min` | `--warm 8 --warm-interval 60` | Each invocation flushes after 60 s of idle time. |
+| `traffic:busy` | `--warm 60 --warm-interval 1` | The default flush strategy changes after 20 invocations in one environment, to a flush in the background. With 60, most warm invocations come after the change. |
 
 If the 95% interval of `bad minus good` contains 0, run again with `-n 40`. If it still contains
 0, stop and report that the harness does not show the regression. Give the numbers. Do not
