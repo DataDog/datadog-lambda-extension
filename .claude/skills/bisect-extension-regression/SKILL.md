@@ -70,8 +70,10 @@ aws-vault exec sso-serverless-sandbox-account-admin -- python3 .claude/skills/me
 python3 .claude/skills/measure-extension-layer/scripts/summarize.py /tmp/extension-perf/repro --compare good bad
 ```
 
-- For a regression that you saw in the dashboard, use the setup of the prod self-monitoring
-  functions: `--runtime python314 --arch x86_64 --region us-east-1`.
+- For a regression that you saw in the dashboard, use the architecture and region of the prod
+  self-monitoring functions, `--arch x86_64 --region us-east-1`. Keep the runtime from step 1.
+  The harness has `python` (Python 3.13), `python314` (Python 3.14) and `node` (Node.js 24). For a
+  regression only in another runtime, report that the harness does not cover it.
 - For a FIPS regression, add `--fips`. It changes which released layer `v<N>` means.
 - For a size regression, `layer_size.py --arch <arch> [--fips] <good tag> <bad tag>` is enough.
   Size has no noise.
