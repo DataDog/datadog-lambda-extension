@@ -101,8 +101,15 @@ The build scripts at an old commit can be different from the current ones. If a 
 read `scripts/build_bottlecap_layer.sh` at that commit.
 
 Do not test commits that cannot change the binary. A commit that changes only CI, tests or docs
-is not a candidate. List the candidates with the files that each commit changes in `bottlecap/src`
-and `bottlecap/Cargo.*`.
+is not a candidate. A candidate changes at least one input of the build:
+
+- anything in `bottlecap/` except tests, including `bottlecap/build.rs` and `bottlecap/Cargo.*`
+- the compile images, `images/Dockerfile.bottlecap*`
+- the build scripts, `.gitlab/scripts/compile_bottlecap.sh` and `scripts/build_bottlecap_layer.sh`
+- the toolchain and its settings, `rust-toolchain.toml` and `.cargo/`
+- the wrapper script in the layer, `scripts/datadog_wrapper`
+
+For example, `8e1bcf9` changes only the compile images, and it embeds the dependency tree in the binary.
 
 ### Test many cut points in one round
 
@@ -119,6 +126,9 @@ in one run:
    ```sh
    $SKILLS/bisect-extension-regression/scripts/build_layers.sh ../dle-bisect <your-name>-bisect v99 <cut1> <cut2> <cut3> v100
    ```
+
+   For a FIPS regression, set `FIPS=1` before the command, and use `--fips` for the released layers. Set
+   `ARCHITECTURE` and `REGION` in the same way when the regression needs them.
 
 3. Measure all of them in one run, with one variant for each line of `layers.txt`, for example
    `good=<arn> c1=<arn> c2=<arn> c3=<arn> bad=<arn>`. Compare each cut point with `good`.
@@ -139,10 +149,10 @@ push it. Build the bad tag and the revert in the same batch, and measure them in
 the good release:
 
 ```sh
-git -C ../dle-bisect checkout --detach v98
+git -C ../dle-bisect checkout --detach <bad tag>
 git -C ../dle-bisect revert --no-edit <commit>
-REVERT=$(git -C ../dle-bisect rev-parse HEAD)  # the script checks out v98 first, so HEAD moves
-$SKILLS/bisect-extension-regression/scripts/build_layers.sh ../dle-bisect <your-name>-revert v98 "$REVERT"
+REVERT=$(git -C ../dle-bisect rev-parse HEAD)  # the script checks out <bad tag> first, so HEAD moves
+$SKILLS/bisect-extension-regression/scripts/build_layers.sh ../dle-bisect <your-name>-revert <bad tag> "$REVERT"
 ```
 
 The commit is the cause if `revert minus bad` shows the regression with the opposite sign, and
