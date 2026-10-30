@@ -8,6 +8,9 @@ flavors:
     layer_name_base_suffix: ""
     max_layer_compressed_size_mb: 27
     max_layer_uncompressed_size_mb: 54
+    # Also build an unstripped copy on main (job "bottlecap symbols"), for size,
+    # ELF and benchmark analysis. The copy is a CI artifact only, never shipped.
+    keep_symbols: true
 
   - name: arm64
     arch: arm64
@@ -18,6 +21,7 @@ flavors:
     layer_name_base_suffix: "-ARM"
     max_layer_compressed_size_mb: 24
     max_layer_uncompressed_size_mb: 50
+    keep_symbols: true
 
   - name: amd64, alpine
     arch: amd64
