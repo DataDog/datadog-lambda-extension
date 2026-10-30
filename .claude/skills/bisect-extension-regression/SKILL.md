@@ -70,6 +70,9 @@ python3 .claude/skills/measure-extension-layer/scripts/summarize.py /tmp/extensi
 - For a FIPS regression, add `--fips`. It changes which released layer `v<N>` means.
 - For a size regression, `layer_size.py --arch <arch> [--fips] <good tag> <bad tag>` is enough.
   Size has no noise.
+- The tools name the architectures in two ways. `measure.py` takes `x86_64` or `arm64`, as
+  Lambda does. `layer_size.py` and the build scripts' `ARCHITECTURE` take `amd64` or `arm64`. So
+  for an `x86_64` regression, use `amd64` for those two.
 
 Measure the traffic pattern that changed. For `traffic:1min` in post-runtime duration, use
 `--warm 8 --warm-interval 60`, and read `each_warm_duration_ms`.
@@ -136,10 +139,13 @@ in one run:
    ```
 
    For a FIPS regression, set `FIPS=1` before the command, and use `--fips` for the released layers. Set
-   `ARCHITECTURE` and `REGION` in the same way when the regression needs them.
+   `ARCHITECTURE` and `REGION` in the same way when the regression needs them, with
+   `ARCHITECTURE=amd64` for `x86_64`.
 
 3. Measure all of them in one run, with one variant for each line of `layers.txt`, for example
-   `good=<arn> c1=<arn> c2=<arn> c3=<arn> bad=<arn>`. Compare each cut point with `good`.
+   `good=<arn> c1=<arn> c2=<arn> c3=<arn> bad=<arn>`. Compare each cut point with both ends,
+   because the rule below needs both intervals. For example, `--compare good c1 --compare bad c1`
+   prints `c1 minus good` and `c1 minus bad`.
 4. Put each cut point on one side:
    - It is good if the interval of `cut minus good` contains 0, and the interval of `cut minus
      bad` is below 0.
