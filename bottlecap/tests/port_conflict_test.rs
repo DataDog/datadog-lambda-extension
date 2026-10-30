@@ -20,6 +20,8 @@ mod harness;
 
 use harness::prelude::*;
 
+const INVOKE_DEADLINE: Duration = secs(5);
+
 enum Proto {
     Tcp,
 }
@@ -49,9 +51,13 @@ async fn run_with_port_held(
     let telemetry_possible = port != TELEMETRY_PORT || s.api.telemetry_port() != TELEMETRY_PORT;
     let mut flushed = false;
     if reached_next && telemetry_possible {
-        s.api.push_invoke("req-1", secs(5));
+        let invoked = Instant::now();
+        s.api.push_invoke("req-1", INVOKE_DEADLINE);
         if deliver_runtime_done(&s.api, "req-1", true).await.is_ok() {
-            flushed = s.api.wait_for_next_calls(2, secs(10)).await;
+            flushed = s
+                .api
+                .wait_for_next_calls(2, INVOKE_DEADLINE.saturating_sub(invoked.elapsed()))
+                .await;
         }
     }
     let exit = s.shutdown(&mut bc).await;
@@ -68,6 +74,12 @@ async fn run_with_port_held(
     assert!(
         reached_next,
         "with port {port} held, the extension never reached /next. API: {:?}\n{}",
+        s.api.request_lines(),
+        bc.log_tail(40)
+    );
+    assert!(
+        flushed || !telemetry_possible,
+        "with port {port} held, the invocation did not end within its {INVOKE_DEADLINE:?} deadline. API: {:?}\n{}",
         s.api.request_lines(),
         bc.log_tail(40)
     );

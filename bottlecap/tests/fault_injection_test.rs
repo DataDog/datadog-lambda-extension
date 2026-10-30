@@ -160,9 +160,9 @@ async fn oversized_trace_is_dropped_and_later_traces_flow() {
     );
 }
 
-/// `close_mid_body`: the intake sends headers and part of the body, then
-/// closes. The extension must treat it as a failed request and keep flowing.
-/// Passes today.
+/// `close_mid_body`: the intake sends a 2xx with headers and part of the body,
+/// then closes. The request reached the intake, so this checks only that the
+/// extension does not hold `/next` or crash. Passes today.
 #[tokio::test(flavor = "multi_thread")]
 #[serial_test::serial(bottlecap_ports)]
 async fn intake_closing_mid_body_does_not_hold_next() {
