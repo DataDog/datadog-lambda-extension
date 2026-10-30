@@ -18,27 +18,36 @@ import statistics
 from collections import defaultdict
 
 REPORT_RE = re.compile(r"(Init Duration|Billed Duration|Duration|Max Memory Used): ([\d.]+)")
+STATUS_RE = re.compile(r"Status: (\w+)")
 
 
 def parse(path):
-    """Return one dict per cold start: its REPORT fields and the extension's cold start steps."""
+    """Return one dict per cold start, and the number of environments dropped for a failure.
+
+    A dict has the REPORT fields and the extension's cold start steps.
+    """
     streams = defaultdict(list)
     with open(path) as f:
         for line in f:
             e = json.loads(line)
             streams[e["logStreamName"]].append(e)
-    rows = []
+    rows, dropped = [], 0
     for events in streams.values():
         events.sort(key=lambda e: e["timestamp"])
         if not any(e["message"].startswith("INIT_START") for e in events):
             continue  # an execution environment from before this run
-        row, warm = {}, []
+        row, warm, failed = {}, [], False
         for e in events:
             m = e["message"]
             if '"cold_start":{' in m:
                 steps = json.loads(m)["cold_start"]
                 row.update({f"ext.{k}": v for k, v in steps.items()})
             elif m.startswith("REPORT"):
+                # A failed invocation ends with "Status: error" or "Status: timeout", and Lambda then
+                # resets the environment. So the later REPORT lines of that environment are not clean.
+                status = STATUS_RE.search(m)
+                if status and status.group(1) != "success":
+                    failed = True
                 fields = {k: float(v) for k, v in REPORT_RE.findall(m)}
                 if "Init Duration" in fields:
                     row["init_duration_ms"] = fields["Init Duration"]
@@ -49,9 +58,11 @@ def parse(path):
         if warm:
             row["warm_duration_ms"] = statistics.median(warm)
             row["_warm_durations"] = warm
-        if "init_duration_ms" in row:
+        if failed:
+            dropped += 1
+        elif "init_duration_ms" in row:
             rows.append(row)
-    return rows
+    return rows, dropped
 
 
 def boot_median_diff(base_rows, rows, key, n=2000):
@@ -97,13 +108,17 @@ def main():
 
     with open(os.path.join(args.dir, "meta.json")) as f:
         meta = json.load(f)
-    data = {v: parse(os.path.join(args.dir, f"{v}.jsonl")) for v in meta["variants"]}
+    data, dropped = {}, {}
+    for v in meta["variants"]:
+        data[v], dropped[v] = parse(os.path.join(args.dir, f"{v}.jsonl"))
     keys = sorted({k for rows in data.values() for r in rows for k in r if not k.startswith("_")})
 
-    print(f"{'variant':12} {'cold starts':>11} {'zipped':>10} {'unzipped':>10}")
+    print(f"{'variant':12} {'cold starts':>11} {'dropped':>8} {'zipped':>10} {'unzipped':>10}")
     for v, rows in data.items():
         m = meta["variants"][v]
-        print(f"{v:12} {len(rows):11d} {m['zipped_bytes']:10d} {m['unzipped_bytes']:10d}")
+        print(f"{v:12} {len(rows):11d} {dropped[v]:8d} {m['zipped_bytes']:10d} {m['unzipped_bytes']:10d}")
+    if any(dropped.values()):
+        print("dropped: environments with a failed invocation, which the summary leaves out")
 
     print(f"\n## Medians")
     print(f"{'metric':42} " + " ".join(f"{v:>12}" for v in data))

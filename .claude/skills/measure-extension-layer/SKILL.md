@@ -84,7 +84,7 @@ a timing run, because the extra logs make the extension slower.
 python3 .claude/skills/measure-extension-layer/scripts/summarize.py /tmp/extension-perf/<label> --compare old new
 ```
 
-The output has the layer sizes, the medians of each variant, and differences. Each difference
+The output has the layer sizes, the medians of each variant, and differences. It leaves out each execution environment that had a failed invocation, and the `dropped` column counts them. Each difference
 is the difference of two medians, with a bootstrap 95% interval. The bootstrap resamples whole
 execution environments, because invocations in one environment are not independent. If the
 interval contains 0, the

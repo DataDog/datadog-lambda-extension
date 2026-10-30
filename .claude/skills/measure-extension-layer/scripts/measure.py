@@ -161,13 +161,16 @@ def collect_logs(logs, name, start_ms, expected_reports):
     deadline = time.time() + 180
     while True:
         events = []
-        for page in logs.get_paginator("filter_log_events").paginate(
-            logGroupName=f"/aws/lambda/{name}", startTime=start_ms
-        ):
-            events += [
-                {"timestamp": e["timestamp"], "logStreamName": f"{name}/{e['logStreamName']}", "message": e["message"]}
-                for e in page["events"]
-            ]
+        try:
+            for page in logs.get_paginator("filter_log_events").paginate(
+                logGroupName=f"/aws/lambda/{name}", startTime=start_ms
+            ):
+                events += [
+                    {"timestamp": e["timestamp"], "logStreamName": f"{name}/{e['logStreamName']}", "message": e["message"]}
+                    for e in page["events"]
+                ]
+        except logs.exceptions.ResourceNotFoundException:
+            pass  # the function wrote no log yet, so its log group does not exist
         reports = sum(e["message"].startswith("REPORT") for e in events)
         if reports >= expected_reports or time.time() > deadline:
             return events, reports
@@ -224,7 +227,8 @@ def main():
     all_fns = [fn for v in meta["variants"].values() for fn in v["functions"]]
     failed = []
     try:
-        with ThreadPoolExecutor(max_workers=16) as pool:
+        # One thread per function, so that no invocation waits for a free thread.
+        with ThreadPoolExecutor(max_workers=len(all_fns)) as pool:
             for i in range(1, args.n + 1):
                 for v in meta["variants"].values():
                     # A changed environment variable makes Lambda start a new execution environment.
