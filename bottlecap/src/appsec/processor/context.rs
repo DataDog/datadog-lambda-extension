@@ -6,7 +6,9 @@ use std::time::Duration;
 use bytes::{Buf, Bytes};
 use libdd_trace_protobuf::pb::Span;
 use libddwaf::object::{Keyed, WafMap, WafObject};
-use libddwaf::{Context as WafContext, Handle, RunError, RunOutput, RunResult, waf_map};
+use libddwaf::{
+    Context as WafContext, Handle, RunError, RunOutput, RunResult, RunnableContext, waf_map,
+};
 use mime::Mime;
 use multipart::server::Multipart;
 use tracing::{debug, info, warn};
@@ -56,7 +58,7 @@ impl Context {
             (TagName::AppsecEnabled, TagValue::Metric(1.0)),
             (
                 TagName::AppsecWafVersion,
-                TagValue::Always(libddwaf::get_version().to_string_lossy().to_string()),
+                TagValue::Always(libddwaf::version().to_string_lossy().to_string()),
             ),
         ]);
         if !ruleset_version.is_empty() {
@@ -185,7 +187,7 @@ impl Context {
         };
 
         // Evaluate the WAF ruleset and handle the result.
-        match self.waf.run(Some(address_data), None, self.waf_timeout) {
+        match self.waf.run(address_data, self.waf_timeout) {
             Ok(RunResult::Match(result) | RunResult::NoMatch(result)) => {
                 self.process_result(result);
             }
@@ -218,7 +220,7 @@ impl Context {
                 ("extract-schema", true)
             })
         };
-        match self.waf.run(Some(address_data), None, self.waf_timeout) {
+        match self.waf.run(address_data, self.waf_timeout) {
             Ok(RunResult::Match(result) | RunResult::NoMatch(result)) => {
                 self.process_result(result);
             }
@@ -454,7 +456,7 @@ impl Context {
                 let value = if let Some(value) = item.to_str() {
                     value.to_string()
                 } else {
-                    match serde_json::to_string(item.inner()) {
+                    match serde_json::to_string(item.value()) {
                         Ok(value) => value,
                         Err(e) => {
                             warn!(
@@ -649,7 +651,8 @@ fn to_address_data(payload: &dyn InvocationPayload) -> Option<WafMap> {
         ($field:ident[] => $name:literal) => {
             let value = payload.$field();
             if !value.is_empty() {
-                let mut waf_value = libddwaf::object::WafMap::new(value.len() as u64);
+                let mut waf_value = libddwaf::object::WafMap::new(value.len())
+                    .expect("WAF map length is representable");
                 for (idx, (key, item)) in value.iter().enumerate() {
                     waf_value[idx] = (key.as_str(), item.as_str()).into();
                 }
@@ -661,9 +664,11 @@ fn to_address_data(payload: &dyn InvocationPayload) -> Option<WafMap> {
         ($field:ident[][] => $name:literal) => {
             let value = payload.$field();
             if !value.is_empty() {
-                let mut waf_value = libddwaf::object::WafMap::new(value.len() as u64);
+                let mut waf_value = libddwaf::object::WafMap::new(value.len())
+                    .expect("WAF map length is representable");
                 for (idx, (key, elements)) in value.iter().enumerate() {
-                    let mut waf_elements = libddwaf::object::WafArray::new(elements.len() as u64);
+                    let mut waf_elements = libddwaf::object::WafArray::new(elements.len())
+                        .expect("WAF array length is representable");
                     for (idx, elt) in elements.iter().enumerate() {
                         waf_elements[idx] = elt.as_str().into();
                     }
@@ -692,7 +697,7 @@ fn to_address_data(payload: &dyn InvocationPayload) -> Option<WafMap> {
         return None;
     }
 
-    let mut result = WafMap::new(addresses.len() as u64);
+    let mut result = WafMap::new(addresses.len()).expect("WAF map length is representable");
     for (idx, item) in addresses.into_iter().enumerate() {
         result[idx] = item;
     }
@@ -717,7 +722,7 @@ fn try_parse_body_with_mime(body: impl Read, mime_type: Mime) -> Result<WafObjec
         }
         (mime::APPLICATION, mime::WWW_FORM_URLENCODED, None) => {
             let pairs: Vec<(String, String)> = serde_html_form::from_reader(body)?;
-            let mut res = WafMap::new(pairs.len() as u64);
+            let mut res = WafMap::new(pairs.len()).expect("WAF map length is representable");
             for (i, (key, value)) in pairs.into_iter().enumerate() {
                 res[i] = (key.as_str(), value.as_str()).into();
             }
@@ -758,7 +763,7 @@ fn try_parse_body_with_mime(body: impl Read, mime_type: Mime) -> Result<WafObjec
                     }
                 }
             }
-            let mut res = WafMap::new(items.len() as u64);
+            let mut res = WafMap::new(items.len()).expect("WAF map length is representable");
             for (idx, (name, value)) in items.into_iter().enumerate() {
                 res[idx] = (name.as_str(), value).into();
             }
