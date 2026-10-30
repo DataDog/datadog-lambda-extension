@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2024"
 publish = false
 
-# CI runs `cargo machete` (rs_ci.yml). These entries are version bounds on
+# Read by cargo-machete (`cargo machete` in bottlecap/). These entries are version bounds on
 # transitive crates, a crate reached only through a re-export (aws-lc-rs via
 # `rustls::crypto`), a use cargo-machete cannot see (serde_bytes in a
 # `#[serde(with = "...")]` string), or a dependency listed only to enable a
