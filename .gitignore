@@ -28,3 +28,5 @@ integration-tests/cdk.context.json
 
 .gitlab/pipeline*
 /CLAUDE_PERSONAL.md
+# Generated benchmark fixture corpus (see bottlecap/tests/fixtures/README.md)
+bottlecap/tests/fixtures/generated
