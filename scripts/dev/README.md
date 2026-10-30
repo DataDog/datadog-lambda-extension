@@ -94,7 +94,7 @@ Rules for the shared dir:
 
 - Never run `cargo clean` there. It deletes every worktree's artifacts.
 - `target/debug/bottlecap` is overwritten by whichever worktree built last.
-  Use `cargo run`, or read the path from
+  Use `cargo run --bin bottlecap`, or read the path from
   `cargo build --message-format=json | jq -r 'select(.executable != null).executable'`.
   Tests that spawn that binary (`CARGO_BIN_EXE_bottlecap`) must run with
   `setup-build-cache.sh --tests`. Unit test and bench binaries in

@@ -193,14 +193,18 @@ if [ "$wrapper" = 1 ]; then
   # starts. A client with a different SCCACHE_DIR silently uses the running
   # server. Detect that and tell the user how to fix it.
   realdir() { (cd "$1" 2>/dev/null && pwd -P) || printf '%s' "$1"; }
-  running_dir="$(SCCACHE_DIR="$SCCACHE_DIR" SCCACHE_CACHE_SIZE="$SCCACHE_CACHE_SIZE" "$SCCACHE_BIN_PATH" --show-stats 2>/dev/null | sed -n 's/^Cache location *Local disk: "\(.*\)"$/\1/p' || true)"
+  stats="$(SCCACHE_DIR="$SCCACHE_DIR" SCCACHE_CACHE_SIZE="$SCCACHE_CACHE_SIZE" "$SCCACHE_BIN_PATH" --show-stats 2>&1)" ||
+    die "'$SCCACHE_BIN_PATH --show-stats' failed (a server from another sccache version may be running; stop it with '$SCCACHE_BIN_PATH --stop-server', or use --no-wrapper):
+$stats"
+  running_dir="$(printf '%s\n' "$stats" | sed -n 's/^Cache location *Local disk: "\(.*\)"$/\1/p')"
+  running_max="$(printf '%s\n' "$stats" | sed -n 's/^Max cache size *//p')"
   if [ -n "$running_dir" ] && [ "$(realdir "$running_dir")" != "$(realdir "$SCCACHE_DIR")" ]; then
     log "WARNING: an sccache server is already running with SCCACHE_DIR=$running_dir"
     log "         this shell asked for $SCCACHE_DIR. Run '$SCCACHE_BIN_PATH --stop-server' first,"
     log "         or export SCCACHE_DIR=$running_dir to join the running server."
   fi
   log "sccache:          $SCCACHE_BIN_PATH ($("$SCCACHE_BIN_PATH" --version 2>/dev/null | tr -d '\n'))"
-  log "SCCACHE_DIR:      $SCCACHE_DIR (limit $SCCACHE_CACHE_SIZE)"
+  log "SCCACHE_DIR:      $SCCACHE_DIR (server limit ${running_max:-unknown}; run with --stop to change it)"
 fi
 if [ "$target_mode" = "shared" ]; then
   log "CARGO_TARGET_DIR: $CARGO_TARGET_DIR (shared by all worktrees; cargo serializes builds on its lock)"

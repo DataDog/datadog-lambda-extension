@@ -72,6 +72,7 @@ fi
 
 qpath="$(printf '%q' "$path/bottlecap")"
 qbranch="$(printf '%q' "$branch")"
+qscript="$(printf '%q' "$here/worktree.sh")"
 cat >&2 <<EOF
 worktree: created $path
 
@@ -85,6 +86,6 @@ Notes:
   - Builds in all worktrees queue on the shared target dir lock. That is expected.
   - target/debug/bottlecap is shared. Tests that spawn the bottlecap binary need
     'eval "\$(../scripts/dev/setup-build-cache.sh --tests)"' (per-worktree target dir).
-  - Remove with: scripts/dev/worktree.sh --remove $qbranch
+  - Remove with: $qscript --remove $qbranch
 EOF
 printf '%s\n' "$path"
