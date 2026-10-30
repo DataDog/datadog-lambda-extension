@@ -91,7 +91,13 @@ def ensure_role(iam, secret_arn):
                 "Statement": [{"Effect": "Allow", "Principal": {"Service": "lambda.amazonaws.com"}, "Action": "sts:AssumeRole"}],
             }),
         )["Role"]["Arn"]
-        iam.attach_role_policy(RoleName=name, PolicyArn="arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole")
+    changed = False
+    # Also for an existing role: a cleanup that stopped halfway can leave the role without it.
+    logging_policy = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+    attached = iam.list_attached_role_policies(RoleName=name)["AttachedPolicies"]
+    if logging_policy not in [a["PolicyArn"] for a in attached]:
+        iam.attach_role_policy(RoleName=name, PolicyArn=logging_policy)
+        changed = True
     try:
         old_policy = iam.get_role_policy(RoleName=name, PolicyName="read-api-key")["PolicyDocument"]
     except iam.exceptions.NoSuchEntityException:
@@ -108,6 +114,8 @@ def ensure_role(iam, secret_arn):
     }
     if old_policy != policy:
         iam.put_role_policy(RoleName=name, PolicyName="read-api-key", PolicyDocument=json.dumps(policy))
+        changed = True
+    if changed:
         print(f"updated role {name}, waiting for IAM to propagate", flush=True)
         time.sleep(12)
     return arn
@@ -153,12 +161,11 @@ def invoke(lam, fn):
     return True
 
 
-def collect_logs(logs, name, start_ms, expected_reports):
+def collect_logs(logs, name, start_ms, expected_reports, deadline):
     """Return the log events of one function. Stream names get the function name as a prefix.
 
-    Poll CloudWatch until every invocation's REPORT line arrived, or 3 minutes passed.
+    Poll CloudWatch until every invocation's REPORT line arrived, or the deadline passed.
     """
-    deadline = time.time() + 180
     while True:
         events = []
         try:
@@ -247,10 +254,13 @@ def main():
                 print(f"round {i}/{args.n} done", flush=True)
     finally:
         # Save what CloudWatch has, also after an error, so that a long run is not lost.
+        # One deadline for all functions, so that a run that stopped early does not wait 3
+        # minutes for each function.
+        deadline = time.time() + 180
         for vname, v in meta["variants"].items():
             events, reports = [], 0
             for fn in v["functions"]:
-                fn_events, fn_reports = collect_logs(logs, fn, start_ms, args.n * (1 + args.warm))
+                fn_events, fn_reports = collect_logs(logs, fn, start_ms, args.n * (1 + args.warm), deadline)
                 events += fn_events
                 reports += fn_reports
             with open(os.path.join(args.out, f"{vname}.jsonl"), "w") as f:
