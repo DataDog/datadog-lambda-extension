@@ -28,7 +28,10 @@ If you do not know the versions, get them from the time series of the release da
 ## 2. Check that the change follows the version, not a date
 
 A change in the dashboard can come from outside the extension, for example from the Datadog
-intake or from AWS. Before you measure or build anything, check when the change started. Query
+intake or from AWS. For a change that you saw in the dashboard, check when it started before you
+measure or build anything. Skip this step for a layer size change, because the dashboard has no
+layer size. Also skip it for a change that a harness run showed, because both variants ran at
+the same time there. Go to step 3. Query
 the metric through the logged-in browser, as in `check-extension-overhead`, in steps of 3 hours.
 Compare these series:
 
@@ -132,9 +135,16 @@ in one run:
 
 3. Measure all of them in one run, with one variant for each line of `layers.txt`, for example
    `good=<arn> c1=<arn> c2=<arn> c3=<arn> bad=<arn>`. Compare each cut point with `good`.
-4. The regression is in the group after the last cut point that is near `good`. Its interval of
-   `cut minus good` contains 0. If no cut point is clearly near `good` or clearly near `bad`,
-   run again with a larger `-n`.
+4. Put each cut point on one side:
+   - It is good if the interval of `cut minus good` contains 0, and the interval of `cut minus
+     bad` is below 0.
+   - It is bad if the interval of `cut minus bad` contains 0, and the interval of `cut minus good`
+     is above 0.
+   - Otherwise it is not clear. An interval that contains 0 alone does not show that a cut point
+     is near that end. For a +13 ms regression, an interval of [-5, +25] fits both ends.
+
+   The regression is in the group between the last good cut point and the first bad one. If a
+   cut point next to that group is not clear, run again with more copies before you go on.
 5. Repeat with cut points inside that group, until one commit is left.
 
 For a size regression, build only, and run `layer_size.py --zip` after each build. Size has no
