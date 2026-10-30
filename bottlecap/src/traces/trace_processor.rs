@@ -93,10 +93,10 @@ pub fn error_rare_sample_tracer_drop_enabled(config: &config::Config) -> bool {
 #[allow(clippy::module_name_repetitions)]
 pub struct ServerlessTraceProcessor {
     pub obfuscation_config: Arc<obfuscation_config::ObfuscationConfig>,
-    /// Rescues errored chunks on the `lambda_extension_compute_stats`
-    /// path. Shared across invocations so a stateful mode (`RateLimited`) would
-    /// keep its rolling window; a std Mutex rather than tokio because
-    /// `process_traces` is synchronous.
+    /// Rescues errored chunks whenever stats are computed before the backend,
+    /// by either the tracer or the extension. Shared across invocations so a
+    /// stateful mode (`RateLimited`) would keep its rolling window; a std Mutex
+    /// rather than tokio because `process_traces` is synchronous.
     pub error_sampler: Arc<std::sync::Mutex<ErrorsSampler>>,
     /// Whether `DD_APM_FEATURES` enables [`ERROR_RARE_SAMPLE_TRACER_DROP`]. When
     /// true, chunks with a negative priority are rescued like `AutoDrop` chunks
@@ -248,9 +248,9 @@ struct ChunkProcessor {
     obfuscation_config: Arc<obfuscation_config::ObfuscationConfig>,
     tags_provider: Arc<provider::Provider>,
     span_pointers: Option<Vec<SpanPointer>>,
-    /// Whether the tracer signaled (via `Datadog-Client-Computed-Stats`) that it already
-    /// computed trace stats client-side. Used to decide whether to stamp `_dd.compute_stats`.
-    client_computed_stats: bool,
+    /// Resolved once per request by the caller; used to decide whether to stamp
+    /// `_dd.compute_stats`.
+    stats_computed_by: StatsComputedBy,
 }
 
 impl TraceChunkProcessor for ChunkProcessor {
@@ -283,12 +283,7 @@ impl TraceChunkProcessor for ChunkProcessor {
             .spans
             .retain(|span| !filter_span_from_lambda_library_or_runtime(span));
 
-        // The stats-routing decision depends only on config and the per-request
-        // client_computed_stats flag, so resolve it once instead of per span.
-        let stamp_compute_stats = StatsComputedBy::resolve(
-            self.config.ext.lambda_extension_compute_stats,
-            self.client_computed_stats,
-        ) == StatsComputedBy::Backend;
+        let stamp_compute_stats = self.stats_computed_by == StatsComputedBy::Backend;
 
         for span in &mut chunk.spans {
             // Service name could be incorrectly set to 'aws.lambda'
@@ -587,6 +582,12 @@ impl TraceProcessor for ServerlessTraceProcessor {
         body_size: usize,
         span_pointers: Option<Vec<SpanPointer>>,
     ) -> (Option<SendDataBuilderInfo>, TracerPayloadCollection) {
+        // Who computes stats drives both the `_dd.compute_stats` stamp below and the
+        // sampled-out filtering further down, so resolve it once for this request.
+        let stats_computed_by = StatsComputedBy::resolve(
+            config.ext.lambda_extension_compute_stats,
+            header_tags.generic.client_computed_stats,
+        );
         let mut payload = trace_utils::collect_pb_trace_chunks(
             traces,
             &header_tags,
@@ -595,7 +596,7 @@ impl TraceProcessor for ServerlessTraceProcessor {
                 obfuscation_config: self.obfuscation_config.clone(),
                 tags_provider: tags_provider.clone(),
                 span_pointers,
-                client_computed_stats: header_tags.generic.client_computed_stats,
+                stats_computed_by,
             },
             true, // send agentless since we are the agent
         )
@@ -634,8 +635,10 @@ impl TraceProcessor for ServerlessTraceProcessor {
         };
 
         // Sampled-out chunks are preserved in payloads_for_stats above, so their
-        // stats are still counted after they are removed here.
-        if config.ext.lambda_extension_compute_stats
+        // stats are still counted after they are removed here. Filter whenever
+        // stats are computed before the backend, by either the tracer or the
+        // extension: the backend only needs these chunks when it owns stats.
+        if stats_computed_by != StatsComputedBy::Backend
             && let TracerPayloadCollection::V07(ref mut tracer_payloads) = payload
         {
             self.drop_sampled_out_chunks(tracer_payloads);
@@ -841,10 +844,14 @@ mod tests {
     }
 
     fn create_compute_stats_config() -> Arc<Config> {
+        create_compute_stats_config_with(true)
+    }
+
+    fn create_compute_stats_config_with(lambda_extension_compute_stats: bool) -> Arc<Config> {
         Arc::new(Config {
             apm_dd_url: "https://trace.agent.datadoghq.com".to_string(),
             ext: crate::config::LambdaConfig {
-                lambda_extension_compute_stats: true,
+                lambda_extension_compute_stats,
                 ..Default::default()
             },
             ..Config::default()
@@ -1232,7 +1239,7 @@ mod tests {
                 )]),
             )),
             span_pointers: None,
-            client_computed_stats: false,
+            stats_computed_by: StatsComputedBy::Backend,
         };
 
         processor.process(&mut chunk, 0);
@@ -1317,7 +1324,7 @@ mod tests {
                 )]),
             )),
             span_pointers: None,
-            client_computed_stats: false,
+            stats_computed_by: StatsComputedBy::Backend,
         };
 
         processor.process(&mut chunk, 0);
@@ -1401,7 +1408,7 @@ mod tests {
                 )]),
             )),
             span_pointers: None,
-            client_computed_stats: false,
+            stats_computed_by: StatsComputedBy::Backend,
         };
 
         processor.process(&mut chunk, 0);
@@ -1413,170 +1420,150 @@ mod tests {
         );
     }
 
-    /// Verifies that when `lambda_extension_compute_stats` is true, `process_traces`
-    /// filters sampled-out chunks from the backend payload while preserving them in the
-    /// stats collection.
+    /// Verifies that `process_traces` filters sampled-out chunks from the backend
+    /// payload whenever stats are computed before the backend, by either the tracer
+    /// or the extension, while preserving them in the stats collection. When the
+    /// backend owns stats, all chunks are kept so the backend can compute stats.
     #[test]
     #[allow(clippy::unwrap_used)]
     fn test_process_traces_filters_sampled_out_chunks() {
-        let config = create_compute_stats_config();
-        let (tags_provider, processor) =
-            create_test_processor(&config, enabled_error_sampler(), false);
-        let header_tags = create_test_header_tags();
-
-        let make_span = |trace_id: u64, priority: Option<f64>| -> pb::Span {
-            let mut metrics = HashMap::new();
-            if let Some(p) = priority {
-                metrics.insert("_sampling_priority_v1".to_string(), p);
-            }
-            pb::Span {
-                trace_id,
-                span_id: trace_id,
-                parent_id: 0,
-                metrics,
-                service: "svc".to_string(),
-                name: "op".to_string(),
-                resource: "res".to_string(),
-                ..Default::default()
-            }
-        };
-
-        // Three traces: kept (priority 1), dropped (priority 0), dropped (priority -1)
-        let traces = vec![
-            vec![make_span(1, Some(1.0))],
-            vec![make_span(2, Some(0.0))],
-            vec![make_span(3, Some(-1.0))],
+        // (lambda_extension_compute_stats, client_computed_stats, expected_backend_span_count)
+        let cases = [
+            (false, false, 3), // backend owns stats: keep all chunks
+            (true, false, 1),  // extension owns stats: filter
+            (false, true, 1),  // tracer owns stats: filter
+            (true, true, 1),   // tracer owns stats even when extension configured: filter
         ];
 
-        let (payload_info, stats_collection) =
-            processor.process_traces(config, tags_provider, header_tags, traces, 0, None);
-        let payload_info = payload_info.expect("expected Some payload");
+        for (compute_on_extension, client_computed_stats, expected_backend_span_count) in cases {
+            let config = create_compute_stats_config_with(compute_on_extension);
+            let (tags_provider, processor) =
+                create_test_processor(&config, enabled_error_sampler(), false);
+            let mut header_tags = create_test_header_tags();
+            header_tags.generic.client_computed_stats = client_computed_stats;
 
-        // Stats collection must include all three traces
-        let TracerPayloadCollection::V07(ref stats_payloads) = stats_collection else {
-            panic!("expected V07");
-        };
-        let stats_span_count: usize = stats_payloads
-            .iter()
-            .flat_map(|tp| tp.chunks.iter())
-            .map(|c| c.spans.len())
-            .sum();
-        assert_eq!(stats_span_count, 3, "stats must include all traces");
+            // Three traces: kept (priority 1), dropped (priority 0), dropped (priority -1)
+            let traces = vec![
+                vec![make_tracer_drop_span(1, 1.0, 0, None)],
+                vec![make_tracer_drop_span(2, 0.0, 0, None)],
+                vec![make_tracer_drop_span(3, -1.0, 0, None)],
+            ];
 
-        // Backend payload must only contain the kept trace (priority 1)
-        let backend_send_data = payload_info.builder.build();
-        let TracerPayloadCollection::V07(backend_payloads) = backend_send_data.get_payloads()
-        else {
-            panic!("expected V07");
-        };
-        let backend_span_count: usize = backend_payloads
-            .iter()
-            .flat_map(|tp| tp.chunks.iter())
-            .map(|c| c.spans.len())
-            .sum();
-        assert_eq!(
-            backend_span_count, 1,
-            "backend must only include kept traces"
-        );
+            let (payload_info, stats_collection) =
+                processor.process_traces(config, tags_provider, header_tags, traces, 0, None);
+            let payload_info = payload_info.expect("expected Some payload");
+
+            // Stats collection must include all three traces
+            let stats_span_count = trace_spans(&stats_collection).count();
+            assert_eq!(
+                stats_span_count, 3,
+                "stats must include all traces (compute_on_extension={compute_on_extension}, \
+                 client_computed_stats={client_computed_stats})"
+            );
+
+            let backend_send_data = payload_info.builder.build();
+            let backend_span_count = trace_spans(backend_send_data.get_payloads()).count();
+            assert_eq!(
+                backend_span_count, expected_backend_span_count,
+                "compute_on_extension={compute_on_extension}, \
+                 client_computed_stats={client_computed_stats}"
+            );
+        }
     }
 
-    /// On the compute-stats path, the error sampler rescues errored chunks that
-    /// would otherwise be dropped (`AutoDrop`), stamping `_dd.errors_sr`, while
-    /// non-errored P0 chunks and explicit user drops are still dropped.
+    /// On any stats path where stats are computed before the backend (extension or
+    /// tracer), the error sampler rescues errored chunks that would otherwise be
+    /// dropped (`AutoDrop`), stamping `_dd.errors_sr`, while non-errored P0 chunks
+    /// and explicit user drops are still dropped. Priorities are never rewritten.
     #[test]
     fn test_error_sampler_rescues_errored_p0_chunks() {
-        let config = create_compute_stats_config();
-        let (tags_provider, processor) =
-            create_test_processor(&config, enabled_error_sampler(), false);
-        let header_tags = create_test_header_tags();
+        // (owner label, lambda_extension_compute_stats, client_computed_stats)
+        let cases = [("extension", true, false), ("tracer", false, true)];
 
-        let make_span = |trace_id: u64, priority: f64, error: i32| -> pb::Span {
-            let mut metrics = HashMap::new();
-            metrics.insert("_sampling_priority_v1".to_string(), priority);
-            pb::Span {
-                trace_id,
-                span_id: trace_id,
-                parent_id: 0,
-                error,
-                metrics,
-                service: "svc".to_string(),
-                name: "op".to_string(),
-                resource: "res".to_string(),
-                ..Default::default()
-            }
-        };
+        for (owner, compute_on_extension, client_computed_stats) in cases {
+            let config = create_compute_stats_config_with(compute_on_extension);
+            let (tags_provider, processor) =
+                create_test_processor(&config, enabled_error_sampler(), false);
+            let mut header_tags = create_test_header_tags();
+            header_tags.generic.client_computed_stats = client_computed_stats;
 
-        // trace 1: kept normally (priority 1). trace 2: errored P0 (rescued).
-        // trace 3: non-errored P0 (dropped). trace 4: errored user drop (dropped).
-        let traces = vec![
-            vec![make_span(1, 1.0, 0)],
-            vec![make_span(2, 0.0, 1)],
-            vec![make_span(3, 0.0, 0)],
-            vec![make_span(4, -1.0, 1)],
-        ];
+            // trace 1: kept normally (priority 1). trace 2: errored P0 (rescued).
+            // trace 3: non-errored P0 (dropped). trace 4: errored user drop (dropped).
+            let traces = vec![
+                vec![make_tracer_drop_span(1, 1.0, 0, None)],
+                vec![make_tracer_drop_span(2, 0.0, 1, None)],
+                vec![make_tracer_drop_span(3, 0.0, 0, None)],
+                vec![make_tracer_drop_span(4, -1.0, 1, None)],
+            ];
 
-        let (payload_info, _stats) =
-            processor.process_traces(config, tags_provider, header_tags, traces, 0, None);
-        let payload_info = payload_info.expect("expected Some payload");
-        let backend_send_data = payload_info.builder.build();
-        let TracerPayloadCollection::V07(backend_payloads) = backend_send_data.get_payloads()
-        else {
-            panic!("expected V07");
-        };
+            let (payload_info, _stats) =
+                processor.process_traces(config, tags_provider, header_tags, traces, 0, None);
+            let payload_info = payload_info.expect("expected Some payload");
+            let backend_send_data = payload_info.builder.build();
+            let kept: Vec<(u64, f64)> = trace_spans(backend_send_data.get_payloads())
+                .map(|s| (s.trace_id, s.metrics["_sampling_priority_v1"]))
+                .collect();
+            assert_eq!(
+                kept.len(),
+                2,
+                "kept normal trace + rescued errored trace (owner={owner})"
+            );
+            assert!(
+                kept.contains(&(1, 1.0)),
+                "priority-1 trace kept (owner={owner})"
+            );
+            assert!(
+                kept.contains(&(2, 0.0)),
+                "errored P0 trace rescued with its original priority (owner={owner})"
+            );
 
-        let kept: Vec<u64> = backend_payloads
-            .iter()
-            .flat_map(|tp| tp.chunks.iter())
-            .flat_map(|c| c.spans.iter())
-            .map(|s| s.trace_id)
-            .collect();
-        assert_eq!(kept.len(), 2, "kept normal trace + rescued errored trace");
-        assert!(kept.contains(&1), "priority-1 trace kept");
-        assert!(kept.contains(&2), "errored P0 trace rescued");
-        assert!(!kept.contains(&3), "non-errored P0 trace dropped");
-        assert!(!kept.contains(&4), "errored user-drop trace not rescued");
-
-        let rescued_root = backend_payloads
-            .iter()
-            .flat_map(|tp| tp.chunks.iter())
-            .flat_map(|c| c.spans.iter())
-            .find(|s| s.trace_id == 2)
-            .expect("rescued trace present");
-        assert!(
-            rescued_root.metrics.contains_key("_dd.errors_sr"),
-            "_dd.errors_sr stamped on rescued root"
-        );
+            let rescued_root = trace_spans(backend_send_data.get_payloads())
+                .find(|s| s.trace_id == 2)
+                .expect("rescued trace present");
+            assert!(
+                rescued_root.metrics.contains_key("_dd.errors_sr"),
+                "_dd.errors_sr stamped on rescued root (owner={owner})"
+            );
+        }
     }
 
     /// With `error_rare_sample_tracer_drop` enabled, an errored chunk the tracer
     /// dropped itself (priority -1, no decision maker) is rescued like an
-    /// `AutoDrop` chunk, matching the Go agent.
+    /// `AutoDrop` chunk, matching the Go agent. Runs for both stats owners: the
+    /// tracer-owned path reaches the rescue only when filtering also applies to
+    /// tracer-computed stats.
     #[test]
     fn test_error_rare_sample_tracer_drop_rescues_errored_user_drop() {
-        let config = create_compute_stats_config();
-        let (tags_provider, processor) =
-            create_test_processor(&config, enabled_error_sampler(), true);
-        let header_tags = create_test_header_tags();
+        // (owner label, lambda_extension_compute_stats, client_computed_stats)
+        let cases = [("extension", true, false), ("tracer", false, true)];
 
-        let span = make_tracer_drop_span(7, -1.0, 1, None);
+        for (owner, compute_on_extension, client_computed_stats) in cases {
+            let config = create_compute_stats_config_with(compute_on_extension);
+            let (tags_provider, processor) =
+                create_test_processor(&config, enabled_error_sampler(), true);
+            let mut header_tags = create_test_header_tags();
+            header_tags.generic.client_computed_stats = client_computed_stats;
 
-        let (payload_info, _stats) = processor.process_traces(
-            config,
-            tags_provider,
-            header_tags,
-            vec![vec![span]],
-            0,
-            None,
-        );
-        let payload_info = payload_info.expect("errored tracer drop must be rescued");
-        let backend_send_data = payload_info.builder.build();
-        let rescued = trace_spans(backend_send_data.get_payloads())
-            .find(|span| span.trace_id == 7)
-            .expect("rescued trace present");
-        assert!(
-            rescued.metrics.contains_key("_dd.errors_sr"),
-            "_dd.errors_sr stamped on rescued root"
-        );
+            let span = make_tracer_drop_span(7, -1.0, 1, None);
+
+            let (payload_info, _stats) = processor.process_traces(
+                config,
+                tags_provider,
+                header_tags,
+                vec![vec![span]],
+                0,
+                None,
+            );
+            let payload_info = payload_info.expect("errored tracer drop must be rescued");
+            let backend_send_data = payload_info.builder.build();
+            let rescued = trace_spans(backend_send_data.get_payloads())
+                .find(|span| span.trace_id == 7)
+                .expect("rescued trace present");
+            assert!(
+                rescued.metrics.contains_key("_dd.errors_sr"),
+                "_dd.errors_sr stamped on rescued root (owner={owner})"
+            );
+        }
     }
 
     /// Span factory for tracer-drop tests: a single-span trace with an explicit
@@ -2147,6 +2134,10 @@ mod tests {
         client_computed_stats: bool,
     ) -> ChunkProcessor {
         let tags_provider = create_tags_provider(config.clone());
+        let stats_computed_by = StatsComputedBy::resolve(
+            config.ext.lambda_extension_compute_stats,
+            client_computed_stats,
+        );
         ChunkProcessor {
             config,
             obfuscation_config: Arc::new(
@@ -2154,7 +2145,7 @@ mod tests {
             ),
             tags_provider,
             span_pointers: None,
-            client_computed_stats,
+            stats_computed_by,
         }
     }
 
