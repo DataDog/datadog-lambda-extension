@@ -3,6 +3,19 @@
 ## Development
 Use the `/scripts/build_bottlecap_layer.sh` and either publish it as a layer and test in Lambda or copy the binary into a container image and test there. Ask AJ or see the internal wiki for more.
 
+## Local APM debugging with mock-intake
+
+The `mock-intake` feature builds a standalone mock Datadog APM intake: a small HTTP server that accepts the same APM endpoints the extension flushes to, decodes the payloads, and reports them locally. It is gated behind a feature and is never part of `default` or `fips` production builds.
+
+```bash
+cd bottlecap
+cargo build --bin mock-intake --features mock-intake
+```
+
+The binary wraps the shared `datadog-mock-intake` crate from the `serverless-components` repository. The same crate backs the `apm_integration_test` and `dsm_integration_test` integration tests, which run in every test build via a dev-dependency.
+
+For configuration, endpoints, failure injection, request summaries, JSON dumps, and a smoke procedure, see [mock-intake/README.md](src/bin/mock-intake/README.md).
+
 ## Flush Strategies
 
 Bottlecap supports several flush strategies that control when and how observability data (metrics, logs, traces) is sent to Datadog. The strategy is configured via the `DD_SERVERLESS_FLUSH_STRATEGY` environment variable.
