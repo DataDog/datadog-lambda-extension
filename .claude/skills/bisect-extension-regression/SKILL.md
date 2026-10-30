@@ -20,7 +20,7 @@ Write down these facts before you start:
 | Metric | Init duration overhead |
 | Good version and bad version | `v99` and `v101` |
 | Size of the change | +15 ms |
-| Runtime, architecture, FIPS | Python, `arm64`, not FIPS |
+| Runtime, architecture, region, FIPS | Python 3.14, `x86_64`, us-east-1, not FIPS |
 
 If you do not know the versions, get them from the time series of the release dashboard with
 `check-extension-overhead`.
@@ -55,19 +55,24 @@ was at 75 to 81 ms for 4 days after its deploy on 2026-09-16. The change started
 
 ## 3. Reproduce it with the released layers
 
-Measure the good and the bad release in one run:
+Measure the good and the bad release in one run, with the runtime, architecture, region and FIPS
+mode from step 1:
 
 ```sh
 aws-vault exec sso-serverless-sandbox-account-admin -- python3 .claude/skills/measure-extension-layer/scripts/measure.py \
-  --out /tmp/extension-perf/repro -n 20 --warm 3 noext=none good=v99 bad=v101
+  --out /tmp/extension-perf/repro --runtime <runtime> --arch <arch> --region <region> [--fips] \
+  -n 20 --warm 3 noext=none good=<good tag> bad=<bad tag>
 python3 .claude/skills/measure-extension-layer/scripts/summarize.py /tmp/extension-perf/repro --compare good bad
 ```
 
-For a size regression, `layer_size.py v99 v101` is enough. Size has no noise.
+- For a regression that you saw in the dashboard, use the setup of the prod self-monitoring
+  functions: `--runtime python314 --arch x86_64 --region us-east-1`.
+- For a FIPS regression, add `--fips`. It changes which released layer `v<N>` means.
+- For a size regression, `layer_size.py --arch <arch> [--fips] <good tag> <bad tag>` is enough.
+  Size has no noise.
 
 Measure the traffic pattern that changed. For `traffic:1min` in post-runtime duration, use
-`--warm 8 --warm-interval 60`, and read `each_warm_duration_ms`. The dashboard functions are
-`x86_64`. Use `--arch x86_64` if the change can depend on the architecture.
+`--warm 8 --warm-interval 60`, and read `each_warm_duration_ms`.
 
 If the 95% interval of `bad minus good` contains 0, run again with `-n 40`. If it still contains
 0, stop and report that the harness does not show the regression. Give the numbers. Do not
@@ -155,19 +160,21 @@ When you finish, remove the worktree.
 ### Test the cause with a revert
 
 When one commit is left, revert only that commit on top of the bad tag, in the worktree. Do not
-push it. Build the bad tag and the revert in the same batch, and measure them in one run with
-the good release:
+push it. Build the good tag, the bad tag and the revert in the same batch, and measure the three
+layers in one run. Then all three come from the same build process. This matters most for a size
+regression, because a local zip can differ in size from the released one.
 
 ```sh
 git -C ../dle-bisect checkout --detach <bad tag>
 git -C ../dle-bisect revert --no-edit <commit>
-REVERT=$(git -C ../dle-bisect rev-parse HEAD)  # the script checks out <bad tag> first, so HEAD moves
-$SKILLS/bisect-extension-regression/scripts/build_layers.sh ../dle-bisect <your-name>-revert <bad tag> "$REVERT"
+REVERT=$(git -C ../dle-bisect rev-parse HEAD)  # the script checks out the tags first, so HEAD moves
+$SKILLS/bisect-extension-regression/scripts/build_layers.sh ../dle-bisect <your-name>-revert <good tag> <bad tag> "$REVERT"
 ```
 
 The commit is the cause if `revert minus bad` shows the regression with the opposite sign, and
 the interval of `revert minus good` contains 0. Example: for v98, `revert minus v98` was
--13.7 ms [-20.4, -6.9], and `revert minus v97` was +1.4 ms [-4.8, +7.4].
+-13.7 ms [-20.4, -6.9], against a build of v98. `revert minus v97` was +1.4 ms [-4.8, +7.4],
+against the released v97.
 
 ## 6. Report
 
