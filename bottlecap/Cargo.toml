@@ -94,7 +94,8 @@ libdd-trace-utils = { version = "10.1.0", default-features = false, features = [
 libdd-trace-normalization = "3.0.1"
 libdd-trace-obfuscation = { version = "6.0.0", default-features = false }
 libdd-trace-stats = { version = "7.0.0", default-features = false }
-datadog-opentelemetry = { version = "0.5.2", default-features = false, features = ["_unstable_propagation"] }
+# Keep the OTel 0.32-compatible release until the upstream compatibility fix is validated.
+datadog-opentelemetry = { version = "=0.5.2", default-features = false, features = ["_unstable_propagation"] }
 dogstatsd = { git = "https://github.com/DataDog/serverless-components", rev = "5859602d609405a9de4d32638673a643caf37534", default-features = false }
 datadog-fips = { git = "https://github.com/DataDog/serverless-components", rev = "5859602d609405a9de4d32638673a643caf37534", default-features = false }
 datadog-agent-config = { git = "https://github.com/DataDog/serverless-components", rev = "5859602d609405a9de4d32638673a643caf37534", default-features = false }
