@@ -78,7 +78,9 @@ const OOM_ERRORS: [&str; 7] = [
     "OutOfMemoryException",                      // .NET
 ];
 
-fn is_oom_error(error_msg: &str) -> bool {
+#[doc(hidden)]
+#[must_use]
+pub fn is_oom_error(error_msg: &str) -> bool {
     OOM_ERRORS
         .iter()
         .any(|&oom_str| error_msg.contains(oom_str))

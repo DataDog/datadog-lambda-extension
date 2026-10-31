@@ -30,3 +30,6 @@ integration-tests/cdk.context.json
 /CLAUDE_PERSONAL.md
 # Generated benchmark fixture corpus (see bottlecap/tests/fixtures/README.md)
 bottlecap/tests/fixtures/generated
+# Criterion baseline exports are machine specific; keep them as CI artifacts, not in git.
+bottlecap/benches/baselines/*.json
+bottlecap/target-linux-arm64
