@@ -1144,7 +1144,7 @@ mod tests {
         let (dedup_svc, dedup_handle) = DedupService::new();
         tokio::spawn(dedup_svc.run());
         let trace_processor = Arc::new(trace_processor::ServerlessTraceProcessor {
-            obfuscation_config: Arc::new(ObfuscationConfig::new().expect("ObfuscationConfig")),
+            obfuscation_config: Arc::new(ObfuscationConfig::default()),
             error_sampler: trace_processor::new_error_sampler(false),
             error_rare_sample_tracer_drop: false,
         });
