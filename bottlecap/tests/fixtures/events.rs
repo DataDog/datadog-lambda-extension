@@ -24,7 +24,7 @@ pub fn payload(name: &str) -> String {
 pub fn payload_names() -> Vec<String> {
     let mut names: Vec<String> = std::fs::read_dir(payloads_dir())
         .expect("list tests/payloads")
-        .filter_map(Result::ok)
+        .map(|e| e.expect("read a tests/payloads entry"))
         .filter_map(|e| {
             let name = e.file_name().to_str()?.to_string();
             name.strip_suffix(".json").map(str::to_string)

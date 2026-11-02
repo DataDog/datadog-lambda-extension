@@ -60,10 +60,11 @@ pub fn packet(kind: Kind, first: usize, n: usize) -> String {
         .join("\n")
 }
 
-/// `total` lines split into datagrams of `per_packet` lines.
+/// `total` lines split into datagrams of `per_packet` lines (at least 1).
 pub fn packets(kind: Kind, total: usize, per_packet: usize) -> Vec<String> {
+    let per_packet = per_packet.max(1);
     (0..total)
-        .step_by(per_packet.max(1))
+        .step_by(per_packet)
         .map(|first| packet(kind, first, per_packet.min(total - first)))
         .collect()
 }
