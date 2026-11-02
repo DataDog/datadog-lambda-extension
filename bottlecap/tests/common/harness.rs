@@ -114,30 +114,31 @@ impl Scenario {
         true
     }
 
-    /// Answer the open `/next` with a SHUTDOWN ([`SHUTDOWN_DEADLINE`]) and
-    /// wait for the process to exit. Returns the exit status, `None` when it
-    /// had to be killed.
+    /// Answer the open `/next` with a SHUTDOWN ([`SHUTDOWN_DEADLINE`]), wait
+    /// for the process to exit, and assert it exited within that deadline
+    /// (Lambda kills it after). Returns the exit status, `None` when it had
+    /// to be killed.
     pub async fn shutdown(&self, bc: &mut BottlecapProcess) -> Option<ExitStatus> {
+        let start = std::time::Instant::now();
         self.api.push_shutdown("spindown", SHUTDOWN_DEADLINE);
-        bc.wait_for_exit(bottlecap_process::EXIT_BUDGET).await
+        let exit = bc.wait_for_exit(bottlecap_process::EXIT_BUDGET).await;
+        let took = start.elapsed();
+        assert!(
+            took <= SHUTDOWN_DEADLINE,
+            "exit took {took:?}, past the {SHUTDOWN_DEADLINE:?} SHUTDOWN deadline. {}",
+            bc.log_tail(40)
+        );
+        exit
     }
 
-    /// [`shutdown`](Self::shutdown), then assert no panic and a clean exit
-    /// within the SHUTDOWN deadline.
+    /// [`shutdown`](Self::shutdown), then assert no panic and a clean exit.
     pub async fn shutdown_cleanly(&self, bc: &mut BottlecapProcess) {
-        let start = std::time::Instant::now();
         let exit = self.shutdown(bc).await;
-        let took = start.elapsed();
         bc.assert_no_panic();
         assert!(
             exit.is_some_and(|e| e.success()),
             "exit {exit:?} after SHUTDOWN. API: {:?}\n{}",
             self.api.request_lines(),
-            bc.log_tail(40)
-        );
-        assert!(
-            took <= SHUTDOWN_DEADLINE,
-            "exit took {took:?}, past the {SHUTDOWN_DEADLINE:?} SHUTDOWN deadline. {}",
             bc.log_tail(40)
         );
     }

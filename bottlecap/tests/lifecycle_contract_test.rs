@@ -23,6 +23,8 @@ mod harness;
 
 use harness::prelude::*;
 
+const INVOKE_DEADLINE: Duration = secs(10);
+
 /// Happy path, also a self-test of the harness: an invocation ends, the
 /// extension flushes to the intake and calls `/next` again, then exits on
 /// SHUTDOWN with no panic.
@@ -33,18 +35,21 @@ async fn invoke_then_shutdown_exits_cleanly() {
     let mut bc = s.bottlecap().spawn();
 
     assert!(
-        s.invoke("req-1", secs(10), 1).await,
+        s.invoke("req-1", INVOKE_DEADLINE, 1).await,
         "no /next poll. {}",
         bc.log_tail(40)
     );
+    let invoked = Instant::now();
     s.api
         .send_telemetry(&[function_log("hello from the function")], STARTUP_BUDGET)
         .await
         .unwrap();
     deliver_runtime_done(&s.api, "req-1", true).await.unwrap();
     assert!(
-        s.api.wait_for_next_calls(2, secs(10)).await,
-        "no second /next after runtimeDone. {}",
+        s.api
+            .wait_for_next_calls(2, INVOKE_DEADLINE.saturating_sub(invoked.elapsed()))
+            .await,
+        "no second /next within the {INVOKE_DEADLINE:?} invoke deadline. {}",
         bc.log_tail(40)
     );
 

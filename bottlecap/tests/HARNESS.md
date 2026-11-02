@@ -45,9 +45,11 @@ async fn my_fault() {
     let s = Scenario::start(FaultMode::Ok).await;          // fake API + intake, fixed ports checked
     let mut bc = s.bottlecap().spawn();                     // real binary, base env points at the fakes
     assert!(s.invoke("req-1", secs(10), 1).await);          // wait for /next #1, answer with INVOKE
+    let invoked = Instant::now();                           // the invoke deadline runs from here
     s.intake.set_mode(FaultMode::Status(503));              // the fault
     deliver_runtime_done(&s.api, "req-1", true).await.unwrap();
-    assert!(s.api.wait_for_next_calls(2, secs(10)).await, "{}", bc.log_tail(40));
+    let left = secs(10).saturating_sub(invoked.elapsed());  // wait only for what is left of it
+    assert!(s.api.wait_for_next_calls(2, left).await, "{}", bc.log_tail(40));
     s.shutdown_cleanly(&mut bc).await;                      // SHUTDOWN, exit 0 within 2 s, no panic
 }
 ```
@@ -90,7 +92,8 @@ async fn my_fault() {
   `log_tail(n)`, `log_contains`, `panic_lines()`, `assert_no_panic()`, `rss_kb()`, `hwm_kb()`,
   `cpu_ms()`, `uptime()`; `STARTUP_BUDGET`, `EXIT_BUDGET`, `TEST_API_KEY`.
 - `Scenario`: `start(mode)`, `bottlecap()`, `invoke(id, deadline, poll)` (waits for the poll,
-  then answers it), `wait_next_or_exit`, `shutdown(&mut bc)`, `shutdown_cleanly(&mut bc)`.
+  then answers it), `wait_next_or_exit`, `shutdown(&mut bc)` (asserts the exit within the 2 s
+  SHUTDOWN deadline), `shutdown_cleanly(&mut bc)` (also asserts exit 0 and no panic).
   Helpers: `deliver_runtime_done`, `msgpack_trace(trace_id, meta_bytes)`, `post_trace` (to 8126),
   `incompressible_text`, `secs`, `ms`. Records: `platform_init_start`, `platform_start`,
   `platform_runtime_done(id, status, with_metrics)`, `platform_report`, `function_log`,
