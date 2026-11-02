@@ -40,6 +40,10 @@ pub struct FlushingService {
 
     // Pending flush handles
     handles: FlushHandles,
+
+    /// Whether every flush forces the stats flusher. See
+    /// [`with_forced_stats`](Self::with_forced_stats).
+    force_stats: bool,
 }
 
 impl FlushingService {
@@ -63,7 +67,24 @@ impl FlushingService {
             dsm_processor,
             metrics_aggr_handle,
             handles: FlushHandles::new(),
+            force_stats: false,
         }
+    }
+
+    /// Makes every flush force the stats flusher, so the stats of the spans it
+    /// sends leave in the same flush instead of being held back.
+    ///
+    /// By default the stats concentrator keeps its newest buckets back to absorb
+    /// late spans, and only the final flush forces them out. That suits a
+    /// process whose timer keeps flushing. In on-demand mode the sandbox can
+    /// freeze right after any flush, so held-back stats would wait for the next
+    /// invocation or shutdown while their traces have already been sent. All
+    /// other telemetry types are always flushed in full. A span arriving after
+    /// its bucket was flushed still counts, in the oldest open bucket.
+    #[must_use]
+    pub fn with_forced_stats(mut self) -> Self {
+        self.force_stats = true;
+        self
     }
 
     /// Returns `true` if any flush operation is still pending.
@@ -125,10 +146,11 @@ impl FlushingService {
 
         // Spawn stats flush
         let sf = Arc::clone(&self.stats_flusher);
+        let force_stats = self.force_stats;
         self.handles
             .stats_flush_handles
             .push(tokio::spawn(async move {
-                sf.flush(false, None).await.unwrap_or_default()
+                sf.flush(force_stats, None).await.unwrap_or_default()
             }));
 
         // Drain DSM pipeline stats into the proxy aggregator before flushing.
@@ -160,6 +182,7 @@ impl FlushingService {
     pub async fn await_handles(&mut self) -> bool {
         let mut joinset = tokio::task::JoinSet::new();
         let mut flush_error = false;
+        let force_stats = self.force_stats;
 
         // Await stats handles with retry
         for handle in self.handles.stats_flush_handles.drain(..) {
@@ -172,7 +195,7 @@ impl FlushingService {
                             retry.len()
                         );
                         joinset.spawn(async move {
-                            sf.flush(false, Some(retry)).await;
+                            sf.flush(force_stats, Some(retry)).await;
                         });
                     }
                 }
@@ -299,13 +322,14 @@ impl FlushingService {
     /// data in parallel using `tokio::join!`. Unlike `spawn_non_blocking`, this waits
     /// for all flushes to complete before returning.
     ///
-    /// The stats flusher respects its normal timing constraints (time-based bucketing),
+    /// Unless [`with_forced_stats`](Self::with_forced_stats) is set, the stats
+    /// flusher respects its normal timing constraints (time-based bucketing),
     /// which may result in some stats being held back until the next flush cycle.
     ///
     /// Returns `true` when at least one flusher finished with payloads it could
     /// not deliver. See [`flush_blocking_inner`](Self::flush_blocking_inner).
     pub async fn flush_blocking(&self) -> bool {
-        self.flush_blocking_inner(false).await
+        self.flush_blocking_inner(self.force_stats).await
     }
 
     /// Performs a final blocking flush of all telemetry data before shutdown.
