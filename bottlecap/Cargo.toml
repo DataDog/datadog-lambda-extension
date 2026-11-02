@@ -82,8 +82,8 @@ indexmap = {version = "2.11.0", default-features = false}
 # method in favor of our
 # datadog_fips::reqwest_adapter::create_reqwest_client_builder. An example can
 # be found in the clippy.toml file adjacent to this Cargo.toml.
-datadog-protos = { version = "0.1.0", default-features = false, git = "https://github.com/DataDog/saluki/", rev = "f863626dbfe3c59bb390985fa6530b0621c2a0a2"}
-ddsketch-agent = { version = "0.1.0", default-features = false, git = "https://github.com/DataDog/saluki/", rev = "f863626dbfe3c59bb390985fa6530b0621c2a0a2"}
+datadog-protos = { default-features = false, git = "https://github.com/DataDog/saluki/", rev = "f863626dbfe3c59bb390985fa6530b0621c2a0a2"}
+ddsketch-agent = { default-features = false, git = "https://github.com/DataDog/saluki/", rev = "f863626dbfe3c59bb390985fa6530b0621c2a0a2"}
 # Pin the libdd crates used by Bottlecap's trace pipeline to the release line
 # required by serverless-components PR #196.
 libdd-capabilities = "4.0.1"
@@ -99,9 +99,9 @@ datadog-fips = { git = "https://github.com/DataDog/serverless-components", rev =
 datadog-agent-config = { git = "https://github.com/DataDog/serverless-components", rev = "e462105e918904e6b1ad2ebc153ae561cebe5a34", default-features = false }
 datadog-agent-trace-sampler = { git = "https://github.com/DataDog/serverless-components", rev = "e462105e918904e6b1ad2ebc153ae561cebe5a34", default-features = false }
 datadog-serverless-logging = { git = "https://github.com/DataDog/serverless-components", rev = "e462105e918904e6b1ad2ebc153ae561cebe5a34", default-features = false }
-libddwaf = { version = "2.1.0", git = "https://github.com/DataDog/libddwaf-rust", rev = "bbada5255bf8e9105c06b03ce6d5d63a7c337e2a", default-features = false, features = ["serde"] }
+libddwaf = { git = "https://github.com/DataDog/libddwaf-rust", rev = "bbada5255bf8e9105c06b03ce6d5d63a7c337e2a", default-features = false, features = ["serde"] }
 # Enables the crypto provider libddwaf-sys needs to download prebuilt WAF binaries.
-libddwaf-sys = { version = "2.1.0", git = "https://github.com/DataDog/libddwaf-rust", rev = "bbada5255bf8e9105c06b03ce6d5d63a7c337e2a", default-features = false, features = ["aws-lc-rs"] }
+libddwaf-sys = { git = "https://github.com/DataDog/libddwaf-rust", rev = "bbada5255bf8e9105c06b03ce6d5d63a7c337e2a", default-features = false, features = ["aws-lc-rs"] }
 
 [dev-dependencies]
 figment = { version = "0.10", default-features = false, features = ["yaml", "env", "test"] }
