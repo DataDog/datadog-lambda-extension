@@ -12,7 +12,7 @@
 //! together trace, stats, proxy, lifecycle, tags, appsec, and flushing
 //! pieces: it is orchestration, not a trace-domain API.
 
-use std::{env, sync::Arc};
+use std::sync::Arc;
 
 use dogstatsd::api_key::ApiKeyFactory;
 use libdd_common::regex_engine::{Regex, Replacer};
@@ -157,29 +157,24 @@ pub fn build_trace_agent(
         ..Default::default()
     };
 
-    // The Agent's error sampler knob has no effect here: the extension's
-    // sampler is a plain on/off switch, not a TPS budget.
-    if env::var("DD_APM_ERROR_TPS").is_ok_and(|v| !v.trim().is_empty()) {
-        warn!(
-            "DD_APM_ERROR_TPS is not supported by the Lambda extension; error trace rescue is an on/off switch controlled by DD_SERVERLESS_ERROR_SAMPLER_ENABLED"
-        );
+    if let Some(message) = config.ext.legacy_error_sampler_warning() {
+        warn!("{message}");
     }
+    let error_tps = config.ext.error_sampler_target_tps();
 
     // One-time startup warning: the feature only widens rescue eligibility, it
-    // does not enable the sampler.
+    // does not change the rescue budget.
     let error_rare_sample_tracer_drop =
         trace_processor::error_rare_sample_tracer_drop_enabled(config);
-    if error_rare_sample_tracer_drop && !config.ext.serverless_error_sampler_enabled {
+    if error_rare_sample_tracer_drop && error_tps <= 0.0 {
         warn!(
-            "DD_APM_FEATURES includes error_rare_sample_tracer_drop, but DD_SERVERLESS_ERROR_SAMPLER_ENABLED is false: errored traces dropped by the tracer will not be rescued"
+            "DD_APM_FEATURES includes error_rare_sample_tracer_drop, but error trace rescue is disabled (effective DD_APM_ERROR_TPS {error_tps}): errored traces dropped by the tracer will not be rescued"
         );
     }
 
     let trace_processor = Arc::new(trace_processor::ServerlessTraceProcessor {
         obfuscation_config: Arc::new(obfuscation_config),
-        error_sampler: trace_processor::new_error_sampler(
-            config.ext.serverless_error_sampler_enabled,
-        ),
+        error_sampler: trace_processor::new_error_sampler(error_tps),
         error_rare_sample_tracer_drop,
     });
 

@@ -831,7 +831,7 @@ mod tests {
         use std::collections::HashMap;
         use tokio::time::{Duration, timeout};
 
-        let error_sampler = trace_processor::new_error_sampler(false);
+        let error_sampler = trace_processor::new_error_sampler(0.0);
 
         let timeout_dur = Duration::from_millis(500);
 

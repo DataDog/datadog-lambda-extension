@@ -21,7 +21,7 @@ use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use bottlecap::LAMBDA_RUNTIME_SLUG;
-use bottlecap::config::{Config, get_config};
+use bottlecap::config::{Config, DEFAULT_APM_ERROR_TPS, get_config};
 use bottlecap::tags::provider::Provider;
 use bottlecap::traces::http_client::create_client;
 use bottlecap::traces::stats_aggregator::StatsAggregator;
@@ -375,7 +375,7 @@ async fn run_processor_pipeline_with_settings(
         appsec: None,
         processor: Arc::new(ServerlessTraceProcessor {
             obfuscation_config: Arc::new(ObfuscationConfig::default()),
-            error_sampler: new_error_sampler(true),
+            error_sampler: new_error_sampler(DEFAULT_APM_ERROR_TPS),
             error_rare_sample_tracer_drop,
         }),
         trace_tx,
