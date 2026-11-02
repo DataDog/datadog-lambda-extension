@@ -841,8 +841,9 @@ mod tests {
         let trace_sender = Arc::new(SendingTraceProcessor {
             appsec: None,
             processor: Arc::new(ServerlessTraceProcessor {
-                obfuscation_config: Arc::new(ObfuscationConfig::new().expect("ObfuscationConfig")),
+                obfuscation_config: Arc::new(ObfuscationConfig::default()),
                 error_sampler,
+                error_rare_sample_tracer_drop: false,
             }),
             trace_tx: tokio::sync::mpsc::channel(1).0,
             stats_generator: Arc::new(StatsGenerator::new(concentrator)),

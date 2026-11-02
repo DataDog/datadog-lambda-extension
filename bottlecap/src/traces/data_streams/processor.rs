@@ -26,13 +26,11 @@ use crate::traces::data_streams::checkpoint::compute_consume_checkpoint;
 use crate::traces::data_streams::context::{
     DD_PATHWAY_CTX_BASE64_KEY, DD_PATHWAY_CTX_KEY, DsmContext,
 };
+use crate::traces::intake_base_url;
 use crate::traces::proxy_aggregator::{Aggregator as ProxyAggregator, ProxyRequest};
 
 /// gzip level used by the tracer for pipeline stats.
 const GZIP_LEVEL: u32 = 1;
-/// The trace intake path appended to `apm_dd_url` by the upstream config crate.
-/// Must be stripped before deriving non-trace endpoints from that field.
-const TRACE_INTAKE_ROUTE: &str = "/api/v0.2/traces";
 
 pub struct DsmProcessor {
     service: String,
@@ -60,16 +58,7 @@ impl DsmProcessor {
             env,
             aggregator: Mutex::new(aggregator),
             proxy_aggregator,
-            // config.apm_dd_url is a fully-resolved trace endpoint that already
-            // ends with TRACE_INTAKE_ROUTE (e.g. ".../api/v0.2/traces"). Strip
-            // that suffix to recover the base URL before appending the DSM route;
-            // without this the target becomes .../api/v0.2/traces/api/v0.1/pipeline_stats.
-            target_url: format!(
-                "{}/api/v0.1/pipeline_stats",
-                apm_dd_url
-                    .trim_end_matches('/')
-                    .trim_end_matches(TRACE_INTAKE_ROUTE)
-            ),
+            target_url: format!("{}/api/v0.1/pipeline_stats", intake_base_url(apm_dd_url)),
         }
     }
 
