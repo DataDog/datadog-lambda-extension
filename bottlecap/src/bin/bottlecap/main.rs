@@ -108,7 +108,6 @@ use tokio::time::Instant;
 use tokio::{sync::Mutex as TokioMutex, sync::mpsc::Sender};
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, warn};
-use tracing_subscriber::util::SubscriberInitExt;
 use ustr::Ustr;
 
 fn resolve_dsm_service(
@@ -258,8 +257,7 @@ fn enable_logging_subsystem() {
         .without_time()
         .event_format(logger::Formatter)
         .finish();
-    // `init` also forwards records from crates that log with the `log` crate to this subscriber.
-    subscriber.init();
+    tracing::subscriber::set_global_default(subscriber).expect("setting default subscriber failed");
 
     if !invalid_entries.is_empty() {
         warn!("Ignoring invalid {LEVEL_BY_TARGET_ENV_VAR} entries: {invalid_entries:?}");

@@ -1,6 +1,5 @@
 use std::fmt::{self, Write as _};
 use tracing_core::{Event, Subscriber};
-use tracing_log::NormalizeEvent;
 use tracing_subscriber::fmt::{
     FmtContext, FormattedFields,
     format::{self, FormatEvent, FormatFields},
@@ -86,10 +85,7 @@ struct FieldVisitor {
 
 impl FieldVisitor {
     fn record_other(&mut self, field: &tracing::field::Field, value: fmt::Arguments<'_>) {
-        // `log.*` fields carry the target and location of a record from the `log` crate.
-        if !field.name().starts_with("log.") {
-            let _ = write!(self.other_fields, " {}={value}", field.name());
-        }
+        let _ = write!(self.other_fields, " {}={value}", field.name());
     }
 }
 
@@ -151,9 +147,7 @@ where
         mut writer: format::Writer<'_>,
         event: &Event<'_>,
     ) -> fmt::Result {
-        // A record from the `log` crate arrives with the target `log`, and its own target in a field.
-        let normalized = event.normalized_metadata();
-        let metadata = normalized.as_ref().unwrap_or_else(|| event.metadata());
+        let metadata = event.metadata();
         let level = metadata.level();
 
         let mut visitor = FieldVisitor::default();
@@ -463,23 +457,6 @@ mod tests {
             output.trim().to_string()
         )));
         assert!(is_http_library_record(&parsed));
-    }
-
-    #[test]
-    fn test_formatter_uses_target_of_log_crate_record() {
-        let output = capture_log(|| {
-            tracing_log::format_trace(
-                &log::Record::builder()
-                    .target("rustls::client::hs")
-                    .level(log::Level::Debug)
-                    .args(format_args!("Not resuming any session"))
-                    .build(),
-            )
-            .unwrap();
-        });
-
-        assert!(output.starts_with(r#"{"target":"rustls::client::hs","status":"DEBUG","#));
-        assert!(output.contains(r#"DD_EXTENSION | DEBUG | Not resuming any session""#));
     }
 
     #[test]
