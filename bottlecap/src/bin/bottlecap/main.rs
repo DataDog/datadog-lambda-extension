@@ -44,7 +44,10 @@ use bottlecap::{
         invocation::processor_service::{InvocationProcessorHandle, InvocationProcessorService},
         listener::Listener as LifecycleListener,
     },
-    logger,
+    logger::{
+        self,
+        cold_start::{ColdStartDurations, elapsed_ms},
+    },
     logs::{
         agent::LogsAgent,
         aggregator_service::{
@@ -61,26 +64,18 @@ use bottlecap::{
         provider::Provider as TagProvider,
     },
     traces::{
-        http_client as trace_http_client,
         propagation::DatadogCompositePropagator,
         proxy_aggregator,
-        proxy_flusher::Flusher as ProxyFlusher,
-        span_dedup_service,
-        stats_aggregator::StatsAggregator,
-        stats_concentrator_service::{StatsConcentratorHandle, StatsConcentratorService},
-        stats_flusher,
+        stats_concentrator_service::StatsConcentratorHandle,
         stats_generator::StatsGenerator,
-        stats_processor, trace_agent,
         trace_aggregator::SendDataBuilderInfo,
-        trace_aggregator_service::{
-            AggregatorHandle as TraceAggregatorHandle, AggregatorService as TraceAggregatorService,
-        },
-        trace_flusher,
         trace_processor::{self, SendingTraceProcessor},
     },
 };
 use datadog_fips::reqwest_adapter::create_reqwest_client_builder;
-use decrypt::{resolve_additional_endpoints_secrets, resolve_secrets};
+use decrypt::{
+    has_additional_endpoints_secrets, resolve_additional_endpoints_secrets, resolve_secrets,
+};
 use dogstatsd::{
     aggregator::{
         AggregatorHandle as MetricsAggregatorHandle, AggregatorService as MetricsAggregatorService,
@@ -95,7 +90,6 @@ use dogstatsd::{
     flusher::{Flusher as MetricsFlusher, FlusherConfig as MetricsFlusherConfig},
     metric::{EMPTY_TAGS, SortedTags},
 };
-use libdd_trace_obfuscation::obfuscation_config;
 use reqwest::Client;
 use std::{collections::hash_map, env, path::Path, str::FromStr, sync::Arc};
 use tokio::time::Instant;
@@ -117,11 +111,14 @@ fn resolve_dsm_service(
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    let start_time = Instant::now();
+    let mut cold_start_durations = ColdStartDurations::new(Instant::now());
     init_ustr();
     enable_logging_subsystem();
-    let aws_config = AwsConfig::from_env(start_time);
+    cold_start_durations.enable_logging_ms = elapsed_ms(cold_start_durations.start_time);
+    let step_start_time = Instant::now();
+    let aws_config = AwsConfig::from_env(cold_start_durations.start_time);
     log_fips_status(&aws_config.region);
+    cold_start_durations.load_aws_config_ms = elapsed_ms(step_start_time);
     let version_without_next = EXTENSION_VERSION.split('-').next().unwrap_or("NA");
     debug!("Starting Datadog Extension v{version_without_next}");
 
@@ -135,32 +132,43 @@ async fn main() -> anyhow::Result<()> {
         debug!("DD_DEBUG_WAIT_FOR_ATTACH: Continuing execution...");
     }
 
+    let step_start_time = Instant::now();
     prepare_client_provider()?;
     let client = create_reqwest_client_builder()
         .map_err(|e| anyhow::anyhow!("Failed to create client builder: {e:?}"))?
         .no_proxy()
         .build()
         .map_err(|e| anyhow::anyhow!("Failed to create client: {e:?}"))?;
+    cold_start_durations.create_extensions_api_client_ms = elapsed_ms(step_start_time);
 
     let cloned_client = client.clone();
     let runtime_api = aws_config.runtime_api.clone();
     let managed_instance_mode = aws_config.is_managed_instance_mode();
     let response = tokio::task::spawn(async move {
-        extension::register(
+        let step_start_time = Instant::now();
+        let response = extension::register(
             &cloned_client,
             &runtime_api,
             extension::EXTENSION_NAME,
             managed_instance_mode,
         )
-        .await
+        .await;
+        (response, elapsed_ms(step_start_time))
     });
     // First load the AWS configuration
     let lambda_directory: String =
         env::var("LAMBDA_TASK_ROOT").unwrap_or_else(|_| "/var/task".to_string());
     let aws_config = Arc::new(aws_config);
 
+    let step_start_time = Instant::now();
     let mut lambda_config = config::get_config(Path::new(&lambda_directory));
-    resolve_additional_endpoints_secrets(&mut lambda_config, &aws_config).await;
+    cold_start_durations.load_config_ms = elapsed_ms(step_start_time);
+    if has_additional_endpoints_secrets(&lambda_config) {
+        let step_start_time = Instant::now();
+        resolve_additional_endpoints_secrets(&mut lambda_config, &aws_config).await;
+        cold_start_durations.resolve_additional_endpoint_secrets_ms =
+            Some(elapsed_ms(step_start_time));
+    }
     let config = Arc::new(lambda_config);
 
     // Build one shared reqwest::Client for metrics, logs, trace proxy flushing, and calls to
@@ -169,10 +177,13 @@ async fn main() -> anyhow::Result<()> {
     let shared_client = bottlecap::http::get_client(&config);
     let api_key_factory = create_api_key_factory(&config, &aws_config, &shared_client);
 
-    let r = response
+    let step_start_time = Instant::now();
+    let (response, register_extension_ms) = response
         .await
-        .map_err(|e| anyhow::anyhow!("Failed to join task: {e:?}"))?
-        .map_err(|e| anyhow::anyhow!("Failed to register extension: {e:?}"))?;
+        .map_err(|e| anyhow::anyhow!("Failed to join task: {e:?}"))?;
+    let r = response.map_err(|e| anyhow::anyhow!("Failed to register extension: {e:?}"))?;
+    cold_start_durations.register_extension_ms = register_extension_ms;
+    cold_start_durations.wait_for_register_ms = elapsed_ms(step_start_time);
 
     match extension_loop_active(
         Arc::clone(&aws_config),
@@ -181,7 +192,7 @@ async fn main() -> anyhow::Result<()> {
         shared_client,
         &r,
         Arc::clone(&api_key_factory),
-        start_time,
+        cold_start_durations,
     )
     .await
     {
@@ -312,7 +323,7 @@ async fn extension_loop_active(
     shared_client: reqwest::Client,
     r: &RegisterResponse,
     api_key_factory: Arc<ApiKeyFactory>,
-    start_time: Instant,
+    mut cold_start_durations: ColdStartDurations,
 ) -> anyhow::Result<()> {
     let (mut event_bus, event_bus_tx) = EventBus::run();
 
@@ -334,6 +345,7 @@ async fn extension_loop_active(
         &shared_client,
     );
 
+    let step_start_time = Instant::now();
     let (metrics_flushers, metrics_aggregator_handle, dogstatsd_cancel_token) = start_dogstatsd(
         tags_provider.clone(),
         Arc::clone(&api_key_factory),
@@ -341,6 +353,7 @@ async fn extension_loop_active(
         &shared_client,
     )
     .await;
+    cold_start_durations.start_dogstatsd_ms = elapsed_ms(step_start_time);
 
     let propagator = Arc::new(DatadogCompositePropagator::new(Arc::clone(config)));
 
@@ -406,10 +419,15 @@ async fn extension_loop_active(
     });
 
     // AppSec processor (if enabled)
+    let step_start_time = Instant::now();
     let appsec_processor = match AppSecProcessor::new(config) {
-        Ok(p) => Some(Arc::new(TokioMutex::new(p))),
+        Ok(p) => {
+            cold_start_durations.create_appsec_processor_ms = Some(elapsed_ms(step_start_time));
+            Some(Arc::new(TokioMutex::new(p)))
+        }
         Err(AppSecFeatureDisabled) => None,
         Err(e) => {
+            cold_start_durations.create_appsec_processor_ms = Some(elapsed_ms(step_start_time));
             error!(
                 "AAP | error creating App & API Protection processor, the feature will be disabled: {e}"
             );
@@ -417,16 +435,16 @@ async fn extension_loop_active(
         }
     };
 
-    let (
-        trace_agent_channel,
+    let bottlecap::startup::TraceAgentPipeline {
+        trace_tx: trace_agent_channel,
         trace_flusher,
         trace_processor,
         stats_flusher,
         proxy_flusher,
-        trace_agent_shutdown_token,
+        shutdown_token: trace_agent_shutdown_token,
         stats_concentrator,
         trace_aggregator_handle,
-    ) = start_trace_agent(
+    } = bottlecap::startup::start_trace_agent(
         config,
         &api_key_factory,
         &tags_provider,
@@ -454,6 +472,7 @@ async fn extension_loop_active(
         }
     });
 
+    let step_start_time = Instant::now();
     let telemetry_listener_cancel_token = setup_telemetry_client(
         client,
         &r.extension_id,
@@ -464,6 +483,7 @@ async fn extension_loop_active(
         aws_config.is_managed_instance_mode(),
     )
     .await?;
+    cold_start_durations.start_telemetry_listener_ms = elapsed_ms(step_start_time);
 
     let otlp_cancel_token = start_otlp_agent(
         config,
@@ -481,8 +501,13 @@ async fn extension_loop_active(
 
     debug!(
         "Datadog Next-Gen Extension ready in {:}ms",
-        start_time.elapsed().as_millis().to_string()
+        cold_start_durations
+            .start_time
+            .elapsed()
+            .as_millis()
+            .to_string()
     );
+    cold_start_durations.log();
 
     if aws_config.is_managed_instance_mode() {
         // Clone Arc references for the background flusher task
@@ -1158,132 +1183,6 @@ fn start_logs_agent(
         cancel_token,
         aggregator_handle,
         durable_context_tx,
-    )
-}
-
-#[allow(clippy::type_complexity)]
-fn start_trace_agent(
-    config: &Arc<Config>,
-    api_key_factory: &Arc<ApiKeyFactory>,
-    tags_provider: &Arc<TagProvider>,
-    invocation_processor_handle: InvocationProcessorHandle,
-    appsec_processor: Option<Arc<TokioMutex<AppSecProcessor>>>,
-    client: &Client,
-    proxy_aggregator: Arc<TokioMutex<proxy_aggregator::Aggregator>>,
-) -> (
-    Sender<SendDataBuilderInfo>,
-    Arc<trace_flusher::TraceFlusher>,
-    Arc<trace_processor::ServerlessTraceProcessor>,
-    Arc<stats_flusher::StatsFlusher>,
-    Arc<ProxyFlusher>,
-    tokio_util::sync::CancellationToken,
-    StatsConcentratorHandle,
-    TraceAggregatorHandle,
-) {
-    // Build one shared hyper-based HTTP client for trace and stats flushing.
-    // This client type is required by libdd_trace_utils for SendData::send().
-    let trace_http_client = trace_http_client::create_client(
-        config.proxy_https.as_ref(),
-        config.tls_cert_file.as_ref(),
-        config.skip_ssl_validation,
-    )
-    .expect("Failed to create trace HTTP client");
-
-    // Stats
-    let (stats_concentrator_service, stats_concentrator_handle) =
-        StatsConcentratorService::new(Arc::clone(config));
-    tokio::spawn(stats_concentrator_service.run());
-    let stats_aggregator: Arc<TokioMutex<StatsAggregator>> = Arc::new(TokioMutex::new(
-        StatsAggregator::new_with_concentrator(stats_concentrator_handle.clone()),
-    ));
-    let stats_flusher = Arc::new(stats_flusher::StatsFlusher::new(
-        api_key_factory.clone(),
-        stats_aggregator.clone(),
-        Arc::clone(config),
-        trace_http_client.clone(),
-        libdd_trace_utils::config_utils::trace_stats_url(&config.site),
-    ));
-
-    let stats_processor = Arc::new(stats_processor::ServerlessStatsProcessor {});
-
-    // Traces
-    let (trace_aggregator_service, trace_aggregator_handle) = TraceAggregatorService::default();
-    tokio::spawn(trace_aggregator_service.run());
-
-    let trace_flusher = Arc::new(trace_flusher::TraceFlusher::new(
-        trace_aggregator_handle.clone(),
-        config.clone(),
-        api_key_factory.clone(),
-        trace_http_client,
-    ));
-
-    let obfuscation_config = obfuscation_config::ObfuscationConfig {
-        tag_replace_rules: config.apm_replace_tags.clone(),
-        http: obfuscation_config::HttpConfig {
-            remove_paths_with_digits: config.apm_config_obfuscation_http_remove_paths_with_digits,
-            remove_query_string: config.apm_config_obfuscation_http_remove_query_string,
-        },
-        ..Default::default()
-    };
-
-    // The Agent's error sampler knob has no effect here: the extension's
-    // sampler is a plain on/off switch, not a TPS budget.
-    if env::var("DD_APM_ERROR_TPS").is_ok_and(|v| !v.trim().is_empty()) {
-        warn!(
-            "DD_APM_ERROR_TPS is not supported by the Lambda extension; error trace rescue is an on/off switch controlled by DD_SERVERLESS_ERROR_SAMPLER_ENABLED"
-        );
-    }
-
-    let trace_processor = Arc::new(trace_processor::ServerlessTraceProcessor {
-        obfuscation_config: Arc::new(obfuscation_config),
-        error_sampler: trace_processor::new_error_sampler(
-            config.ext.serverless_error_sampler_enabled,
-        ),
-    });
-
-    let (span_dedup_service, span_dedup_handle) = span_dedup_service::DedupService::new();
-    tokio::spawn(span_dedup_service.run());
-
-    // Proxy
-    let proxy_flusher = Arc::new(ProxyFlusher::new(
-        api_key_factory.clone(),
-        Arc::clone(&proxy_aggregator),
-        Arc::clone(tags_provider),
-        Arc::clone(config),
-        client.clone(),
-    ));
-
-    let trace_agent = trace_agent::TraceAgent::new(
-        Arc::clone(config),
-        trace_aggregator_handle.clone(),
-        trace_processor.clone(),
-        stats_aggregator,
-        stats_processor,
-        proxy_aggregator,
-        invocation_processor_handle,
-        appsec_processor,
-        Arc::clone(tags_provider),
-        stats_concentrator_handle.clone(),
-        span_dedup_handle,
-    );
-    let trace_agent_channel = trace_agent.get_sender_copy();
-    let shutdown_token = trace_agent.shutdown_token();
-
-    tokio::spawn(async move {
-        if let Err(e) = trace_agent.start().await {
-            error!("Error starting trace agent: {e:?}");
-        }
-    });
-
-    (
-        trace_agent_channel,
-        trace_flusher,
-        trace_processor,
-        stats_flusher,
-        proxy_flusher,
-        shutdown_token,
-        stats_concentrator_handle,
-        trace_aggregator_handle,
     )
 }
 

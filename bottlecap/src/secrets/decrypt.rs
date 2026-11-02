@@ -121,6 +121,17 @@ fn build_direct_aws_client() -> Option<Client> {
 /// documented.
 const ADDITIONAL_ENDPOINTS_SECRET_FETCH_TIMEOUT: Duration = Duration::from_secs(5);
 
+/// Whether `config` sets any `DD_*_ADDITIONAL_ENDPOINTS_SECRET_ARN`, so that
+/// [`resolve_additional_endpoints_secrets`] has secrets to fetch.
+#[must_use]
+pub fn has_additional_endpoints_secrets(config: &Config) -> bool {
+    !(config.additional_endpoints_secret_arn.is_empty()
+        && config.apm_additional_endpoints_secret_arn.is_empty()
+        && config
+            .logs_config_additional_endpoints_secret_arn
+            .is_empty())
+}
+
 /// Resolves the `DD_*_ADDITIONAL_ENDPOINTS_SECRET_ARN` dual-shipping secrets into `config`.
 ///
 /// Each secret holds the whole additional-endpoints JSON blob, in the same shape as the
@@ -131,12 +142,7 @@ pub async fn resolve_additional_endpoints_secrets(
     config: &mut Config,
     aws_config: &Arc<AwsConfig>,
 ) {
-    if config.additional_endpoints_secret_arn.is_empty()
-        && config.apm_additional_endpoints_secret_arn.is_empty()
-        && config
-            .logs_config_additional_endpoints_secret_arn
-            .is_empty()
-    {
+    if !has_additional_endpoints_secrets(config) {
         return;
     }
 
@@ -648,6 +654,15 @@ mod tests {
         let v = make_sm_response(raw);
         let result = extract_secret_string(&v).expect("should return the blob verbatim");
         assert_eq!(result, raw);
+    }
+
+    #[test]
+    fn test_has_additional_endpoints_secrets() {
+        let mut config = Config::default();
+        assert!(!has_additional_endpoints_secrets(&config));
+        config.logs_config_additional_endpoints_secret_arn =
+            "arn:aws:secretsmanager:us-east-1:123456789012:secret:x".to_string();
+        assert!(has_additional_endpoints_secrets(&config));
     }
 
     #[tokio::test]
