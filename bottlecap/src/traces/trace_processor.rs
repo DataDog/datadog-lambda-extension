@@ -79,8 +79,8 @@ const USER_DROP_PRIORITY: i32 = -1;
 /// Returns true when `config.apm_features` contains
 /// [`ERROR_RARE_SAMPLE_TRACER_DROP`].
 ///
-/// `DD_APM_FEATURES` is parsed upstream as a comma-separated list, so matching
-/// is exact per entry; space-separated values are not supported.
+/// `DD_APM_FEATURES` is split on commas when one is present, otherwise on
+/// spaces, and matching is exact per entry.
 #[must_use]
 pub fn error_rare_sample_tracer_drop_enabled(config: &config::Config) -> bool {
     config

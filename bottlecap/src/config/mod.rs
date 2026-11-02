@@ -780,6 +780,22 @@ mod lambda_config_tests {
     }
 
     #[test]
+    fn apm_features_space_separated_list_from_env() {
+        let config = load(|jail| {
+            jail.set_env(
+                "DD_APM_FEATURES",
+                "some_other_feature error_rare_sample_tracer_drop",
+            );
+            Ok(())
+        });
+        assert_eq!(
+            config.apm_features,
+            ["some_other_feature", "error_rare_sample_tracer_drop"]
+        );
+        assert!(crate::traces::trace_processor::error_rare_sample_tracer_drop_enabled(&config));
+    }
+
+    #[test]
     fn apm_features_unrelated_feature_does_not_enable_error_rare_sample_tracer_drop() {
         let config = load(|jail| {
             jail.set_env(
