@@ -98,6 +98,7 @@ dogstatsd = { git = "https://github.com/DataDog/serverless-components", rev = "e
 datadog-fips = { git = "https://github.com/DataDog/serverless-components", rev = "e462105e918904e6b1ad2ebc153ae561cebe5a34", default-features = false }
 datadog-agent-config = { git = "https://github.com/DataDog/serverless-components", rev = "e462105e918904e6b1ad2ebc153ae561cebe5a34", default-features = false }
 datadog-agent-trace-sampler = { git = "https://github.com/DataDog/serverless-components", rev = "e462105e918904e6b1ad2ebc153ae561cebe5a34", default-features = false }
+datadog-serverless-logging = { git = "https://github.com/DataDog/serverless-components", rev = "e462105e918904e6b1ad2ebc153ae561cebe5a34", default-features = false }
 libddwaf = { version = "2.1.0", git = "https://github.com/DataDog/libddwaf-rust", rev = "bbada5255bf8e9105c06b03ce6d5d63a7c337e2a", default-features = false, features = ["serde"] }
 # Enables the crypto provider libddwaf-sys needs to download prebuilt WAF binaries.
 libddwaf-sys = { version = "2.1.0", git = "https://github.com/DataDog/libddwaf-rust", rev = "bbada5255bf8e9105c06b03ce6d5d63a7c337e2a", default-features = false, features = ["aws-lc-rs"] }
