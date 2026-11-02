@@ -107,12 +107,18 @@ impl TraceAggregator {
         // Fill the batch
         while batch_size < self.max_content_size_bytes {
             if let Some(payload_info) = self.queue.pop_front() {
-                // TODO(duncanista): revisit if this is bigger than limit
                 let payload_size = payload_info.size;
 
-                // Put stats back in the queue
                 if batch_size + payload_size > self.max_content_size_bytes {
-                    self.queue.push_front(payload_info);
+                    // A payload larger than the cap on its own is sent as a batch by itself.
+                    // Putting it back would leave it at the front of the queue forever and
+                    // block every payload behind it.
+                    if self.buffer.is_empty() {
+                        batch_size += payload_size;
+                        self.buffer.push(payload_info);
+                    } else {
+                        self.queue.push_front(payload_info);
+                    }
                     break;
                 }
                 batch_size += payload_size;
@@ -219,6 +225,25 @@ mod tests {
         // The second batch should only contain the last log
         let second_batch = aggregator.get_batch();
         assert_eq!(second_batch.len(), 1);
+        assert_eq!(aggregator.queue.len(), 0);
+    }
+
+    #[test]
+    fn test_get_batch_oversized_payload_does_not_block_queue() {
+        let mut aggregator = TraceAggregator::new(10);
+
+        aggregator.add(make_builder_info(4));
+        aggregator.add(make_builder_info(25));
+        aggregator.add(make_builder_info(3));
+
+        // The oversized payload doesn't fit after the first one, so it waits.
+        assert_eq!(aggregator.get_batch().len(), 1);
+        // On its own it is sent as a batch by itself instead of being put back.
+        let oversized = aggregator.get_batch();
+        assert_eq!(oversized.len(), 1);
+        assert_eq!(oversized[0].size, 25);
+        // Payloads behind it are still sent.
+        assert_eq!(aggregator.get_batch().len(), 1);
         assert_eq!(aggregator.queue.len(), 0);
     }
 }
