@@ -1,12 +1,10 @@
 # OOM reproducer for Python.
-# Allocates and retains 10 MB strings in a list until CPython raises
-# MemoryError. Lambda surfaces this as PlatformRuntimeDone with
-# error_type=Runtime.OutOfMemory; the function log line also contains
-# "MemoryError". Both bottlecap detection paths fire — the dedup flag is
-# what makes the OOM metric emit exactly once.
-
-
+# A single 100 GB bytearray request exceeds the function's 512 MB memory
+# cap by orders of magnitude. The handler is expected to raise an uncaught
+# MemoryError, which Lambda surfaces as a "MemoryError" log line and a
+# PlatformRuntimeDone with error_type=Runtime.OutOfMemory; bottlecap
+# deduplication keeps the OOM metric at exactly one emission. Linux
+# overcommit means this is not guaranteed to fail deterministically at
+# the allocator: the kernel may terminate the process instead.
 def handler(event, context):
-    data = []
-    while True:
-        data.append("x" * (10 * 1024 * 1024))
+    data = bytearray(100 * 1024 * 1024 * 1024)

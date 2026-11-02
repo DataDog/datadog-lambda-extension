@@ -96,7 +96,7 @@ impl DatadogCompositePropagator {
 mod tests {
     use std::collections::HashMap;
 
-    use datadog_opentelemetry::propagation::TracePropagationStyle;
+    use crate::config::TracePropagationStyle;
 
     use super::*;
 

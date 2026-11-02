@@ -434,7 +434,6 @@ impl StatsConcentratorService {
             // Span meta keys included as additional aggregation dimensions, from
             // DD_TRACE_STATS_ADDITIONAL_TAGS (only set when experimental_features_enabled).
             additional_metric_tag_keys,
-            // Resource key obfuscation is handled separately in this extension; not used here.
             None,
         );
         // After construction, so the kept keys can be read back off the concentrator rather than
@@ -478,11 +477,9 @@ impl StatsConcentratorService {
     ) {
         let flush_result = self.concentrator.flush(SystemTime::now(), force_flush);
         let collapsed_spans = flush_result.collapsed_spans;
-        // Obfuscation is excluded at the feature level: bottlecap's `libdd-trace-stats`
-        // dependency does not enable `stats-obfuscation`, so every bucket ends up in
-        // `unobfuscated_buckets`; combine both to stay correct if that ever changes. Start
-        // from `unobfuscated_buckets` since it's normally the only non-empty one, avoiding a
-        // reallocation to grow the (usually empty) `obfuscated_buckets` vec.
+        // No obfuscation config is supplied to the concentrator, so buckets normally remain
+        // unobfuscated. Combine both vectors in case that configuration is added. Start from
+        // `unobfuscated_buckets` to avoid reallocating for the normally empty obfuscated vector.
         let mut stats_buckets = flush_result.unobfuscated_buckets;
         stats_buckets.extend(flush_result.obfuscated_buckets);
         self.report_collapse(&stats_buckets, collapsed_spans);
