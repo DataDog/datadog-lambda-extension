@@ -335,8 +335,8 @@ impl FlushingService {
     /// Performs a final blocking flush of all telemetry data before shutdown.
     ///
     /// Flushes logs, metrics (series and distributions), traces, stats, and APM proxy
-    /// data in parallel. Unlike `flush_blocking`, this forces the stats flusher to
-    /// flush immediately regardless of its normal timing constraints.
+    /// data in parallel. Always forces the stats flusher, regardless of
+    /// [`with_forced_stats`](Self::with_forced_stats) or normal timing constraints.
     ///
     /// Use this during shutdown when this is the last opportunity to send data.
     ///

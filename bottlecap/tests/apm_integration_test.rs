@@ -1440,7 +1440,6 @@ fn flushing_service_for(
 }
 
 /// Which `FlushingService` entry point a test drives.
-#[derive(Clone, Copy, Debug)]
 enum FlushPath {
     /// `flush_blocking`: the `End` and `Periodic` decisions and the timer ticks.
     Blocking,
