@@ -48,7 +48,8 @@ async fn run_with_port_held(
 
     let reached_next = s.wait_next_or_exit(&mut bc, 1, STARTUP_BUDGET).await;
     let reached_at = bc.uptime();
-    let telemetry_possible = port != TELEMETRY_PORT || s.api.telemetry_port() != TELEMETRY_PORT;
+    let telemetry_possible =
+        port != TELEMETRY_PORT || s.api.telemetry_port() != Some(TELEMETRY_PORT);
     let mut flushed = false;
     if reached_next && telemetry_possible {
         let invoked = Instant::now();

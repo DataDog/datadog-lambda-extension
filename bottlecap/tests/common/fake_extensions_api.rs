@@ -12,7 +12,8 @@
 //! `FaultIntake`.
 //!
 //! It also plays Lambda's Telemetry API sender: `send_telemetry` posts a batch
-//! to the extension's listener (the port taken from the subscribe body).
+//! to the extension's listener (the port taken from the subscribe body). Like
+//! Lambda, it delivers nothing until a subscribe call was accepted.
 
 use std::collections::VecDeque;
 use std::net::SocketAddr;
@@ -33,9 +34,6 @@ use tokio::net::TcpListener;
 use tokio::sync::Notify;
 use tokio::task::JoinHandle;
 
-/// Default Telemetry API listener port of the extension.
-pub const DEFAULT_TELEMETRY_PORT: u16 = 8999;
-
 #[derive(Clone)]
 struct Shared {
     /// Events pushed by the test, served to `/next` in order.
@@ -45,7 +43,8 @@ struct Shared {
     /// `METHOD path` of every request, in arrival order.
     requests: Arc<Mutex<Vec<String>>>,
     subscribe_status: Arc<AtomicU16>,
-    /// Port in the `destination.URI` of the last subscribe body.
+    /// Port in the `destination.URI` of the last accepted subscribe body, 0
+    /// until one.
     telemetry_port: Arc<AtomicU16>,
 }
 
@@ -89,7 +88,7 @@ impl FakeExtensionsApi {
             next_calls: Arc::new(AtomicUsize::new(0)),
             requests: Arc::new(Mutex::new(Vec::new())),
             subscribe_status: Arc::new(AtomicU16::new(StatusCode::OK.as_u16())),
-            telemetry_port: Arc::new(AtomicU16::new(DEFAULT_TELEMETRY_PORT)),
+            telemetry_port: Arc::new(AtomicU16::new(0)),
         };
         let router = Router::new()
             .route("/2020-01-01/extension/register", post(register))
@@ -181,33 +180,43 @@ impl FakeExtensionsApi {
 
     // --- Telemetry API sender ----------------------------------------------
 
-    /// Port the extension asked Lambda to deliver telemetry to.
-    pub fn telemetry_port(&self) -> u16 {
-        self.shared.telemetry_port.load(Ordering::SeqCst)
+    /// Port the extension asked Lambda to deliver telemetry to, `None` until
+    /// a subscribe call was accepted.
+    pub fn telemetry_port(&self) -> Option<u16> {
+        match self.shared.telemetry_port.load(Ordering::SeqCst) {
+            0 => None,
+            port => Some(port),
+        }
     }
 
-    pub fn telemetry_url(&self) -> String {
-        format!("http://127.0.0.1:{}/", self.telemetry_port())
+    pub fn telemetry_url(&self) -> Option<String> {
+        self.telemetry_port()
+            .map(|port| format!("http://127.0.0.1:{port}/"))
     }
 
     /// Post a raw body (a JSON array of events) to the extension's listener.
     /// Retries until it is accepted or `budget` passes, since the listener
-    /// comes up a moment after the process starts.
+    /// comes up a moment after the process starts. Fails without an accepted
+    /// subscription, as Lambda would deliver nothing.
     pub async fn send_telemetry_raw(&self, body: Vec<u8>, budget: Duration) -> Result<(), String> {
         let start = Instant::now();
         let mut last: String;
         loop {
-            let result = self
-                .telemetry_client
-                .post(self.telemetry_url())
-                .header("content-type", "application/json")
-                .body(body.clone())
-                .send()
-                .await;
+            let result = match self.telemetry_url() {
+                Some(url) => self
+                    .telemetry_client
+                    .post(url)
+                    .header("content-type", "application/json")
+                    .body(body.clone())
+                    .send()
+                    .await
+                    .map_err(|e| e.to_string()),
+                None => Err("no accepted Telemetry API subscription".to_string()),
+            };
             match result {
                 Ok(r) if r.status().is_success() => return Ok(()),
                 Ok(r) => last = format!("status {}", r.status()),
-                Err(e) => last = e.to_string(),
+                Err(e) => last = e,
             }
             if start.elapsed() > budget {
                 return Err(format!("telemetry not accepted within {budget:?}: {last}"));
@@ -256,7 +265,10 @@ async fn register(State(shared): State<Shared>) -> impl IntoResponse {
 
 async fn subscribe(State(shared): State<Shared>, body: Bytes) -> impl IntoResponse {
     record(&shared, "PUT", "/2022-07-01/telemetry");
-    if let Ok(v) = serde_json::from_slice::<Value>(&body)
+    let status = StatusCode::from_u16(shared.subscribe_status.load(Ordering::SeqCst))
+        .unwrap_or(StatusCode::OK);
+    if status.is_success()
+        && let Ok(v) = serde_json::from_slice::<Value>(&body)
         && let Some(uri) = v["destination"]["URI"].as_str()
         && let Some(port) = uri
             .rsplit(':')
@@ -265,8 +277,6 @@ async fn subscribe(State(shared): State<Shared>, body: Bytes) -> impl IntoRespon
     {
         shared.telemetry_port.store(port, Ordering::SeqCst);
     }
-    let status = StatusCode::from_u16(shared.subscribe_status.load(Ordering::SeqCst))
-        .unwrap_or(StatusCode::OK);
     (status, "{}")
 }
 

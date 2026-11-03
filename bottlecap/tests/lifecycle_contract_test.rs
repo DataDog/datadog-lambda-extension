@@ -40,8 +40,16 @@ async fn invoke_then_shutdown_exits_cleanly() {
         bc.log_tail(40)
     );
     let invoked = Instant::now();
+    // Lambda sends `platform.initStart` on a cold start. Until it arrives the
+    // extension holds logs, as it cannot yet tell a durable function.
     s.api
-        .send_telemetry(&[function_log("hello from the function")], STARTUP_BUDGET)
+        .send_telemetry(
+            &[
+                platform_init_start(),
+                function_log("hello from the function"),
+            ],
+            STARTUP_BUDGET,
+        )
         .await
         .unwrap();
     deliver_runtime_done(&s.api, "req-1", true).await.unwrap();
@@ -63,6 +71,11 @@ async fn invoke_then_shutdown_exits_cleanly() {
         .count();
     // Enhanced metrics are distributions, so they land on the sketches path.
     let metrics = s.intake.count("/api/beta/sketches") + s.intake.count("/api/v2/series");
+    let log_flushed = s
+        .intake
+        .requests_to("/api/v2/logs")
+        .iter()
+        .any(|r| r.body_text().contains("hello from the function"));
     s.shutdown_cleanly(&mut bc).await;
 
     // The end-of-invocation flush reached the intake with the configured key.
@@ -74,6 +87,11 @@ async fn invoke_then_shutdown_exits_cleanly() {
     assert!(
         metrics > 0,
         "no metrics flushed before SHUTDOWN. Intake:\n{}",
+        s.intake.summary()
+    );
+    assert!(
+        log_flushed,
+        "the function log was not flushed before SHUTDOWN. Intake:\n{}",
         s.intake.summary()
     );
 }
