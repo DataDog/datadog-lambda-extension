@@ -3,14 +3,18 @@ curl -OL "binaries.ddbuild.io/dd-source/authanywhere/LATEST/authanywhere-linux-a
     && mv "authanywhere-linux-amd64" /bin/authanywhere \
     && chmod +x /bin/authanywhere
 
-BTI_CI_API_TOKEN=$(authanywhere --audience rapid-devex-ci)
+get_gitlab_token() {
+    BTI_CI_API_TOKEN=$(authanywhere --audience rapid-devex-ci)
 
-BTI_RESPONSE=$(curl --silent --request GET \
-    --header "$BTI_CI_API_TOKEN" \
-    --header "Content-Type: application/vnd.api+json" \
-    "https://bti-ci-api.us1.ddbuild.io/internal/ci/gitlab/token?owner=DataDog&repository=datadog-lambda-extension")
+    BTI_RESPONSE=$(curl --silent --request GET \
+        --header "$BTI_CI_API_TOKEN" \
+        --header "Content-Type: application/vnd.api+json" \
+        "https://bti-ci-api.us1.ddbuild.io/internal/ci/gitlab/token?owner=DataDog&repository=datadog-lambda-extension")
 
-GITLAB_TOKEN=$(echo "$BTI_RESPONSE" | jq -r '.token // empty')
+    GITLAB_TOKEN=$(echo "$BTI_RESPONSE" | jq -r '.token // empty')
+}
+
+get_gitlab_token
 
 if [ -z "$GITLAB_TOKEN" ]; then
     echo "ERROR: could not obtain GitLab token from BTI"
@@ -25,6 +29,10 @@ while true; do
     HTTP_STATUS=$(curl -s -o /tmp/e2e_response.json -w "%{http_code}" --header "PRIVATE-TOKEN: ${GITLAB_TOKEN}" "$URL")
     if [ "$HTTP_STATUS" != "200" ]; then
         echo "WARNING: GitLab API returned HTTP $HTTP_STATUS, retrying in 2 minutes..."
+        # A token from BTI stopped working during a long run, so get a new one.
+        if [ "$HTTP_STATUS" == "401" ]; then
+            get_gitlab_token
+        fi
         sleep 120
         continue
     fi
