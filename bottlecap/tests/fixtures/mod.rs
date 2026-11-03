@@ -119,7 +119,7 @@ pub fn write_corpus(dir: &Path) -> Vec<(PathBuf, usize)> {
     }
     put(
         "dogstatsd/enrich_tags.txt",
-        dogstatsd::ENRICH_TAGS.as_bytes(),
+        dogstatsd::enrich_tags().as_bytes(),
     );
 
     // Large invocation payloads, plus a copy of the checked-in trigger events so a tool that

@@ -1,7 +1,20 @@
 //! DogStatsD datagrams as a client library sends them to UDP 8125.
 
-/// The tags bottlecap adds to every metric of a `$LATEST` function (`SortedTags::parse(ENRICH_TAGS)`).
-pub const ENRICH_TAGS: &str = "function_arn:arn:aws:lambda:us-east-1:123456789012:function:my-checkout-fn,region:us-east-1,account_id:123456789012,aws_account:123456789012,functionname:my-checkout-fn,resource:my-checkout-fn,memorysize:128,architecture:arm64,runtime:nodejs22.x,_dd.runtime_family:nodejs,env:prod,service:checkout,version:1.2.3,dd_extension_version:90";
+use bottlecap::tags::lambda::tags::EXTENSION_VERSION;
+
+use crate::fixtures::telemetry::FUNCTION_ARN;
+
+/// The tags bottlecap adds to every metric of the `$LATEST` version of [`FUNCTION_ARN`]
+/// (`SortedTags::parse(&enrich_tags())`).
+pub fn enrich_tags() -> String {
+    let name = FUNCTION_ARN
+        .rsplit(':')
+        .next()
+        .expect("function name in the ARN");
+    format!(
+        "function_arn:{FUNCTION_ARN},region:us-east-1,account_id:123456789012,aws_account:123456789012,functionname:{name},resource:{name},memorysize:128,architecture:arm64,runtime:nodejs22.x,_dd.runtime_family:nodejs,env:prod,service:checkout,version:1.2.3,dd_extension_version:{EXTENSION_VERSION}"
+    )
+}
 
 /// A distribution with 8 tags, the heaviest common line.
 pub const DIST_8_TAGS: &str = "app.checkout.latency:12.5|d|#env:prod,service:checkout,version:1.2.3,region:us-east-1,team:payments,endpoint:/api/v1/pay,status:200,method:POST";

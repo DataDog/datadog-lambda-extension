@@ -28,7 +28,8 @@ use fixtures::{dogstatsd, events, logs, telemetry, traces};
 | | `trace_2000_spans()`, `v04_2000_spans() -> Vec<u8>` | The reference payload: 100 x 20 spans, ~1 MB v0.4 msgpack |
 | | `v04_msgpack(&traces)`, `header_tags()`, `TRACE_HEADERS` | Encoding and the matching tracer headers |
 | `dogstatsd` | `line(Kind, i)`, `packet(Kind, first, n)`, `packets(Kind, total, per_packet)`, `unique_tag_line(i)` | Datagrams: 50 metric names x 100 endpoints; `Kind::{Count, Gauge, Distribution}` |
-| | `ENRICH_TAGS`, `DIST_8_TAGS`, `COUNT_2_TAGS`, `SKIPPED_LINES` | Constants |
+| | `enrich_tags()` | The tags bottlecap adds to every metric, for `FUNCTION_ARN` and the current `EXTENSION_VERSION` |
+| | `DIST_8_TAGS`, `COUNT_2_TAGS`, `SKIPPED_LINES` | Constants |
 | `events` | `payload(name)`, `payload_names()`, `all_payloads()` | The 38 trigger events in `tests/payloads/` |
 | | `sqs_event(records, body_bytes)`, `sqs_220kb()` | SQS batch with `_datadog` trace context; reference 10 x 22 KB |
 | | `dynamodb_event(records, attrs)`, `dynamodb_100_records()` | DynamoDB stream batch; reference 100 x 30 attributes |
