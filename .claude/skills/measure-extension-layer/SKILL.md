@@ -6,10 +6,10 @@ description: Measure the size, cold start and duration overhead of extension lay
 # Measure the size and cold start of an extension layer
 
 The scripts in `scripts/` create small Lambda functions, one or more for each variant, in the
-serverless sandbox account. The default region is `us-east-2`. They force cold starts and read the `REPORT` lines from
-CloudWatch. A variant is a name and a layer. Always measure the variants that you compare in
-the same run. Each round does one cold start of each variant, so a change over time affects all
-variants the same way.
+serverless sandbox account. The default region is `us-east-2`. They force cold starts and read
+the `REPORT` lines from CloudWatch. A variant is a name and a layer. Always measure the variants
+that you compare in the same run. Each round does one cold start of each variant, so a change
+over time affects all variants the same way.
 
 Run the scripts through `aws-vault exec sso-serverless-sandbox-account-admin --`. They need
 `boto3`.
@@ -84,11 +84,12 @@ a timing run, because the extra logs make the extension slower.
 python3 .claude/skills/measure-extension-layer/scripts/summarize.py /tmp/extension-perf/<label> --compare old new
 ```
 
-The output has the layer sizes, the medians of each variant, and differences. It leaves out each execution environment that had a failed invocation, and the `dropped` column counts them. Each difference
-is the difference of two medians, with a bootstrap 95% interval. The bootstrap resamples whole
-execution environments, because invocations in one environment are not independent. If the
-interval contains 0, the
-run does not show a difference. Run again with a larger `-n` before you report a change.
+The output has the layer sizes, the medians of each variant, and differences. It leaves out each
+execution environment that had a failed invocation, and the `dropped` column counts them. Each
+difference is the difference of two medians, with a bootstrap 95% interval. The bootstrap
+resamples whole execution environments, because invocations in one environment are not
+independent. If the interval contains 0, the run does not show a difference. Run again with a
+larger `-n` before you report a change.
 
 How the metrics relate to the release dashboard, Lambda Extension Overhead per Runtime:
 
@@ -106,13 +107,20 @@ almost all of the difference in duration from `noext` is time after the handler 
 also includes any time the extension adds while the handler runs, so it is an upper limit of the
 post-runtime duration.
 
-For post-runtime duration, choose the warm interval for the traffic pattern that you check. Use
-the setup of the prod self-monitoring functions, `--region us-east-1 --arch x86_64 --runtime
-python314`, to get numbers near the dashboard:
+For post-runtime duration, choose the flush strategy and the warm interval for the traffic
+pattern that you check. The functions use `DD_SERVERLESS_FLUSH_STRATEGY=end`, so each invocation
+flushes when it ends. With the extension's default strategy, an environment changes its flush
+mode at its 20th invocation. The prod self-monitoring functions run for days, so they always use
+the later mode. To measure in that mode from the first invocation, set it with `--env`:
 
-| Dashboard traffic | Harness options | Result on 2026-10-19 |
+| Dashboard traffic | Mode after 20 invocations | Harness options |
 | --- | --- | --- |
-| `1min`, one flush in each invocation | `--warm-interval 60` | v101: 89.5 ms. The dashboard showed about 87 ms. |
+| `traffic:1min` | Periodic: a blocking flush when an invocation starts, at most every 20 s | `--warm-interval 60 --env DD_SERVERLESS_FLUSH_STRATEGY=periodically,20000` |
+| `traffic:busy` | Continuous: a flush in the background, at most every 20 s | `--warm-interval 1 --env DD_SERVERLESS_FLUSH_STRATEGY=continuously,20000` |
+
+Use the setup of the prod self-monitoring functions, `--region us-east-1 --arch x86_64 --runtime
+python314`, to get numbers near the dashboard. On 2026-10-19, with the default strategy,
+`--warm 30` and `--warm-interval 60`, v101 measured 89.5 ms. The dashboard showed about 87 ms.
 
 Other setups gave slower flushes, and the cause is not known. In `us-east-2` on `arm64`, a warm
 invocation took about 210 ms with 60 s gaps and about 125 ms with 1 s gaps. In the prod setup with

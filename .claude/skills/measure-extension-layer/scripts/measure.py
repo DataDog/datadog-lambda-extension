@@ -22,6 +22,7 @@ import zipfile
 from concurrent.futures import ThreadPoolExecutor
 
 import boto3
+from botocore.config import Config
 from botocore.exceptions import ConnectionError as BotoConnectionError
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -50,6 +51,8 @@ BASE_ENV = {
     "DD_SITE": "datadoghq.com",
     "DD_SERVICE": "extension-perf-test",
     "DD_ENV": "test",
+    # The default strategy changes at the 20th invocation of an environment.
+    "DD_SERVERLESS_FLUSH_STRATEGY": "end",
 }
 
 
@@ -124,6 +127,11 @@ def ensure_role(iam, secret_arn):
 def ensure_function(lam, name, rt, arch, role_arn, layers, env):
     try:
         lam.get_function(FunctionName=name)
+        # A function from an earlier run gets the current code and settings.
+        lam.update_function_code(FunctionName=name, ZipFile=zip_bytes(rt))
+        lam.get_waiter("function_updated_v2").wait(FunctionName=name)
+        lam.update_function_configuration(FunctionName=name, Timeout=30, MemorySize=1024)
+        lam.get_waiter("function_updated_v2").wait(FunctionName=name)
     except lam.exceptions.ResourceNotFoundException:
         lam.create_function(
             FunctionName=name,
@@ -202,11 +210,10 @@ def main():
         sys.exit("Set DD_API_KEY to a Datadog API key. The test functions send their data to the org of that key.")
 
     rt = RUNTIMES[args.runtime]
-    layer_arch = "arm64" if args.arch == "arm64" else "amd64"
     variants = {}
     for v in args.variants:
         vname, spec = v.split("=", 1)
-        layers = [] if spec == "none" else [resolve(spec, layer_arch, args.fips, args.region)]
+        layers = [] if spec == "none" else [resolve(spec, args.arch, args.fips, args.region)]
         fns = [
             f"{owner()}-extperf-{args.runtime}-{args.arch}-{vname}" + (f"-{k}" if args.copies > 1 else "")
             for k in range(1, args.copies + 1)
@@ -216,7 +223,12 @@ def main():
                 sys.exit(f"The function name {fn} is longer than 64 characters. Use a shorter variant name.")
         variants[vname] = (layers, fns)
 
-    lam = boto3.client("lambda", region_name=args.region)
+    # One connection for each function, because all of them are invoked at the same time.
+    lam = boto3.client(
+        "lambda",
+        region_name=args.region,
+        config=Config(max_pool_connections=sum(len(fns) for _, fns in variants.values())),
+    )
     logs = boto3.client("logs", region_name=args.region)
     secret_arn = ensure_api_key_secret(boto3.client("secretsmanager", region_name=args.region))
     env = {**BASE_ENV, "DD_API_KEY_SECRET_ARN": secret_arn, **dict(kv.split("=", 1) for kv in args.env)}
@@ -268,6 +280,9 @@ def main():
             print(f"{vname}: saved {len(events)} log events, {reports} REPORT lines", flush=True)
         with open(os.path.join(args.out, "meta.json"), "w") as f:
             json.dump(meta, f, indent=2)
+        # Reserved concurrency counts against the account limit, and the next run sets it again.
+        for fn in all_fns:
+            lam.delete_function_concurrency(FunctionName=fn)
     # summarize.py counts the REPORT line of a failed invocation like any other, so the results need a rerun.
     if failed:
         sys.exit(f"{len(failed)} invocations failed, for example in {failed[0]}. Run the measurement again.")

@@ -122,7 +122,7 @@ def main():
 
     print(f"\n## Medians")
     print(f"{'metric':42} " + " ".join(f"{v:>12}" for v in data))
-    for k in keys:
+    for k in keys + ["each_warm_duration_ms"]:
         cells = []
         for rows in data.values():
             xs = values(rows, k)

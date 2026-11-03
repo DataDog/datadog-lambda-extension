@@ -47,7 +47,7 @@ def main():
     p = argparse.ArgumentParser()
     p.add_argument("specs", nargs="*", help="v<N> or a layer version ARN")
     p.add_argument("--zip", action="append", default=[], help="a local layer zip")
-    p.add_argument("--arch", default="arm64", choices=["arm64", "amd64"])
+    p.add_argument("--arch", default="arm64", choices=["arm64", "x86_64"])
     p.add_argument("--fips", action="store_true")
     args = p.parse_args()
 
