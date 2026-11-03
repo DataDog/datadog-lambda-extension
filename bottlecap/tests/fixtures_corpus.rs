@@ -20,6 +20,8 @@ fn telemetry_batches_parse() {
             serde_json::from_slice(&telemetry::log_batch(kind, 10)).unwrap();
         assert_eq!(events.len(), 10, "{}", kind.name());
     }
+    // The largest shape, as `write_corpus` writes it, fits the 1 MiB `maxBytes`.
+    assert!(telemetry::log_batch(telemetry::LogKind::JsonString, 600).len() <= 1 << 20);
     let events: Vec<TelemetryEvent> =
         serde_json::from_slice(&telemetry::invocation_batch(telemetry::LogKind::Text, 5)).unwrap();
     assert_eq!(events.len(), 8);
@@ -52,6 +54,11 @@ fn trace_payload_round_trips() {
     let body = traces::v04_msgpack(&traces);
     let decoded: Vec<Vec<libdd_trace_protobuf::pb::Span>> = rmp_serde::from_slice(&body).unwrap();
     assert_eq!(decoded.len(), 100);
+    assert_eq!(
+        body,
+        traces::v04_2000_spans(),
+        "encoding is not deterministic"
+    );
 }
 
 #[test]
@@ -74,6 +81,7 @@ fn dogstatsd_packets_split_by_lines() {
 fn large_events_identify_as_their_trigger() {
     assert_eq!(events::all_payloads().len(), 38);
     let sqs = events::sqs_220kb();
+    assert_eq!(sqs["Records"][0]["body"].as_str().unwrap().len(), 22_000);
     let sqs_len = serde_json::to_vec(&sqs).unwrap().len();
     assert!((200_000..260_000).contains(&sqs_len), "sqs {sqs_len} B");
     assert!(matches!(

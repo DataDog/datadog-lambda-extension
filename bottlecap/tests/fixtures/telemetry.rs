@@ -157,9 +157,11 @@ pub fn function_event(kind: LogKind, i: usize) -> String {
     event(60 + i % 80, "function", &record)
 }
 
-/// An `extension` log event (bottlecap's own stdout as Lambda re-ingests it).
+/// An `extension` log event (bottlecap's own stdout as Lambda re-ingests it), in the JSON
+/// shape `logger::Formatter` writes.
 pub fn extension_event(i: usize) -> String {
-    let line = format!("[{}Z] DEBUG LOGS | processed batch {i}", time(60 + i % 80));
+    let line =
+        format!(r#"{{"status":"DEBUG","message":"DD_EXTENSION | DEBUG | processed batch {i}"}}"#);
     event(
         60 + i % 80,
         "extension",
@@ -194,7 +196,8 @@ pub fn platform_batch(request_id: &str) -> Vec<u8> {
     ])
 }
 
-/// `n` function log events of one shape, as one POST body (`n` is at most 1000 in practice).
+/// `n` function log events of one shape, as one POST body. Lambda caps a POST at 1000 events
+/// and 1 MiB, so keep `n` at most 600 for the JSON shapes.
 pub fn log_batch(kind: LogKind, n: usize) -> Vec<u8> {
     let events: Vec<String> = (0..n).map(|i| function_event(kind, i)).collect();
     batch(&events)

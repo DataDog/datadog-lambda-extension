@@ -4,6 +4,7 @@ use libdd_trace_protobuf::pb::Span;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+use crate::config::aws::get_aws_partition_by_region;
 use crate::lifecycle::invocation::{
     processor::MS_TO_NS,
     triggers::{
@@ -164,11 +165,10 @@ impl Trigger for LambdaFunctionUrlEvent {
     }
 
     fn get_arn(&self, region: &str) -> String {
+        let partition = get_aws_partition_by_region(region);
         let function_name = env::var("AWS_LAMBDA_FUNCTION_NAME").unwrap_or_default();
-        format!(
-            "arn:aws:lambda:{region}:{}:url:{}",
-            self.request_context.account_id, function_name
-        )
+        let account_id = &self.request_context.account_id;
+        format!("arn:{partition}:lambda:{region}:{account_id}:url:{function_name}")
     }
 
     fn get_carrier(&self) -> HashMap<String, String> {
@@ -196,6 +196,7 @@ impl ServiceNameResolver for LambdaFunctionUrlEvent {
 mod tests {
     use super::*;
     use crate::lifecycle::invocation::triggers::test_utils::read_json_file;
+    use serial_test::serial;
 
     #[test]
     fn test_new() {
@@ -326,6 +327,7 @@ mod tests {
     }
 
     #[test]
+    #[serial] // mutates the shared AWS_LAMBDA_FUNCTION_NAME env var
     fn test_get_arn() {
         unsafe { env::set_var("AWS_LAMBDA_FUNCTION_NAME", "mock-lambda") };
         let json = read_json_file("lambda_function_url_event.json");
@@ -337,6 +339,32 @@ mod tests {
             "arn:aws:lambda:sa-east-1:601427279990:url:mock-lambda"
         );
         unsafe { env::remove_var("AWS_LAMBDA_FUNCTION_NAME") };
+    }
+
+    #[test]
+    #[serial] // coordinates with test_get_arn, which mutates AWS_LAMBDA_FUNCTION_NAME
+    fn test_get_arn_non_default_partitions() {
+        let json = read_json_file("lambda_function_url_event.json");
+        let payload = serde_json::from_str(&json).expect("Failed to deserialize into Value");
+        let event = LambdaFunctionUrlEvent::new(payload)
+            .expect("Failed to deserialize LambdaFunctionUrlEvent");
+
+        // This test only exercises the partition portion of the ARN, so derive the
+        // expected value from whatever AWS_LAMBDA_FUNCTION_NAME is currently set to
+        // rather than mutating the shared process environment.
+        let function_name = env::var("AWS_LAMBDA_FUNCTION_NAME").unwrap_or_default();
+
+        // GovCloud regions use the aws-us-gov partition.
+        assert_eq!(
+            event.get_arn("us-gov-west-1"),
+            format!("arn:aws-us-gov:lambda:us-gov-west-1:601427279990:url:{function_name}")
+        );
+
+        // China regions use the aws-cn partition.
+        assert_eq!(
+            event.get_arn("cn-north-1"),
+            format!("arn:aws-cn:lambda:cn-north-1:601427279990:url:{function_name}")
+        );
     }
 
     #[test]
