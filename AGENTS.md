@@ -25,7 +25,7 @@ The `serverless-components` repo (https://github.com/DataDog/serverless-componen
 
 ## Pull Requests
 
-- When creating a PR, follow the PR template at `.github/pull_request_template.md`.
+- When creating a PR, follow the PR template at `.github/pull_request_template.md`. Use its sections (Problem, Cause, This PR, Testing) instead of one long overview. In Testing, give each test its own subsection with Steps and Result.
 - Try to keep PRs small to make review easier: usually no more than 300 lines of core code, excluding tests, dependency updates, and other generated changes.
 - When making a change on a PR, update the PR title and summary if necessary.
 - When reviewing a PR, make sure the PR summary accurately describes the code changes.
