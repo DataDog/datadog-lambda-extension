@@ -131,9 +131,9 @@ install_cargo() {
 }
 
 find_sccache() {
-  if [ -n "${SCCACHE_BIN:-}" ] && [ -x "$SCCACHE_BIN" ]; then echo "$SCCACHE_BIN"; return 0; fi
+  if [ -n "${SCCACHE_BIN:-}" ] && [ -x "$SCCACHE_BIN" ]; then abspath "$SCCACHE_BIN"; return 0; fi
   if [ -x "$TOOLS_DIR/bin/sccache" ]; then echo "$TOOLS_DIR/bin/sccache"; return 0; fi
-  if command -v sccache >/dev/null 2>&1; then command -v sccache; return 0; fi
+  if command -v sccache >/dev/null 2>&1; then abspath "$(command -v sccache)"; return 0; fi
   return 1
 }
 
