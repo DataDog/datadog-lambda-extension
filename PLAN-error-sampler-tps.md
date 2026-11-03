@@ -1,6 +1,19 @@
 # Plan: rate-limit Lambda error trace rescue with `DD_APM_ERROR_TPS` and deprecate `DD_SERVERLESS_ERROR_SAMPLER_ENABLED`
 
-> Temporary planning file (untracked). Delete before merging the PR. This file plans **PR 1 of 3**; PRs 2 and 3 are listed under "Follow-up PRs" and are out of scope here.
+> Temporary planning file, committed on its own so it can be dropped. Delete it before merging the PR. This file plans **PR 1 of 3**; PRs 2 and 3 are listed under "Follow-up PRs" and are out of scope here.
+
+## Status (PR 1)
+- **Implemented** on `lpimentel/error-sampler-rate-limited`, rebased onto `origin/main` `f32a2bc0` (#1471), and pushed. No PR opened yet.
+- Commits: this plan file, then `docs(bottlecap): DD_APM_FEATURES accepts space-separated values` (step 1), then `feat(bottlecap): rate-limit error trace rescue with DD_APM_ERROR_TPS` (steps 2-4, with review nits and test simplifications squashed in).
+- Final verification passed: `cargo fmt --check`, `cargo test --workspace`, the test-mode bin, and clippy `-D warnings` for default, default+test-mode, and fips. Greps for `AlwaysKeep`, `not supported by the Lambda extension`, `new_error_sampler(true|false)` and added em dashes are all clean.
+- Not verified: the "make the shared run reset per call and watch the shared-budget test fail" check from step 3.
+- Remaining: open the PR (text under "Commits and PR"), and drop this plan commit (or add a commit deleting the file) before merge.
+- Deviations from the steps below, as implemented:
+  - The step 2 table rows are data (`yaml: Option<&str>`, `env: &[(key, value)]`, `tps_is_none: bool`) applied by one loop. The "no removal promise" check runs inside that loop on every warning row instead of in a separate test. The legacy raw-field check was dropped, since a warning exists exactly when the legacy flag is set.
+  - The non-finite warning reads `Ignoring non-finite DD_APM_ERROR_TPS (apm_error_tps) value {v}`, so it also covers YAML.
+  - The test helper `enabled_error_sampler()` is renamed `default_error_sampler()` (20 call sites in `trace_processor.rs` and `lifecycle/invocation/processor.rs`).
+  - The two sampler-level tests share a `sample_errored_trace(sampler, now, n)` helper.
+  - `DEFAULT_APM_ERROR_TPS` is declared after the `use datadog_agent_config::{...}` block.
 
 ## PR series
 | PR | Scope | Base |
@@ -15,7 +28,7 @@ Order matters: filtering on the tracer path before rescue exists there would dro
 Make `DD_APM_ERROR_TPS` the only knob for error trace rescue in bottlecap. Rescue always uses the shared `ErrorSamplerMode::RateLimited` sampler with Go agent / SCL trace-agent defaults: rescue is on at 10 TPS when nothing is set, and `<= 0` turns it off. `DD_SERVERLESS_ERROR_SAMPLER_ENABLED` stays parsed but deprecated.
 
 ## Context (verified by reading the code)
-- Repo: DataDog/datadog-lambda-extension. Worktree: `/home/lucas/source/datadog/datadog-lambda-extension--lpimentel-error-sampler-rate-limited`. Branch: `lpimentel/error-sampler-rate-limited` at `aa9d3f54`, 1 commit behind `origin/main` (`e36a4709`, #1424, `AGENTS.md` only). Fast-forward to `origin/main` before starting; no line references below change. All Rust code is under `bottlecap/`. Toolchain is 1.93.1.
+- Repo: DataDog/datadog-lambda-extension. Worktree: `/home/lucas/source/datadog/datadog-lambda-extension--lpimentel-error-sampler-rate-limited`. Branch: `lpimentel/error-sampler-rate-limited`, now based on `origin/main` `f32a2bc0`. Line references below are from the original base (`aa9d3f54`) and may have drifted by a few lines. All Rust code is under `bottlecap/`. Toolchain is 1.93.1.
 - `AGENTS.md` (after #1424) says to check `serverless-components` before adding functionality. This plan adds no new shared logic: the sampler is already the shared crate, and the new code is bottlecap's `LambdaConfig` extension field plus its resolution (bottlecap-specific because of the deprecated flag). SCL's `parse_error_sampler_config` lives in `datadog-trace-agent`, not in a shared crate, so there is nothing to reuse.
 - Sampler crate `datadog-agent-trace-sampler` is pinned at serverless-components rev `e462105e918904e6b1ad2ebc153ae561cebe5a34` (`bottlecap/Cargo.toml:100`). Do not bump it. Its source is at `~/.cargo/git/checkouts/serverless-components-d7345b4db0f8d2aa/e462105/crates/datadog-agent-trace-sampler/src/{lib.rs,score_sampler.rs}`. What it provides:
   - `ErrorSamplerConfig { mode, target_tps, extra_sample_rate }`. `Default` is `RateLimited`, `10.0`, `1.0`.
@@ -95,7 +108,7 @@ Make `DD_APM_ERROR_TPS` the only knob for error trace rescue in bottlecap. Rescu
 
    Rust formats `5.0_f64` with `{}` as `5`, so `"DD_APM_ERROR_TPS=5"` matches.
 
-   Before finalizing the table, check how figment treats exponent notation without a dot (`DD_APM_ERROR_TPS=1e3`). The `1e400` row above suggests it stays a string and is rejected as invalid. Add a row pinning whatever actually happens, and if it is rejected, list it under Risks so the PR can mention it.
+   Resolved: figment only tries a float parse when the text contains `.` (`figment-0.10.19/src/value/parse.rs:90-100`, and again in `value.rs:512-532`). So `DD_APM_ERROR_TPS=1e3` stays a string and is rejected (target 10.0, `apm_error_tps == None`), while `1.0e3` parses to 1000.0. The table has both rows, and `1e400` is rejected the same way.
 
    - Add `default_apm_error_tps_matches_shared_sampler_default`, asserting `DEFAULT_APM_ERROR_TPS == datadog_agent_trace_sampler::ErrorSamplerConfig::default().target_tps`.
    - Update `apm_features_error_rare_sample_tracer_drop_from_env` (~:752-764). Replace `assert!(!config.ext.serverless_error_sampler_enabled)` with `assert_eq!(config.ext.error_sampler_target_tps(), DEFAULT_APM_ERROR_TPS)`. Reword its comment to "The feature only widens rescue eligibility; it must not change the rescue budget."
@@ -103,7 +116,7 @@ Make `DD_APM_ERROR_TPS` the only knob for error trace rescue in bottlecap. Rescu
 2. Add `pub const DEFAULT_APM_ERROR_TPS: f64 = 10.0;` near the top of the LambdaConfig section. Its doc comment should say it matches the shared sampler and Go agent default.
 3. Add a private deserializer `deserialize_optional_finite_f64<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Option<f64>, D::Error>`.
    - Call `deser_opt_lossless::<_, f64>(d)?`, then filter out non-finite values.
-   - When a value is dropped, call `tracing::warn!("Ignoring non-finite DD_APM_ERROR_TPS value {v}")` (fully qualified, since `tracing` is not imported in this file).
+   - When a value is dropped, call `tracing::warn!("Ignoring non-finite DD_APM_ERROR_TPS (apm_error_tps) value {v}")` (fully qualified, since `tracing` is not imported in this file).
 4. `LambdaConfig` (~:72-79, default ~:147):
    - Change `serverless_error_sampler_enabled` to `Option<bool>` and give it default `None`.
    - Rewrite its doc: deprecated raw value of `DD_SERVERLESS_ERROR_SAMPLER_ENABLED`; read it only through `error_sampler_target_tps` and `legacy_error_sampler_warning`.
@@ -213,6 +226,8 @@ Run everything from `bottlecap/` and report the pass/fail counts.
 8. Grep the changed lines for `—` (em dash): zero matches.
 
 ## Commits and PR (only when the user asks)
+Both commits are done (see Status). The PR is not opened yet.
+
 - Commit 1 (step 1 only): `docs(bottlecap): DD_APM_FEATURES accepts space-separated values`
 - Commit 2 (steps 2-4): `feat(bottlecap): rate-limit error trace rescue with DD_APM_ERROR_TPS`. Body:
   - Rescue is on by default at 10 errored traces/s per execution environment when the extension computes stats.
@@ -226,6 +241,8 @@ Run everything from `bottlecap/` and report the pass/fail counts.
   - The behavior change: compute-stats users who never set the flag now get rescue at 10/s.
   - The caveats: per-environment budget, compute-stats path only, approximate limit with no hard ceiling, inherited from Go/SCL.
   - `_dd.errors_sr` can now be below 1.0 under load.
+  - Legacy-only YAML users keep the same on/off result, but rescue becomes rate-limited.
+  - Exponent values without a dot, such as `1e3`, are rejected as invalid.
 - `## Testing`: describe what is covered. Do not include test counts.
 
 ## Risks
@@ -234,6 +251,7 @@ Run everything from `bottlecap/` and report the pass/fail counts.
 - **Flaky-test risk.** The shared-budget test uses the real wall clock through `process_traces`, and a 5s bucket boundary can fall mid-test. Comparing against a reset control (`shared * 2 < control`) tolerates that, because rotation only throttles the shared run further. Do not assert exact counts.
 - **Throttled recovery after freeze/thaw (inherited).** After a long gap, stale counters are cleared but a throttled signature's stored rate only rises 1.2x per evaluation, and it also holds `lowest_rate` (the default for unknown signatures) down. A thawed sandbox can therefore under-rescue for a while after a past burst. Same as the Go agent and SCL; document it in the `apm_error_tps` doc and the PR, do not deviate.
 - **Legacy-only YAML users.** A user with `serverless_error_sampler_enabled: true` and no TPS keeps the same on/off result, but rescue is now rate-limited instead of keep-all. This is intended; state it in the PR.
+- **`1e3` is rejected (parity, intentional).** Exponent notation without a dot stays a string in figment and is ignored with a deserializer warning. Mention it in the PR; do not add a custom parser.
 - **Duplicate warnings.** The non-finite warning in the deserializer can fire once per source (YAML and env). That is acceptable at startup.
 - **Lints.** Clippy pedantic needs `#[must_use]` on the new pub fns and backticks around identifiers in docs (`doc_markdown`). Use `.expect("...")`, not `.unwrap()`, in new tests unless the module already has `#[allow(clippy::unwrap_used)]` (the config test module does; the trace_processor test module relies on `expect`).
 
