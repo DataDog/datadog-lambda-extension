@@ -100,7 +100,7 @@ aws-vault exec sso-serverless-sandbox-account-admin -- python3 .claude/skills/me
 ```
 
 It prints the zipped size (`CodeSize`, the number that AWS limits) and the unzipped size. Use
-`--arch amd64` or `--fips` for the other layers.
+`--arch x86_64` or `--fips` for the other layers.
 
 The metric `sls.monitoring.latest_layer_version_size{layer:datadog-extension-arm}`, grouped by
 `layer_version`, has the same zipped size. It has a value only for versions that were the latest
