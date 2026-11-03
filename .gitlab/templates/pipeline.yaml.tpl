@@ -138,6 +138,35 @@ bottlecap symbols ({{ $flavor.name }}):
     - printf 'commit=%s\nref=%s\npipeline=%s\njob=%s\n' "$CI_COMMIT_SHA" "$CI_COMMIT_REF_NAME" "$CI_PIPELINE_URL" "$CI_JOB_URL" > .binaries/bottlecap-{{ $flavor.suffix }}.build-info
     - ls -la .binaries/
     - echo "unstripped binary for ${CI_COMMIT_SHA}:" "${CI_JOB_URL}/artifacts/raw/.binaries/bottlecap-{{ $flavor.suffix }}-unstripped"
+
+# Size and ELF report of the compiled binary against the latest main build
+# (the `bottlecap symbols ({{ $flavor.name }})` artifact). Informational: it
+# never fails on a number; a growth over BINARY_SIZE_WARN_KIB prints a WARNING
+# line. Table in the job log and in .binary-report/report.md.
+binary report ({{ $flavor.name }}):
+  stage: build
+  # The CI image the cargo jobs use (Debian based: bash present, apt works).
+  image: ${CI_DOCKER_TARGET_IMAGE}:${CI_DOCKER_TARGET_VERSION}
+  tags: ["arch:amd64"]
+  needs:
+    - bottlecap ({{ $flavor.name }})
+  dependencies:
+    - bottlecap ({{ $flavor.name }})
+  allow_failure: true
+  timeout: 10m
+  variables:
+    FILE_SUFFIX: {{ $flavor.suffix }}
+    BINARY_SIZE_WARN_KIB: "256"
+  artifacts:
+    when: always
+    expire_in: 1 week
+    paths:
+      - .binary-report/
+    reports:
+      metrics: .binary-report/metrics.txt
+  script:
+    - command -v python3 >/dev/null || (apt-get update && apt-get install -y --no-install-recommends python3)
+    - python3 -I .gitlab/scripts/binary_report.py --suffix "$FILE_SUFFIX"
 {{ end }}{{/* end keep_symbols */}}
 
 layer ({{ $flavor.name }}):
