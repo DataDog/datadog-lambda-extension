@@ -35,7 +35,7 @@ use bottlecap::traces::stats_concentrator_service::StatsConcentratorService;
 use bottlecap::traces::stats_flusher::StatsFlusher;
 use bottlecap::traces::stats_generator::StatsGenerator;
 use bottlecap::traces::trace_aggregator::SendDataBuilderInfo;
-use bottlecap::traces::trace_aggregator_service::AggregatorService;
+use bottlecap::traces::trace_aggregator_service::{AggregatorHandle, AggregatorService};
 use bottlecap::traces::trace_flusher::TraceFlusher;
 use bottlecap::traces::trace_processor::{
     SendingTraceProcessor, ServerlessTraceProcessor, new_error_sampler,
@@ -1371,72 +1371,15 @@ async fn stats_additional_metric_tags_multiple_keys_through_fake_intake() {
 // because its timer keeps flushing.
 // ---------------------------------------------------------------------------
 
-/// Builds a `FlushingService` whose trace and stats flushers point at `fake_intake`.
-/// Logs, metrics and proxy run real services with empty queues, so their flushes are
-/// no-ops, as in `bottlecap-test-mode`.
-fn flushing_service_for(
-    fake_intake: &FakeIntake,
-    config: &Arc<Config>,
-    concentrator_handle: bottlecap::traces::stats_concentrator_service::StatsConcentratorHandle,
-) -> FlushingService {
-    let api_key_factory = Arc::new(ApiKeyFactory::new(DD_API_KEY));
-    let http_client = create_client(None, None, false).expect("failed to create http client");
-    let reqwest_client = bottlecap::http::get_client(config);
-
-    let (trace_aggregator_service, trace_aggregator_handle) = AggregatorService::default();
-    tokio::spawn(trace_aggregator_service.run());
-    let trace_flusher = Arc::new(TraceFlusher::new(
-        trace_aggregator_handle,
-        Arc::clone(config),
-        Arc::clone(&api_key_factory),
-        http_client.clone(),
-    ));
-
-    let stats_flusher = Arc::new(StatsFlusher::new(
-        Arc::clone(&api_key_factory),
-        Arc::new(Mutex::new(StatsAggregator::new_with_concentrator(
-            concentrator_handle,
-        ))),
-        Arc::clone(config),
-        http_client,
-        fake_intake.stats_url(),
-    ));
-
-    let (logs_aggregator_service, logs_aggregator_handle) = LogsAggregatorService::default();
-    tokio::spawn(logs_aggregator_service.run());
-    let logs_flusher = LogsFlusher::new(
-        Arc::clone(&api_key_factory),
-        logs_aggregator_handle,
-        Arc::clone(config),
-        reqwest_client.clone(),
-    );
-
-    let (metrics_aggregator_service, metrics_aggregator_handle) =
-        MetricsAggregatorService::new(EMPTY_TAGS, CONTEXTS).expect("metrics aggregator");
-    tokio::spawn(metrics_aggregator_service.run());
-
-    let tags_provider = Arc::new(Provider::new(
-        Arc::clone(config),
-        LAMBDA_RUNTIME_SLUG.to_string(),
-        &HashMap::new(),
-    ));
-    let proxy_flusher = Arc::new(ProxyFlusher::new(
-        api_key_factory,
-        Arc::new(Mutex::new(proxy_aggregator::Aggregator::default())),
-        tags_provider,
-        Arc::clone(config),
-        reqwest_client,
-    ));
-
-    FlushingService::new(
-        logs_flusher,
-        trace_flusher,
-        stats_flusher,
-        proxy_flusher,
-        Arc::new(Vec::new()),
-        metrics_aggregator_handle,
-        None,
+/// Nanoseconds since the Unix epoch, as span timestamps use.
+fn now_ns() -> i64 {
+    i64::try_from(
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system time before unix epoch")
+            .as_nanos(),
     )
+    .expect("nanos since epoch must fit in i64")
 }
 
 /// Which `FlushingService` entry point a test drives.
@@ -1448,100 +1391,213 @@ enum FlushPath {
     NonBlocking,
 }
 
-/// Sends one root span that ends "now" through the stats pipeline, flushes once via
-/// `path`, and returns the hits for that span that reached the intake.
+/// The trace and stats pipelines feeding one `FlushingService`, with its trace and
+/// stats flushers pointed at a fake intake. Logs, metrics and proxy run real services
+/// with empty queues, so their flushes are no-ops, as in `bottlecap-test-mode`.
+struct FlushHarness {
+    fake_intake: FakeIntake,
+    config: Arc<Config>,
+    tags_provider: Arc<Provider>,
+    sender: SendingTraceProcessor,
+    trace_rx: tokio::sync::mpsc::Receiver<SendDataBuilderInfo>,
+    trace_aggregator_handle: AggregatorHandle,
+    flushing_service: FlushingService,
+}
+
+impl FlushHarness {
+    async fn new(force_stats: bool) -> Self {
+        let fake_intake = FakeIntake::start().await;
+        let config = Arc::new(Config {
+            api_key: DD_API_KEY.to_string(),
+            site: "datadoghq.com".to_string(),
+            apm_dd_url: fake_intake.traces_url(),
+            service: Some("fake-intake-trace-service".to_string()),
+            ext: bottlecap::config::LambdaConfig {
+                lambda_extension_compute_stats: true,
+                ..Default::default()
+            },
+            ..Config::default()
+        });
+        let api_key_factory = Arc::new(ApiKeyFactory::new(DD_API_KEY));
+        let http_client = create_client(None, None, false).expect("failed to create http client");
+        let reqwest_client = bottlecap::http::get_client(&config);
+
+        let (concentrator_service, concentrator_handle) =
+            StatsConcentratorService::new(Arc::clone(&config));
+        tokio::spawn(concentrator_service.run());
+
+        // Spans go through `send_processed_traces`, as from the trace agent and the
+        // invocation processor: it enqueues each span on the concentrator before it
+        // returns, and sends the trace on `trace_tx`.
+        let (trace_tx, trace_rx) = tokio::sync::mpsc::channel::<SendDataBuilderInfo>(8);
+        let sender = SendingTraceProcessor {
+            appsec: None,
+            processor: Arc::new(ServerlessTraceProcessor {
+                obfuscation_config: Arc::new(ObfuscationConfig::default()),
+                error_sampler: new_error_sampler(true),
+                error_rare_sample_tracer_drop: false,
+            }),
+            trace_tx,
+            stats_generator: Arc::new(StatsGenerator::new(concentrator_handle.clone())),
+        };
+        let tags_provider = Arc::new(Provider::new(
+            Arc::clone(&config),
+            LAMBDA_RUNTIME_SLUG.to_string(),
+            &HashMap::from([(
+                "function_arn".to_string(),
+                "arn:aws:lambda:us-west-2:123456789012:function:my-function".to_string(),
+            )]),
+        ));
+
+        let (trace_aggregator_service, trace_aggregator_handle) = AggregatorService::default();
+        tokio::spawn(trace_aggregator_service.run());
+        let trace_flusher = Arc::new(TraceFlusher::new(
+            trace_aggregator_handle.clone(),
+            Arc::clone(&config),
+            Arc::clone(&api_key_factory),
+            http_client.clone(),
+        ));
+
+        let stats_flusher = Arc::new(StatsFlusher::new(
+            Arc::clone(&api_key_factory),
+            Arc::new(Mutex::new(StatsAggregator::new_with_concentrator(
+                concentrator_handle,
+            ))),
+            Arc::clone(&config),
+            http_client,
+            fake_intake.stats_url(),
+        ));
+
+        let (logs_aggregator_service, logs_aggregator_handle) = LogsAggregatorService::default();
+        tokio::spawn(logs_aggregator_service.run());
+        let logs_flusher = LogsFlusher::new(
+            Arc::clone(&api_key_factory),
+            logs_aggregator_handle,
+            Arc::clone(&config),
+            reqwest_client.clone(),
+        );
+
+        let (metrics_aggregator_service, metrics_aggregator_handle) =
+            MetricsAggregatorService::new(EMPTY_TAGS, CONTEXTS).expect("metrics aggregator");
+        tokio::spawn(metrics_aggregator_service.run());
+
+        let proxy_flusher = Arc::new(ProxyFlusher::new(
+            api_key_factory,
+            Arc::new(Mutex::new(proxy_aggregator::Aggregator::default())),
+            Arc::clone(&tags_provider),
+            Arc::clone(&config),
+            reqwest_client,
+        ));
+
+        let mut flushing_service = FlushingService::new(
+            logs_flusher,
+            trace_flusher,
+            stats_flusher,
+            proxy_flusher,
+            Arc::new(Vec::new()),
+            metrics_aggregator_handle,
+            None,
+        );
+        if force_stats {
+            flushing_service = flushing_service.with_forced_stats();
+        }
+
+        Self {
+            fake_intake,
+            config,
+            tags_provider,
+            sender,
+            trace_rx,
+            trace_aggregator_handle,
+            flushing_service,
+        }
+    }
+
+    /// Sends a root span for `resource` that ends at `end_ns`, then hands its trace to
+    /// the trace aggregator, as the trace agent does.
+    async fn send_span(&mut self, id: u64, resource: &str, end_ns: i64) {
+        let duration = 5_000_000;
+        let mut trace = stats_trace(id, resource, duration, 0);
+        trace[0].start = end_ns - duration;
+        self.sender
+            .send_processed_traces(
+                Arc::clone(&self.config),
+                Arc::clone(&self.tags_provider),
+                header_tags_with(false),
+                vec![trace],
+                100,
+                None,
+            )
+            .await
+            .expect("send_processed_traces failed");
+        while let Ok(info) = self.trace_rx.try_recv() {
+            self.trace_aggregator_handle
+                .insert_payload(info)
+                .expect("insert_payload must succeed");
+        }
+    }
+
+    async fn flush(&mut self, path: FlushPath) {
+        match path {
+            FlushPath::Blocking => {
+                let undelivered = self.flushing_service.flush_blocking().await;
+                assert!(!undelivered, "blocking flush dropped payloads");
+            }
+            FlushPath::NonBlocking => {
+                self.flushing_service.spawn_non_blocking().await;
+                let flush_error = self.flushing_service.await_handles().await;
+                assert!(!flush_error, "non-blocking flush reported an error");
+            }
+        }
+    }
+
+    /// `(bucket start, hits)` for `resource` in every stats bucket the intake received,
+    /// in arrival order.
+    fn stats_hits(&self, resource: &str) -> Vec<(u64, u64)> {
+        self.fake_intake
+            .stats_payloads()
+            .iter()
+            .flat_map(|payload| &payload.stats)
+            .flat_map(|client| &client.stats)
+            .flat_map(|bucket| {
+                bucket
+                    .stats
+                    .iter()
+                    .filter(|grouped| grouped.resource == resource)
+                    .map(|grouped| (bucket.start, grouped.hits))
+            })
+            .collect()
+    }
+
+    /// Total hits for `resource` the stats intake received.
+    fn total_hits(&self, resource: &str) -> u64 {
+        self.stats_hits(resource).iter().map(|(_, hits)| hits).sum()
+    }
+
+    /// Spans for `resource` the trace intake received.
+    fn spans_sent(&self, resource: &str) -> usize {
+        captured_trace_spans(&self.fake_intake.trace_payloads())
+            .filter(|span| span.resource == resource)
+            .count()
+    }
+}
+
+/// Sends one root span that ends "now" and flushes once via `path`. Returns the hits
+/// for that span that reached the stats intake, after checking that its trace was sent
+/// by the same flush.
 ///
 /// A span ending "now" lands in the concentrator's current bucket, which a
 /// non-forced flush keeps back together with the previous one.
 async fn hits_sent_by_one_flush(force_stats: bool, path: FlushPath) -> u64 {
-    let fake_intake = FakeIntake::start().await;
-    let config = Arc::new(Config {
-        api_key: DD_API_KEY.to_string(),
-        site: "datadoghq.com".to_string(),
-        apm_dd_url: fake_intake.traces_url(),
-        service: Some("fake-intake-trace-service".to_string()),
-        ext: bottlecap::config::LambdaConfig {
-            lambda_extension_compute_stats: true,
-            ..Default::default()
-        },
-        ..Config::default()
-    });
-
-    let (concentrator_service, concentrator_handle) =
-        StatsConcentratorService::new(Arc::clone(&config));
-    tokio::spawn(concentrator_service.run());
-
-    // Generate the invocation's stats the way the trace agent and the invocation
-    // processor do: through `send_processed_traces`, which enqueues each span on the
-    // concentrator before it returns.
-    let (trace_tx, _trace_rx) = tokio::sync::mpsc::channel::<SendDataBuilderInfo>(8);
-    let sender = SendingTraceProcessor {
-        appsec: None,
-        processor: Arc::new(ServerlessTraceProcessor {
-            obfuscation_config: Arc::new(ObfuscationConfig::default()),
-            error_sampler: new_error_sampler(true),
-            error_rare_sample_tracer_drop: false,
-        }),
-        trace_tx,
-        stats_generator: Arc::new(StatsGenerator::new(concentrator_handle.clone())),
-    };
-    let tags_provider = Arc::new(Provider::new(
-        Arc::clone(&config),
-        LAMBDA_RUNTIME_SLUG.to_string(),
-        &HashMap::from([(
-            "function_arn".to_string(),
-            "arn:aws:lambda:us-west-2:123456789012:function:my-function".to_string(),
-        )]),
-    ));
-
-    let now_ns = i64::try_from(
-        SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .expect("system time before unix epoch")
-            .as_nanos(),
-    )
-    .expect("nanos since epoch must fit in i64");
-    let duration = 5_000_000;
-    let mut trace = stats_trace(0x3333_3333_3333_3333, "GET /end", duration, 0);
-    trace[0].start = now_ns - duration;
-
-    sender
-        .send_processed_traces(
-            Arc::clone(&config),
-            tags_provider,
-            header_tags_with(false),
-            vec![trace],
-            100,
-            None,
-        )
-        .await
-        .expect("send_processed_traces failed");
-
-    let mut flushing_service = flushing_service_for(&fake_intake, &config, concentrator_handle);
-    if force_stats {
-        flushing_service = flushing_service.with_forced_stats();
-    }
-    match path {
-        FlushPath::Blocking => {
-            let undelivered = flushing_service.flush_blocking().await;
-            assert!(!undelivered, "blocking flush dropped payloads");
-        }
-        FlushPath::NonBlocking => {
-            flushing_service.spawn_non_blocking().await;
-            let flush_error = flushing_service.await_handles().await;
-            assert!(!flush_error, "non-blocking flush reported an error");
-        }
-    }
-
-    fake_intake
-        .stats_payloads()
-        .iter()
-        .flat_map(|payload| &payload.stats)
-        .flat_map(|client| &client.stats)
-        .flat_map(|bucket| &bucket.stats)
-        .filter(|grouped| grouped.resource == "GET /end")
-        .map(|grouped| grouped.hits)
-        .sum()
+    let mut harness = FlushHarness::new(force_stats).await;
+    harness.send_span(0x3333_3333_3333_3333, "GET /end", now_ns()).await;
+    harness.flush(path).await;
+    assert_eq!(
+        harness.spans_sent("GET /end"),
+        1,
+        "the flush must send the trace"
+    );
+    harness.total_hits("GET /end")
 }
 
 /// On-demand mode: a blocking flush (`End`, `Periodic`) sends the stats of the spans
@@ -1562,7 +1618,7 @@ async fn forced_non_blocking_flush_sends_current_stats() {
 }
 
 /// Managed Instance mode keeps the hold-back: the current bucket stays for the next
-/// timer flush.
+/// timer flush, while its trace is sent.
 #[tokio::test]
 async fn unforced_flush_holds_back_current_stats() {
     assert_eq!(hits_sent_by_one_flush(false, FlushPath::Blocking).await, 0);
