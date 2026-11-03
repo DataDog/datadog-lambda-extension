@@ -71,16 +71,8 @@ impl FlushingService {
         }
     }
 
-    /// Makes every flush force the stats flusher, so the stats of the spans it
-    /// sends leave in the same flush instead of being held back.
-    ///
-    /// By default the stats concentrator keeps its newest buckets back to absorb
-    /// late spans, and only the final flush forces them out. That suits a
-    /// process whose timer keeps flushing. In on-demand mode the sandbox can
-    /// freeze right after any flush, so held-back stats would wait for the next
-    /// invocation or shutdown while their traces have already been sent. All
-    /// other telemetry types are always flushed in full. A span arriving after
-    /// its bucket was flushed still counts, in the oldest open bucket.
+    /// Forces stats out with every flush so on-demand sandbox freezing
+    /// doesn't leave stats behind after their traces are sent.
     #[must_use]
     pub fn with_forced_stats(mut self) -> Self {
         self.force_stats = true;
