@@ -174,7 +174,6 @@ impl FlushingService {
     pub async fn await_handles(&mut self) -> bool {
         let mut joinset = tokio::task::JoinSet::new();
         let mut flush_error = false;
-        let force_stats = self.force_stats;
 
         // Await stats handles with retry
         for handle in self.handles.stats_flush_handles.drain(..) {
@@ -187,7 +186,7 @@ impl FlushingService {
                             retry.len()
                         );
                         joinset.spawn(async move {
-                            sf.flush(force_stats, Some(retry)).await;
+                            sf.send(retry).await;
                         });
                     }
                 }
@@ -427,5 +426,137 @@ impl std::fmt::Debug for FlushingService {
         f.debug_struct("FlushingService")
             .field("handles", &self.handles)
             .finish_non_exhaustive()
+    }
+}
+
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+mod tests {
+    use super::*;
+    use crate::config::Config;
+    use crate::tags::provider::Provider;
+    use crate::traces::http_client::create_client;
+    use crate::traces::stats_aggregator::StatsAggregator;
+    use crate::traces::stats_concentrator_service::StatsConcentratorService;
+    use dogstatsd::api_key::ApiKeyFactory;
+    use httpmock::{Method::POST, MockServer};
+    use libdd_trace_protobuf::pb;
+    use std::collections::HashMap;
+    use std::time::{Duration, SystemTime, UNIX_EPOCH};
+    use tokio::sync::Mutex;
+
+    #[tokio::test]
+    #[allow(clippy::too_many_lines)]
+    async fn stats_redrive_leaves_fresh_stats_for_final_flush() {
+        let server = MockServer::start_async().await;
+        let failed_send = server
+            .mock_async(|when, then| {
+                when.method(POST).path("/api/v0.2/stats");
+                then.status(503);
+            })
+            .await;
+        let config = Arc::new(Config::default());
+        let api_key_factory = Arc::new(ApiKeyFactory::new("test-api-key"));
+        let http_client = create_client(None, None, false).expect("http client");
+        let reqwest_client = crate::http::get_client(&config);
+        let (concentrator_service, concentrator) =
+            StatsConcentratorService::new(Arc::clone(&config));
+        tokio::spawn(concentrator_service.run());
+        let stats_flusher = Arc::new(StatsFlusher::new(
+            Arc::clone(&api_key_factory),
+            Arc::new(Mutex::new(StatsAggregator::new_with_concentrator(
+                concentrator.clone(),
+            ))),
+            Arc::clone(&config),
+            http_client.clone(),
+            server.url("/api/v0.2/stats"),
+        ));
+        let (_, logs_handle) = crate::logs::aggregator_service::AggregatorService::default();
+        let (_, trace_handle) =
+            crate::traces::trace_aggregator_service::AggregatorService::default();
+        let (_, metrics_handle) = dogstatsd::aggregator::AggregatorService::new(
+            dogstatsd::metric::EMPTY_TAGS,
+            dogstatsd::constants::CONTEXTS,
+        )
+        .expect("metrics aggregator");
+        let tags_provider = Arc::new(Provider::new(
+            Arc::clone(&config),
+            crate::LAMBDA_RUNTIME_SLUG.to_string(),
+            &HashMap::new(),
+        ));
+        let mut service = FlushingService::new(
+            LogsFlusher::new(
+                Arc::clone(&api_key_factory),
+                logs_handle,
+                Arc::clone(&config),
+                reqwest_client.clone(),
+            ),
+            Arc::new(TraceFlusher::new(
+                trace_handle,
+                Arc::clone(&config),
+                Arc::clone(&api_key_factory),
+                http_client,
+            )),
+            Arc::clone(&stats_flusher),
+            Arc::new(ProxyFlusher::new(
+                api_key_factory,
+                Arc::new(Mutex::new(
+                    crate::traces::proxy_aggregator::Aggregator::default(),
+                )),
+                tags_provider,
+                config,
+                reqwest_client,
+            )),
+            Arc::new(Vec::new()),
+            metrics_handle,
+            None,
+        )
+        .with_forced_stats();
+        service
+            .handles
+            .stats_flush_handles
+            .push(tokio::spawn(async {
+                vec![pb::ClientStatsPayload::default()]
+            }));
+
+        let now_ns = i64::try_from(
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .expect("system time")
+                .as_nanos(),
+        )
+        .expect("timestamp fits in i64");
+        concentrator
+            .add(&pb::Span {
+                service: "service".to_string(),
+                name: "web.request".to_string(),
+                resource: "GET /fresh".to_string(),
+                start: now_ns - 1_000_000,
+                duration: 1_000_000,
+                metrics: HashMap::from([("_top_level".to_string(), 1.0)]),
+                ..pb::Span::default()
+            })
+            .expect("add fresh span");
+
+        tokio::time::timeout(Duration::from_secs(5), service.await_handles())
+            .await
+            .expect("redrive must finish");
+        failed_send
+            .assert_hits_async(crate::FLUSH_RETRY_COUNT)
+            .await;
+        let fresh = concentrator
+            .flush(true)
+            .await
+            .expect("final stats snapshot")
+            .expect("fresh stats must remain after failed redrive");
+        assert_eq!(
+            fresh
+                .stats
+                .iter()
+                .flat_map(|bucket| &bucket.stats)
+                .map(|stats| stats.hits)
+                .sum::<u64>(),
+            1
+        );
     }
 }
