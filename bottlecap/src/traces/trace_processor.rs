@@ -137,9 +137,11 @@ pub fn error_sampler_config(target_tps: f64) -> ErrorSamplerConfig {
 ///
 /// The rolling window is driven by the wall-clock seconds passed on each call,
 /// so a freeze/thaw gap expires stale counters. Stored per-signature rates are
-/// not reset by a gap: a throttled signature recovers by at most 20% per
-/// evaluation (inherited from the Go agent). A budget `<= 0` disables rescue;
-/// see [`crate::config::LambdaConfig::apm_error_tps`] for the caveats.
+/// not reset by a gap: they are recomputed only when a rescue candidate arrives
+/// in a new 5s bucket, a throttled signature recovers by at most 20% per
+/// recomputation, and the lowest stored rate also caps unseen signatures
+/// (inherited from the Go agent). A budget `<= 0` disables rescue; see
+/// [`crate::config::LambdaConfig::apm_error_tps`] for the caveats.
 #[must_use]
 pub fn new_error_sampler(target_tps: f64) -> Arc<std::sync::Mutex<ErrorsSampler>> {
     Arc::new(std::sync::Mutex::new(ErrorsSampler::new(

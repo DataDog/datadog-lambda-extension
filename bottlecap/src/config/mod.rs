@@ -93,11 +93,17 @@ pub struct LambdaConfig {
     /// the tracer or the extension.
     ///
     /// The limit is approximate and has no hard ceiling (inherited from the Go
-    /// agent and the Serverless Compatibility Layer). Rates are recomputed on
-    /// each 5s bucket rotation over a 30s window. A cold sampler keeps errors
-    /// at rate 1.0 until volume in the current bucket exceeds about 5x the
-    /// budget. After a freeze/thaw gap, stale counters expire, but a throttled
-    /// signature's rate recovers by at most 20% per evaluation.
+    /// agent and the Serverless Compatibility Layer). Errored traces are counted
+    /// in 5s buckets over a 30s window. Rates are recomputed only when a rescue
+    /// candidate arrives in a new bucket, not on a timer. A cold sampler keeps
+    /// errors at rate 1.0 until volume in the current bucket exceeds about 5x
+    /// the budget.
+    ///
+    /// A freeze/thaw gap expires stale counters but does not reset stored rates.
+    /// A throttled signature's rate recovers by at most 20% per recomputation,
+    /// so with sparse traffic recovery takes several errored invocations however
+    /// long the sandbox was frozen. Until then, the lowest stored rate also caps
+    /// signatures the sampler has not seen yet.
     pub apm_error_tps: Option<f64>,
 
     pub span_dedup_timeout: Option<Duration>,
