@@ -21,7 +21,7 @@ use bottlecap::config::Config;
 use criterion::{BatchSize, Criterion, SamplingMode, criterion_group};
 use datadog_fips::reqwest_adapter::create_reqwest_client_builder;
 use dogstatsd::metric::SortedTags;
-use fixtures::dogstatsd::ENRICH_TAGS;
+use fixtures::dogstatsd::enrich_tags;
 use ustr::Ustr;
 
 const CHILD_ENV: &str = "BOTTLECAP_BENCH_CHILD";
@@ -72,7 +72,7 @@ fn run_step(step: &str, config: &Arc<Config>) {
         // The first interner use when `init_ustr` has not finished: `start_dogstatsd` parses
         // the enrichment tags.
         SORTED_TAGS_FIRST_PARSE => {
-            black_box(SortedTags::parse(ENRICH_TAGS).expect("enrichment tags"));
+            black_box(SortedTags::parse(&enrich_tags()).expect("enrichment tags"));
         }
         FIRST_REGISTER_CLIENT => {
             black_box(register_client());
@@ -160,11 +160,12 @@ fn bench_child(c: &mut Criterion, group: &str, id: &str, step: &str) {
 fn ustr(c: &mut Criterion) {
     let mut g = c.benchmark_group("init/ustr");
 
-    let existing: Vec<&str> = ENRICH_TAGS.split(',').collect();
+    let tags = enrich_tags();
+    let existing: Vec<&str> = tags.split(',').collect();
     for s in &existing {
         Ustr::from(s);
     }
-    g.bench_function("from_existing_x16", |b| {
+    g.bench_function(format!("from_existing_x{}", existing.len()), |b| {
         b.iter(|| {
             for s in &existing {
                 black_box(Ustr::from(black_box(*s)));

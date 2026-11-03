@@ -1,7 +1,20 @@
 //! DogStatsD datagrams as a client library sends them to UDP 8125.
 
-/// The tags bottlecap adds to every metric (`SortedTags::parse(ENRICH_TAGS)`).
-pub const ENRICH_TAGS: &str = "function_arn:arn:aws:lambda:us-east-1:123456789012:function:my-checkout-fn,region:us-east-1,account_id:123456789012,aws_account:123456789012,functionname:my-checkout-fn,resource:my-checkout-fn,executedversion:$LATEST,memorysize:128,architecture:arm64,runtime:nodejs22.x,_dd.runtime_family:nodejs,env:prod,service:checkout,version:1.2.3,dd_extension_version:90,_dd.compute_stats:1";
+use bottlecap::tags::lambda::tags::EXTENSION_VERSION;
+
+use crate::fixtures::telemetry::FUNCTION_ARN;
+
+/// The tags bottlecap adds to every metric of the `$LATEST` version of [`FUNCTION_ARN`]
+/// (`SortedTags::parse(&enrich_tags())`).
+pub fn enrich_tags() -> String {
+    let name = FUNCTION_ARN
+        .rsplit(':')
+        .next()
+        .expect("function name in the ARN");
+    format!(
+        "function_arn:{FUNCTION_ARN},region:us-east-1,account_id:123456789012,aws_account:123456789012,functionname:{name},resource:{name},memorysize:128,architecture:arm64,runtime:nodejs22.x,_dd.runtime_family:nodejs,env:prod,service:checkout,version:1.2.3,dd_extension_version:{EXTENSION_VERSION}"
+    )
+}
 
 /// A distribution with 8 tags, the heaviest common line.
 pub const DIST_8_TAGS: &str = "app.checkout.latency:12.5|d|#env:prod,service:checkout,version:1.2.3,region:us-east-1,team:payments,endpoint:/api/v1/pay,status:200,method:POST";
@@ -23,24 +36,24 @@ pub enum Kind {
     Distribution,
 }
 
-/// One metric line. The name cycles over 50 values and the `endpoint` tag over 100, so a
-/// stream of `n` lines has at most 5000 contexts.
+/// One metric line. The `endpoint` tag cycles over 100 values and the name moves to the next of
+/// 50 values every 100 lines, so a stream of `n` lines has `min(n, 5000)` contexts.
 pub fn line(kind: Kind, i: usize) -> String {
     match kind {
         Kind::Count => format!(
             "app.request.count{}:1|c|#endpoint:/api/v{},status:200,method:GET",
-            i % 50,
+            (i / 100) % 50,
             i % 100
         ),
         Kind::Gauge => format!(
             "app.queue.depth{}:{}|g|#endpoint:/api/v{},status:200,method:GET",
-            i % 50,
+            (i / 100) % 50,
             i % 900,
             i % 100
         ),
         Kind::Distribution => format!(
             "app.request.latency{}:{}|d|#endpoint:/api/v{},status:200,method:GET",
-            i % 50,
+            (i / 100) % 50,
             (i % 900) + 1,
             i % 100
         ),
@@ -60,10 +73,11 @@ pub fn packet(kind: Kind, first: usize, n: usize) -> String {
         .join("\n")
 }
 
-/// `total` lines split into datagrams of `per_packet` lines.
+/// `total` lines split into datagrams of `per_packet` lines (at least 1).
 pub fn packets(kind: Kind, total: usize, per_packet: usize) -> Vec<String> {
+    let per_packet = per_packet.max(1);
     (0..total)
-        .step_by(per_packet.max(1))
+        .step_by(per_packet)
         .map(|first| packet(kind, first, per_packet.min(total - first)))
         .collect()
 }

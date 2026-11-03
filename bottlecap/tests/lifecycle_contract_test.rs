@@ -23,6 +23,8 @@ mod harness;
 
 use harness::prelude::*;
 
+const INVOKE_DEADLINE: Duration = secs(10);
+
 /// Happy path, also a self-test of the harness: an invocation ends, the
 /// extension flushes to the intake and calls `/next` again, then exits on
 /// SHUTDOWN with no panic.
@@ -33,38 +35,63 @@ async fn invoke_then_shutdown_exits_cleanly() {
     let mut bc = s.bottlecap().spawn();
 
     assert!(
-        s.invoke("req-1", secs(10), 1).await,
+        s.invoke("req-1", INVOKE_DEADLINE, 1).await,
         "no /next poll. {}",
         bc.log_tail(40)
     );
+    let invoked = Instant::now();
+    // Lambda sends `platform.initStart` on a cold start. Until it arrives the
+    // extension holds logs, as it cannot yet tell a durable function.
     s.api
-        .send_telemetry(&[function_log("hello from the function")], STARTUP_BUDGET)
+        .send_telemetry(
+            &[
+                platform_init_start(),
+                function_log("hello from the function"),
+            ],
+            STARTUP_BUDGET,
+        )
         .await
         .unwrap();
     deliver_runtime_done(&s.api, "req-1", true).await.unwrap();
     assert!(
-        s.api.wait_for_next_calls(2, secs(10)).await,
-        "no second /next after runtimeDone. {}",
+        s.api
+            .wait_for_next_calls(2, INVOKE_DEADLINE.saturating_sub(invoked.elapsed()))
+            .await,
+        "no second /next within the {INVOKE_DEADLINE:?} invoke deadline. {}",
         bc.log_tail(40)
     );
 
-    s.shutdown_cleanly(&mut bc).await;
-    // The end-of-invocation flush reached the intake with the configured key.
+    // Read the intake before SHUTDOWN: its final flush would hide a missing
+    // end-of-invocation flush.
     let with_key = s
         .intake
         .requests()
         .iter()
         .filter(|r| r.api_key() == Some(TEST_API_KEY))
         .count();
+    // Enhanced metrics are distributions, so they land on the sketches path.
+    let metrics = s.intake.count("/api/beta/sketches") + s.intake.count("/api/v2/series");
+    let log_flushed = s
+        .intake
+        .requests_to("/api/v2/logs")
+        .iter()
+        .any(|r| r.body_text().contains("hello from the function"));
+    s.shutdown_cleanly(&mut bc).await;
+
+    // The end-of-invocation flush reached the intake with the configured key.
     assert!(
         with_key > 0,
-        "no intake request carried the API key. Intake:\n{}",
+        "no intake request carried the API key before SHUTDOWN. Intake:\n{}",
         s.intake.summary()
     );
-    // Enhanced metrics are distributions, so they land on the sketches path.
     assert!(
-        s.intake.count("/api/beta/sketches") + s.intake.count("/api/v2/series") > 0,
-        "no metrics flushed. Intake:\n{}",
+        metrics > 0,
+        "no metrics flushed before SHUTDOWN. Intake:\n{}",
+        s.intake.summary()
+    );
+    assert!(
+        log_flushed,
+        "the function log was not flushed before SHUTDOWN. Intake:\n{}",
         s.intake.summary()
     );
 }

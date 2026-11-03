@@ -153,8 +153,17 @@ impl FaultIntake {
                     continue;
                 };
                 accept_shared.connections.fetch_add(1, Ordering::SeqCst);
-                // A connection accepted in blackhole mode is never read.
-                if *accept_shared.mode.lock().expect("mode lock") == FaultMode::Blackhole {
+                // A connection accepted in blackhole mode is never read, unless a path has
+                // its own mode: then `handle` reads the request to pick the mode.
+                let blackhole =
+                    *accept_shared.mode.lock().expect("mode lock") == FaultMode::Blackhole;
+                if blackhole
+                    && accept_shared
+                        .path_modes
+                        .lock()
+                        .expect("path modes lock")
+                        .is_empty()
+                {
                     accept_shared.held.lock().expect("held lock").push(stream);
                     continue;
                 }

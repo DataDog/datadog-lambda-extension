@@ -27,7 +27,7 @@ use libdd_capabilities::MaybeSend;
 use libdd_capabilities::http::{HttpClientCapability, HttpError};
 use libdd_capabilities::sleep::SleepCapability;
 use libdd_common::http_common;
-use libdd_trace_obfuscation::obfuscate::obfuscate_span;
+use libdd_trace_obfuscation::obfuscate::obfuscate_pb_span;
 use libdd_trace_obfuscation::obfuscation_config::{HttpConfig, ObfuscationConfig};
 use libdd_trace_protobuf::pb;
 use libdd_trace_utils::send_with_retry::{RetryBackoffType, RetryStrategy};
@@ -54,10 +54,9 @@ fn make_config(edit: impl FnOnce(&mut Config)) -> Arc<Config> {
 fn processor(config: &Config) -> ServerlessTraceProcessor {
     ServerlessTraceProcessor {
         obfuscation_config: Arc::new(ObfuscationConfig {
-            tag_replace_rules: config.apm_replace_tags.clone(),
+            tag_replace_rules: bottlecap::startup::build_tag_replace_rules(config),
             http: HttpConfig {
-                remove_paths_with_digits: config
-                    .apm_config_obfuscation_http_remove_paths_with_digits,
+                remove_path_digits: config.apm_config_obfuscation_http_remove_paths_with_digits,
                 remove_query_string: config.apm_config_obfuscation_http_remove_query_string,
             },
             ..Default::default()
@@ -357,14 +356,14 @@ fn parts(c: &mut Criterion) {
         );
     });
 
-    // The `obfuscate_span` call in `ChunkProcessor::process`.
+    // The `obfuscate_pb_span` call in `ChunkProcessor::process`.
     let obfuscation = processor(&config).obfuscation_config;
     g.bench_function("obfuscate_span", |b| {
         b.iter_batched(
             || traces.clone(),
             |mut input| {
                 for span in input.iter_mut().flatten() {
-                    obfuscate_span(span, &obfuscation);
+                    obfuscate_pb_span(span, &obfuscation);
                 }
                 input
             },
@@ -450,7 +449,7 @@ impl HttpClientCapability for FakeClient {
         FakeClient
     }
 
-    fn new_without_connection_pooling() -> Self {
+    fn new_periodic() -> Self {
         FakeClient
     }
 
