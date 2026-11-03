@@ -138,7 +138,7 @@ async fn test_processor() {
             }
         }
     }
-    let waf_version = libddwaf::get_version().to_string_lossy().to_string();
+    let waf_version = libddwaf::version().to_string_lossy().to_string();
     /// Marker for metrics we can't statically know the value of, but must be present & > 0...
     const ANY_POSITIVE_VALUE_IS_FINE: f64 = f64::NAN;
     for (rid, expected) in [
@@ -311,7 +311,7 @@ async fn test_processor() {
                 "_dd.appsec.fp.http.header": "hdr-0000000010-40b52535-5-1e6648af",
                 "_dd.appsec.fp.http.network": "net-1-1000000000",
                 "_dd.appsec.fp.session": "ssn--45f15964-7f506709-",
-                "_dd.appsec.json": r#"{"triggers":[{"rule":{"id":"ua0-600-12x","name":"Arachni","on_match":[],"tags":{"capec":"1000/118/169","category":"attack_attempt","confidence":"1","cwe":"200","module":"waf","tool_name":"Arachni","type":"attack_tool"}},"rule_matches":[{"operator":"match_regex","operator_value":"^Arachni\\/v","parameters":[{"address":"server.request.headers.no_cookies","highlight":["Arachni/v"],"key_path":["user-agent","0"],"value":"Arachni/v2"}]}]}]}"#,
+                "_dd.appsec.json": r#"{"triggers":[{"rule":{"id":"ua0-600-12x","name":"Arachni","on_match":[],"tags":{"capec":"1000/118/169","category":"attack_attempt","confidence":"1","cwe":"200","module":"waf","tool_name":"Arachni","type":"attack_tool"}},"rule_matches":[{"operator":"match_regex","operator_value":"^Arachni\\/v","parameters":[{"address":"server.request.headers.no_cookies","highlight":["Arachni/v"],"key_path":["user-agent",0],"value":"Arachni/v2"}]}]}]}"#,
                 "_dd.appsec.s.req.body": r#"[{"hello":[8]}]"#,
                 "_dd.appsec.s.req.cookies": r#"[{"cookie1":[[[8]],{"len":1}],"cookie2":[[[8]],{"len":1}]}]"#,
                 "_dd.appsec.s.req.headers": r#"[{"accept":[[[8]],{"len":1}],"content-length":[[[8]],{"len":1}],"host":[[[8]],{"len":1}],"user-agent":[[[8]],{"len":1}],"x-amzn-trace-id":[[[8]],{"len":1}],"x-datadog-parent-id":[[[8]],{"len":1}],"x-datadog-sampling-priority":[[[8]],{"len":1}],"x-datadog-trace-id":[[[8]],{"len":1}],"x-forwarded-for":[[[8]],{"len":1}],"x-forwarded-port":[[[8]],{"len":1}],"x-forwarded-proto":[[[8]],{"len":1}]}]"#,

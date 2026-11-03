@@ -19,6 +19,14 @@ Opt-in shared compile cache (sccache plus one shared `CARGO_TARGET_DIR` for all 
 - Builds from several worktrees queue on cargo's lock (`Blocking waiting for file lock`). Do not kill them. Never `cargo clean` the shared dir.
 - Run the tests the way CI does: `cargo nextest run`.
 
+## Where New Code Goes
+
+The `serverless-components` repo (https://github.com/DataDog/serverless-components) holds Rust crates that this extension and the Azure and Google Cloud Platform (GCP) serverless agents share, for example `dogstatsd`, `datadog-fips` and `datadog-agent-config`.
+
+- Before you add a new functionality, check whether `serverless-components` already has it. If it does, use it from there.
+- If it does not, decide whether other serverless agents can also use the code. If they can, add it to `serverless-components`, not to this repo.
+- If the decision is not clear, tell the engineer to speak with the Serverless Azure and GCP team. Do the same if you must change an existing crate in `serverless-components`.
+
 ## Code Style
 
 - Do not be overly defensive and add unnecessary checks or tests unless you have a good reason.
