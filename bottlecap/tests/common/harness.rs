@@ -27,7 +27,7 @@ pub mod prelude {
     pub use super::bottlecap_process::{
         BottlecapBuilder, BottlecapProcess, EXIT_BUDGET, STARTUP_BUDGET, TEST_API_KEY,
     };
-    pub use super::fake_extensions_api::{DEFAULT_TELEMETRY_PORT, FakeExtensionsApi};
+    pub use super::fake_extensions_api::FakeExtensionsApi;
     pub use super::fault_intake::{FaultIntake, FaultMode, IntakeRequest, SynBlackhole};
     pub use super::port_guard::{
         DOGSTATSD_UDP_PORT, LIFECYCLE_PORT, PROXY_PORT, PortGuard, TELEMETRY_PORT, TRACE_AGENT_PORT,
@@ -53,6 +53,9 @@ pub const fn secs(n: u64) -> Duration {
 pub const fn ms(n: u64) -> Duration {
     Duration::from_millis(n)
 }
+
+/// The deadline of the SHUTDOWN event, Lambda's default.
+const SHUTDOWN_DEADLINE: Duration = secs(2);
 
 /// A fake Extensions API and a fault intake, started together.
 ///
@@ -111,12 +114,29 @@ impl Scenario {
         true
     }
 
-    /// Answer the open `/next` with a SHUTDOWN (2 s deadline, Lambda's
-    /// default) and wait for the process to exit. Returns the exit status,
-    /// `None` when it had to be killed.
+    /// Answer the open `/next` with a SHUTDOWN ([`SHUTDOWN_DEADLINE`]), wait
+    /// for the process to exit, and assert it exited within that deadline
+    /// (Lambda kills it after). Also asserts the process is still running
+    /// when the SHUTDOWN is queued: Lambda treats an earlier exit as a crash.
+    /// Returns the exit status, `None` when it had to be killed.
     pub async fn shutdown(&self, bc: &mut BottlecapProcess) -> Option<ExitStatus> {
-        self.api.push_shutdown("spindown", secs(2));
-        bc.wait_for_exit(bottlecap_process::EXIT_BUDGET).await
+        let early = bc.try_exit();
+        assert!(
+            early.is_none(),
+            "exited {early:?} before SHUTDOWN. API: {:?}\n{}",
+            self.api.request_lines(),
+            bc.log_tail(40)
+        );
+        let start = std::time::Instant::now();
+        self.api.push_shutdown("spindown", SHUTDOWN_DEADLINE);
+        let exit = bc.wait_for_exit(bottlecap_process::EXIT_BUDGET).await;
+        let took = start.elapsed();
+        assert!(
+            took <= SHUTDOWN_DEADLINE,
+            "exit took {took:?}, past the {SHUTDOWN_DEADLINE:?} SHUTDOWN deadline. {}",
+            bc.log_tail(40)
+        );
+        exit
     }
 
     /// [`shutdown`](Self::shutdown), then assert no panic and a clean exit.

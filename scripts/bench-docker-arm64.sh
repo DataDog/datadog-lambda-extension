@@ -45,8 +45,13 @@ while [[ $# -gt 0 ]]; do
   shift
 done
 
-# Optional docker flags. `${arr[@]+"${arr[@]}"}` expands to nothing when the array is empty;
-# a bare "${arr[@]}" is an unbound variable under `set -u` on bash 3.2 (/bin/bash on macOS).
+# `${arr[@]+"${arr[@]}"}` expands to nothing when the array is empty; a bare "${arr[@]}" is an
+# unbound variable under `set -u` on bash 3.2 (/bin/bash on macOS). The cargo arguments reach
+# the container shell as positional parameters, not as script text, so filters with spaces or
+# shell metacharacters pass through unchanged.
+cargo_args=(${benches[@]+"${benches[@]}"} -- --save-baseline "$name" ${extra[@]+"${extra[@]}"})
+
+# Optional docker flags.
 docker_flags=()
 if [[ "${BENCH_FAST:-0}" == 1 ]]; then
   docker_flags+=(-e CARGO_PROFILE_BENCH_LTO=false -e CARGO_PROFILE_BENCH_CODEGEN_UNITS=16)
@@ -74,6 +79,6 @@ docker run --rm \
     fi
     echo 'machine:' \$(uname -sm) \$(nproc) 'cpus visible,' \$(grep -m1 'model name' /proc/cpuinfo | cut -d: -f2- || true)
     echo 'profile:' \${CARGO_PROFILE_BENCH_LTO:+bench FAST (no LTO, NOT production)}\${CARGO_PROFILE_BENCH_LTO:-bench = release (opt-level z, lto, codegen-units 1)}
-    cargo bench ${benches[*]-} -- --save-baseline '$name' ${extra[*]-}
-  "
+    cargo bench \"\$@\"
+  " bench "${cargo_args[@]}"
 echo "saved baseline '$name' under bottlecap/target-linux-arm64/criterion"

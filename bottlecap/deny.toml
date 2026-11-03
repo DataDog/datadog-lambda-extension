@@ -39,26 +39,12 @@ unsound = "workspace"
 # once a FIPS-certified aws-lc-rs is available. Trivy reports
 # RUSTSEC-2026-0285 as GHSA-2mjx-qc3c-rqvc, ignored in .trivyignore.yaml.
 #
-# The zstd advisories cover APIs this graph does not call: bottlecap, the
-# serverless-components crates and libdd-trace-utils compress through
-# `stream::write::Encoder` / the bulk API; the only decoding is
-# `stream::read::Decoder` on the embedded AppSec ruleset and `decode_all` in
-# a test helper, both excluded by RUSTSEC-2026-0403. Only libddwaf-sys's build
-# script enables zstd's default (legacy) features; build-dependency features
-# resolve separately, so the shipped binary has no legacy-frame support.
-# zstd-safe 7.2.4 also has unsound notices RUSTSEC-2026-0395 to 0406 that the
-# `workspace` scope does not report; the same zstd 0.14 / zstd-safe 8.2 bump
-# fixes them (needs the same bump in serverless-components and libdatadog);
-# drop these ignores with it.
 ignore = [
     { id = "RUSTSEC-2026-0285", reason = "rustls fix needs aws-lc-rs >= 1.18 (AWS-LC-FIPS 4.x, uncertified)" },
     { id = "RUSTSEC-2026-0346", reason = "rustls fix needs aws-lc-rs >= 1.18 (AWS-LC-FIPS 4.x, uncertified)" },
     { id = "RUSTSEC-2026-0348", reason = "rustls fix needs aws-lc-rs >= 1.18 (AWS-LC-FIPS 4.x, uncertified)" },
     { id = "RUSTSEC-2026-0349", reason = "rustls fix needs aws-lc-rs >= 1.18 (AWS-LC-FIPS 4.x, uncertified)" },
     { id = "RUSTSEC-2026-0382", reason = "rustls-webpki fix needs aws-lc-rs ^1.18 (AWS-LC-FIPS 4.x, uncertified)" },
-    { id = "RUSTSEC-2026-0391", reason = "zstd `with_context` is not used anywhere in the graph; fix is zstd 0.14" },
-    { id = "RUSTSEC-2026-0398", reason = "zstd-safe `seekable` feature is not enabled; fix is zstd 0.14" },
-    { id = "RUSTSEC-2026-0403", reason = "only `stream::read::Decoder` and `decode_all` are used, which the advisory excludes; runtime zstd-sys is built without the `legacy` feature" },
     { id = "RUSTSEC-2026-0410", reason = "wasm32 only; the extension ships on Linux" },
     { id = "RUSTSEC-2023-0050", reason = "multipart 0.18 is unmaintained; it parses AppSec multipart request bodies; no maintained replacement is chosen yet" },
     { id = "RUSTSEC-2025-0134", reason = "rustls-pemfile is unmaintained; replace with rustls-pki-types PEM parsing (code change, not a version bump)" },

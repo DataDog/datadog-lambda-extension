@@ -21,20 +21,25 @@ mod harness;
 
 use harness::prelude::*;
 
+const INVOKE_DEADLINE: Duration = secs(10);
+
 /// Run one invocation with `extra` in the env and report whether an intake
 /// request carried `DD_API_KEY`, then shut down cleanly.
 async fn runs_and_flushes_with_api_key(extra: &[(&str, &str)]) -> bool {
     let s = Scenario::start(FaultMode::Ok).await;
     let mut bc = s.bottlecap().envs(extra.iter().copied()).spawn();
     assert!(
-        s.invoke("req-1", secs(10), 1).await,
+        s.invoke("req-1", INVOKE_DEADLINE, 1).await,
         "no /next poll. {}",
         bc.log_tail(40)
     );
+    let invoked = Instant::now();
     deliver_runtime_done(&s.api, "req-1", true).await.unwrap();
     assert!(
-        s.api.wait_for_next_calls(2, secs(10)).await,
-        "no second /next. {}",
+        s.api
+            .wait_for_next_calls(2, INVOKE_DEADLINE.saturating_sub(invoked.elapsed()))
+            .await,
+        "no second /next within the {INVOKE_DEADLINE:?} invoke deadline. {}",
         bc.log_tail(40)
     );
     let with_key = s

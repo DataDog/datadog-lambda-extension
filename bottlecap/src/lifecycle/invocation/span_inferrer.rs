@@ -480,10 +480,9 @@ pub fn extract_generated_span_context(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::LambdaConfig;
+    use crate::config::{LambdaConfig, TracePropagationStyle};
     use crate::lifecycle::invocation::triggers::test_utils::read_json_file;
     use crate::traces::propagation::DatadogCompositePropagator;
-    use datadog_opentelemetry::propagation::TracePropagationStyle;
     use serde_json::json;
     use std::sync::Arc;
     use tokio::time::Instant;

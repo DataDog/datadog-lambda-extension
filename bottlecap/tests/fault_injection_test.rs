@@ -23,11 +23,13 @@ use harness::prelude::*;
 
 const TRACES_PATH: &str = "/api/v0.2/traces";
 /// Deliver a log and `runtimeDone` for `request_id`, then wait for `/next`
-/// call number `next_call`. Returns `(released, time to release)`.
+/// call number `next_call` until `budget` after `invoked`, when the INVOKE
+/// was queued. Returns `(released, time since the INVOKE)`.
 async fn end_invocation_and_wait(
     s: &Scenario,
     request_id: &str,
     next_call: usize,
+    invoked: Instant,
     budget: Duration,
 ) -> (bool, Duration) {
     s.api
@@ -40,9 +42,11 @@ async fn end_invocation_and_wait(
     deliver_runtime_done(&s.api, request_id, true)
         .await
         .unwrap();
-    let start = Instant::now();
-    let released = s.api.wait_for_next_calls(next_call, budget).await;
-    (released, start.elapsed())
+    let released = s
+        .api
+        .wait_for_next_calls(next_call, budget.saturating_sub(invoked.elapsed()))
+        .await;
+    (released, invoked.elapsed())
 }
 
 /// T2 (no hang). A 503 storm must not hold the Invoke phase: retries are
@@ -57,9 +61,10 @@ async fn status_503_storm_does_not_hold_next() {
         "no /next poll. {}",
         bc.log_tail(40)
     );
+    let invoked = Instant::now();
 
     s.intake.set_mode(FaultMode::Status(503));
-    let (released, took) = end_invocation_and_wait(&s, "req-1", 2, secs(10)).await;
+    let (released, took) = end_invocation_and_wait(&s, "req-1", 2, invoked, secs(10)).await;
 
     s.intake.set_mode(FaultMode::Ok);
     let exit = s.shutdown(&mut bc).await;
@@ -91,12 +96,13 @@ async fn oversized_trace_is_dropped_and_later_traces_flow() {
         "no /next poll. {}",
         bc.log_tail(40)
     );
+    let invoked = Instant::now();
 
     let status = post_trace(msgpack_trace(1, 4_000_000), STARTUP_BUDGET)
         .await
         .unwrap();
     eprintln!("trace agent answered {status} to a 4 MB span");
-    let (released, _) = end_invocation_and_wait(&s, "req-1", 2, secs(15)).await;
+    let (released, _) = end_invocation_and_wait(&s, "req-1", 2, invoked, secs(10)).await;
     assert!(
         released,
         "the oversized trace held /next. {}",
@@ -113,10 +119,11 @@ async fn oversized_trace_is_dropped_and_later_traces_flow() {
 
     s.intake.set_reject_over(None);
     assert!(s.invoke("req-2", secs(10), 2).await, "no second /next poll");
+    let invoked = Instant::now();
     post_trace(msgpack_trace(2, 0), STARTUP_BUDGET)
         .await
         .unwrap();
-    let (released, _) = end_invocation_and_wait(&s, "req-2", 3, secs(15)).await;
+    let (released, _) = end_invocation_and_wait(&s, "req-2", 3, invoked, secs(10)).await;
     assert!(released, "no /next after the second invocation");
     let later_trace = s
         .intake
@@ -133,6 +140,18 @@ async fn oversized_trace_is_dropped_and_later_traces_flow() {
         "the 4 MB trace never reached the intake (accepted by the agent: {status}). Intake:\n{}",
         s.intake.summary()
     );
+    // The flusher retries the 413 within its flush today; the contract is
+    // that the 4 MB trace is never sent again once the rejection is lifted.
+    let redriven = s
+        .intake
+        .requests()
+        .iter()
+        .any(|r| r.path.contains(TRACES_PATH) && r.body_len > 1_000_000 && r.status != 413);
+    assert!(
+        !redriven,
+        "the rejected trace was redriven after the fault cleared. Intake:\n{}",
+        s.intake.summary()
+    );
     assert!(
         later_trace,
         "the trace after the rejected one never arrived. Intake:\n{}\n{}",
@@ -141,9 +160,9 @@ async fn oversized_trace_is_dropped_and_later_traces_flow() {
     );
 }
 
-/// `close_mid_body`: the intake sends headers and part of the body, then
-/// closes. The extension must treat it as a failed request and keep flowing.
-/// Passes today.
+/// `close_mid_body`: the intake sends a 2xx with headers and part of the body,
+/// then closes. The request reached the intake, so this checks only that the
+/// extension does not hold `/next` or crash. Passes today.
 #[tokio::test(flavor = "multi_thread")]
 #[serial_test::serial(bottlecap_ports)]
 async fn intake_closing_mid_body_does_not_hold_next() {
@@ -154,9 +173,10 @@ async fn intake_closing_mid_body_does_not_hold_next() {
         "no /next poll. {}",
         bc.log_tail(40)
     );
+    let invoked = Instant::now();
 
     s.intake.set_mode(FaultMode::CloseMidBody);
-    let (released, took) = end_invocation_and_wait(&s, "req-1", 2, secs(10)).await;
+    let (released, took) = end_invocation_and_wait(&s, "req-1", 2, invoked, secs(10)).await;
 
     s.intake.set_mode(FaultMode::Ok);
     let exit = s.shutdown(&mut bc).await;
