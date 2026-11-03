@@ -425,13 +425,13 @@ impl LambdaConfig {
         match (self.apm_error_tps, self.serverless_error_sampler_enabled) {
             (_, None) => None,
             (Some(tps), Some(enabled)) => Some(format!(
-                "DD_SERVERLESS_ERROR_SAMPLER_ENABLED={enabled} is deprecated and ignored because DD_APM_ERROR_TPS={tps} is set"
+                "DD_SERVERLESS_ERROR_SAMPLER_ENABLED (serverless_error_sampler_enabled) is deprecated; its value {enabled} is ignored because DD_APM_ERROR_TPS (apm_error_tps) is set to {tps}"
             )),
             (None, Some(true)) => Some(format!(
-                "DD_SERVERLESS_ERROR_SAMPLER_ENABLED is deprecated and has no effect: error trace rescue is on by default at {DEFAULT_APM_ERROR_TPS} traces per second; use DD_APM_ERROR_TPS to change the budget"
+                "DD_SERVERLESS_ERROR_SAMPLER_ENABLED (serverless_error_sampler_enabled) is deprecated and has no effect: error trace rescue is on by default at {DEFAULT_APM_ERROR_TPS} traces per second; use DD_APM_ERROR_TPS (apm_error_tps) to change the budget"
             )),
             (None, Some(false)) => Some(String::from(
-                "DD_SERVERLESS_ERROR_SAMPLER_ENABLED is deprecated; set DD_APM_ERROR_TPS=0 to disable error trace rescue instead",
+                "DD_SERVERLESS_ERROR_SAMPLER_ENABLED (serverless_error_sampler_enabled) is deprecated; set DD_APM_ERROR_TPS (apm_error_tps) to 0 to disable error trace rescue instead",
             )),
         }
     }
@@ -986,7 +986,7 @@ mod lambda_config_tests {
                 yaml: None,
                 env: &[(LEGACY, "false")],
                 target: 0.0,
-                warning_contains: Some(&["DD_APM_ERROR_TPS=0"]),
+                warning_contains: Some(&["set DD_APM_ERROR_TPS (apm_error_tps) to 0"]),
                 tps_is_none: true,
             },
             ErrorSamplerCase {
@@ -994,7 +994,10 @@ mod lambda_config_tests {
                 yaml: Some("serverless_error_sampler_enabled: false\n"),
                 env: &[],
                 target: 0.0,
-                warning_contains: Some(&["DD_APM_ERROR_TPS=0"]),
+                warning_contains: Some(&[
+                    "DD_SERVERLESS_ERROR_SAMPLER_ENABLED (serverless_error_sampler_enabled)",
+                    "set DD_APM_ERROR_TPS (apm_error_tps) to 0",
+                ]),
                 tps_is_none: true,
             },
             ErrorSamplerCase {
@@ -1003,8 +1006,8 @@ mod lambda_config_tests {
                 env: &[(TPS, "5"), (LEGACY, "false")],
                 target: 5.0,
                 warning_contains: Some(&[
-                    "DD_APM_ERROR_TPS=5",
-                    "DD_SERVERLESS_ERROR_SAMPLER_ENABLED=false",
+                    "DD_APM_ERROR_TPS (apm_error_tps) is set to 5",
+                    "its value false is ignored",
                 ]),
                 tps_is_none: false,
             },
@@ -1014,8 +1017,8 @@ mod lambda_config_tests {
                 env: &[(TPS, "0"), (LEGACY, "true")],
                 target: 0.0,
                 warning_contains: Some(&[
-                    "DD_APM_ERROR_TPS=0",
-                    "DD_SERVERLESS_ERROR_SAMPLER_ENABLED=true",
+                    "DD_APM_ERROR_TPS (apm_error_tps) is set to 0",
+                    "its value true is ignored",
                 ]),
                 tps_is_none: false,
             },
@@ -1025,8 +1028,8 @@ mod lambda_config_tests {
                 env: &[(LEGACY, "false")],
                 target: 5.0,
                 warning_contains: Some(&[
-                    "DD_APM_ERROR_TPS=5",
-                    "DD_SERVERLESS_ERROR_SAMPLER_ENABLED=false",
+                    "DD_APM_ERROR_TPS (apm_error_tps) is set to 5",
+                    "its value false is ignored",
                 ]),
                 tps_is_none: false,
             },
@@ -1035,7 +1038,7 @@ mod lambda_config_tests {
                 yaml: None,
                 env: &[(TPS, "abc"), (LEGACY, "false")],
                 target: 0.0,
-                warning_contains: Some(&["set DD_APM_ERROR_TPS=0"]),
+                warning_contains: Some(&["set DD_APM_ERROR_TPS (apm_error_tps) to 0"]),
                 tps_is_none: true,
             },
             ErrorSamplerCase {
@@ -1044,8 +1047,8 @@ mod lambda_config_tests {
                 env: &[(TPS, "abc"), (LEGACY, "false")],
                 target: 5.0,
                 warning_contains: Some(&[
-                    "DD_APM_ERROR_TPS=5",
-                    "DD_SERVERLESS_ERROR_SAMPLER_ENABLED=false",
+                    "DD_APM_ERROR_TPS (apm_error_tps) is set to 5",
+                    "its value false is ignored",
                 ]),
                 tps_is_none: false,
             },
