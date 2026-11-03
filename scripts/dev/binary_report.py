@@ -26,18 +26,21 @@ MACHINE = {0xB7: "aarch64", 0x3E: "x86_64"}
 R_RELATIVE = {0xB7: 1027, 0x3E: 8}
 ETYPE = {2: "EXEC", 3: "DYN"}
 
+# libddwaf is the only C++ code linked, so every C++ (`_Z`, not legacy Rust) symbol counts there.
 C_HINTS = [
-    ("[C libddwaf]", re.compile(r"(ddwaf|std::__[12]|__cxx|libinjection|re2::|fmt::v|rapidjson|operator new|__cxa|__gxx|__dynamic_cast|typeinfo|vtable for|guard variable|__lcxx|_GLOBAL__sub_I|utf8proc|ac_|lua_|pcre)")),
+    ("[C libddwaf]", re.compile(r"(^_Z|ddwaf|std::__[12]|__cxx|libinjection|re2::|fmt::v|rapidjson|operator new|__cxa|__gxx|__dynamic_cast|typeinfo|vtable for|guard variable|__lcxx|_GLOBAL__sub_I|utf8proc|ac_|lua_|pcre)")),
     ("[C zstd]", re.compile(r"^(ZSTD|HUF_|FSE_|ZDICT|COVER|HIST_|POOL_|ERR_getErrorString|ZBUFF)")),
     ("[C jemalloc]", re.compile(r"^(_rjem|je_|malloc_|jemalloc)|rjem")),
     ("[C/asm ring]", re.compile(r"^(ring_core|GFp|ring_|aes_|gcm_|sha256|sha512|ChaCha20|chacha|x25519|p256|p384|ecp_|bn_|LIMBS|OPENSSL|CRYPTO|poly1305|fiat_)")),
 ]
+# Legacy Rust symbols end in a 17h<16 hex>E hash segment, optionally followed by a .llvm.N style suffix; C++ ones do not.
+LEGACY_RUST = re.compile(r"17h[0-9a-f]{16}E(?:\.|$)")
 V0_CRATE = re.compile(r"^_R(?:[A-Za-z]|s[0-9A-Za-z]*_)*?C(?:s[0-9A-Za-z]*_)?(\d+)(.*)$")
 IDENT = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 
 
 def crate_of(sym):
-    if sym.startswith("_ZN"):
+    if sym.startswith("_ZN") and LEGACY_RUST.search(sym):
         m = re.match(r"^_ZN(\d+)", sym)
         if not m:
             return "[unknown]"
@@ -47,13 +50,17 @@ def crate_of(sym):
             for esc, ch in (("$LT$", "<"), ("$GT$", ">"), ("$RF$", "&"), ("$BP$", "*"), ("$u20$", " "), ("..", "::")):
                 first = first.replace(esc, ch)
             first = re.sub(r"^_?<[&*]?(?:mut |dyn |const )*", "", first)
+            m2 = IDENT.match(first)
+            # A receiver without a crate path (str, u8, T, [T], &T) names no crate: use the trait's.
+            if (not m2 or not first[m2.end():].startswith("::")) and " as " in first:
+                first = first.split(" as ", 1)[1]
         m2 = IDENT.match(first)
         return m2.group(0) if m2 else "[unknown]"
     if sym.startswith("_R"):
         m = V0_CRATE.match(sym)
         if m:
             n, rest = int(m.group(1)), m.group(2)
-            if rest.startswith("u"):
+            if rest.startswith("_"):
                 rest = rest[1:]
             return rest[:n] or "[unknown]"
         return "[unknown]"
@@ -151,7 +158,7 @@ class Elf:
             name, info, _, shndx, value, size = struct.unpack_from("<IBBHQQ", b, off)
             if size == 0 or shndx == 0 or shndx >= len(self.sections):
                 continue
-            yield self.cstr(strtab["offset"] + name), info & 0xF, self.sections[shndx]["name"], size
+            yield self.cstr(strtab["offset"] + name), info & 0xF, self.sections[shndx]["name"], value, size
 
 
 def report(path, crates):
@@ -190,7 +197,12 @@ def report(path, crates):
         text = defaultdict(lambda: {"text": 0, "symbols": 0})
         data = defaultdict(int)
         covered = 0
-        for name, typ, sec, size in e.symbols():
+        seen = set()
+        for name, typ, sec, value, size in e.symbols():
+            # Aliases (merged functions, C++ constructor variants) share one range; count it once.
+            if (sec, value, size) in seen:
+                continue
+            seen.add((sec, value, size))
             if sec == ".text" and typ == 2:
                 c = crate_of(name)
                 text[c]["text"] += size
@@ -229,7 +241,7 @@ def diff(a, b, top):
         tb = {c["crate"]: c["text"] for c in b["crates"]}
         rows = [(c, tb.get(c, 0) - ta.get(c, 0)) for c in set(ta) | set(tb)]
         rows = [(c, v) for c, v in rows if v]
-        rows.sort(key=lambda cv: -abs(cv[1]))
+        rows.sort(key=lambda cv: (-abs(cv[1]), cv[0]))
         d["crates_text"] = [{"crate": c, "delta": v} for c, v in rows[:top]]
     return d
 

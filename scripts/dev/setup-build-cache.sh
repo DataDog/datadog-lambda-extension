@@ -24,20 +24,34 @@
 # Why one shared CARGO_TARGET_DIR: sccache hashes the full rustc command line,
 # and cargo passes `-L dependency=<CARGO_TARGET_DIR>/debug/deps`. A different
 # target dir path gives 0 % Rust cache hits. See scripts/dev/README.md.
+# RUSTC_WORKSPACE_WRAPPER points at this worktree's rustc-workspace-wrapper.sh,
+# so bottlecap's own artifacts stay per worktree and only dependencies are shared.
 set -euo pipefail
 
 log() { printf '%s\n' "setup-build-cache: $*" >&2; }
-# `false` on stdout makes `eval "$(...)"` fail instead of exporting nothing.
-die() { log "error: $*"; printf 'false\n'; exit 1; }
+die() { log "error: $*"; exit 1; }
 
-BOTTLECAP_CACHE_ROOT="${BOTTLECAP_CACHE_ROOT:-$HOME/.cache/bottlecap}"
+TMP=""
+# On any failure, `false` on stdout makes `eval "$(...)"` fail instead of exporting nothing.
+# shellcheck disable=SC2317,SC2329  # invoked by the trap
+cleanup() {
+  local rc=$?
+  [ -z "$TMP" ] || rm -rf "$TMP"
+  [ "$rc" -eq 0 ] || printf 'false\n'
+}
+trap cleanup EXIT
+
+# Exported paths must not depend on the directory cargo later runs from.
+abspath() { case "$1" in /*) printf '%s' "$1" ;; *) printf '%s/%s' "$PWD" "$1" ;; esac; }
+BOTTLECAP_CACHE_ROOT="$(abspath "${BOTTLECAP_CACHE_ROOT:-$HOME/.cache/bottlecap}")"
 DEFAULT_TARGET_DIR="$BOTTLECAP_CACHE_ROOT/target"
-SCCACHE_DIR="${SCCACHE_DIR:-$BOTTLECAP_CACHE_ROOT/sccache}"
+SCCACHE_DIR="$(abspath "${SCCACHE_DIR:-$BOTTLECAP_CACHE_ROOT/sccache}")"
 SCCACHE_CACHE_SIZE="${SCCACHE_CACHE_SIZE:-20G}"
-CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-$DEFAULT_TARGET_DIR}"
+CARGO_TARGET_DIR="$(abspath "${CARGO_TARGET_DIR:-$DEFAULT_TARGET_DIR}")"
 SCCACHE_VERSION="${SCCACHE_VERSION:-0.19.0}"
 SCCACHE_INSTALL="${SCCACHE_INSTALL:-prebuilt}"
 TOOLS_DIR="$BOTTLECAP_CACHE_ROOT/tools"
+WORKSPACE_WRAPPER="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)/rustc-workspace-wrapper.sh"
 PINNED_VERSION="0.19.0"
 mode="export"
 wrapper=1
@@ -53,7 +67,7 @@ case "${1:-}" in
   --check) mode="check" ;;
   --stats) mode="stats" ;;
   --stop) mode="stop" ;;
-  -h|--help) sed -n '2,26p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+  -h|--help) sed -n '2,28p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
   *) die "unknown option: $1 (see --help)" ;;
 esac
 
@@ -87,17 +101,12 @@ prebuilt_triple() {
   esac
 }
 
-TMP=""
-# shellcheck disable=SC2317,SC2329  # invoked by the trap
-cleanup() { [ -n "$TMP" ] && rm -rf "$TMP"; return 0; }
-trap cleanup EXIT
-
 install_prebuilt() {
   local triple base url want have
   if ! triple="$(prebuilt_triple)"; then log "no prebuilt sccache for $(uname -s)-$(uname -m)"; return 1; fi
   base="sccache-v${SCCACHE_VERSION}-${triple}"
   url="https://github.com/mozilla/sccache/releases/download/v${SCCACHE_VERSION}/${base}.tar.gz"
-  TMP="$(mktemp -d)"
+  TMP="$(mktemp -d)" || return 1
   log "downloading $url"
   if ! curl -fsSL --retry 3 -o "$TMP/$base.tar.gz" "$url"; then log "download failed"; return 1; fi
   if [ "$SCCACHE_VERSION" = "$PINNED_VERSION" ]; then
@@ -109,9 +118,10 @@ install_prebuilt() {
   fi
   have="$(sha256_file "$TMP/$base.tar.gz")"
   [ "$want" = "$have" ] || die "sha256 mismatch for $base.tar.gz: expected $want, got $have"
-  tar -xzf "$TMP/$base.tar.gz" -C "$TMP"
-  mkdir -p "$TOOLS_DIR/bin"
-  install -m 0755 "$TMP/$base/sccache" "$TOOLS_DIR/bin/sccache"
+  # errexit is off here (called from `if !`), so return on each failure to reach the cargo fallback.
+  tar -xzf "$TMP/$base.tar.gz" -C "$TMP" || return 1
+  mkdir -p "$TOOLS_DIR/bin" || return 1
+  install -m 0755 "$TMP/$base/sccache" "$TOOLS_DIR/bin/sccache" || return 1
   log "installed sccache $SCCACHE_VERSION to $TOOLS_DIR/bin/sccache"
 }
 
@@ -140,15 +150,17 @@ print_exports() {
       esac
     fi
   else
-    printf 'unset RUSTC_WRAPPER\n'
+    # Empty, not unset: an empty RUSTC_WRAPPER also overrides build.rustc-wrapper in cargo config.
+    printf 'export RUSTC_WRAPPER=\n'
   fi
+  printf 'export RUSTC_WORKSPACE_WRAPPER=%q\n' "$WORKSPACE_WRAPPER"
   printf 'export CARGO_TARGET_DIR=%q\n' "$CARGO_TARGET_DIR"
 }
 
 SCCACHE_BIN_PATH="$(find_sccache || true)"
 
 case "$mode" in
-  stats) [ -n "$SCCACHE_BIN_PATH" ] || die "sccache not found; run without options to install it"; exec "$SCCACHE_BIN_PATH" --show-stats ;;
+  stats) [ -n "$SCCACHE_BIN_PATH" ] || die "sccache not found; run without options to install it"; export SCCACHE_DIR SCCACHE_CACHE_SIZE; exec "$SCCACHE_BIN_PATH" --show-stats ;;
   stop) [ -n "$SCCACHE_BIN_PATH" ] || die "sccache not found"; exec "$SCCACHE_BIN_PATH" --stop-server ;;
   check)
     if [ -z "$SCCACHE_BIN_PATH" ]; then
@@ -181,14 +193,18 @@ if [ "$wrapper" = 1 ]; then
   # starts. A client with a different SCCACHE_DIR silently uses the running
   # server. Detect that and tell the user how to fix it.
   realdir() { (cd "$1" 2>/dev/null && pwd -P) || printf '%s' "$1"; }
-  running_dir="$("$SCCACHE_BIN_PATH" --show-stats 2>/dev/null | sed -n 's/^Cache location *Local disk: "\(.*\)"$/\1/p' || true)"
+  stats="$(SCCACHE_DIR="$SCCACHE_DIR" SCCACHE_CACHE_SIZE="$SCCACHE_CACHE_SIZE" "$SCCACHE_BIN_PATH" --show-stats 2>&1)" ||
+    die "'$SCCACHE_BIN_PATH --show-stats' failed (a server from another sccache version may be running; stop it with '$SCCACHE_BIN_PATH --stop-server', or use --no-wrapper):
+$stats"
+  running_dir="$(printf '%s\n' "$stats" | sed -n 's/^Cache location *Local disk: "\(.*\)"$/\1/p')"
+  running_max="$(printf '%s\n' "$stats" | sed -n 's/^Max cache size *//p')"
   if [ -n "$running_dir" ] && [ "$(realdir "$running_dir")" != "$(realdir "$SCCACHE_DIR")" ]; then
     log "WARNING: an sccache server is already running with SCCACHE_DIR=$running_dir"
     log "         this shell asked for $SCCACHE_DIR. Run '$SCCACHE_BIN_PATH --stop-server' first,"
     log "         or export SCCACHE_DIR=$running_dir to join the running server."
   fi
   log "sccache:          $SCCACHE_BIN_PATH ($("$SCCACHE_BIN_PATH" --version 2>/dev/null | tr -d '\n'))"
-  log "SCCACHE_DIR:      $SCCACHE_DIR (limit $SCCACHE_CACHE_SIZE)"
+  log "SCCACHE_DIR:      $SCCACHE_DIR (server limit ${running_max:-unknown}; run with --stop to change it)"
 fi
 if [ "$target_mode" = "shared" ]; then
   log "CARGO_TARGET_DIR: $CARGO_TARGET_DIR (shared by all worktrees; cargo serializes builds on its lock)"
