@@ -77,16 +77,17 @@ python3 .claude/skills/measure-extension-layer/scripts/summarize.py /tmp/extensi
 - For a FIPS regression, add `--fips`. It changes which released layer `v<N>` means.
 - For a size regression, `layer_size.py --arch <arch> [--fips] <good tag> <bad tag>` is enough.
   Size has no noise.
-- The tools name the architectures in two ways. `measure.py` takes `x86_64` or `arm64`, as
-  Lambda does. `layer_size.py` and the build scripts' `ARCHITECTURE` take `amd64` or `arm64`. So
-  for an `x86_64` regression, use `amd64` for those two.
+- `measure.py` and `layer_size.py` take `x86_64` or `arm64`, as Lambda does. The build scripts'
+  `ARCHITECTURE` takes `amd64` or `arm64`. So for an `x86_64` regression, set
+  `ARCHITECTURE=amd64` for a build.
 
-Measure the traffic pattern that changed, and read `each_warm_duration_ms`:
+Measure the traffic pattern that changed, in the flush mode of the prod functions, and read
+`each_warm_duration_ms`. The `measure-extension-layer` skill explains the modes.
 
-| Dashboard traffic | Harness options | Why |
-| --- | --- | --- |
-| `traffic:1min` | `--warm 8 --warm-interval 60` | Each invocation flushes after 60 s of idle time. |
-| `traffic:busy` | `--warm 60 --warm-interval 1` | The default flush strategy changes after 20 invocations in one environment, to a flush in the background. With 60, most warm invocations come after the change. |
+| Dashboard traffic | Harness options |
+| --- | --- |
+| `traffic:1min` | `--warm 8 --warm-interval 60 --env DD_SERVERLESS_FLUSH_STRATEGY=periodically,20000` |
+| `traffic:busy` | `--warm 20 --warm-interval 1 --env DD_SERVERLESS_FLUSH_STRATEGY=continuously,20000` |
 
 If the 95% interval of `bad minus good` contains 0, run again with `-n 40`. If it still contains
 0, stop and report that the harness does not show the regression. Give the numbers. Do not
