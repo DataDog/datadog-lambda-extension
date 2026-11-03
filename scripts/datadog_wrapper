@@ -34,6 +34,13 @@ if [[ "$DD_SERVERLESS_APPSEC_ENABLED" =~ ^(1|t|true)$ ]]
 then
   debug_log "Enabling Datadog Application Security Management"
 
+  DD_APPSEC_ENABLED_NORMALIZED=$(echo "$DD_APPSEC_ENABLED" | tr '[:upper:]' '[:lower:]')
+  if [[ "$DD_APPSEC_ENABLED_NORMALIZED" =~ ^(1|t|true)$ ]]
+  then
+    echo "[datadog-wrapper] WARNING: Both DD_APPSEC_ENABLED and DD_SERVERLESS_APPSEC_ENABLED are enabled. Disabling tracer AppSec to avoid duplicated security analysis. Disable DD_SERVERLESS_APPSEC_ENABLED to use tracer AppSec instead."
+  fi
+  export DD_APPSEC_ENABLED="false"
+
   # Enable the library's instrumentation telemetry needed for ASM OSS VM
   export DD_INSTRUMENTATION_TELEMETRY_ENABLED="${DD_INSTRUMENTATION_TELEMETRY_ENABLED:-true}" # the standard env var to enable telemetry
   export DD_TRACE_TELEMETRY_ENABLED="${DD_TRACE_TELEMETRY_ENABLED:-true}" # but dd-trace-js < v4.18.0 uses this other one
@@ -112,11 +119,6 @@ then
   export DD_JMXFETCH_ENABLED="false"
   export DD_RUNTIME_METRICS_ENABLED="false"
   export DD_REMOTE_CONFIG_ENABLED="false"
-  if [[ "$DD_SERVERLESS_APPSEC_ENABLED" =~ ^(1|t|true)$ ]]
-  then
-    debug_log "Disabling tracer AppSec because serverless AppSec is enabled"
-    export DD_APPSEC_ENABLED="false"
-  fi
 
   # Removes the -XX:-TieredCompilation flag from the java command passed
   # through from the Lambda runtime. Allows the JVM to use the C1 compiler

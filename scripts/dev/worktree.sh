@@ -35,8 +35,10 @@ case "${1:-}" in
     [ $# -eq 2 ] || die "--remove needs a branch name"
     path="$WORKTREE_ROOT/$(slug "$2")"
     [ -d "$path" ] || die "no worktree at $path"
+    # slug() maps a/b and a-b to the same path; remove only the requested branch.
+    [ "$(git -C "$path" symbolic-ref --quiet --short HEAD || true)" = "$2" ] || die "$path does not have branch $2 checked out"
     g worktree remove "$path"
-    log "removed $path (branch $2 still exists; delete it with: git branch -D $2)"
+    log "removed $path (branch $2 still exists; delete it with: git branch -D $(printf '%q' "$2"))"
     exit 0 ;;
 esac
 
@@ -69,6 +71,8 @@ else
 fi
 
 qpath="$(printf '%q' "$path/bottlecap")"
+qbranch="$(printf '%q' "$branch")"
+qscript="$(printf '%q' "$here/worktree.sh")"
 cat >&2 <<EOF
 worktree: created $path
 
@@ -82,6 +86,6 @@ Notes:
   - Builds in all worktrees queue on the shared target dir lock. That is expected.
   - target/debug/bottlecap is shared. Tests that spawn the bottlecap binary need
     'eval "\$(../scripts/dev/setup-build-cache.sh --tests)"' (per-worktree target dir).
-  - Remove with: scripts/dev/worktree.sh --remove $branch
+  - Remove with: $qscript --remove $qbranch
 EOF
 printf '%s\n' "$path"
