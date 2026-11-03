@@ -223,9 +223,14 @@ fn enable_logging_subsystem() {
     )
     .unwrap_or(LogLevel::Info);
 
+    let http_libraries_off: Vec<String> = logger::HTTP_LIBRARY_TARGETS
+        .iter()
+        .map(|target| format!("{target}=off"))
+        .collect();
     let (env_filter, invalid_entries) = build_env_filter(
         &format!(
-            "h2=off,hyper=off,reqwest=off,rustls=off,datadog-trace-mini-agent=off,{log_level:?}"
+            "{},datadog-trace-mini-agent=off,{log_level:?}",
+            http_libraries_off.join(",")
         ),
         &std::env::var(LEVEL_BY_TARGET_ENV_VAR).unwrap_or_default(),
     )
