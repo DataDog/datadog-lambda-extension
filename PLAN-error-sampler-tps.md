@@ -1,28 +1,43 @@
 # Plan: rate-limit Lambda error trace rescue with `DD_APM_ERROR_TPS` and deprecate `DD_SERVERLESS_ERROR_SAMPLER_ENABLED`
 
-> Temporary planning file, committed on its own so it can be dropped. Delete it before merging the PR. This file plans **PR 1 of 3**; PRs 2 and 3 are listed under "Follow-up PRs" and are out of scope here.
+> Temporary planning file, committed separately so its commits can be dropped. Delete it before merging the PR. This file records **PR 1 of 2**; the combined rescue-and-filtering follow-up is existing PR #1358, listed under "Follow-up PR" and out of scope here.
 
 ## Status (PR 1)
-- **Implemented** on `lpimentel/error-sampler-rate-limited`, rebased onto `origin/main` `f32a2bc0` (#1471), and pushed. No PR opened yet.
+- **Implemented** on `lpimentel/error-sampler-rate-limited` and open as draft [PR #1490](https://github.com/DataDog/datadog-lambda-extension/pull/1490), targeting `main`.
 - Commits: this plan file, then `docs(bottlecap): DD_APM_FEATURES accepts space-separated values` (step 1), then `feat(bottlecap): rate-limit error trace rescue with DD_APM_ERROR_TPS` (steps 2-4, with review nits and test simplifications squashed in).
 - Final verification passed: `cargo fmt --check`, `cargo test --workspace`, the test-mode bin, and clippy `-D warnings` for default, default+test-mode, and fips. Greps for `AlwaysKeep`, `not supported by the Lambda extension`, `new_error_sampler(true|false)` and added em dashes are all clean.
 - Not verified: the "make the shared run reset per call and watch the shared-budget test fail" check from step 3.
-- Remaining: open the PR (text under "Commits and PR"), and drop this plan commit (or add a commit deleting the file) before merge.
+- Remaining: update #1490's description from a three-PR series to the two-PR plan below, and drop all plan-file commits (or add a commit deleting the file) before merge.
 - Deviations from the steps below, as implemented:
   - The step 2 table rows are data (`yaml: Option<&str>`, `env: &[(key, value)]`, `tps_is_none: bool`) applied by one loop. The "no removal promise" check runs inside that loop on every warning row instead of in a separate test. The legacy raw-field check was dropped, since a warning exists exactly when the legacy flag is set.
   - The non-finite warning reads `Ignoring non-finite DD_APM_ERROR_TPS (apm_error_tps) value {v}`, so it also covers YAML.
   - The test helper `enabled_error_sampler()` is renamed `default_error_sampler()` (20 call sites in `trace_processor.rs` and `lifecycle/invocation/processor.rs`).
   - The two sampler-level tests share a `sample_errored_trace(sampler, now, n)` helper.
   - `DEFAULT_APM_ERROR_TPS` is declared after the `use datadog_agent_config::{...}` block.
+  - A later startup change warns when a valid explicit TPS is set but `lambda_extension_compute_stats` is false, because PR 1 only rescues on the extension-configured path. Revisit this warning in #1358: tracer-computed stats will also enable rescue, and startup cannot know that per-request signal.
 
 ## PR series
 | PR | Scope | Base |
 |---|---|---|
-| **1 (this plan)** | `DD_APM_ERROR_TPS` budget, `RateLimited` mode, deprecate `DD_SERVERLESS_ERROR_SAMPLER_ENABLED`. Rescue gating unchanged: only when the extension computes stats. | `main` |
-| 2 | Also run rescue when the tracer computes stats (`Datadog-Client-Computed-Stats: true`). On that path rescue only stamps `_dd.errors_sr` on kept errored P0 chunks; every chunk is still forwarded, so the backend's P0 drop keeps the stamped ones (same model as SCL, APMSVLS-472). | PR 1 |
-| 3 | DataDog/datadog-lambda-extension#1358, rebased onto PR 2 and trimmed to filtering sampled-out chunks when the tracer computes stats. | PR 2 |
+| **1: #1490 (this plan)** | `DD_APM_ERROR_TPS` budget, `RateLimited` mode, deprecate `DD_SERVERLESS_ERROR_SAMPLER_ENABLED`. Preserve the existing config-only rescue/filtering gate, including when the tracer also reports computed stats. | `main` |
+| **2: #1358** | Keep its existing scope: extend both error rescue and sampled-out filtering to tracer-computed stats. Preserve its review history; do not split out a stamp-and-forward intermediate PR. | `main` |
 
-Order matters: filtering on the tracer path before rescue exists there would drop errored P0 chunks unrescued. Today tracers still send P0 chunks because `/info` reports `client_drop_p0s: false` (`bottlecap/src/traces/trace_agent.rs:653`).
+**Preferred merge order:** merge #1490 first, then update #1358 against `main`, resolve conflicts, update warnings/docs, and test the combined behavior. There is no requirement to stack #1358 onto the unmerged #1490 branch.
+
+**Independent functionality:** #1358 can merge first using the existing `AlwaysKeep` behavior, with #1490 subsequently adding rate limiting. Both PRs currently target `main`, but a read-only merge check found conflicts between their heads in config documentation and trace-processor tests. Whichever merges second needs reconciliation and validation; they cannot both merge unchanged.
+
+Rescue and filtering must widen together in #1358 so newly filtered errored chunks get a rescue decision first. The existing helper already does both. Today tracers still send P0 chunks because `/info` reports `client_drop_p0s: false` (`bottlecap/src/traces/trace_agent.rs:653`, original reference).
+
+After both PRs, use this ownership contract:
+
+| Extension stats configured | Tracer computed stats | Stats owner | Rescue/filtering |
+|---|---|---|---|
+| false | false | Backend | No rescue; forward every chunk for backend stats |
+| true | false | Extension | Rescue eligible errors; filter unrescued sampled-out chunks |
+| false | true | Tracer | Rescue eligible errors; filter unrescued sampled-out chunks |
+| true | true | Tracer | Rescue eligible errors; preserve existing local filtering |
+
+There is no stamp-and-forward-only release or temporary forwarding change for the both-flags combination.
 
 ## Goal
 Make `DD_APM_ERROR_TPS` the only knob for error trace rescue in bottlecap. Rescue always uses the shared `ErrorSamplerMode::RateLimited` sampler with Go agent / SCL trace-agent defaults: rescue is on at 10 TPS when nothing is set, and `<= 0` turns it off. `DD_SERVERLESS_ERROR_SAMPLER_ENABLED` stays parsed but deprecated.
@@ -58,14 +73,14 @@ Make `DD_APM_ERROR_TPS` the only knob for error trace rescue in bottlecap. Rescu
 6. Large finite values (for example `1000000000`) are accepted as-is, no cap and no warning (Go/SCL parity).
 7. Configuration keys: env `DD_APM_ERROR_TPS` (parity with the Go trace-agent's env var) and flat YAML `apm_error_tps`. Go's YAML key `apm_config.errors_per_second` is intentionally not supported: parity target is env vars, not YAML files.
 8. Deprecation warnings do not promise removal (no "will be removed" wording).
-9. No "setting has no effect" warning when compute stats is off: whether the tracer computes stats is known only per request, and PR 2 makes rescue apply there too.
+9. PR 1 currently warns when an explicit valid TPS is set without extension stats configured. In #1358, remove or revise that unconditional startup warning: rescue will also apply when the tracer reports computed stats, which is known only per request.
 
 ## Constraints
 - TDD: write each step's tests first, watch them fail (or fail to compile), then implement.
 - Every step must leave the whole crate compiling (`cargo test --lib` builds all lib tests regardless of name filter). Each step therefore updates every caller its type or signature change breaks; do not defer callers to a later step.
 - Keep `lambda_extension_compute_stats` gating unchanged (`trace_processor.rs:638`).
 - Keep comments concise and leave history out of them. No em dashes in code comments or strings.
-- Non-goals: removing `AlwaysKeep` from the shared crate, stats-payload `errorTPS`, changing compute-stats gating (PR 2), tracer-path filtering (PR 3), public docs. The repo has no changelog and no doc mentions `DD_SERVERLESS_ERROR_SAMPLER_ENABLED`.
+- Non-goals for PR 1: removing `AlwaysKeep` from the shared crate, stats-payload `errorTPS`, widening rescue or filtering to the tracer-stats path (both belong to #1358), public docs. The repo has no changelog and no doc mentions `DD_SERVERLESS_ERROR_SAMPLER_ENABLED`.
 - Do not commit or push unless the user asks. When asked, make two commits (step 1 alone, then everything else). Commit messages must be user-facing.
 - The PR description must not include test counts. Use `.github/pull_request_template.md` (`## Overview`, `## Testing`). No Jira ticket in the PR title; mention APMSVLS-469 in the description.
 
@@ -195,7 +210,7 @@ Make `DD_APM_ERROR_TPS` the only knob for error trace rescue in bottlecap. Rescu
    ```
 3. Retarget the rare-sample warning (:172) to `if error_rare_sample_tracer_drop && error_tps <= 0.0`. Message: `"DD_APM_FEATURES includes error_rare_sample_tracer_drop, but error trace rescue is disabled (effective DD_APM_ERROR_TPS {error_tps}): errored traces dropped by the tracer will not be rescued"`.
 4. Build the sampler with `trace_processor::new_error_sampler(error_tps)` (reusing the local instead of the step 3 inline call).
-5. Do not add a warning for "rescue configured but compute stats off" (settled semantics 9).
+5. Keep PR 1's later startup warning for an explicit valid TPS with extension stats off; see settled semantics 9. Remove or revise it in #1358 when tracer-computed stats also enable rescue.
 6. Verify: `cargo build` succeeds and `cargo test --lib startup` passes. The warning logic itself is covered by the step 2 tests on `legacy_error_sampler_warning` and `error_sampler_target_tps`.
 
 ## Files to Modify
@@ -226,7 +241,7 @@ Run everything from `bottlecap/` and report the pass/fail counts.
 8. Grep the changed lines for `—` (em dash): zero matches.
 
 ## Commits and PR (only when the user asks)
-Both commits are done (see Status). The PR is not opened yet.
+Both original code commits are done (see Status), with later follow-up fixes. Draft PR #1490 is open.
 
 - Commit 1 (step 1 only): `docs(bottlecap): DD_APM_FEATURES accepts space-separated values`
 - Commit 2 (steps 2-4): `feat(bottlecap): rate-limit error trace rescue with DD_APM_ERROR_TPS`. Body:
@@ -235,7 +250,7 @@ Both commits are done (see Status). The PR is not opened yet.
   - `DD_SERVERLESS_ERROR_SAMPLER_ENABLED` is deprecated and logs a warning.
 - PR title: `feat(bottlecap): rate-limit error trace rescue with DD_APM_ERROR_TPS` (no ticket).
 - `## Overview`:
-  - Follow-up to APMSVLS-469 (the bottlecap error sampler) and part 1 of 3; name PRs 2 and 3 briefly.
+  - Follow-up to APMSVLS-469 (the bottlecap error sampler) and part 1 of 2; name #1358 as the combined tracer-path rescue-and-filtering follow-up.
   - The semantics table.
   - Env parity with the Go trace-agent's `DD_APM_ERROR_TPS`; YAML key is flat `apm_error_tps`.
   - The behavior change: compute-stats users who never set the flag now get rescue at 10/s.
@@ -255,15 +270,17 @@ Both commits are done (see Status). The PR is not opened yet.
 - **Duplicate warnings.** The non-finite warning in the deserializer can fire once per source (YAML and env). That is acceptable at startup.
 - **Lints.** Clippy pedantic needs `#[must_use]` on the new pub fns and backticks around identifiers in docs (`doc_markdown`). Use `.expect("...")`, not `.unwrap()`, in new tests unless the module already has `#[allow(clippy::unwrap_used)]` (the config test module does; the trace_processor test module relies on `expect`).
 
-## Follow-up PRs (out of scope for this plan; plan each in its own session)
+## Follow-up PR (out of scope for PR 1)
 
-### PR 2: rescue when the tracer computes stats
-- Base: PR 1's branch (or `main` after PR 1 merges).
-- Run the error sampler when either the extension or the tracer computes stats (resolve stats ownership once in `process_traces`, as #1358 does today).
-- Tracer-owned path: do not drop any chunk. For errored P0 chunks (plus negative-priority non-manual drops under `error_rare_sample_tracer_drop`), call the sampler and stamp `_dd.errors_sr` on `Keep`; forward everything. The backend's P0 drop then keeps the stamped chunks.
-- Extension-owned path: unchanged from PR 1 (rescue + drop).
-- Update the `apm_error_tps` doc ("rescue runs when the extension or the tracer computes stats").
-- Source material: the rescue-widening half of #1358 (`lpimentel/filter-sampled-traces-by-stats-owner`).
-
-### PR 3: filter sampled-out chunks when the tracer computes stats
-- Rebase DataDog/datadog-lambda-extension#1358 onto PR 2 so it only adds dropping of sampled-out chunks on the tracer-owned path (rescued chunks kept). Keep its review history; update its title and description.
+### PR 2: #1358, rescue and filter when the tracer computes stats
+- Keep [DataDog/datadog-lambda-extension#1358](https://github.com/DataDog/datadog-lambda-extension/pull/1358), branch `lpimentel/filter-sampled-traces-by-stats-owner`, with its current combined scope and review history. Do not create a separate stamp-only rescue PR or trim #1358 to filtering alone.
+- Prefer to merge #1490 first, then update #1358 against `main`. Rebasing onto the unmerged #1490 branch is optional, not a dependency. Do not rebase, commit, or push without user approval.
+- Resolve overlapping config docs and trace-processor tests. Retain #1490's optional raw config fields, TPS resolution, `RateLimited` constructor, `default_error_sampler()` helper, and sampler regression coverage; do not restore the old boolean or `AlwaysKeep` wiring.
+- Resolve stats ownership once in `process_traces` and reuse it for `_dd.compute_stats` stamping and the rescue/filtering gate. Tracer-computed stats win even when extension stats are configured.
+- Run the existing rescue-and-filter pass whenever ownership is Extension or Tracer. Keep eligible errored P0 chunks on sampler `Keep`, stamp `_dd.errors_sr`, and filter unrescued sampled-out chunks. Preserve negative-priority eligibility under `error_rare_sample_tracer_drop`, manual-drop exclusions, absent-priority behavior, and unchanged priorities/decision makers.
+- Preserve one shared TPS budget per execution environment across requests and stats-ownership paths. `DD_APM_ERROR_TPS <= 0` disables rescue, not filtering.
+- Leave the Backend-owned path unchanged: no rescue, forward every chunk. Preserve the pre-filter stats payload; submit it to the extension's stats generator only when the extension owns stats.
+- Update `apm_error_tps` and sampler docs to cover extension- or tracer-computed stats. Remove or revise #1490's unconditional "TPS has no effect unless extension stats are enabled" startup warning, since tracer ownership is request-specific.
+- Extend unit coverage across all four ownership combinations, including rescue, filtering, disabled budgets, negative-priority feature behavior, manual-drop exclusions, original priorities, and the pre-filter stats payload. Verify that extension and tracer paths consume the same sampler budget.
+- Retain and adapt #1358's fake-intake E2E coverage for filtering and error rescue on both non-backend paths; assert that tracer-owned requests do not generate duplicate extension stats.
+- Before merging, rerun the workspace tests, test-mode binary tests, formatting, and default/test-mode/FIPS clippy checks listed above. Report counts in the session, not the PR description; update the PR description to describe the rate-limited combined behavior.
