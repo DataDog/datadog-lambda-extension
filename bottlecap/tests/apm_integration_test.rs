@@ -374,9 +374,7 @@ async fn run_processor_pipeline_with_settings(
     let sender = SendingTraceProcessor {
         appsec: None,
         processor: Arc::new(ServerlessTraceProcessor {
-            obfuscation_config: Arc::new(
-                ObfuscationConfig::new().expect("Failed to create ObfuscationConfig"),
-            ),
+            obfuscation_config: Arc::new(ObfuscationConfig::default()),
             error_sampler: new_error_sampler(true),
             error_rare_sample_tracer_drop,
         }),
