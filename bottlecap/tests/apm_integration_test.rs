@@ -1590,7 +1590,9 @@ impl FlushHarness {
 /// non-forced flush keeps back together with the previous one.
 async fn hits_sent_by_one_flush(force_stats: bool, path: FlushPath) -> u64 {
     let mut harness = FlushHarness::new(force_stats).await;
-    harness.send_span(0x3333_3333_3333_3333, "GET /end", now_ns()).await;
+    harness
+        .send_span(0x3333_3333_3333_3333, "GET /end", now_ns())
+        .await;
     harness.flush(path).await;
     assert_eq!(
         harness.spans_sent("GET /end"),
@@ -1626,4 +1628,48 @@ async fn unforced_flush_holds_back_current_stats() {
         hits_sent_by_one_flush(false, FlushPath::NonBlocking).await,
         0
     );
+}
+
+/// The trade-off of forcing: a second flush within one 10s bucket sends that bucket
+/// again, in a second partial payload.
+#[tokio::test]
+async fn forced_flushes_send_one_bucket_in_partial_payloads() {
+    let mut harness = FlushHarness::new(true).await;
+    // Both spans end at the same instant, so they share a bucket whenever the second
+    // flush runs: after a flush, older spans fold into the oldest open bucket, which
+    // is at most this one.
+    let end_ns = now_ns();
+    harness
+        .send_span(0x4444_4444_4444_4441, "GET /twice", end_ns)
+        .await;
+    harness.flush(FlushPath::Blocking).await;
+    harness
+        .send_span(0x4444_4444_4444_4442, "GET /twice", end_ns)
+        .await;
+    harness.flush(FlushPath::Blocking).await;
+
+    let hits = harness.stats_hits("GET /twice");
+    assert_eq!(hits.len(), 2, "each flush sends its own partial bucket");
+    assert_eq!(hits[0], hits[1], "both partials are for the same bucket");
+    assert_eq!(hits[0].1, 1);
+}
+
+/// A span older than every open bucket after a forced flush, such as one ending in a
+/// bucket that flush already sent, is not dropped: it folds into the oldest open
+/// bucket and the next flush counts it.
+#[tokio::test]
+async fn forced_flush_counts_span_from_flushed_bucket() {
+    let mut harness = FlushHarness::new(true).await;
+    let now = now_ns();
+    harness
+        .send_span(0x5555_5555_5555_5551, "GET /on-time", now)
+        .await;
+    harness.flush(FlushPath::Blocking).await;
+    harness
+        .send_span(0x5555_5555_5555_5552, "GET /late", now - 20_000_000_000)
+        .await;
+    harness.flush(FlushPath::Blocking).await;
+
+    assert_eq!(harness.total_hits("GET /on-time"), 1);
+    assert_eq!(harness.total_hits("GET /late"), 1);
 }
