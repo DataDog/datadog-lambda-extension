@@ -4,6 +4,16 @@ version = "0.1.0"
 edition = "2024"
 publish = false
 
+# Read by cargo-machete (`cargo machete` in bottlecap/). These entries are version bounds on
+# transitive crates, a crate reached only through a re-export (aws-lc-rs via
+# `rustls::crypto`), a use cargo-machete cannot see (serde_bytes in a
+# `#[serde(with = "...")]` string), or a dependency listed only to enable a
+# feature (libddwaf-sys). Keep the reason next to the dependency.
+# `time` is also only a version bound, but cargo-machete counts `std::time::`
+# as a use, so listing it here triggers an "ignored but used" warning.
+[package.metadata.cargo-machete]
+ignored = ["aws-lc-rs", "libddwaf-sys", "rustls-native-certs", "rustls-webpki", "serde_bytes"]
+
 [dependencies]
 anyhow = { version = "1.0", default-features = false }
 async-trait = { version = "0.1", default-features = false }
@@ -18,8 +28,6 @@ hyper-util = { version = "0.1.16", features = ["http1", "client", "client-legacy
 http-body = { version = "1", default-features = false }
 http-body-util = { version = "0.1", default-features = false }
 itertools = { version = "0.14", default-features = false, features = ["use_std"] }
-lazy_static = { version = "1.5", default-features = false }
-log = { version = "0.4", default-features = false }
 mime = { version = "0.3", default-features = false }
 multipart = { version = "0.18", default-features = false, features = ["server"] }
 nix = { version = "0.26", default-features = false, features = ["feature", "fs"] }
@@ -33,7 +41,7 @@ serde_bytes = { version = "0.11", default-features = false, features = ["std"] }
 rmp-serde = { version = "1.3.1", default-features = false }
 flate2 = { version = "1.1", default-features = false, features = ["rust_backend"] }
 thiserror = { version = "1.0", default-features = false }
-# Transitive dependency (pulled in via cookie). Pinned to >=0.3.47 so cargo audit / CI passes (RUSTSEC-2026-0009).
+# Transitive dependency (pulled in via cookie). Pinned to >=0.3.47 so cargo deny / CI passes (RUSTSEC-2026-0009).
 time = { version = "0.3.47", default-features = false }
 tokio = { version = "1.47", default-features = false, features = ["macros", "rt-multi-thread", "time"] }
 tokio-util = { version = "0.7", default-features = false }
@@ -48,10 +56,10 @@ base64 = { version = "0.22", default-features = false }
 rustls = { version = ">=0.23.18, <0.23.45", default-features = false }
 # Constrain the transitive FIPS crypto backend: aws-lc-rs 1.18 switches to
 # AWS-LC-FIPS 4.x, pending FIPS 140-3 certification. Lift this bound only
-# after 4.x certification is verified. See .cargo/audit.toml and
+# after 4.x certification is verified. See deny.toml and
 # DataDog/serverless-components#173.
 aws-lc-rs = { version = ">=1, <1.18", default-features = false, optional = true }
-# Transitive via rustls. Pinned to >=0.103.13 so cargo audit passes (RUSTSEC-2026-0098, RUSTSEC-2026-0099, RUSTSEC-2026-0104).
+# Transitive via rustls. Pinned to >=0.103.13 so cargo deny passes (RUSTSEC-2026-0098, RUSTSEC-2026-0099, RUSTSEC-2026-0104).
 rustls-webpki = { version = "0.103.13", default-features = false }
 rustls-pemfile = { version = "2.0", default-features = false, features = ["std"] }
 rustls-pki-types = { version = "1.0", default-features = false }
@@ -60,9 +68,8 @@ rand = { version = "0.8", default-features = false }
 prost = { version = "0.14", default-features = false }
 tonic = { version = "0.14", features = ["transport", "codegen", "server", "channel", "router"], default-features = false }
 tonic-types = { version = "0.14", default-features = false }
-zstd = { version = "0.13.3", default-features = false }
+zstd = { version = "0.14.3", default-features = false }
 futures = { version = "0.3.31", default-features = false }
-serde-aux = { version = "4.7", default-features = false }
 serde_html_form = { version = "0.2", default-features = false }
 opentelemetry-proto = { version = "0.32.0", features = ["trace", "with-serde", "gen-tonic"] }
 opentelemetry-semantic-conventions = { version = "0.30", features = ["semconv_experimental"] }
@@ -76,34 +83,33 @@ tower-http = { version = "0.6.6", default-features = false, features = ["limit"]
 hyper-http-proxy = { version = "1.1.0", default-features = false, features = [
     "rustls-tls-webpki-roots",
 ] }
-indexmap = {version = "2.11.0", default-features = false}
 # If you are adding or updating a datadog-owned code dependency, please ensure
 # that it has a clippy.toml rule for disallowing the reqwest::Client::builder
 # method in favor of our
 # datadog_fips::reqwest_adapter::create_reqwest_client_builder. An example can
 # be found in the clippy.toml file adjacent to this Cargo.toml.
 datadog-protos = { version = "0.1.0", default-features = false, git = "https://github.com/DataDog/saluki/", rev = "f863626dbfe3c59bb390985fa6530b0621c2a0a2"}
-ddsketch-agent = { version = "0.1.0", default-features = false, git = "https://github.com/DataDog/saluki/", rev = "f863626dbfe3c59bb390985fa6530b0621c2a0a2"}
-# These are pinned to the same crates.io versions that dd-trace-rs's datadog-opentelemetry
-# depends on, so cargo unifies them instead of compiling duplicate copies. Re-check with
-# `cargo tree --duplicates | grep ^libdd-` when bumping either side.
-libdd-capabilities = "3.0.0"
-libdd-common = { version = "5.2.0", default-features = false }
-libdd-trace-protobuf = "4.0.1"
-libdd-trace-utils = { version = "10.1.0", default-features = false, features = ["mini_agent"] }
-libdd-trace-normalization = "3.0.1"
-libdd-trace-obfuscation = { version = "6.0.0", default-features = false }
-libdd-trace-stats = { version = "7.0.0", default-features = false }
-datadog-opentelemetry = { version = "0.5.2", default-features = false, features = ["_unstable_propagation"] }
-dogstatsd = { git = "https://github.com/DataDog/serverless-components", rev = "8156757470d0843a99fc5d19809ae021cd2c7178", default-features = false }
-datadog-fips = { git = "https://github.com/DataDog/serverless-components", rev = "8156757470d0843a99fc5d19809ae021cd2c7178", default-features = false }
-datadog-agent-config = { git = "https://github.com/DataDog/serverless-components", rev = "8156757470d0843a99fc5d19809ae021cd2c7178", default-features = false }
-datadog-agent-trace-sampler = { git = "https://github.com/DataDog/serverless-components", rev = "8156757470d0843a99fc5d19809ae021cd2c7178", default-features = false }
-libddwaf = { version = "1.28.1", git = "https://github.com/DataDog/libddwaf-rust", rev = "d1534a158d976bd4f747bf9fcc58e0712d2d17fc", default-features = false, features = ["serde"] }
+# Pin the libdd crates used by Bottlecap's trace pipeline to the release line
+# required by serverless-components PR #196.
+libdd-capabilities = "4.0.1"
+libdd-common = { version = "10.0.0", default-features = false }
+libdd-trace-protobuf = "5.1.1"
+libdd-trace-utils = { version = "16.0.0", default-features = false, features = ["mini_agent"] }
+libdd-trace-normalization = "4.3.1"
+libdd-trace-obfuscation = { version = "12.0.0", default-features = false }
+libdd-trace-stats = { version = "13.0.0", default-features = false }
+datadog-opentelemetry = { version = "0.6.0", default-features = false, features = ["_unstable_propagation"] }
+dogstatsd = { git = "https://github.com/DataDog/serverless-components", rev = "e462105e918904e6b1ad2ebc153ae561cebe5a34", default-features = false }
+datadog-fips = { git = "https://github.com/DataDog/serverless-components", rev = "e462105e918904e6b1ad2ebc153ae561cebe5a34", default-features = false }
+datadog-agent-config = { git = "https://github.com/DataDog/serverless-components", rev = "e462105e918904e6b1ad2ebc153ae561cebe5a34", default-features = false }
+datadog-agent-trace-sampler = { git = "https://github.com/DataDog/serverless-components", rev = "e462105e918904e6b1ad2ebc153ae561cebe5a34", default-features = false }
+datadog-serverless-logging = { git = "https://github.com/DataDog/serverless-components", rev = "e462105e918904e6b1ad2ebc153ae561cebe5a34", default-features = false }
+libddwaf = { version = "2.1.0", git = "https://github.com/DataDog/libddwaf-rust", rev = "bbada5255bf8e9105c06b03ce6d5d63a7c337e2a", default-features = false, features = ["serde"] }
+# Enables the crypto provider libddwaf-sys needs to download prebuilt WAF binaries.
+libddwaf-sys = { version = "2.1.0", git = "https://github.com/DataDog/libddwaf-rust", rev = "bbada5255bf8e9105c06b03ce6d5d63a7c337e2a", default-features = false, features = ["aws-lc-rs"] }
 
 [dev-dependencies]
 figment = { version = "0.10", default-features = false, features = ["yaml", "env", "test"] }
-proptest = "1.4"
 httpmock = "0.7"
 tower = { version = "0.5", features = ["util"] }
 mock_instant = "0.6"
@@ -122,6 +128,10 @@ flate2 = { version = "1.1", default-features = false, features = ["rust_backend"
 
 [[bin]]
 name = "bottlecap"
+
+[[bin]]
+name = "bottlecap-test-mode"
+required-features = ["test-mode"]
 
 [profile.dev]
 debug = true   # same as debuginfo=2 and no stripping
@@ -185,8 +195,10 @@ fips = [
 # `InvocationProcessorHandle::noop()`) to callers that need to drive the
 # trace-processing surface without Lambda lifecycle state.
 # Not enabled in `default` or `fips`, so the items it gates do not appear
-# in production builds.
-test-mode = []
+# in production builds. `tokio/signal` is pulled in here rather than in the
+# base dependency so the shipped extension does not carry the signal driver
+# for a binary only the test-mode build produces.
+test-mode = ["tokio/signal"]
 
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(coverage,coverage_nightly)'] }
