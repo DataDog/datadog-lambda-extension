@@ -39,7 +39,7 @@ Each handled request produces one summary line on stderr (prefix `mock-intake:`)
 
 ## JSON dumps
 
-With `MOCK_INTAKE_DUMP_DIR` set, each successfully decoded request attempt (including rejected stats attempts) writes one JSON file containing the request identity, endpoint, encoding, response status, and decoded payload. Trace payloads are serialized field by field because `AgentPayload` does not implement `Serialize` in `libdd-trace-protobuf` 4.0.1. DSM dumps contain only the fields the crate decodes. Filenames are collision-resistant and never overwrite earlier dumps.
+With `MOCK_INTAKE_DUMP_DIR` set, each successfully decoded request attempt (including rejected stats attempts) writes one JSON file containing the request identity, endpoint, encoding, response status, and decoded payload. Trace payloads use explicit field-by-field JSON serialization rather than a derived `Serialize` implementation. DSM dumps contain only the fields the crate decodes. Filenames are collision-resistant and never overwrite earlier dumps.
 
 ## Smoke procedure
 

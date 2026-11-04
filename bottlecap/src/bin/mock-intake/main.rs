@@ -5,8 +5,7 @@
 //!
 //! Runs the shared `datadog-mock-intake` crate with request summaries enabled
 //! and accepts the same APM endpoints the Lambda extension flushes to. Point a
-//! tracer or the `bottlecap-test-mode` trace processor (added in
-//! DataDog/datadog-lambda-extension#1216) at it and inspect
+//! tracer or the `bottlecap-test-mode` trace processor at it and inspect
 //! decoded payloads and JSON dumps locally. See `bottlecap/README.md` for usage.
 //!
 //! Environment variables:
@@ -65,12 +64,10 @@ fn parse_env_or<T: std::str::FromStr>(name: &str, default: T, expected: &str) ->
             anyhow::anyhow!("mock-intake: invalid {name} value '{raw}', expected {expected}")
         }),
         Err(std::env::VarError::NotPresent) => Ok(default),
-        Err(std::env::VarError::NotUnicode(raw)) => {
-            bail!(
-                "mock-intake: {name} is not valid Unicode: {}",
-                raw.display()
-            )
-        }
+        Err(std::env::VarError::NotUnicode(raw)) => bail!(
+            "mock-intake: {name} is not valid Unicode: {}",
+            raw.display()
+        ),
     }
 }
 
