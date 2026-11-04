@@ -146,9 +146,6 @@ def ensure_function(lam, name, rt, arch, role_arn, layers, env):
             Environment={"Variables": env},
         )
         lam.get_waiter("function_active_v2").wait(FunctionName=name)
-    # As in the self-monitoring functions. Without this and the pause between warm invocations,
-    # some warm invocations started a new execution environment.
-    lam.put_function_concurrency(FunctionName=name, ReservedConcurrentExecutions=1)
 
 
 def invoke(lam, fn):
@@ -235,53 +232,60 @@ def main():
     role_arn = ensure_role(boto3.client("iam"), secret_arn)
     os.makedirs(args.out, exist_ok=True)
 
-    meta = {"args": vars(args), "env": env, "variants": {}}
-    for vname, (layers, fns) in variants.items():
-        for fn in fns:
-            ensure_function(lam, fn, rt, args.arch, role_arn, layers, env)
-        sizes = layer_sizes(lam, layers[0]) if layers else (0, 0)
-        meta["variants"][vname] = {"functions": fns, "layers": layers, "zipped_bytes": sizes[0], "unzipped_bytes": sizes[1]}
-
-    start_ms = int(time.time() * 1000)
-    all_fns = [fn for v in meta["variants"].values() for fn in v["functions"]]
-    failed = []
+    reserved, failed = [], []
     try:
-        # One thread per function, so that no invocation waits for a free thread.
-        with ThreadPoolExecutor(max_workers=len(all_fns)) as pool:
-            for i in range(1, args.n + 1):
-                for v in meta["variants"].values():
-                    # A changed environment variable makes Lambda start a new execution environment.
-                    for fn in v["functions"]:
-                        run_env = {**env, "RUN_ID": f"{i}-{random.randint(0, 1 << 30)}"}
-                        lam.update_function_configuration(FunctionName=fn, Layers=v["layers"], Environment={"Variables": run_env})
-                for fn in all_fns:
-                    lam.get_waiter("function_updated_v2").wait(FunctionName=fn)
-                # All functions are invoked together at a fixed cadence, so a long --warm-interval
-                # costs the same for any number of variants and copies.
-                step_start = time.time()
-                for j in range(1 + args.warm):
-                    time.sleep(max(0, step_start + j * args.warm_interval - time.time()))
-                    ok = list(pool.map(lambda fn: invoke(lam, fn), all_fns))
-                    failed += [fn for fn, good in zip(all_fns, ok) if not good]
-                print(f"round {i}/{args.n} done", flush=True)
+        meta = {"args": vars(args), "env": env, "variants": {}}
+        for vname, (layers, fns) in variants.items():
+            for fn in fns:
+                ensure_function(lam, fn, rt, args.arch, role_arn, layers, env)
+                # As in the self-monitoring functions. Without this and the pause between warm
+                # invocations, some warm invocations started a new execution environment.
+                lam.put_function_concurrency(FunctionName=fn, ReservedConcurrentExecutions=1)
+                reserved.append(fn)
+            sizes = layer_sizes(lam, layers[0]) if layers else (0, 0)
+            meta["variants"][vname] = {"functions": fns, "layers": layers, "zipped_bytes": sizes[0], "unzipped_bytes": sizes[1]}
+
+        start_ms = int(time.time() * 1000)
+        all_fns = [fn for v in meta["variants"].values() for fn in v["functions"]]
+        try:
+            # One thread per function, so that no invocation waits for a free thread.
+            with ThreadPoolExecutor(max_workers=len(all_fns)) as pool:
+                for i in range(1, args.n + 1):
+                    for v in meta["variants"].values():
+                        # A changed environment variable makes Lambda start a new execution environment.
+                        for fn in v["functions"]:
+                            run_env = {**env, "RUN_ID": f"{i}-{random.randint(0, 1 << 30)}"}
+                            lam.update_function_configuration(FunctionName=fn, Layers=v["layers"], Environment={"Variables": run_env})
+                    for fn in all_fns:
+                        lam.get_waiter("function_updated_v2").wait(FunctionName=fn)
+                    # All functions are invoked together at a fixed cadence, so a long --warm-interval
+                    # costs the same for any number of variants and copies.
+                    step_start = time.time()
+                    for j in range(1 + args.warm):
+                        time.sleep(max(0, step_start + j * args.warm_interval - time.time()))
+                        ok = list(pool.map(lambda fn: invoke(lam, fn), all_fns))
+                        failed += [fn for fn, good in zip(all_fns, ok) if not good]
+                    print(f"round {i}/{args.n} done", flush=True)
+        finally:
+            # Save what CloudWatch has, also after an error, so that a long run is not lost.
+            # One deadline for all functions, so that a run that stopped early does not wait 3
+            # minutes for each function.
+            deadline = time.time() + 180
+            for vname, v in meta["variants"].items():
+                events, reports = [], 0
+                for fn in v["functions"]:
+                    fn_events, fn_reports = collect_logs(logs, fn, start_ms, args.n * (1 + args.warm), deadline)
+                    events += fn_events
+                    reports += fn_reports
+                with open(os.path.join(args.out, f"{vname}.jsonl"), "w") as f:
+                    f.writelines(json.dumps(e) + "\n" for e in events)
+                print(f"{vname}: saved {len(events)} log events, {reports} REPORT lines", flush=True)
+            with open(os.path.join(args.out, "meta.json"), "w") as f:
+                json.dump(meta, f, indent=2)
     finally:
-        # Save what CloudWatch has, also after an error, so that a long run is not lost.
-        # One deadline for all functions, so that a run that stopped early does not wait 3
-        # minutes for each function.
-        deadline = time.time() + 180
-        for vname, v in meta["variants"].items():
-            events, reports = [], 0
-            for fn in v["functions"]:
-                fn_events, fn_reports = collect_logs(logs, fn, start_ms, args.n * (1 + args.warm), deadline)
-                events += fn_events
-                reports += fn_reports
-            with open(os.path.join(args.out, f"{vname}.jsonl"), "w") as f:
-                f.writelines(json.dumps(e) + "\n" for e in events)
-            print(f"{vname}: saved {len(events)} log events, {reports} REPORT lines", flush=True)
-        with open(os.path.join(args.out, "meta.json"), "w") as f:
-            json.dump(meta, f, indent=2)
         # Reserved concurrency counts against the account limit, and the next run sets it again.
-        for fn in all_fns:
+        # This also runs when setup or the log export fails.
+        for fn in reserved:
             lam.delete_function_concurrency(FunctionName=fn)
     # summarize.py counts the REPORT line of a failed invocation like any other, so the results need a rerun.
     if failed:
