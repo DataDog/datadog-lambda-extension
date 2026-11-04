@@ -47,8 +47,8 @@ RUNTIMES = {
     },
 }
 
-# Log lines of the extension when it has no API key.
-KEY_ERRORS = ("Error decrypting key", "Failed to resolve API key")
+# For example a missing API key, or a flush that the intake rejected.
+EXTENSION_ERROR = "DD_EXTENSION | ERROR | "
 
 BASE_ENV = {
     # The site of the key in DD_API_KEY.
@@ -214,8 +214,8 @@ def main():
     p.add_argument("--copies", type=int, default=1, help="functions per variant, to get more samples in the same time")
     p.add_argument("--env", action="append", default=[], help="KEY=VALUE for every variant")
     args = p.parse_args()
-    if args.n < 1 or args.warm < 0 or args.copies < 1:
-        sys.exit("-n and --copies must be 1 or more, and --warm must be 0 or more.")
+    if args.n < 1 or args.warm < 0 or args.copies < 1 or args.warm_interval < 0:
+        sys.exit("-n and --copies must be 1 or more, and --warm and --warm-interval must be 0 or more.")
     if not os.environ.get("DD_API_KEY"):
         sys.exit("Set DD_API_KEY to a Datadog API key. The test functions send their data to the org of that key.")
 
@@ -247,7 +247,7 @@ def main():
     role_arn = ensure_role(boto3.client("iam"), secret_arn)
     os.makedirs(args.out, exist_ok=True)
 
-    reserved, failed, incomplete, key_errors = [], [], [], []
+    reserved, failed, incomplete, extension_errors = [], [], [], []
     try:
         meta = {"args": vars(args), "env": env, "variants": {}}
         for vname, (layers, fns) in variants.items():
@@ -294,9 +294,8 @@ def main():
                     reports += fn_reports
                     if fn_reports < args.n * (1 + args.warm):
                         incomplete.append(fn)
-                    # Without a key, the extension skips its flushes, and the durations are too low.
-                    if any(m in e["message"] for e in fn_events for m in KEY_ERRORS):
-                        key_errors.append(fn)
+                    # After an error, the durations can come from a path that prod does not take.
+                    extension_errors += [e["message"] for e in fn_events if EXTENSION_ERROR in e["message"]]
                 with open(os.path.join(args.out, f"{vname}.jsonl"), "w") as f:
                     f.writelines(json.dumps(e) + "\n" for e in events)
                 print(f"{vname}: saved {len(events)} log events, {reports} REPORT lines", flush=True)
@@ -313,8 +312,8 @@ def main():
         problems.append(f"{len(failed)} invocations failed, for example in {failed[0]}.")
     if incomplete:
         problems.append(f"CloudWatch did not have all REPORT lines of {len(incomplete)} functions, for example {incomplete[0]}.")
-    if key_errors:
-        problems.append(f"The extension could not get the API key in {len(key_errors)} functions, for example {key_errors[0]}.")
+    if extension_errors:
+        problems.append(f"The extension logged {len(extension_errors)} errors, for example: {extension_errors[0].strip()[:300]}")
     if problems:
         sys.exit(" ".join(problems) + " Run the measurement again.")
 
