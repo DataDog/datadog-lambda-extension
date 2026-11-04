@@ -29,3 +29,7 @@ retry treatment:
     max: 1
     when:
       - job_execution_timeout
+
+retry disabled:
+  extends: .timeout-probe
+  retry: 0
