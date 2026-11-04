@@ -84,6 +84,13 @@ impl LogsAgent {
                             }
                             Err(_) => {
                                 debug!("LOGS_AGENT | Timed out waiting for channel to disconnect");
+                                // Refuse later sends, so the listener returns 503 instead of
+                                // accepting events that nothing reads. Then process the events
+                                // already accepted.
+                                self.rx.close();
+                                while let Some(event) = self.rx.recv().await {
+                                    self.processor.process(event, &self.aggregator_handle).await;
+                                }
                                 break;
                             }
                         }
@@ -193,6 +200,19 @@ mod tests {
         agent.spin().await;
 
         assert!(matches!(event_bus.rx.try_recv(), Ok(Event::Tombstone)));
+    }
+
+    #[tokio::test]
+    async fn test_sends_refused_after_drain_timeout() {
+        let (mut agent, logs_tx, _event_bus) = agent();
+        agent.cancel_token().cancel();
+        // The sender stays open, so the drain times out. The agent is still alive afterwards.
+        agent.spin().await;
+
+        let result = logs_tx
+            .send(serde_json::from_str(RUNTIME_DONE).expect("valid event"))
+            .await;
+        assert!(result.is_err());
     }
 
     #[tokio::test]
