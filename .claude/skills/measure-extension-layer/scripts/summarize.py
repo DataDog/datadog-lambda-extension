@@ -130,7 +130,9 @@ def main():
         print(f"{k:42} " + " ".join(cells))
 
     report_keys = ["init_duration_ms", "cold_duration_ms", "warm_duration_ms", "cold_max_memory_mb"]
-    if args.baseline in data:
+    if args.baseline in data and meta["variants"][args.baseline]["layers"]:
+        print(f"\n{args.baseline} has an extension layer, so its differences are not the overhead of the extension.")
+    elif args.baseline in data:
         for v, rows in data.items():
             if v != args.baseline:
                 print_diff(f"{v} minus {args.baseline} (overhead of the extension)", data[args.baseline], rows, report_keys)

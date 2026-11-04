@@ -51,7 +51,8 @@ RUNTIMES = {
 KEY_ERRORS = ("Error decrypting key", "Failed to resolve API key")
 
 BASE_ENV = {
-    "DD_SITE": "datadoghq.com",
+    # The site of the key in DD_API_KEY.
+    "DD_SITE": os.environ.get("DD_SITE", "datadoghq.com"),
     "DD_SERVICE": "extension-perf-test",
     "DD_ENV": "test",
     # The default strategy changes at the 20th invocation of an environment.
@@ -79,10 +80,15 @@ def ensure_api_key_secret(sm):
 
     The functions read the key from Secrets Manager, as the self-monitoring functions do.
     """
+    key = os.environ["DD_API_KEY"]
     try:
-        return sm.put_secret_value(SecretId=api_key_secret_name(), SecretString=os.environ["DD_API_KEY"])["ARN"]
+        current = sm.get_secret_value(SecretId=api_key_secret_name())
     except sm.exceptions.ResourceNotFoundException:
-        return sm.create_secret(Name=api_key_secret_name(), SecretString=os.environ["DD_API_KEY"])["ARN"]
+        return sm.create_secret(Name=api_key_secret_name(), SecretString=key)["ARN"]
+    # Secrets Manager keeps every version of the last 24 hours, so write only a changed key.
+    if current["SecretString"] == key:
+        return current["ARN"]
+    return sm.put_secret_value(SecretId=api_key_secret_name(), SecretString=key)["ARN"]
 
 
 def ensure_role(iam, secret_arn):
@@ -208,6 +214,8 @@ def main():
     p.add_argument("--copies", type=int, default=1, help="functions per variant, to get more samples in the same time")
     p.add_argument("--env", action="append", default=[], help="KEY=VALUE for every variant")
     args = p.parse_args()
+    if args.n < 1 or args.warm < 0 or args.copies < 1:
+        sys.exit("-n and --copies must be 1 or more, and --warm must be 0 or more.")
     if not os.environ.get("DD_API_KEY"):
         sys.exit("Set DD_API_KEY to a Datadog API key. The test functions send their data to the org of that key.")
 

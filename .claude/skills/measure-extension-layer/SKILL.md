@@ -16,7 +16,8 @@ Run the scripts through `aws-vault exec sso-serverless-sandbox-account-admin --`
 
 `measure.py` needs a Datadog API key in the environment variable `DD_API_KEY`. Without a key,
 the extension does not flush, so the run measures no flush time. The test functions send their
-data to the org of that key. The script stores the key in a Secrets Manager secret,
+data to the org of that key. For a key from a Datadog site other than `datadoghq.com`, also set
+`DD_SITE`, for example to `datadoghq.eu`. The script stores the key in a Secrets Manager secret,
 `<user>-extension-perf-api-key`, in the region of the run. The functions read the key from that
 secret, as the self-monitoring functions do.
 
