@@ -1,12 +1,38 @@
 # Throwaway diagnostic spike: replaces the normal pipeline, including all
 # publishing jobs. Start it manually from the GitLab UI or the pipelines API on
 # this branch. Do not merge this pipeline replacement.
+#
+# The probe jobs run on every triggered pipeline. The sampler jobs only run when
+# RUN_SAMPLER=1 is set, so a cheap probe run does not also spend compile time.
 workflow:
   rules:
     - if: '$CI_COMMIT_BRANCH == "lpimentel/spike-compile-sampler" && ($CI_PIPELINE_SOURCE == "web" || $CI_PIPELINE_SOURCE == "api")'
     - when: never
 
-stages: [spike]
+stages: [probe, spike]
+
+.buildkit-node-probe:
+  stage: probe
+  image: registry.ddbuild.io/images/docker:20.10
+  timeout: 10m
+  retry: 0
+  artifacts:
+    when: always
+    expire_in: 2 weeks
+    paths:
+      - node-probe.log
+      - build-*.log
+  script:
+    - .gitlab/scripts/probe_buildkit_node.sh
+
+# Names the BuildKit node serving a build, and its architecture.
+buildkit node probe (amd64):
+  extends: .buildkit-node-probe
+  tags: ["arch:amd64"]
+
+buildkit node probe (arm64):
+  extends: .buildkit-node-probe
+  tags: ["arch:arm64"]
 
 .sampled-compile:
   stage: spike
@@ -16,6 +42,8 @@ stages: [spike]
   # No native retry. Platform automation can still add an attempt; treat that as
   # a second sample, not as a broken spike.
   retry: 0
+  rules:
+    - if: '$RUN_SAMPLER == "1"'
   artifacts:
     when: always
     expire_in: 2 weeks

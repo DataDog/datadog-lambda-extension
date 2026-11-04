@@ -15,9 +15,30 @@ IO.
 This spike runs the real compile unchanged and samples the job container while it
 runs, so a stall is captured with resource and network state attached.
 
-## What runs
+## BuildKit node probe
 
-Two arms, two replicas each, from `.gitlab/scripts/sample_compile.sh`:
+Runs on every triggered pipeline, on both `arch:amd64` and `arch:arm64` runners,
+from `.gitlab/scripts/probe_buildkit_node.sh`. It builds a two-step image three
+times and records the identity visible from inside the build container:
+hostname, `/proc/self/cgroup`, pod mounts, `uname -m`, and the builder pool
+before and after. The two `RUN` steps also show whether the serving node changes
+partway through a single build.
+
+What it is for: `buildx ls` shows builder `ci` as a pool of pods named
+`buildkit-platform-amd64-<hash>-<suffix>`, and the pool differs per job, so which
+node serves a given build is otherwise invisible. Knowing the serving
+architecture also tests whether `linux/arm64` builds are emulated on
+`linux/amd64` nodes, which would explain why the arm64 variants are both the
+slowest and the most likely to time out.
+
+A pod UID is not a pod name. Resolving one to the other needs cluster access, so
+the probe gives CI Execution something exact to look up rather than an answer by
+itself.
+
+## Sampler arms
+
+Two arms, two replicas each, from `.gitlab/scripts/sample_compile.sh`. These only
+run when the pipeline is triggered with `RUN_SAMPLER=1`:
 
 | Arm | Why this variant |
 |---|---|
@@ -32,6 +53,9 @@ build is the production build. Only the sampling wrapper is new.
 In GitLab, select **Build > Pipelines > New pipeline**, choose this branch, and
 run it. The pipelines API also works. Push, schedule, and merge request pipelines
 are disabled, and there are no build, publish, deploy, or downstream trigger jobs.
+
+Run the probe alone by triggering without `RUN_SAMPLER`. Add `RUN_SAMPLER=1` to
+run the sampler arms in the same pipeline.
 
 ## Bounds
 
