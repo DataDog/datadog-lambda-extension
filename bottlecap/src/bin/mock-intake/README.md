@@ -48,7 +48,9 @@ Point the test-mode trace processor at a local mock intake. Build both binaries 
 ```bash
 cd bottlecap
 cargo build --bin bottlecap-test-mode --bin mock-intake --features test-mode,mock-intake
-./target/debug/mock-intake
+dump_dir=$(mktemp -d)
+printf 'JSON dumps: %s\n' "$dump_dir"
+MOCK_INTAKE_DUMP_DIR="$dump_dir" ./target/debug/mock-intake
 ```
 
 In another shell, start at the same checkout's repository root:
