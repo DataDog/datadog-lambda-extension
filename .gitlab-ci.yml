@@ -1,72 +1,20 @@
-variables:
-  DOCKER_TARGET_IMAGE: registry.ddbuild.io/ci/datadog-lambda-extension
-  DOCKER_TARGET_VERSION: latest
-  # Default version for development builds
-  # This will be overwritten by the tag version if it is a release.
-  VERSION: dev
-  # Manual trigger variables
-  PIPELINE_LAYER_SUFFIX:
-    description: "Suffix to be appended to the layer name (default empty)."
-    value: ""
+# Throwaway spike: replaces the normal pipeline, including all publishing jobs.
+# Start manually from the GitLab UI or pipelines API on this branch.
+workflow:
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "lpimentel/spike-buildx-version" && ($CI_PIPELINE_SOURCE == "web" || $CI_PIPELINE_SOURCE == "api")'
+    - when: never
 
-stages:
-  - prepare
-  - generate
-  - run
+stages: [spike]
 
-ci image:
-  stage: prepare
+buildx provenance:
+  stage: spike
   image: registry.ddbuild.io/images/docker:20.10
-  tags: ["arch:arm64"]
-  rules:
-    - if: '$CI_COMMIT_BRANCH == "main" && $CI_PIPELINE_SOURCE == "push"'
-      changes:
-        - .gitlab/Dockerfile
-      when: on_success
-  id_tokens:
-    DDSIGN_ID_TOKEN:
-      aud: image-integrity
-  variables:
-    DOCKER_TARGET: ${DOCKER_TARGET_IMAGE}:${DOCKER_TARGET_VERSION}
+  parallel:
+    matrix:
+      - ARCHITECTURE: [amd64, arm64]
+  tags: ["arch:${ARCHITECTURE}"]
+  timeout: 3m
+  retry: 0
   script:
-    - METADATA_FILE=$(mktemp)
-    - docker buildx build --platform linux/amd64,linux/arm64 --no-cache --pull --push --tag ${DOCKER_TARGET} --metadata-file ${METADATA_FILE} -f .gitlab/Dockerfile .
-    - ddsign sign ${DOCKER_TARGET} --docker-metadata-file ${METADATA_FILE}
-
-.go-cache: &go-cache
-  key: datadog-lambda-extension-go-cache
-  policy: pull
-
-generator:
-  stage: generate
-  image: registry.ddbuild.io/images/mirror/golang:alpine
-  tags: ["arch:amd64"]
-  cache: *go-cache
-  artifacts:
-    paths:
-      - .gitlab/pipeline.yaml
-    reports:
-      dotenv: .env
-  script:
-    - if [[ "$CI_COMMIT_TAG" =~ ^v[0-9]+$ ]]; then echo "VERSION=${CI_COMMIT_TAG//[!0-9]/}" >> .env; fi
-    - apk add --no-cache gomplate
-    - gomplate --config .gitlab/config.yaml
-
-generated pipeline:
-  stage: run
-  trigger:
-    include:
-      - artifact: .gitlab/pipeline.yaml
-        job: generator
-    strategy: depend
-    forward:
-      yaml_variables: true
-      # Without this pipeline_variables: true bit the pipeline we trigger will
-      # not get the variables that we set as part of our release process in our
-      # manual pipeline runs.
-      pipeline_variables: true
-  needs:
-    - job: generator
-      artifacts: true
-  rules:
-    - when: on_success
+    - sh .gitlab/scripts/probe_buildx.sh
