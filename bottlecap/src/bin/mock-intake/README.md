@@ -9,7 +9,7 @@ cd bottlecap
 cargo build --bin mock-intake --features mock-intake
 ```
 
-The binary wraps the shared `datadog-mock-intake` crate from the `serverless-components` repository. The same crate backs the `apm_integration_test` and `dsm_integration_test` integration tests, which run in every test build via a dev-dependency.
+The binary wraps the shared `datadog-mock-intake` crate from the `serverless-components` repository. The standalone binary disables in-memory captures; request summaries and JSON dumps remain available. The same crate backs the `apm_integration_test` and `dsm_integration_test` integration tests, which retain captures by default and run in every test build via a dev-dependency.
 
 ## Configuration
 
@@ -23,9 +23,9 @@ Malformed configuration values cause a clear error and a nonzero exit. Bind fail
 
 ## Endpoints and response codes
 
-- `POST /api/v0.2/stats`: MessagePack `StatsPayload` (gzip, zstd, and identity accepted): `202 Accepted` when stored
-- `POST /api/v0.2/traces`: protobuf `AgentPayload` (gzip, zstd, and identity accepted): `202 Accepted` when stored
-- `POST /api/v0.1/pipeline_stats`: MessagePack DSM pipeline stats: `202 Accepted` when stored
+- `POST /api/v0.2/stats`: MessagePack `StatsPayload` (gzip, zstd, and identity accepted): `202 Accepted` when decoded (unless failure injection rejects the attempt)
+- `POST /api/v0.2/traces`: protobuf `AgentPayload` (gzip, zstd, and identity accepted): `202 Accepted` when decoded
+- `POST /api/v0.1/pipeline_stats`: MessagePack DSM pipeline stats: `202 Accepted` when decoded
 - Malformed payloads return `400 Bad Request` (unless inside the stats failure-injection window, which returns `500`)
 - Request bodies above the 2 MiB wire-body limit return `413 Payload Too Large` without being decoded
 
