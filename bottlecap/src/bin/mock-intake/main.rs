@@ -101,7 +101,7 @@ async fn wait_for_shutdown() -> anyhow::Result<()> {
     let mut sigterm = signal(SignalKind::terminate())
         .context("mock-intake: failed to register SIGTERM handler")?;
     tokio::select! {
-        _ = tokio::signal::ctrl_c() => {}
+        result = tokio::signal::ctrl_c() => result?,
         _ = sigterm.recv() => {}
     }
     Ok(())
