@@ -19,7 +19,7 @@ use datadog_agent_trace_sampler::{
     ErrorSamplerConfig, ErrorSamplerMode, ErrorsSampler, SampleDecision, SpanView, TraceView,
 };
 use libdd_common::Endpoint;
-use libdd_trace_obfuscation::obfuscate::obfuscate_span;
+use libdd_trace_obfuscation::obfuscate::obfuscate_pb_span;
 use libdd_trace_obfuscation::obfuscation_config;
 use libdd_trace_protobuf::pb;
 use libdd_trace_protobuf::pb::Span;
@@ -337,7 +337,7 @@ impl TraceChunkProcessor for ChunkProcessor {
             span.meta.insert("origin".to_string(), "lambda".to_string());
             span.meta
                 .insert("_dd.origin".to_string(), "lambda".to_string());
-            obfuscate_span(span, &self.obfuscation_config);
+            obfuscate_pb_span(span, &self.obfuscation_config);
         }
 
         if let Some(span) = chunk.spans.get_mut(root_span_index) {
@@ -862,9 +862,7 @@ mod tests {
             &HashMap::from([("function_arn".to_string(), "test-arn".to_string())]),
         ));
         let processor = ServerlessTraceProcessor {
-            obfuscation_config: Arc::new(
-                ObfuscationConfig::new().expect("Failed to create ObfuscationConfig"),
-            ),
+            obfuscation_config: Arc::new(ObfuscationConfig::default()),
             error_sampler,
             error_rare_sample_tracer_drop,
         };
@@ -958,9 +956,7 @@ mod tests {
         };
 
         let trace_processor = ServerlessTraceProcessor {
-            obfuscation_config: Arc::new(
-                ObfuscationConfig::new().expect("Failed to create ObfuscationConfig"),
-            ),
+            obfuscation_config: Arc::new(ObfuscationConfig::default()),
             error_sampler: enabled_error_sampler(),
             error_rare_sample_tracer_drop: false,
         };
@@ -1220,9 +1216,7 @@ mod tests {
 
         let mut processor = ChunkProcessor {
             config: config.clone(),
-            obfuscation_config: Arc::new(
-                ObfuscationConfig::new().expect("Failed to create ObfuscationConfig"),
-            ),
+            obfuscation_config: Arc::new(ObfuscationConfig::default()),
             tags_provider: Arc::new(Provider::new(
                 config,
                 "lambda".to_string(),
@@ -1305,9 +1299,7 @@ mod tests {
 
         let mut processor = ChunkProcessor {
             config: config.clone(),
-            obfuscation_config: Arc::new(
-                ObfuscationConfig::new().expect("Failed to create ObfuscationConfig"),
-            ),
+            obfuscation_config: Arc::new(ObfuscationConfig::default()),
             tags_provider: Arc::new(Provider::new(
                 config,
                 "lambda".to_string(),
@@ -1389,9 +1381,7 @@ mod tests {
 
         let mut processor = ChunkProcessor {
             config: config.clone(),
-            obfuscation_config: Arc::new(
-                ObfuscationConfig::new().expect("Failed to create ObfuscationConfig"),
-            ),
+            obfuscation_config: Arc::new(ObfuscationConfig::default()),
             tags_provider: Arc::new(Provider::new(
                 config,
                 "lambda".to_string(),
@@ -2149,9 +2139,7 @@ mod tests {
         let tags_provider = create_tags_provider(config.clone());
         ChunkProcessor {
             config,
-            obfuscation_config: Arc::new(
-                ObfuscationConfig::new().expect("Failed to create ObfuscationConfig"),
-            ),
+            obfuscation_config: Arc::new(ObfuscationConfig::default()),
             tags_provider,
             span_pointers: None,
             client_computed_stats,
@@ -2625,9 +2613,7 @@ mod tests {
             let sender = SendingTraceProcessor {
                 appsec: None,
                 processor: Arc::new(ServerlessTraceProcessor {
-                    obfuscation_config: Arc::new(
-                        ObfuscationConfig::new().expect("Failed to create ObfuscationConfig"),
-                    ),
+                    obfuscation_config: Arc::new(ObfuscationConfig::default()),
                     error_sampler: enabled_error_sampler(),
                     error_rare_sample_tracer_drop: false,
                 }),
