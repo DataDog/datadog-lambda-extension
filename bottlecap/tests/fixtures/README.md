@@ -17,16 +17,16 @@ use fixtures::{dogstatsd, events, logs, telemetry, traces};
 | `telemetry` | `platform_batch(request_id) -> Vec<u8>` | One cold-start invocation: `initStart`, `initRuntimeDone`, `initReport`, `start`, `runtimeDone`, `report` |
 | | `log_batch(LogKind, n) -> Vec<u8>` | One POST body of `n` function log events (`LogKind::{Text, JsonObject, JsonString}`) |
 | | `log_batches(LogKind, n, per_post) -> Vec<Vec<u8>>` | The same, split into POSTs of `per_post` events (Lambda sends at most 1000) |
-| | `invocation_batch(LogKind, n) -> Vec<u8>` | `platform.start`, `n` log lines, `runtimeDone`, `report` |
+| | `invocation_batch(LogKind, n) -> Vec<u8>` | One warm invocation: `platform.start`, `n` log lines, `runtimeDone`, a `report` without `initDurationMs` |
 | | `split_record_posts(total, piece, per_post) -> Vec<Vec<u8>>` | A record of `total` bytes cut into `piece`-byte pieces, spread over POSTs; the last carries `runtimeDone`. Feed to `FragmentBuffer::stitch` in order |
 | | `split_record_single_post(total, piece) -> Vec<u8>` | All pieces of one split record in one body (seams only) |
 | | `runtime_done_with(id, status, with_metrics)`, `logs_dropped(n)`, `unknown_event()` | A `runtimeDone` of any status with or without `metrics` (Lambda omits it on a timeout), a `platform.logsDropped`, an event of an unknown type |
-| | `event(millis, type, record_json)`, `init_start()`, `platform_start(id)`, `runtime_done(id)`, `report(id)`, `function_event(kind, i)`, `extension_event(i)`, `batch(&[String])` | Building blocks |
+| | `event(millis, type, record_json)`, `init_start()`, `platform_start(id)`, `runtime_done(id)`, `report(id)` (cold), `warm_report(id)`, `function_event(kind, i)`, `extension_event(i)`, `batch(&[String])` | Building blocks |
 | | `REQUEST_ID`, `FUNCTION_ARN` | Constants used everywhere |
 | `logs` | `text_line(i)`, `json_object(i) -> Value`, `json_line(i)`, `text_line_of_len(i, len)`, `OOM_LINES` | Raw log lines: Lambda text format (~200 B), Powertools-like JSON (~2 KB), one OOM line per runtime |
 | `traces` | `make_traces(n_traces, spans_per_trace, with_sql) -> Vec<Vec<pb::Span>>` | Synthetic traces: `aws.lambda` root, SQL and HTTP clients, internal spans |
 | | `trace_2000_spans()`, `v04_2000_spans() -> Vec<u8>` | The reference payload: 100 x 20 spans, ~1 MB v0.4 msgpack |
-| | `v04_msgpack(&traces)`, `header_tags()`, `TRACE_HEADERS` | Encoding and the matching tracer headers |
+| | `v04_msgpack(&traces)`, `header_tags()`, `TRACE_HEADERS` | Encoding and the matching Node.js tracer headers |
 | `dogstatsd` | `line(Kind, i)`, `packet(Kind, first, n)`, `packets(Kind, total, per_packet)`, `unique_tag_line(i)` | Datagrams: 50 metric names x 100 endpoints; `Kind::{Count, Gauge, Distribution}` |
 | | `enrich_tags()` | The tags bottlecap adds to every metric, for `FUNCTION_ARN` and the current `EXTENSION_VERSION` |
 | | `DIST_8_TAGS`, `COUNT_2_TAGS`, `SKIPPED_LINES` | Constants |
@@ -45,14 +45,15 @@ cargo test --test fixtures_corpus write_fixture_corpus -- --ignored
 ```
 
 Output goes to `bottlecap/tests/fixtures/generated/` (gitignored), or to `$BOTTLECAP_FIXTURES_DIR`.
-`MANIFEST.txt` lists every file with its size.
+`MANIFEST.txt` lists every file with its size. A new run first removes the files the previous
+`MANIFEST.txt` lists.
 
 ```
 telemetry/platform_batch.json                 platform events of one cold start
 telemetry/function_text_1000.json             1000 text log events, one POST
 telemetry/function_json_object_600.json       600 JSON-object log events, one POST under 1 MiB
 telemetry/function_json_string_600.json       600 JSON-in-string log events, one POST under 1 MiB
-telemetry/invocation_batch_text_200.json      start + 200 lines + runtimeDone + report
+telemetry/invocation_batch_text_200.json      start + 200 lines + runtimeDone + warm report
 telemetry/split_record_1mib_post_{0..1}.json  a 1 MiB record in 256 KiB pieces, 3 per POST
 telemetry/split_record_1mib_single_post.json  the same pieces in one body
 traces/v04_2000_spans.msgpack                 100 traces x 20 spans

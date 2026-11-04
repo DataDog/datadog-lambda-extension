@@ -136,14 +136,30 @@ pub fn unknown_event() -> String {
     event(70, "platform.somethingNew", r#"{"field":"value"}"#)
 }
 
+/// `platform.report` of a cold start, with `initDurationMs`.
 pub fn report(request_id: &str) -> String {
+    report_with(request_id, r#","initDurationMs":38.12"#)
+}
+
+/// `platform.report` of a warm invocation: Lambda omits `initDurationMs`.
+pub fn warm_report(request_id: &str) -> String {
+    report_with(request_id, "")
+}
+
+fn report_with(request_id: &str, init_duration: &str) -> String {
     event(
         151,
         "platform.report",
         &format!(
-            r#"{{"requestId":"{request_id}","status":"success","metrics":{{"durationMs":98.5,"billedDurationMs":99,"memorySizeMB":128,"maxMemoryUsedMB":64,"initDurationMs":38.12}}}}"#
+            r#"{{"requestId":"{request_id}","status":"success","metrics":{{"durationMs":98.5,"billedDurationMs":99,"memorySizeMB":128,"maxMemoryUsedMB":64{init_duration}}}}}"#
         ),
     )
+}
+
+/// Envelope time of the `i`th log event: nondecreasing, 12 events per millisecond,
+/// between `platform.start` (50 ms) and `platform.runtimeDone` (150 ms).
+fn log_millis(i: usize) -> usize {
+    60 + (i / 12).min(89)
 }
 
 /// One function log event of the given shape.
@@ -154,7 +170,7 @@ pub fn function_event(kind: LogKind, i: usize) -> String {
         LogKind::JsonString => serde_json::to_string(&Value::String(logs::json_line(i))),
     }
     .expect("serialize function record");
-    event(60 + i % 80, "function", &record)
+    event(log_millis(i), "function", &record)
 }
 
 /// An `extension` log event (bottlecap's own stdout as Lambda re-ingests it), in the JSON
@@ -163,7 +179,7 @@ pub fn extension_event(i: usize) -> String {
     let line =
         format!(r#"{{"status":"DEBUG","message":"DD_EXTENSION | DEBUG | processed batch {i}"}}"#);
     event(
-        60 + i % 80,
+        log_millis(i),
         "extension",
         &serde_json::to_string(&Value::String(line)).expect("serialize extension record"),
     )
@@ -216,7 +232,7 @@ pub fn invocation_batch(kind: LogKind, n: usize) -> Vec<u8> {
     events.push(platform_start(REQUEST_ID));
     events.extend((0..n).map(|i| function_event(kind, i)));
     events.push(runtime_done(REQUEST_ID));
-    events.push(report(REQUEST_ID));
+    events.push(warm_report(REQUEST_ID));
     batch(&events)
 }
 

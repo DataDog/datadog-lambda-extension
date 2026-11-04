@@ -41,8 +41,14 @@ pub fn default_corpus_dir() -> PathBuf {
         .join("generated")
 }
 
-/// Writes every fixture to `dir` and returns the written files with their sizes.
+/// Writes every fixture to `dir` and returns the written files with their sizes. First removes
+/// the files the previous `MANIFEST.txt` lists, so a renamed or removed fixture does not stay.
 pub fn write_corpus(dir: &Path) -> Vec<(PathBuf, usize)> {
+    if let Ok(previous) = fs::read_to_string(dir.join("MANIFEST.txt")) {
+        for rel in previous.lines().filter_map(|l| l.split_whitespace().nth(1)) {
+            let _ = fs::remove_file(dir.join(rel));
+        }
+    }
     let mut written = Vec::new();
     let mut put = |rel: &str, bytes: &[u8]| {
         let path = dir.join(rel);

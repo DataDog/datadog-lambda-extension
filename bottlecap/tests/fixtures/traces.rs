@@ -9,13 +9,15 @@ use serde::Serialize;
 
 use crate::fixtures::telemetry::REQUEST_ID;
 
-/// Headers a Python tracer sends with the reference payload ([`v04_2000_spans`], 100 traces).
-/// Set `X-Datadog-Trace-Count` to the trace count when sending another payload.
+/// Headers the Node.js tracer sends with the reference payload ([`v04_2000_spans`], 100
+/// traces), matching the `nodejs22.x` runtime of the other fixtures. Set
+/// `X-Datadog-Trace-Count` to the trace count when sending another payload.
 pub const TRACE_HEADERS: &[(&str, &str)] = &[
     ("Content-Type", "application/msgpack"),
-    ("Datadog-Meta-Lang", "python"),
-    ("Datadog-Meta-Lang-Version", "3.12"),
-    ("Datadog-Meta-Tracer-Version", "2.10.0"),
+    ("Datadog-Meta-Lang", "nodejs"),
+    ("Datadog-Meta-Lang-Version", "v22.11.0"),
+    ("Datadog-Meta-Lang-Interpreter", "v8"),
+    ("Datadog-Meta-Tracer-Version", "5.40.0"),
     ("X-Datadog-Trace-Count", "100"),
 ];
 
@@ -37,9 +39,10 @@ pub fn now_ns() -> i64 {
 /// The tracer header tags that match [`TRACE_HEADERS`].
 pub fn header_tags() -> TracerHeaderTags<'static> {
     TracerHeaderTags {
-        lang: "python",
-        lang_version: "3.12",
-        tracer_version: "2.10.0",
+        lang: "nodejs",
+        lang_version: "v22.11.0",
+        lang_interpreter: "v8",
+        tracer_version: "5.40.0",
         ..Default::default()
     }
 }
@@ -101,12 +104,12 @@ pub fn make_traces_at(
                         };
                     let mut meta: HashMap<String, String> = [
                         ("runtime-id", "f45568ad09d5480b99087d86ebda26e6"),
-                        ("language", "python"),
+                        ("language", "javascript"),
                         ("_dd.p.dm", "-0"),
                         ("_dd.p.tid", "66f1a2b300000000"),
                         ("env", "prod"),
                         ("version", "1.2.3"),
-                        ("component", "requests"),
+                        ("component", "http"),
                     ]
                     .into_iter()
                     .chain(extra)
