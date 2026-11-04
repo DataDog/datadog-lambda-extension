@@ -47,6 +47,9 @@ RUNTIMES = {
     },
 }
 
+# Log lines of the extension when it has no API key.
+KEY_ERRORS = ("Error decrypting key", "Failed to resolve API key")
+
 BASE_ENV = {
     "DD_SITE": "datadoghq.com",
     "DD_SERVICE": "extension-perf-test",
@@ -212,6 +215,8 @@ def main():
     variants = {}
     for v in args.variants:
         vname, spec = v.split("=", 1)
+        if vname in variants:
+            sys.exit(f"The variant name {vname} is used more than once.")
         layers = [] if spec == "none" else [resolve(spec, args.arch, args.fips, args.region)]
         fns = [
             f"{owner()}-extperf-{args.runtime}-{args.arch}-{vname}" + (f"-{k}" if args.copies > 1 else "")
@@ -234,7 +239,7 @@ def main():
     role_arn = ensure_role(boto3.client("iam"), secret_arn)
     os.makedirs(args.out, exist_ok=True)
 
-    reserved, failed = [], []
+    reserved, failed, incomplete, key_errors = [], [], [], []
     try:
         meta = {"args": vars(args), "env": env, "variants": {}}
         for vname, (layers, fns) in variants.items():
@@ -279,6 +284,11 @@ def main():
                     fn_events, fn_reports = collect_logs(logs, fn, start_ms, args.n * (1 + args.warm), deadline)
                     events += fn_events
                     reports += fn_reports
+                    if fn_reports < args.n * (1 + args.warm):
+                        incomplete.append(fn)
+                    # Without a key, the extension skips its flushes, and the durations are too low.
+                    if any(m in e["message"] for e in fn_events for m in KEY_ERRORS):
+                        key_errors.append(fn)
                 with open(os.path.join(args.out, f"{vname}.jsonl"), "w") as f:
                     f.writelines(json.dumps(e) + "\n" for e in events)
                 print(f"{vname}: saved {len(events)} log events, {reports} REPORT lines", flush=True)
@@ -289,9 +299,16 @@ def main():
         # This also runs when setup or the log export fails.
         for fn in reserved:
             lam.delete_function_concurrency(FunctionName=fn)
-    # summarize.py counts the REPORT line of a failed invocation like any other, so the results need a rerun.
+    # summarize.py cannot tell these runs from good ones, so they need a rerun.
+    problems = []
     if failed:
-        sys.exit(f"{len(failed)} invocations failed, for example in {failed[0]}. Run the measurement again.")
+        problems.append(f"{len(failed)} invocations failed, for example in {failed[0]}.")
+    if incomplete:
+        problems.append(f"CloudWatch did not have all REPORT lines of {len(incomplete)} functions, for example {incomplete[0]}.")
+    if key_errors:
+        problems.append(f"The extension could not get the API key in {len(key_errors)} functions, for example {key_errors[0]}.")
+    if problems:
+        sys.exit(" ".join(problems) + " Run the measurement again.")
 
 
 if __name__ == "__main__":
