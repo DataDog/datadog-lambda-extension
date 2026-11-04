@@ -1718,8 +1718,8 @@ mod tests {
     }
 
     /// A long freeze/thaw gap clears stale counters, but a throttled
-    /// signature's stored rate recovers by at most 20% per evaluation, so it
-    /// stays below 1.0 after a single gap.
+    /// signature's stored rate recovers by at most 20% per evaluation, so
+    /// rescue keeps working after the gap at a rate still below 1.0.
     #[test]
     fn error_sampler_stays_throttled_after_long_gap() {
         let sampler = new_error_sampler(1.0);
@@ -1732,15 +1732,24 @@ mod tests {
             }
         }
 
-        match sample_errored_trace(&sampler, t0 + 15 + 3600, n + 1) {
-            SampleDecision::Drop => {}
-            SampleDecision::Keep { errors_sr } => {
-                assert!(
-                    errors_sr < 1.0,
-                    "a previously throttled signature must stay below 1.0, got {errors_sr}"
-                );
-            }
-        }
+        // All post-gap calls share one bucket, so the rate stays fixed. Ids are
+        // deterministic, so this bounded scan is stable.
+        let after_gap = t0 + 15 + 3600;
+        let errors_sr = (n + 1..=n + 400)
+            .find_map(|id| match sample_errored_trace(&sampler, after_gap, id) {
+                SampleDecision::Keep { errors_sr } => Some(errors_sr),
+                SampleDecision::Drop => None,
+            })
+            .expect("a throttled signature must still rescue some traces after a long gap");
+        assert!(
+            errors_sr < 1.0,
+            "a previously throttled signature must stay below 1.0, got {errors_sr}"
+        );
+        // Stored rate 1/40 before the gap, capped at a 20% increase.
+        assert!(
+            (errors_sr - 0.025 * 1.2).abs() < 1e-9,
+            "expected the capped recovery rate 0.03, got {errors_sr}"
+        );
     }
 
     /// Runs one batch of 50 errored P0 traces with the same signature (distinct
