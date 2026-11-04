@@ -99,8 +99,16 @@ The dashboard has no layer size. Get the size of released versions from AWS:
 aws-vault exec sso-serverless-sandbox-account-admin -- python3 .claude/skills/measure-extension-layer/scripts/layer_size.py v99 v100 v101
 ```
 
-It prints the zipped size (`CodeSize`, the number that AWS limits) and the unzipped size. Use
-`--arch x86_64` or `--fips` for the other layers.
+It prints the zipped size (`CodeSize`) and the unzipped size. Use `--arch x86_64` or `--fips`
+for the other layers. AWS limits each size in a different way:
+
+| Size | AWS limit |
+| --- | --- |
+| Zipped | 50 MB for a package that you upload through the Lambda API or an SDK |
+| Unzipped | 250 MB for the function and all its layers together |
+
+The unzipped limit matters more for a customer, because the extension shares those 250 MB with
+the code of the function and its other layers.
 
 The metric `sls.monitoring.latest_layer_version_size{layer:datadog-extension-arm}`, grouped by
 `layer_version`, has the same zipped size. It has a value only for versions that were the latest
