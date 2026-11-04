@@ -11,7 +11,13 @@ get_gitlab_token() {
         --header "Content-Type: application/vnd.api+json" \
         "https://bti-ci-api.us1.ddbuild.io/internal/ci/gitlab/token?owner=DataDog&repository=datadog-lambda-extension")
 
-    GITLAB_TOKEN=$(echo "$BTI_RESPONSE" | jq -r '.token // empty')
+    NEW_TOKEN=$(echo "$BTI_RESPONSE" | jq -r '.token // empty')
+    # Keep the old token if BTI fails. Its next 401 makes the poll loop ask BTI again.
+    if [ -n "$NEW_TOKEN" ]; then
+        GITLAB_TOKEN="$NEW_TOKEN"
+    else
+        echo "WARNING: BTI returned no GitLab token"
+    fi
 }
 
 get_gitlab_token
