@@ -25,15 +25,23 @@ before and after. The two `RUN` steps also show whether the serving node changes
 partway through a single build.
 
 What it is for: `buildx ls` shows builder `ci` as a pool of pods named
-`buildkit-platform-amd64-<hash>-<suffix>`, and the pool differs per job, so which
-node serves a given build is otherwise invisible. Knowing the serving
-architecture also tests whether `linux/arm64` builds are emulated on
-`linux/amd64` nodes, which would explain why the arm64 variants are both the
-slowest and the most likely to time out.
+`buildkit-platform-amd64-<hash>-<suffix>`, all advertising `linux/amd64`, which
+made it worth testing whether `linux/arm64` builds were emulated on amd64 nodes.
 
-A pod UID is not a pod name. Resolving one to the other needs cluster access, so
-the probe gives CI Execution something exact to look up rather than an answer by
-itself.
+Result from pipeline 150398765: **they are not emulated.** `uname -m` reports
+`aarch64` inside an arm64 build, so the pool name says nothing about the pods'
+architecture and the advertised platform list does not constrain what a build
+runs natively. The arm64 variants' longer duration and higher timeout count come
+from the build content (FIPS plus musl), not from emulation.
+
+Also settled: the pool is unchanged before and after a build, so a build adds or
+retires no nodes; the serving node is not observable from the client, because
+build containers report the fixed hostname `buildkitsandbox` and carry no pod
+identity; and buildx 0.8.0 has no root `--debug` to log node selection.
+
+Attributing a build to a specific pod needs cluster-side data, so this probe does
+not answer that. Keep it for the architecture check, or drop it once that answer
+is no longer needed.
 
 ## Sampler arms
 
@@ -48,6 +56,13 @@ run when the pipeline is triggered with `RUN_SAMPLER=1`:
 The compile script, image, runner tags, and build arguments are unchanged, so the
 build is the production build. Only the sampling wrapper is new.
 
+Result from pipeline 150390041: four jobs, all successful, **no stall captured**.
+At roughly one timeout per eight compile attempts, four attempts had about a
+one-in-four chance of catching one, so this is a null result rather than evidence
+against the signature. What it does establish is that client-side starvation is
+not the cause: 111-235 GB available, no swap, 0-14 cumulative TCP retransmissions
+over a full job, and one arm64 job finishing normally at a 1m node load of 296.
+
 ## How to run
 
 In GitLab, select **Build > Pipelines > New pipeline**, choose this branch, and
@@ -56,6 +71,10 @@ are disabled, and there are no build, publish, deploy, or downstream trigger job
 
 Run the probe alone by triggering without `RUN_SAMPLER`. Add `RUN_SAMPLER=1` to
 run the sampler arms in the same pipeline.
+
+This GitLab project mirrors from GitHub, so a fresh push is not immediately
+visible to a pipeline trigger. Check the branch commit SHA on GitLab before
+triggering, or the run uses the previous commit.
 
 ## Bounds
 
