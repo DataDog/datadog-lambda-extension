@@ -852,7 +852,7 @@ dependencies = [
 [[package]]
 name = "datadog-mock-intake"
 version = "0.1.0"
-source = "git+https://github.com/DataDog/serverless-components?rev=e462105e918904e6b1ad2ebc153ae561cebe5a34#e462105e918904e6b1ad2ebc153ae561cebe5a34"
+source = "git+https://github.com/DataDog/serverless-components?rev=fc89cb128a217385c2135a28fea158fc17d0ca40#fc89cb128a217385c2135a28fea158fc17d0ca40"
 dependencies = [
  "bytes",
  "flate2",

@@ -91,6 +91,7 @@ fn parse_options() -> anyhow::Result<MockIntakeOptions> {
         request_summaries: true,
         fail_stats_first_n,
         dump_dir: std::env::var_os("MOCK_INTAKE_DUMP_DIR").map(PathBuf::from),
+        disable_captures: true,
     })
 }
 
@@ -104,4 +105,20 @@ async fn wait_for_shutdown() -> anyhow::Result<()> {
         _ = sigterm.recv() => {}
     }
     Ok(())
+}
+
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+mod tests {
+    use super::parse_options;
+
+    #[test]
+    fn standalone_disables_captures() {
+        figment::Jail::expect_with(|jail| {
+            jail.clear_env();
+            let options = parse_options().expect("default options should parse");
+            assert!(options.disable_captures);
+            Ok(())
+        });
+    }
 }

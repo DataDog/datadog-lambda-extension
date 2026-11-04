@@ -97,7 +97,7 @@ libdd-trace-protobuf = "5.1.1"
 # Shared mock APM intake crate from serverless-components, linked only by the
 # standalone mock-intake binary behind the `mock-intake` feature. The APM /
 # DSM integration tests consume it as an ungated dev-dependency below.
-datadog-mock-intake = { git = "https://github.com/DataDog/serverless-components", rev = "e462105e918904e6b1ad2ebc153ae561cebe5a34", optional = true }
+datadog-mock-intake = { git = "https://github.com/DataDog/serverless-components", rev = "fc89cb128a217385c2135a28fea158fc17d0ca40", optional = true }
 libdd-trace-utils = { version = "16.0.0", default-features = false, features = ["mini_agent"] }
 libdd-trace-normalization = "4.3.1"
 libdd-trace-obfuscation = { version = "12.0.0", default-features = false }
@@ -127,7 +127,7 @@ tokio-rustls = { version = "0.26", default-features = false, features = ["loggin
 protobuf = { version = "3.7", default-features = false }
 # Shared mock APM intake for the APM / DSM integration tests. Ungated so the
 # tests run in every feature set.
-datadog-mock-intake = { git = "https://github.com/DataDog/serverless-components", rev = "e462105e918904e6b1ad2ebc153ae561cebe5a34" }
+datadog-mock-intake = { git = "https://github.com/DataDog/serverless-components", rev = "fc89cb128a217385c2135a28fea158fc17d0ca40" }
 
 [build-dependencies]
 # No external dependencies needed for the build script
