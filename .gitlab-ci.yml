@@ -1,72 +1,50 @@
-variables:
-  DOCKER_TARGET_IMAGE: registry.ddbuild.io/ci/datadog-lambda-extension
-  DOCKER_TARGET_VERSION: latest
-  # Default version for development builds
-  # This will be overwritten by the tag version if it is a release.
-  VERSION: dev
-  # Manual trigger variables
-  PIPELINE_LAYER_SUFFIX:
-    description: "Suffix to be appended to the layer name (default empty)."
-    value: ""
+# Throwaway diagnostic spike: replaces the normal pipeline, including all
+# publishing jobs. Start it manually from the GitLab UI or the pipelines API on
+# this branch. Do not merge this pipeline replacement.
+workflow:
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "lpimentel/spike-compile-sampler" && ($CI_PIPELINE_SOURCE == "web" || $CI_PIPELINE_SOURCE == "api")'
+    - when: never
 
-stages:
-  - prepare
-  - generate
-  - run
+stages: [spike]
 
-ci image:
-  stage: prepare
+.sampled-compile:
+  stage: spike
   image: registry.ddbuild.io/images/docker:20.10
-  tags: ["arch:arm64"]
-  rules:
-    - if: '$CI_COMMIT_BRANCH == "main" && $CI_PIPELINE_SOURCE == "push"'
-      changes:
-        - .gitlab/Dockerfile
-      when: on_success
-  id_tokens:
-    DDSIGN_ID_TOKEN:
-      aud: image-integrity
-  variables:
-    DOCKER_TARGET: ${DOCKER_TARGET_IMAGE}:${DOCKER_TARGET_VERSION}
-  script:
-    - METADATA_FILE=$(mktemp)
-    - docker buildx build --platform linux/amd64,linux/arm64 --no-cache --pull --push --tag ${DOCKER_TARGET} --metadata-file ${METADATA_FILE} -f .gitlab/Dockerfile .
-    - ddsign sign ${DOCKER_TARGET} --docker-metadata-file ${METADATA_FILE}
-
-.go-cache: &go-cache
-  key: datadog-lambda-extension-go-cache
-  policy: pull
-
-generator:
-  stage: generate
-  image: registry.ddbuild.io/images/mirror/golang:alpine
-  tags: ["arch:amd64"]
-  cache: *go-cache
+  # Bound the whole job above the script's own 25m compile bound.
+  timeout: 30m
+  # No native retry. Platform automation can still add an attempt; treat that as
+  # a second sample, not as a broken spike.
+  retry: 0
   artifacts:
+    when: always
+    expire_in: 2 weeks
     paths:
-      - .gitlab/pipeline.yaml
-    reports:
-      dotenv: .env
+      - sampler.log
+      - build.log
   script:
-    - if [[ "$CI_COMMIT_TAG" =~ ^v[0-9]+$ ]]; then echo "VERSION=${CI_COMMIT_TAG//[!0-9]/}" >> .env; fi
-    - apk add --no-cache gomplate
-    - gomplate --config .gitlab/config.yaml
+    - .gitlab/scripts/sample_compile.sh
 
-generated pipeline:
-  stage: run
-  trigger:
-    include:
-      - artifact: .gitlab/pipeline.yaml
-        job: generator
-    strategy: depend
-    forward:
-      yaml_variables: true
-      # Without this pipeline_variables: true bit the pipeline we trigger will
-      # not get the variables that we set as part of our release process in our
-      # manual pipeline runs.
-      pipeline_variables: true
-  needs:
-    - job: generator
-      artifacts: true
-  rules:
-    - when: on_success
+# Slowest variant and the highest timeout count historically. Stalls traced on
+# this Dockerfile path happen inside the final compile step.
+bottlecap sampled (arm64, fips, alpine):
+  extends: .sampled-compile
+  tags: ["arch:arm64"]
+  parallel: 2
+  variables:
+    ARCHITECTURE: arm64
+    ALPINE: 1
+    FIPS: 1
+    FILE_SUFFIX: arm64-alpine-fips
+
+# Fastest variant, and the Dockerfile path where two traced stalls stopped at a
+# step boundary rather than mid-step.
+bottlecap sampled (amd64):
+  extends: .sampled-compile
+  tags: ["arch:amd64"]
+  parallel: 2
+  variables:
+    ARCHITECTURE: amd64
+    ALPINE: 0
+    FIPS: 0
+    FILE_SUFFIX: amd64
