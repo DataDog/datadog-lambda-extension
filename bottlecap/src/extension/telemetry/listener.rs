@@ -1,5 +1,4 @@
 use crate::{
-    event_bus,
     extension::telemetry::{
         events::TelemetryEvent,
         stitch::{FragmentBuffer, Stitch},
@@ -30,7 +29,6 @@ pub struct TelemetryListener {
     port: u16,
     cancel_token: CancellationToken,
     logs_tx: Sender<TelemetryEvent>,
-    event_bus_tx: Sender<event_bus::Event>,
 }
 
 #[derive(Clone)]
@@ -41,19 +39,13 @@ struct HandlerState {
 
 impl TelemetryListener {
     #[must_use]
-    pub fn new(
-        host: [u8; 4],
-        port: u16,
-        logs_tx: Sender<TelemetryEvent>,
-        event_bus_tx: Sender<event_bus::Event>,
-    ) -> Self {
+    pub fn new(host: [u8; 4], port: u16, logs_tx: Sender<TelemetryEvent>) -> Self {
         let cancel_token = CancellationToken::new();
         Self {
             host,
             port,
             cancel_token,
             logs_tx,
-            event_bus_tx,
         }
     }
 
@@ -67,16 +59,18 @@ impl TelemetryListener {
         let router = self.make_router();
 
         let cancel_token_clone = self.cancel_token();
-        let event_bus_tx = self.event_bus_tx.clone();
         tokio::spawn(async move {
             let listener = TcpListener::bind(&socket)
                 .await
                 .expect("Failed to bind socket");
             debug!("TELEMETRY API | Starting listener on {}", socket);
             axum::serve(listener, router)
-                .with_graceful_shutdown(Self::graceful_shutdown(cancel_token_clone, event_bus_tx))
+                .with_graceful_shutdown(Self::graceful_shutdown(cancel_token_clone))
                 .await
                 .expect("Failed to start telemetry listener");
+            // The router, and with it the last `logs_tx`, drops here. That disconnects the
+            // logs agent's channel, which then drains and sends the Tombstone.
+            debug!("TELEMETRY API | Shut down");
         });
 
         Ok(())
@@ -95,19 +89,9 @@ impl TelemetryListener {
             .layer(DefaultBodyLimit::max(MAX_BODY_BYTES))
     }
 
-    async fn graceful_shutdown(
-        cancel_token: CancellationToken,
-        event_bus_tx: Sender<event_bus::Event>,
-    ) {
+    async fn graceful_shutdown(cancel_token: CancellationToken) {
         cancel_token.cancelled().await;
-        debug!("TELEMETRY API | Shutdown signal received, sending tombstone event");
-
-        // Send tombstone event to signal shutdown
-        if let Err(e) = event_bus_tx.send(event_bus::Event::Tombstone).await {
-            debug!("TELEMETRY API |Failed to send tombstone event: {:?}", e);
-        }
-
-        debug!("TELEMETRY API | Shutting down");
+        debug!("TELEMETRY API | Shutdown signal received, shutting down");
     }
 
     async fn handle(State(state): State<HandlerState>, request: Request) -> Response {
@@ -153,7 +137,10 @@ impl TelemetryListener {
         };
 
         for event in telemetry_events.drain(..) {
-            state.logs_tx.send(event).await.expect("infallible");
+            // The logs agent stops receiving once its shutdown drain times out.
+            if state.logs_tx.send(event).await.is_err() {
+                return (StatusCode::SERVICE_UNAVAILABLE, "Shutting down").into_response();
+            }
         }
 
         (StatusCode::OK, "OK").into_response()
@@ -218,6 +205,23 @@ mod tests {
             runtime_version: Some("nodejs:20.v22".to_string()),
             runtime_version_arn: Some("arn:aws:lambda:us-east-1::runtime:da57c20c4b965d5b75540f6865a35fc8030358e33ec44ecfed33e90901a27a72".to_string()),
         });
+    }
+
+    #[tokio::test]
+    async fn test_handle_after_receiver_dropped() {
+        let (tx, rx) = tokio::sync::mpsc::channel(1);
+        drop(rx);
+
+        let response = TelemetryListener::handle(
+            axum::extract::State(state(tx)),
+            post(r#"[{"time":"2024-04-25T17:35:59.944Z","type":"platform.initStart","record":{"initializationType":"on-demand","phase":"init"}}]"#),
+        )
+        .await;
+
+        assert_eq!(
+            response.status(),
+            axum::http::StatusCode::SERVICE_UNAVAILABLE
+        );
     }
 
     /// A split payload is held on the first POST and forwarded whole on the second.
