@@ -43,16 +43,18 @@ With `MOCK_INTAKE_DUMP_DIR` set, each successfully decoded request attempt (incl
 
 ## Smoke procedure
 
-Point the test-mode trace processor at a local mock intake. The `bottlecap-test-mode` binary is added in [#1216](https://github.com/DataDog/datadog-lambda-extension/pull/1216) (not yet merged); build it from a checkout of that branch:
+Point the test-mode trace processor at a local mock intake. Build both binaries from this checkout, starting at the repository root:
 
 ```bash
-cd ../<test-mode-worktree>/bottlecap
-cargo build --bin bottlecap-test-mode --features test-mode
+cd bottlecap
+cargo build --bin bottlecap-test-mode --bin mock-intake --features test-mode,mock-intake
+./target/debug/mock-intake
+```
 
-cd ../<this-checkout>/bottlecap
-cargo run --bin mock-intake --features mock-intake
+In another shell, start at the same checkout's repository root:
 
-# in another shell:
+```bash
+cd bottlecap
 DD_APM_DD_URL=http://127.0.0.1:8127 \
 DD_LAMBDA_EXTENSION_COMPUTE_STATS=true \
 DD_SERVICE=mock-intake-smoke DD_ENV=local DD_VERSION=smoke \
