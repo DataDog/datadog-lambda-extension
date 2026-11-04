@@ -139,7 +139,6 @@ required-features = ["test-mode"]
 
 [[bin]]
 name = "mock-intake"
-path = "src/bin/mock-intake/main.rs"
 required-features = ["mock-intake"]
 
 [profile.dev]
