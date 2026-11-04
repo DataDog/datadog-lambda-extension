@@ -160,8 +160,10 @@ def invoke(lam, fn):
             time.sleep(5 * (attempt + 1))
     else:
         return False
+    # Read the whole body, so that the connection goes back to the pool.
+    payload = r["Payload"].read()
     if r.get("FunctionError"):
-        print(f"{fn}: function error: {r['Payload'].read()[:300]!r}", flush=True)
+        print(f"{fn}: function error: {payload[:300]!r}", flush=True)
         return False
     return True
 
