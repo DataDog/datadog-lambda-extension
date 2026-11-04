@@ -25,14 +25,18 @@ stages: [probe, spike]
   script:
     - .gitlab/scripts/probe_buildkit_node.sh
 
-# Names the BuildKit node serving a build, and its architecture.
+# Names the BuildKit node serving a build, and whether the platform is native.
 buildkit node probe (amd64):
   extends: .buildkit-node-probe
   tags: ["arch:amd64"]
+  variables:
+    TARGET_PLATFORM: amd64
 
 buildkit node probe (arm64):
   extends: .buildkit-node-probe
   tags: ["arch:arm64"]
+  variables:
+    TARGET_PLATFORM: arm64
 
 .sampled-compile:
   stage: spike
