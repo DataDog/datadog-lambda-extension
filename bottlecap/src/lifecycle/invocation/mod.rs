@@ -8,6 +8,7 @@ use serde_json::Value;
 use tracing::debug;
 
 pub mod context;
+pub mod native;
 pub mod processor;
 pub mod processor_service;
 pub mod span_inferrer;
