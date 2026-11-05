@@ -154,8 +154,9 @@ active) backs the lock up in `bottlecap/.patch-deps/` (in `.gitignore`), after
 the manifest was written. `restore` puts it back. After each change the script
 resolves the graph, prints one line per crate with `active` or `NOT USED`, and
 records the sha256 of the patched lock. If the lock changed since then (you
-added or bumped a dependency), `restore` refuses (exit 4) so the backup does not
-erase that change; check `git diff bottlecap/Cargo.lock`, then `restore --force`.
+added or bumped a dependency), `add`, `remove` and `restore` refuse (exit 4) so
+the backup does not erase that change; check `git diff bottlecap/Cargo.lock`,
+then `restore --force`. Only `restore` takes `--force`.
 A crates.io patch is only used when the local version is semver compatible
 with the locked one; a libdatadog checkout that is behind the lock shows
 `NOT USED` for every crate. Exit code 3 means at least one patch is not used.
