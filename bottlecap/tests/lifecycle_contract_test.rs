@@ -55,7 +55,7 @@ async fn invoke_then_shutdown_exits_cleanly() {
     deliver_runtime_done(&s.api, "req-1", true).await.unwrap();
     assert!(
         s.api
-            .wait_for_next_calls(2, INVOKE_DEADLINE.saturating_sub(invoked.elapsed()))
+            .wait_for_next_calls(2, invoked + INVOKE_DEADLINE)
             .await,
         "no second /next within the {INVOKE_DEADLINE:?} invoke deadline. {}",
         bc.log_tail(40)

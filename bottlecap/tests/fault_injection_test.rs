@@ -42,10 +42,7 @@ async fn end_invocation_and_wait(
     deliver_runtime_done(&s.api, request_id, true)
         .await
         .unwrap();
-    let released = s
-        .api
-        .wait_for_next_calls(next_call, budget.saturating_sub(invoked.elapsed()))
-        .await;
+    let released = s.api.wait_for_next_calls(next_call, invoked + budget).await;
     (released, invoked.elapsed())
 }
 

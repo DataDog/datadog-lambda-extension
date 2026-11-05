@@ -8,17 +8,19 @@
 //! Serves `register`, the Telemetry API `subscribe` (with a status knob), and a
 //! `/next` that the test drives: push an INVOKE or a SHUTDOWN and the pending
 //! long-poll returns it. Like Lambda, `/next` serves only the event types the
-//! extension registered for, and a malformed register body gets a `400`. It
-//! also answers any other request with `202`, so the same port can stand in
+//! extension registered for, `/next` and `subscribe` get a `403` without the
+//! identifier issued at register, and a malformed register body gets a `400`.
+//! It also answers any other request with `202`, so the same port can stand in
 //! for the Datadog intake when a test does not need a `FaultIntake`.
 //!
 //! It also plays Lambda's Telemetry API sender: `send_telemetry` posts a batch
 //! to the extension's listener (the port taken from the subscribe body). Like
-//! Lambda, it delivers nothing until a subscribe call was accepted.
+//! Lambda, it delivers nothing until a subscribe call was accepted, and then
+//! only the event types that call asked for.
 
 use std::collections::VecDeque;
 use std::net::SocketAddr;
-use std::sync::atomic::{AtomicU16, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicU16, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -35,12 +37,17 @@ use tokio::net::TcpListener;
 use tokio::sync::Notify;
 use tokio::task::JoinHandle;
 
+const EXTENSION_ID_HEADER: &str = "Lambda-Extension-Identifier";
+/// The identifier the fake issues at register.
+const EXTENSION_ID: &str = "fake-extension-id";
+
 #[derive(Clone)]
 struct Shared {
     /// Events pushed by the test, served to `/next` in order.
     next_queue: Arc<Mutex<VecDeque<Value>>>,
     next_notify: Arc<Notify>,
-    next_calls: Arc<AtomicUsize>,
+    /// Arrival time of every accepted `/next` call, in order.
+    next_arrivals: Arc<Mutex<Vec<Instant>>>,
     /// Event types from the last accepted register body.
     registered_events: Arc<Mutex<Vec<String>>>,
     /// `METHOD path` of every request, in arrival order.
@@ -49,6 +56,8 @@ struct Shared {
     /// Port in the `destination.URI` of the last accepted subscribe body, 0
     /// until one.
     telemetry_port: Arc<AtomicU16>,
+    /// `types` of the last accepted subscribe body.
+    telemetry_types: Arc<Mutex<Vec<String>>>,
 }
 
 pub struct FakeExtensionsApi {
@@ -88,11 +97,12 @@ impl FakeExtensionsApi {
         let shared = Shared {
             next_queue: Arc::new(Mutex::new(VecDeque::new())),
             next_notify: Arc::new(Notify::new()),
-            next_calls: Arc::new(AtomicUsize::new(0)),
+            next_arrivals: Arc::new(Mutex::new(Vec::new())),
             registered_events: Arc::new(Mutex::new(Vec::new())),
             requests: Arc::new(Mutex::new(Vec::new())),
             subscribe_status: Arc::new(AtomicU16::new(StatusCode::OK.as_u16())),
             telemetry_port: Arc::new(AtomicU16::new(0)),
+            telemetry_types: Arc::new(Mutex::new(Vec::new())),
         };
         let router = Router::new()
             .route("/2020-01-01/extension/register", post(register))
@@ -161,20 +171,34 @@ impl FakeExtensionsApi {
 
     /// Number of `/next` calls that arrived so far.
     pub fn next_calls(&self) -> usize {
-        self.shared.next_calls.load(Ordering::SeqCst)
+        self.shared
+            .next_arrivals
+            .lock()
+            .expect("next arrivals lock")
+            .len()
     }
 
-    /// Wait until at least `n` `/next` calls arrived. Returns whether it did
-    /// within `budget`.
-    pub async fn wait_for_next_calls(&self, n: usize, budget: Duration) -> bool {
-        let start = Instant::now();
-        while self.next_calls() < n {
-            if start.elapsed() > budget {
+    /// Wait for `/next` call number `n`. Returns whether it arrived by
+    /// `deadline`, so a call that came late counts as missed even when the
+    /// wait starts after it.
+    pub async fn wait_for_next_calls(&self, n: usize, deadline: Instant) -> bool {
+        loop {
+            let now = Instant::now();
+            let arrived = self
+                .shared
+                .next_arrivals
+                .lock()
+                .expect("next arrivals lock")
+                .get(n - 1)
+                .copied();
+            if let Some(at) = arrived {
+                return at <= deadline;
+            }
+            if now > deadline {
                 return false;
             }
             tokio::time::sleep(Duration::from_millis(10)).await;
         }
-        true
     }
 
     /// `METHOD path` for each request, in order.
@@ -229,13 +253,37 @@ impl FakeExtensionsApi {
         }
     }
 
-    /// Post one batch of events to the extension's listener.
+    /// Post one batch of events to the extension's listener. Like Lambda, it
+    /// withholds events whose type (`platform`, `function`, `extension`) the
+    /// subscription did not ask for, and posts nothing when none is left.
     pub async fn send_telemetry(&self, events: &[Value], budget: Duration) -> Result<(), String> {
-        self.send_telemetry_raw(
-            Value::Array(events.to_vec()).to_string().into_bytes(),
-            budget,
-        )
-        .await
+        if self.telemetry_port().is_none() {
+            return Err("no accepted Telemetry API subscription".to_string());
+        }
+        let types = self
+            .shared
+            .telemetry_types
+            .lock()
+            .expect("telemetry types lock")
+            .clone();
+        let (subscribed, withheld): (Vec<Value>, Vec<Value>) =
+            events.iter().cloned().partition(|e| {
+                let kind = e["type"].as_str().unwrap_or_default();
+                types
+                    .iter()
+                    .any(|t| kind.split('.').next() == Some(t.as_str()))
+            });
+        for e in &withheld {
+            eprintln!(
+                "fake extensions api: withheld an unsubscribed {} event",
+                e["type"]
+            );
+        }
+        if subscribed.is_empty() {
+            return Ok(());
+        }
+        self.send_telemetry_raw(Value::Array(subscribed).to_string().into_bytes(), budget)
+            .await
     }
 }
 
@@ -278,10 +326,7 @@ async fn register(
         .lock()
         .expect("registered events lock") = events;
     let mut headers = HeaderMap::new();
-    headers.insert(
-        "Lambda-Extension-Identifier",
-        "fake-extension-id".parse().expect("header"),
-    );
+    headers.insert(EXTENSION_ID_HEADER, EXTENSION_ID.parse().expect("header"));
     Ok((
         StatusCode::OK,
         headers,
@@ -289,8 +334,26 @@ async fn register(
     ))
 }
 
-async fn subscribe(State(shared): State<Shared>, body: Bytes) -> impl IntoResponse {
+/// Lambda answers `403` to a `/next` or `subscribe` call without the
+/// identifier issued at register.
+fn check_extension_id(headers: &HeaderMap) -> Result<(), StatusCode> {
+    if headers
+        .get(EXTENSION_ID_HEADER)
+        .is_some_and(|v| v == EXTENSION_ID)
+    {
+        Ok(())
+    } else {
+        Err(StatusCode::FORBIDDEN)
+    }
+}
+
+async fn subscribe(
+    State(shared): State<Shared>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Result<impl IntoResponse, StatusCode> {
     record(&shared, "PUT", "/2022-07-01/telemetry");
+    check_extension_id(&headers)?;
     let status = StatusCode::from_u16(shared.subscribe_status.load(Ordering::SeqCst))
         .unwrap_or(StatusCode::OK);
     if status.is_success()
@@ -301,14 +364,28 @@ async fn subscribe(State(shared): State<Shared>, body: Bytes) -> impl IntoRespon
             .next()
             .and_then(|p| p.trim_end_matches('/').parse::<u16>().ok())
     {
+        *shared.telemetry_types.lock().expect("telemetry types lock") = v["types"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|t| t.as_str().map(str::to_string))
+            .collect();
         shared.telemetry_port.store(port, Ordering::SeqCst);
     }
-    (status, "{}")
+    Ok((status, "{}"))
 }
 
-async fn next(State(shared): State<Shared>) -> impl IntoResponse {
+async fn next(
+    State(shared): State<Shared>,
+    headers: HeaderMap,
+) -> Result<impl IntoResponse, StatusCode> {
     record(&shared, "GET", "/2020-01-01/extension/event/next");
-    shared.next_calls.fetch_add(1, Ordering::SeqCst);
+    check_extension_id(&headers)?;
+    shared
+        .next_arrivals
+        .lock()
+        .expect("next arrivals lock")
+        .push(Instant::now());
     loop {
         let event = shared
             .next_queue
@@ -327,7 +404,7 @@ async fn next(State(shared): State<Shared>) -> impl IntoResponse {
             .iter()
             .any(|e| e == event_type);
         if registered {
-            return (StatusCode::OK, event.to_string());
+            return Ok((StatusCode::OK, event.to_string()));
         }
         // Lambda never sends an event type the extension did not register for.
         eprintln!("fake extensions api: dropped an unregistered {event_type} event");

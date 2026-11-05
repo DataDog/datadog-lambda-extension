@@ -87,7 +87,10 @@ impl Scenario {
     pub async fn invoke(&self, request_id: &str, deadline_in: Duration, poll: usize) -> bool {
         if !self
             .api
-            .wait_for_next_calls(poll, bottlecap_process::STARTUP_BUDGET)
+            .wait_for_next_calls(
+                poll,
+                std::time::Instant::now() + bottlecap_process::STARTUP_BUDGET,
+            )
             .await
         {
             return false;

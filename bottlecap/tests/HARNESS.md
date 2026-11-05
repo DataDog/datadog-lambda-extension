@@ -48,8 +48,8 @@ async fn my_fault() {
     let invoked = Instant::now();                           // the invoke deadline runs from here
     s.intake.set_mode(FaultMode::Status(503));              // the fault
     deliver_runtime_done(&s.api, "req-1", true).await.unwrap();
-    let left = secs(10).saturating_sub(invoked.elapsed());  // wait only for what is left of it
-    assert!(s.api.wait_for_next_calls(2, left).await, "{}", bc.log_tail(40));
+    let deadline = invoked + secs(10);                      // /next #2 must arrive by it
+    assert!(s.api.wait_for_next_calls(2, deadline).await, "{}", bc.log_tail(40));
     s.shutdown_cleanly(&mut bc).await;                      // SHUTDOWN, exit 0 within 2 s, no panic
 }
 ```
@@ -76,12 +76,16 @@ async fn my_fault() {
 ## API summary
 
 - `FakeExtensionsApi`: `push_invoke(id, deadline_in)`, `push_shutdown(reason, deadline_in)`,
-  `next_calls()`, `wait_for_next_calls(n, budget)`, `set_subscribe_status(StatusCode)`,
-  `request_lines()`, `send_telemetry(&[Value], budget)`, `send_telemetry_raw(Vec<u8>, budget)`,
-  `telemetry_port()` (from the last accepted subscribe body, `None` before one; `send_telemetry`
-  fails without it, as Lambda delivers telemetry only to subscribers). Like Lambda, `/next` serves
-  only the event types from the register body and drops the rest, and a malformed register body
-  gets `400`. Any other path gets `202`.
+  `next_calls()`, `wait_for_next_calls(n, deadline)` (true only when `/next` call `n` arrived by
+  the `Instant`), `set_subscribe_status(StatusCode)`, `request_lines()`,
+  `send_telemetry(&[Value], budget)`, `send_telemetry_raw(Vec<u8>, budget)`, `telemetry_port()`
+  (from the last accepted subscribe body, `None` before one; `send_telemetry` fails without it,
+  as Lambda delivers telemetry only to subscribers). Like Lambda, `send_telemetry` withholds
+  events whose type (`platform`, `function`, `extension`) the subscribe body did not ask for;
+  `send_telemetry_raw` posts its body as is. Like Lambda, `/next` serves only the event types from
+  the register body and drops the rest, `/next` and subscribe get `403` without the
+  `Lambda-Extension-Identifier` issued at register, and a malformed register body gets `400`.
+  Any other path gets `202`.
 - `FaultIntake` (HTTP/1.1): modes `Ok`, `Status(code)`, `Slow(d)`, `Blackhole`,
   `RetryAfter{status, secs}`, `CloseMidBody`; string forms `ok`, `status:<c>`, `slow:<ms>`,
   `blackhole`, `retry_after:<c>:<s>`, `close_mid_body` (shared with the Lambda simulator).

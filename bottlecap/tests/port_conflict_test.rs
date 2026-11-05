@@ -57,7 +57,7 @@ async fn run_with_port_held(
         if deliver_runtime_done(&s.api, "req-1", true).await.is_ok() {
             flushed = s
                 .api
-                .wait_for_next_calls(2, INVOKE_DEADLINE.saturating_sub(invoked.elapsed()))
+                .wait_for_next_calls(2, invoked + INVOKE_DEADLINE)
                 .await;
         }
     }
