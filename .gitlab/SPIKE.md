@@ -32,12 +32,16 @@ builder `ci`, and the original compile script. No builder is created, bootstrapp
 removed, or upgraded. Each job gets its own runner-provisioned builder state;
 these are matched configurations, not builds forced onto the same physical pod.
 
-The treatment downloads the release binary for the **client's** architecture,
-checks a SHA-256 pinned from GitHub release asset metadata, and replaces only
+The treatment uses curl to download the release binary for the **client's**
+architecture, checks a SHA-256 pinned from GitHub release asset metadata, and replaces only
 `${DOCKER_CONFIG:-$HOME/.docker}/cli-plugins/docker-buildx` in that job container.
 The original plugin is restored on normal/script-failure exit. Job-container death
 can prevent cleanup; this does not modify fleet provisioning. Docker credentials,
 contexts, and builder configuration are not copied, printed, or replaced.
+
+If curl is absent, the treatment installs curl and CA certificates using bounded
+apt-get commands in the job container only. Setup time is excluded from the
+reported compile duration.
 
 The wrapper checks original v0.8.0, active expected version, and Kubernetes driver
 before compiling. A download, selection, or compatibility failure is a setup
@@ -47,7 +51,7 @@ failure, not evidence about compile stalls.
 
 - Native `retry: 0`. Platform automation can still retry; count attempts separately.
 - Compile bounded at 20m, with TERM then KILL after another 30s.
-- Whole job timeout 25m, leaving time for installation, preflight, and artifacts.
+- Whole job timeout 30m, leaving time for installation, preflight, and artifacts.
 - `build.log`: full compile output.
 - `buildx-spike.log`: original/active versions, builder inspection, compile output,
   and outcome. No environment or credential dump.
@@ -64,7 +68,7 @@ instead of hanging.
 
 Expected healthy-run cost is roughly 60-65 runner-minutes per pipeline based on
 prior sampler durations, excluding setup. Eight bounded jobs can consume about
-160 compile runner-minutes plus overhead. No pipeline has been run yet.
+160 compile runner-minutes plus overhead.
 
 ## Run and interpret
 
@@ -95,7 +99,26 @@ credentials/builder sentinel files, failure propagation, and timeout artifacts.
 They do not exercise Docker plugin loading, Kubernetes, or actual Rust compilation.
 GitLab lint validates the pipeline separately; local validation is not a CI result.
 
-Preparation checks passed: Bash syntax, ShellCheck, YAML lint, all 11 wrapper tests,
-pipeline structure assertions, and `git diff --check`. GitLab's project CI lint
-returned `valid: true`, with no errors or warnings. The real compile script,
-Dockerfiles, and Rust code have no diff against the base. No CI run has occurred.
+Initial preparation checks passed: Bash syntax, ShellCheck, YAML lint, all 11
+wrapper tests, pipeline structure assertions, and `git diff --check`. GitLab's
+project CI lint returned `valid: true`, with no errors or warnings. The real
+compile script, Dockerfiles, and Rust code have no diff against the base.
+
+## First run: setup failure, not a client comparison
+
+[Pipeline 150782308](https://gitlab.ddbuild.io/DataDog/datadog-lambda-extension/-/pipelines/150782308)
+ran the initial wrapper on 2026-11-05. All four upgraded jobs failed with
+`timeout: failed to run command 'wget': No such file or directory`, exit 127,
+`phase=setup`, `outcome=setup_failure`. The image lacks wget; this is a wrapper
+mistake, not evidence of buildx incompatibility or the original stalls.
+
+Upgraded jobs: amd64 2220687001/2220687005; arm64 2220687014/2220687016.
+Current controls: amd64 2220686994/2220686998; arm64 2220687009/2220687012.
+One checked control trace per architecture confirmed v0.8.0, the existing ci
+Kubernetes builder, and actual builds starting at 2026-11-05T22:35:50Z.
+The platform also injected a successful ddci-initial-noop job.
+
+The corrected wrapper uses curl, provisions it if absent, and increases the outer
+job limit from 25m to 30m without changing the 20m compile bound. Regression tests
+cover curl provisioning, no installation when already present, and package setup
+failure. A replacement pipeline was approved; results are pending.

@@ -9,7 +9,7 @@ stages: [spike]
 .buildx-comparison:
   stage: spike
   image: registry.ddbuild.io/images/docker:20.10
-  timeout: 25m
+  timeout: 30m
   # Platform automation may still retry. Count those attempts separately.
   retry: 0
   parallel:

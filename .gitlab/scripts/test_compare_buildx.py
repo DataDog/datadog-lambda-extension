@@ -45,11 +45,26 @@ case "$*" in
 esac
 """)
         self.command("uname", 'echo "${TEST_ARCH:-x86_64}"')
-        self.command("wget", """
+        self.command("curl", """
 printf '%s\n' "$*" >download.txt
-if [ "${DOWNLOAD_FAIL:-0}" = 1 ]; then exit 8; fi
-# Arguments are -q -T 30 -O <destination> <URL>.
-printf '#!/bin/bash\\necho "github.com/docker/buildx v0.36.0 treatment"\\n' >"$5"
+if [ "${DOWNLOAD_FAIL:-0}" = 1 ]; then exit 22; fi
+# The output path and URL are the final two arguments.
+printf '#!/bin/bash\\necho "github.com/docker/buildx v0.36.0 treatment"\\n' >"${@: -2:1}"
+""")
+        self.command("apt-get", """
+printf '%s\n' "$*" >>packages.txt
+if [ "${INSTALL_FAIL:-0}" = 1 ]; then exit 100; fi
+if [ "$1" = install ]; then touch curl-installed; fi
+""")
+        self.bash_env = self.root / "bash-env"
+        self.bash_env.write_text("""
+# Simulate a minimal CI image even if the local host has curl.
+command() {
+    if [ "${MISSING_CURL:-0}" = 1 ] && [ "$*" = '-v curl' ] && [ ! -f curl-installed ]; then
+        return 1
+    fi
+    builtin command "$@"
+}
 """)
         self.command("sha256sum", """
 # Successful verification is mocked. The failure case uses real sha256sum.
@@ -85,6 +100,7 @@ exit "${COMPILE_RC:-0}"
             BUILDX_ARM=arm,
             SPIKE_COMPILE_SCRIPT=str(self.compile),
             SPIKE_BUILD_LIMIT="5s",
+            BASH_ENV=str(self.bash_env),
         )
         env.update(overrides)
         run = subprocess.run(
@@ -130,6 +146,26 @@ exit "${COMPILE_RC:-0}"
         run, result = self.run_spike("upgraded", DOWNLOAD_FAIL="1")
         self.assertNotEqual(run.returncode, 0)
         self.assertIn("outcome=setup_failure", result)
+        self.assertFalse((self.root / "compile-ran").exists())
+
+    def test_missing_curl_is_installed_before_download(self):
+        run, result = self.run_spike("upgraded", MISSING_CURL="1")
+        self.assertEqual(run.returncode, 0, run.stdout)
+        self.assertIn("outcome=success", result)
+        self.assertEqual((self.root / "packages.txt").read_text().splitlines(),
+                         ["update -qq", "install -y --no-install-recommends curl ca-certificates"])
+        self.assertTrue((self.root / "curl-installed").exists())
+
+    def test_existing_curl_requires_no_package_install(self):
+        run, _ = self.run_spike("upgraded")
+        self.assertEqual(run.returncode, 0, run.stdout)
+        self.assertFalse((self.root / "packages.txt").exists())
+
+    def test_package_install_failure_does_not_download_or_compile(self):
+        run, result = self.run_spike("upgraded", MISSING_CURL="1", INSTALL_FAIL="1")
+        self.assertEqual(run.returncode, 100, run.stdout)
+        self.assertIn("outcome=setup_failure", result)
+        self.assertFalse((self.root / "download.txt").exists())
         self.assertFalse((self.root / "compile-ran").exists())
 
     def test_checksum_failure_does_not_install_or_compile(self):

@@ -75,7 +75,13 @@ case "${BUILDX_ARM:-}" in
         # the job container's plugin, then restore it on exit.
         test -f "$plugin"
         cp -P "$plugin" "$scratch/original"
-        timeout -k 5s 180s wget -q -T 30 -O "$scratch/docker-buildx" \
+        # The fleet image has no wget. Provision curl in this job only if needed.
+        if ! command -v curl >/dev/null 2>&1; then
+            timeout -k 5s 90s apt-get update -qq
+            timeout -k 5s 90s apt-get install -y --no-install-recommends curl ca-certificates
+        fi
+        timeout -k 5s 180s curl --fail --silent --show-error --location \
+            --connect-timeout 15 --max-time 150 --output "$scratch/docker-buildx" \
             "https://github.com/docker/buildx/releases/download/$version/buildx-$version.linux-$client_arch"
         printf '%s  %s\n' "$checksum" "$scratch/docker-buildx" | sha256sum -c -
         chmod +x "$scratch/docker-buildx"
@@ -104,7 +110,7 @@ phase=compile
 compile_started=$(date +%s)
 echo "Compile start: $(date -u +%FT%TZ)"
 # An internal bound leaves time for artifacts, rather than losing logs to the
-# job's 25m limit. Preserve failure/timeout exits, unlike the earlier sampler.
+# job's 30m limit. Preserve failure/timeout exits, unlike the earlier sampler.
 # Test overrides exercise this wrapper without Docker or compiling Rust.
 timeout -k 30s -s TERM "${SPIKE_BUILD_LIMIT:-20m}" \
     "${SPIKE_COMPILE_SCRIPT:-.gitlab/scripts/compile_bottlecap.sh}" 2>&1 | tee build.log
