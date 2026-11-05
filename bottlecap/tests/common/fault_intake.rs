@@ -113,7 +113,7 @@ impl IntakeRequest {
 struct Shared {
     mode: Arc<Mutex<FaultMode>>,
     path_modes: Arc<Mutex<HashMap<String, FaultMode>>>,
-    /// Bodies over this size get a 413, whatever the mode.
+    /// Bodies over this size get a 413, in any mode but `Blackhole`.
     reject_over: Arc<Mutex<Option<usize>>>,
     /// Bodies sent back for a path in `Ok` mode, instead of `{}`.
     ok_bodies: Arc<Mutex<HashMap<String, String>>>,
@@ -154,7 +154,7 @@ impl FaultIntake {
                 };
                 accept_shared.connections.fetch_add(1, Ordering::SeqCst);
                 // A connection accepted in blackhole mode is never read, unless a path has
-                // its own mode: then `handle` reads the request to pick the mode.
+                // its own mode: then `handle` reads the request head to pick the mode.
                 let blackhole =
                     *accept_shared.mode.lock().expect("mode lock") == FaultMode::Blackhole;
                 if blackhole
@@ -329,13 +329,19 @@ async fn handle(
             )
         })
         .collect();
+    let mode = effective_mode(&shared, &path);
+    if mode == FaultMode::Blackhole {
+        // Reached when a path has its own mode, or the mode changed on an open
+        // connection: record the head, never read the body, hold the connection.
+        record(&shared, &method, &path, headers, Vec::new(), &mode, 0);
+        match std::future::pending::<Infallible>().await {}
+    }
     let body = req
         .into_body()
         .collect()
         .await
         .map(|c| c.to_bytes().to_vec())
         .unwrap_or_default();
-    let mode = effective_mode(&shared, &path);
     let reject_over = *shared.reject_over.lock().expect("reject lock");
 
     let (status, response) = if reject_over.is_some_and(|max| body.len() > max) {
@@ -367,13 +373,7 @@ async fn handle(
                 tokio::time::sleep(*delay).await;
                 (202, status_response(202, "{}".into()))
             }
-            FaultMode::Blackhole => {
-                // A request on a connection opened before the mode changed:
-                // record it, then hold it open for the life of the connection.
-                record(&shared, &method, &path, headers, body, &mode, 0);
-                std::future::pending::<()>().await;
-                unreachable!()
-            }
+            FaultMode::Blackhole => unreachable!("held before the body is read"),
             FaultMode::RetryAfter { status, secs } => (
                 *status,
                 Response::builder()

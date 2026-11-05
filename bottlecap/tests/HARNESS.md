@@ -79,10 +79,14 @@ async fn my_fault() {
   `next_calls()`, `wait_for_next_calls(n, budget)`, `set_subscribe_status(StatusCode)`,
   `request_lines()`, `send_telemetry(&[Value], budget)`, `send_telemetry_raw(Vec<u8>, budget)`,
   `telemetry_port()` (from the last accepted subscribe body, `None` before one; `send_telemetry`
-  fails without it, as Lambda delivers telemetry only to subscribers). Any other path gets `202`.
+  fails without it, as Lambda delivers telemetry only to subscribers). Like Lambda, `/next` serves
+  only the event types from the register body and drops the rest, and a malformed register body
+  gets `400`. Any other path gets `202`.
 - `FaultIntake` (HTTP/1.1): modes `Ok`, `Status(code)`, `Slow(d)`, `Blackhole`,
   `RetryAfter{status, secs}`, `CloseMidBody`; string forms `ok`, `status:<c>`, `slow:<ms>`,
   `blackhole`, `retry_after:<c>:<s>`, `close_mid_body` (shared with the Lambda simulator).
+  `Blackhole` never reads a body: with a path mode set, it reads only the request head to pick
+  the mode, and records the request with `body_len` 0.
   `set_mode`, `set_path_mode(path, mode)`, `clear_path_mode`, `set_reject_over(Some(bytes))`,
   `set_ok_body(path, body)`; `requests()`, `requests_to`, `count`, `connections()`, `summary()`,
   `wait_for(n, pred, budget)`, `wait_for_path`; `IntakeRequest::api_key()`, `decoded_body()`,

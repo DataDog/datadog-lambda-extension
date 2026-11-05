@@ -7,9 +7,10 @@
 //!
 //! Serves `register`, the Telemetry API `subscribe` (with a status knob), and a
 //! `/next` that the test drives: push an INVOKE or a SHUTDOWN and the pending
-//! long-poll returns it. It also answers any other request with `202`, so the
-//! same port can stand in for the Datadog intake when a test does not need a
-//! `FaultIntake`.
+//! long-poll returns it. Like Lambda, `/next` serves only the event types the
+//! extension registered for, and a malformed register body gets a `400`. It
+//! also answers any other request with `202`, so the same port can stand in
+//! for the Datadog intake when a test does not need a `FaultIntake`.
 //!
 //! It also plays Lambda's Telemetry API sender: `send_telemetry` posts a batch
 //! to the extension's listener (the port taken from the subscribe body). Like
@@ -40,6 +41,8 @@ struct Shared {
     next_queue: Arc<Mutex<VecDeque<Value>>>,
     next_notify: Arc<Notify>,
     next_calls: Arc<AtomicUsize>,
+    /// Event types from the last accepted register body.
+    registered_events: Arc<Mutex<Vec<String>>>,
     /// `METHOD path` of every request, in arrival order.
     requests: Arc<Mutex<Vec<String>>>,
     subscribe_status: Arc<AtomicU16>,
@@ -86,6 +89,7 @@ impl FakeExtensionsApi {
             next_queue: Arc::new(Mutex::new(VecDeque::new())),
             next_notify: Arc::new(Notify::new()),
             next_calls: Arc::new(AtomicUsize::new(0)),
+            registered_events: Arc::new(Mutex::new(Vec::new())),
             requests: Arc::new(Mutex::new(Vec::new())),
             subscribe_status: Arc::new(AtomicU16::new(StatusCode::OK.as_u16())),
             telemetry_port: Arc::new(AtomicU16::new(0)),
@@ -249,18 +253,40 @@ fn record(shared: &Shared, method: &str, path: &str) {
         .push(format!("{method} {path}"));
 }
 
-async fn register(State(shared): State<Shared>) -> impl IntoResponse {
+async fn register(
+    State(shared): State<Shared>,
+    body: Bytes,
+) -> Result<impl IntoResponse, StatusCode> {
     record(&shared, "POST", "/2020-01-01/extension/register");
+    // Lambda accepts only these event types and rejects any other body.
+    let events = serde_json::from_slice::<Value>(&body)
+        .ok()
+        .and_then(|v| {
+            v["events"]
+                .as_array()?
+                .iter()
+                .map(|e| {
+                    e.as_str()
+                        .filter(|e| matches!(*e, "INVOKE" | "SHUTDOWN"))
+                        .map(str::to_string)
+                })
+                .collect::<Option<Vec<_>>>()
+        })
+        .ok_or(StatusCode::BAD_REQUEST)?;
+    *shared
+        .registered_events
+        .lock()
+        .expect("registered events lock") = events;
     let mut headers = HeaderMap::new();
     headers.insert(
         "Lambda-Extension-Identifier",
         "fake-extension-id".parse().expect("header"),
     );
-    (
+    Ok((
         StatusCode::OK,
         headers,
         json!({"accountId": "123456789012", "functionName": "test", "functionVersion": "$LATEST", "handler": "index.handler"}).to_string(),
-    )
+    ))
 }
 
 async fn subscribe(State(shared): State<Shared>, body: Bytes) -> impl IntoResponse {
@@ -289,10 +315,22 @@ async fn next(State(shared): State<Shared>) -> impl IntoResponse {
             .lock()
             .expect("next queue lock")
             .pop_front();
-        if let Some(event) = event {
+        let Some(event) = event else {
+            shared.next_notify.notified().await;
+            continue;
+        };
+        let event_type = event["eventType"].as_str().unwrap_or_default();
+        let registered = shared
+            .registered_events
+            .lock()
+            .expect("registered events lock")
+            .iter()
+            .any(|e| e == event_type);
+        if registered {
             return (StatusCode::OK, event.to_string());
         }
-        shared.next_notify.notified().await;
+        // Lambda never sends an event type the extension did not register for.
+        eprintln!("fake extensions api: dropped an unregistered {event_type} event");
     }
 }
 
