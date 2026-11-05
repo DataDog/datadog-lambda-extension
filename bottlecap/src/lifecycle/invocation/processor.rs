@@ -2292,8 +2292,9 @@ mod tests {
                     let trace_sender = Arc::new(SendingTraceProcessor {
                         appsec: None,
                         processor: Arc::new(trace_processor::ServerlessTraceProcessor {
-                            obfuscation_config: Arc::new(ObfuscationConfig::new().expect("Failed to create ObfuscationConfig")),
+                            obfuscation_config: Arc::new(ObfuscationConfig::default()),
                             error_sampler: trace_processor::enabled_error_sampler(),
+                            error_rare_sample_tracer_drop: false,
                         }),
                         trace_tx: tokio::sync::mpsc::channel(1).0,
                         stats_generator: Arc::new(StatsGenerator::new(stats_concentrator_handle)),
@@ -2401,10 +2402,9 @@ mod tests {
         let trace_sender = Arc::new(SendingTraceProcessor {
             appsec: None,
             processor: Arc::new(trace_processor::ServerlessTraceProcessor {
-                obfuscation_config: Arc::new(
-                    ObfuscationConfig::new().expect("Failed to create ObfuscationConfig"),
-                ),
+                obfuscation_config: Arc::new(ObfuscationConfig::default()),
                 error_sampler: trace_processor::enabled_error_sampler(),
+                error_rare_sample_tracer_drop: false,
             }),
             trace_tx: tokio::sync::mpsc::channel(1).0,
             stats_generator: Arc::new(StatsGenerator::new(stats_concentrator_handle)),
@@ -2969,8 +2969,8 @@ mod tests {
     fn test_extract_span_context_priority_order() {
         let config = Arc::new(config::Config {
             trace_propagation_style_extract: vec![
-                datadog_opentelemetry::propagation::TracePropagationStyle::Datadog,
-                datadog_opentelemetry::propagation::TracePropagationStyle::TraceContext,
+                config::TracePropagationStyle::Datadog,
+                config::TracePropagationStyle::TraceContext,
             ],
             ..config::Config::default()
         });
@@ -3007,8 +3007,8 @@ mod tests {
     fn test_extract_span_context_no_request_headers() {
         let config = Arc::new(config::Config {
             trace_propagation_style_extract: vec![
-                datadog_opentelemetry::propagation::TracePropagationStyle::Datadog,
-                datadog_opentelemetry::propagation::TracePropagationStyle::TraceContext,
+                config::TracePropagationStyle::Datadog,
+                config::TracePropagationStyle::TraceContext,
             ],
             ..config::Config::default()
         });
@@ -3040,10 +3040,9 @@ mod tests {
         Arc::new(SendingTraceProcessor {
             appsec: None,
             processor: Arc::new(trace_processor::ServerlessTraceProcessor {
-                obfuscation_config: Arc::new(
-                    ObfuscationConfig::new().expect("Failed to create ObfuscationConfig"),
-                ),
+                obfuscation_config: Arc::new(ObfuscationConfig::default()),
                 error_sampler: trace_processor::enabled_error_sampler(),
+                error_rare_sample_tracer_drop: false,
             }),
             trace_tx: tokio::sync::mpsc::channel(1).0,
             stats_generator: Arc::new(StatsGenerator::new(stats_concentrator_handle)),
@@ -3622,10 +3621,9 @@ mod tests {
         let sender = Arc::new(SendingTraceProcessor {
             appsec: None,
             processor: Arc::new(trace_processor::ServerlessTraceProcessor {
-                obfuscation_config: Arc::new(
-                    ObfuscationConfig::new().expect("Failed to create ObfuscationConfig"),
-                ),
+                obfuscation_config: Arc::new(ObfuscationConfig::default()),
                 error_sampler: trace_processor::enabled_error_sampler(),
+                error_rare_sample_tracer_drop: false,
             }),
             trace_tx,
             stats_generator: Arc::new(StatsGenerator::new(stats_concentrator_handle)),

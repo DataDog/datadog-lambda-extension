@@ -12,6 +12,7 @@ use crate::event_bus::Event;
 use crate::extension::telemetry::events::ReportMetrics;
 use crate::extension::telemetry::events::{Status, TelemetryEvent, TelemetryRecord};
 use crate::lifecycle::invocation::context::Context as InvocationContext;
+use crate::logger;
 use crate::logs::aggregator_service::AggregatorHandle;
 use crate::logs::processor::{Processor, Rule};
 use crate::tags::provider;
@@ -242,6 +243,9 @@ impl LambdaProcessor {
                 Err("Unable to parse log".into())
             }
             TelemetryRecord::Extension(v) => {
+                if logger::is_http_library_record(&v) {
+                    return Err("HTTP library log, kept out of Datadog".into());
+                }
                 let message = match v {
                     serde_json::Value::Object(obj) => Some(serde_json::to_string(&obj).unwrap_or_default()),
                     serde_json::Value::String(s) => Some(s),
@@ -428,12 +432,36 @@ impl LambdaProcessor {
                             message = format!("{message} Init Duration: {init_duration_ms:.2} ms");
                         }
 
+                        // Match CloudWatch REPORT status suffixes so non-success outcomes
+                        // remain visible when START/END lines are excluded.
+                        let result_status = match status {
+                            Status::Timeout => {
+                                message.push_str(" Status: timeout");
+                                Some("error".to_string())
+                            }
+                            Status::Error => {
+                                message.push_str(" Status: error");
+                                if let Some(error_type) = error_type.as_ref() {
+                                    let _ = write!(message, " Error Type: {error_type}");
+                                }
+                                Some("error".to_string())
+                            }
+                            Status::Failure => {
+                                message.push_str(" Status: failure");
+                                if let Some(error_type) = error_type.as_ref() {
+                                    let _ = write!(message, " Error Type: {error_type}");
+                                }
+                                Some("error".to_string())
+                            }
+                            Status::Success => None,
+                        };
+
                         Ok(Message::new(
                             message,
                             Some(request_id),
                             self.function_arn.clone(),
                             event.time.timestamp_millis(),
-                            None,
+                            result_status,
                         ))
                     }
                 }
@@ -1091,6 +1119,99 @@ mod tests {
                     },
                     timestamp: 1_673_061_827_000,
                     status: "info".to_string(),
+                },
+        ),
+
+        // platform report - OnDemand timeout
+        platform_report_timeout: (
+            &TelemetryEvent {
+                time: Utc.with_ymd_and_hms(2023, 1, 7, 3, 23, 47).unwrap(),
+                record: TelemetryRecord::PlatformReport {
+                    error_type: None,
+                    status: Status::Timeout,
+                    request_id: "test-request-id".to_string(),
+                    metrics: ReportMetrics::OnDemand(OnDemandReportMetrics {
+                        duration_ms: 3000.0,
+                        billed_duration_ms: 3000,
+                        memory_size_mb: 256,
+                        max_memory_used_mb: 64,
+                        init_duration_ms: None,
+                        restore_duration_ms: None
+                    }),
+                    spans: None,
+                }
+            },
+            Message {
+                    message: "REPORT RequestId: test-request-id Duration: 3000.00 ms Runtime Duration: 0.00 ms Post Runtime Duration: 0.00 ms Billed Duration: 3000 ms Memory Size: 256 MB Max Memory Used: 64 MB Status: timeout".to_string(),
+                    lambda: Lambda {
+                        arn: "test-arn".to_string(),
+                        request_id: Some("test-request-id".to_string()),
+                    ..Lambda::default()
+                    },
+                    timestamp: 1_673_061_827_000,
+                    status: "error".to_string(),
+                },
+        ),
+
+        // platform report - OnDemand error
+        platform_report_error: (
+            &TelemetryEvent {
+                time: Utc.with_ymd_and_hms(2023, 1, 7, 3, 23, 47).unwrap(),
+                record: TelemetryRecord::PlatformReport {
+                    error_type: Some("Runtime.ExitError".to_string()),
+                    status: Status::Error,
+                    request_id: "test-request-id".to_string(),
+                    metrics: ReportMetrics::OnDemand(OnDemandReportMetrics {
+                        duration_ms: 100.0,
+                        billed_duration_ms: 100,
+                        memory_size_mb: 256,
+                        max_memory_used_mb: 64,
+                        init_duration_ms: None,
+                        restore_duration_ms: None
+                    }),
+                    spans: None,
+                }
+            },
+            Message {
+                    message: "REPORT RequestId: test-request-id Duration: 100.00 ms Runtime Duration: 0.00 ms Post Runtime Duration: 0.00 ms Billed Duration: 100 ms Memory Size: 256 MB Max Memory Used: 64 MB Status: error Error Type: Runtime.ExitError".to_string(),
+                    lambda: Lambda {
+                        arn: "test-arn".to_string(),
+                        request_id: Some("test-request-id".to_string()),
+                    ..Lambda::default()
+                    },
+                    timestamp: 1_673_061_827_000,
+                    status: "error".to_string(),
+                },
+        ),
+
+        // platform report - OnDemand failure
+        platform_report_failure: (
+            &TelemetryEvent {
+                time: Utc.with_ymd_and_hms(2023, 1, 7, 3, 23, 47).unwrap(),
+                record: TelemetryRecord::PlatformReport {
+                    error_type: Some("Runtime.Unknown".to_string()),
+                    status: Status::Failure,
+                    request_id: "test-request-id".to_string(),
+                    metrics: ReportMetrics::OnDemand(OnDemandReportMetrics {
+                        duration_ms: 100.0,
+                        billed_duration_ms: 100,
+                        memory_size_mb: 256,
+                        max_memory_used_mb: 64,
+                        init_duration_ms: None,
+                        restore_duration_ms: None
+                    }),
+                    spans: None,
+                }
+            },
+            Message {
+                    message: "REPORT RequestId: test-request-id Duration: 100.00 ms Runtime Duration: 0.00 ms Post Runtime Duration: 0.00 ms Billed Duration: 100 ms Memory Size: 256 MB Max Memory Used: 64 MB Status: failure Error Type: Runtime.Unknown".to_string(),
+                    lambda: Lambda {
+                        arn: "test-arn".to_string(),
+                        request_id: Some("test-request-id".to_string()),
+                    ..Lambda::default()
+                    },
+                    timestamp: 1_673_061_827_000,
+                    status: "error".to_string(),
                 },
         ),
 
@@ -2359,6 +2480,28 @@ mod tests {
         let lambda_message = processor.get_message(event).await.unwrap();
         let intake_log = processor.get_intake_log(lambda_message).unwrap();
         assert_eq!(intake_log.message.status, "debug");
+    }
+
+    #[tokio::test]
+    async fn test_http_library_log_is_not_sent() {
+        let config = Arc::new(config::Config::default());
+        let tags_provider = Arc::new(provider::Provider::new(
+            Arc::clone(&config),
+            LAMBDA_RUNTIME_SLUG.to_string(),
+            &HashMap::from([("function_arn".to_string(), "test-arn".to_string())]),
+        ));
+        let (tx, _rx) = tokio::sync::mpsc::channel(2);
+        let mut processor =
+            LambdaProcessor::new(tags_provider, Arc::clone(&config), tx.clone(), true);
+
+        let event = TelemetryEvent {
+            time: Utc.with_ymd_and_hms(2023, 1, 7, 3, 23, 47).unwrap(),
+            record: TelemetryRecord::Extension(Value::String(
+                r#"{"target":"hyper_util::client::legacy::connect::http","status":"DEBUG","message":"DD_EXTENSION | DEBUG | connecting to 34.149.115.168:443"}"#
+                    .to_string(),
+            )),
+        };
+        assert!(processor.make_log(event).await.is_err());
     }
 
     #[tokio::test]

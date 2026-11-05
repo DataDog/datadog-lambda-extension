@@ -64,25 +64,16 @@ use bottlecap::{
         provider::Provider as TagProvider,
     },
     traces::{
-        http_client as trace_http_client,
         propagation::DatadogCompositePropagator,
         proxy_aggregator,
-        proxy_flusher::Flusher as ProxyFlusher,
-        span_dedup_service,
-        stats_aggregator::StatsAggregator,
-        stats_concentrator_service::{StatsConcentratorHandle, StatsConcentratorService},
-        stats_flusher,
+        stats_concentrator_service::StatsConcentratorHandle,
         stats_generator::StatsGenerator,
-        stats_processor, trace_agent,
         trace_aggregator::SendDataBuilderInfo,
-        trace_aggregator_service::{
-            AggregatorHandle as TraceAggregatorHandle, AggregatorService as TraceAggregatorService,
-        },
-        trace_flusher,
         trace_processor::{self, SendingTraceProcessor},
     },
 };
 use datadog_fips::reqwest_adapter::create_reqwest_client_builder;
+use datadog_serverless_logging::{LEVEL_BY_TARGET_ENV_VAR, build_env_filter};
 use decrypt::{
     has_additional_endpoints_secrets, resolve_additional_endpoints_secrets, resolve_secrets,
 };
@@ -100,14 +91,12 @@ use dogstatsd::{
     flusher::{Flusher as MetricsFlusher, FlusherConfig as MetricsFlusherConfig},
     metric::{EMPTY_TAGS, SortedTags},
 };
-use libdd_trace_obfuscation::obfuscation_config;
 use reqwest::Client;
 use std::{collections::hash_map, env, path::Path, str::FromStr, sync::Arc};
 use tokio::time::Instant;
 use tokio::{sync::Mutex as TokioMutex, sync::mpsc::Sender};
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, warn};
-use tracing_subscriber::EnvFilter;
 use ustr::Ustr;
 
 fn resolve_dsm_service(
@@ -234,13 +223,20 @@ fn enable_logging_subsystem() {
     )
     .unwrap_or(LogLevel::Info);
 
-    let env_filter = format!(
-        "h2=off,hyper=off,reqwest=off,rustls=off,datadog-trace-mini-agent=off,{log_level:?}",
-    );
+    let http_libraries_off: Vec<String> = logger::HTTP_LIBRARY_TARGETS
+        .iter()
+        .map(|target| format!("{target}=off"))
+        .collect();
+    let (env_filter, invalid_entries) = build_env_filter(
+        &format!(
+            "{},datadog-trace-mini-agent=off,{log_level:?}",
+            http_libraries_off.join(",")
+        ),
+        &std::env::var(LEVEL_BY_TARGET_ENV_VAR).unwrap_or_default(),
+    )
+    .expect("could not parse log level in configuration");
     let subscriber = tracing_subscriber::fmt::Subscriber::builder()
-        .with_env_filter(
-            EnvFilter::try_new(env_filter).expect("could not parse log level in configuration"),
-        )
+        .with_env_filter(env_filter)
         .with_level(true)
         .with_thread_names(false)
         .with_thread_ids(false)
@@ -252,6 +248,9 @@ fn enable_logging_subsystem() {
         .finish();
     tracing::subscriber::set_global_default(subscriber).expect("setting default subscriber failed");
 
+    if !invalid_entries.is_empty() {
+        warn!("Ignoring invalid {LEVEL_BY_TARGET_ENV_VAR} entries: {invalid_entries:?}");
+    }
     debug!("Logging subsystem enabled");
 }
 
@@ -446,16 +445,16 @@ async fn extension_loop_active(
         }
     };
 
-    let (
-        trace_agent_channel,
+    let bottlecap::startup::TraceAgentPipeline {
+        trace_tx: trace_agent_channel,
         trace_flusher,
         trace_processor,
         stats_flusher,
         proxy_flusher,
-        trace_agent_shutdown_token,
+        shutdown_token: trace_agent_shutdown_token,
         stats_concentrator,
         trace_aggregator_handle,
-    ) = start_trace_agent(
+    } = bottlecap::startup::start_trace_agent(
         config,
         &api_key_factory,
         &tags_provider,
@@ -489,7 +488,6 @@ async fn extension_loop_active(
         &r.extension_id,
         &aws_config.runtime_api,
         logs_agent_channel,
-        event_bus_tx.clone(),
         config.ext.serverless_logs_enabled,
         aws_config.is_managed_instance_mode(),
     )
@@ -687,8 +685,8 @@ async fn extension_loop_active(
         // Shutdown sequence
         debug!("Initiating shutdown sequence");
 
-        // Wait for tombstone event from telemetry listener to ensure all events are processed
-        // This is the result of code refactoring which is shared by OnDemand mode as well.
+        // Process remaining events. The logs agent isn't cancelled in this mode, so no Tombstone
+        // arrives and this ends on the idle timeout.
         wait_for_tombstone_event(
             &mut event_bus,
             &invocation_processor_handle,
@@ -818,12 +816,9 @@ async fn extension_loop_active(
         }
 
         if let NextEventResponse::Shutdown { .. } = maybe_shutdown_event {
-            // Cancel Telemetry API listener
-            // Important to do this first, so we can receive the Tombstone event which signals
-            // that there are no more Telemetry events to process
+            // Stop the Telemetry API listener, then let the logs agent drain. The agent sends the
+            // Tombstone only after it has forwarded every telemetry event to the event bus.
             telemetry_listener_cancel_token.cancel();
-
-            // Cancel Logs Agent which might have Telemetry API events to process
             logs_agent_cancel_token.cancel();
 
             // Drop the event bus sender to allow the channel to close properly
@@ -831,7 +826,7 @@ async fn extension_loop_active(
 
             // Redrive/block on any failed payloads
             flushing_service.await_handles().await;
-            // Wait for tombstone event from telemetry listener to ensure all events are processed
+            // Wait for the Tombstone from the logs agent to ensure all events are processed
             wait_for_tombstone_event(
                 &mut event_bus,
                 &invocation_processor_handle,
@@ -873,7 +868,7 @@ async fn extension_loop_active(
     }
 }
 
-/// Wait for the `Tombstone` event from telemetry listener to ensure all events are processed.
+/// Wait for the `Tombstone` event from the logs agent to ensure all events are processed.
 /// This function will timeout after the specified duration to prevent hanging indefinitely.
 #[allow(clippy::too_many_arguments)]
 async fn wait_for_tombstone_event(
@@ -1197,132 +1192,6 @@ fn start_logs_agent(
     )
 }
 
-#[allow(clippy::type_complexity)]
-fn start_trace_agent(
-    config: &Arc<Config>,
-    api_key_factory: &Arc<ApiKeyFactory>,
-    tags_provider: &Arc<TagProvider>,
-    invocation_processor_handle: InvocationProcessorHandle,
-    appsec_processor: Option<Arc<TokioMutex<AppSecProcessor>>>,
-    client: &Client,
-    proxy_aggregator: Arc<TokioMutex<proxy_aggregator::Aggregator>>,
-) -> (
-    Sender<SendDataBuilderInfo>,
-    Arc<trace_flusher::TraceFlusher>,
-    Arc<trace_processor::ServerlessTraceProcessor>,
-    Arc<stats_flusher::StatsFlusher>,
-    Arc<ProxyFlusher>,
-    tokio_util::sync::CancellationToken,
-    StatsConcentratorHandle,
-    TraceAggregatorHandle,
-) {
-    // Build one shared hyper-based HTTP client for trace and stats flushing.
-    // This client type is required by libdd_trace_utils for SendData::send().
-    let trace_http_client = trace_http_client::create_client(
-        config.proxy_https.as_ref(),
-        config.tls_cert_file.as_ref(),
-        config.skip_ssl_validation,
-    )
-    .expect("Failed to create trace HTTP client");
-
-    // Stats
-    let (stats_concentrator_service, stats_concentrator_handle) =
-        StatsConcentratorService::new(Arc::clone(config));
-    tokio::spawn(stats_concentrator_service.run());
-    let stats_aggregator: Arc<TokioMutex<StatsAggregator>> = Arc::new(TokioMutex::new(
-        StatsAggregator::new_with_concentrator(stats_concentrator_handle.clone()),
-    ));
-    let stats_flusher = Arc::new(stats_flusher::StatsFlusher::new(
-        api_key_factory.clone(),
-        stats_aggregator.clone(),
-        Arc::clone(config),
-        trace_http_client.clone(),
-        libdd_trace_utils::config_utils::trace_stats_url(&config.site),
-    ));
-
-    let stats_processor = Arc::new(stats_processor::ServerlessStatsProcessor {});
-
-    // Traces
-    let (trace_aggregator_service, trace_aggregator_handle) = TraceAggregatorService::default();
-    tokio::spawn(trace_aggregator_service.run());
-
-    let trace_flusher = Arc::new(trace_flusher::TraceFlusher::new(
-        trace_aggregator_handle.clone(),
-        config.clone(),
-        api_key_factory.clone(),
-        trace_http_client,
-    ));
-
-    let obfuscation_config = obfuscation_config::ObfuscationConfig {
-        tag_replace_rules: config.apm_replace_tags.clone(),
-        http: obfuscation_config::HttpConfig {
-            remove_paths_with_digits: config.apm_config_obfuscation_http_remove_paths_with_digits,
-            remove_query_string: config.apm_config_obfuscation_http_remove_query_string,
-        },
-        ..Default::default()
-    };
-
-    // The Agent's error sampler knob has no effect here: the extension's
-    // sampler is a plain on/off switch, not a TPS budget.
-    if env::var("DD_APM_ERROR_TPS").is_ok_and(|v| !v.trim().is_empty()) {
-        warn!(
-            "DD_APM_ERROR_TPS is not supported by the Lambda extension; error trace rescue is an on/off switch controlled by DD_SERVERLESS_ERROR_SAMPLER_ENABLED"
-        );
-    }
-
-    let trace_processor = Arc::new(trace_processor::ServerlessTraceProcessor {
-        obfuscation_config: Arc::new(obfuscation_config),
-        error_sampler: trace_processor::new_error_sampler(
-            config.ext.serverless_error_sampler_enabled,
-        ),
-    });
-
-    let (span_dedup_service, span_dedup_handle) = span_dedup_service::DedupService::new();
-    tokio::spawn(span_dedup_service.run());
-
-    // Proxy
-    let proxy_flusher = Arc::new(ProxyFlusher::new(
-        api_key_factory.clone(),
-        Arc::clone(&proxy_aggregator),
-        Arc::clone(tags_provider),
-        Arc::clone(config),
-        client.clone(),
-    ));
-
-    let trace_agent = trace_agent::TraceAgent::new(
-        Arc::clone(config),
-        trace_aggregator_handle.clone(),
-        trace_processor.clone(),
-        stats_aggregator,
-        stats_processor,
-        proxy_aggregator,
-        invocation_processor_handle,
-        appsec_processor,
-        Arc::clone(tags_provider),
-        stats_concentrator_handle.clone(),
-        span_dedup_handle,
-    );
-    let trace_agent_channel = trace_agent.get_sender_copy();
-    let shutdown_token = trace_agent.shutdown_token();
-
-    tokio::spawn(async move {
-        if let Err(e) = trace_agent.start().await {
-            error!("Error starting trace agent: {e:?}");
-        }
-    });
-
-    (
-        trace_agent_channel,
-        trace_flusher,
-        trace_processor,
-        stats_flusher,
-        proxy_flusher,
-        shutdown_token,
-        stats_concentrator_handle,
-        trace_aggregator_handle,
-    )
-}
-
 async fn start_dogstatsd(
     tags_provider: Arc<TagProvider>,
     api_key_factory: Arc<ApiKeyFactory>,
@@ -1475,16 +1344,15 @@ async fn setup_telemetry_client(
     extension_id: &str,
     runtime_api: &str,
     logs_tx: Sender<TelemetryEvent>,
-    event_bus_tx: Sender<Event>,
     logs_enabled: bool,
     managed_instance_mode: bool,
 ) -> anyhow::Result<CancellationToken> {
-    let listener = TelemetryListener::new(EXTENSION_HOST_IP, TELEMETRY_PORT, logs_tx, event_bus_tx);
+    let listener = TelemetryListener::new(EXTENSION_HOST_IP, TELEMETRY_PORT, logs_tx);
 
     let cancel_token = listener.cancel_token();
     match listener.start() {
         Ok(()) => {
-            // Drop the listener, so event_bus_tx is closed
+            // Drop the listener, so its `logs_tx` doesn't keep the logs agent's channel open
             drop(listener);
         }
         Err(e) => {

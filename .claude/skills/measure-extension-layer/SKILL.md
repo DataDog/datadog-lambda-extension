@@ -6,13 +6,20 @@ description: Measure the size, cold start and duration overhead of extension lay
 # Measure the size and cold start of an extension layer
 
 The scripts in `scripts/` create small Lambda functions, one or more for each variant, in the
-serverless sandbox account. The default region is `us-east-2`. They force cold starts and read the `REPORT` lines from
-CloudWatch. A variant is a name and a layer. Always measure the variants that you compare in
-the same run. Each round does one cold start of each variant, so a change over time affects all
-variants the same way.
+serverless sandbox account. The default region is `us-east-2`. They force cold starts and read
+the `REPORT` lines from CloudWatch. A variant is a name and a layer. Always measure the variants
+that you compare in the same run. Each round does one cold start of each variant, so a change
+over time affects all variants the same way.
 
 Run the scripts through `aws-vault exec sso-serverless-sandbox-account-admin --`. They need
 `boto3`.
+
+`measure.py` needs a Datadog API key in the environment variable `DD_API_KEY`. Without a key,
+the extension does not flush, so the run measures no flush time. The test functions send their
+data to the org of that key. For a key from a Datadog site other than `datadoghq.com`, also set
+`DD_SITE`, for example to `datadoghq.eu`. The script stores the key in a Secrets Manager secret,
+`<user>-extension-perf-api-key`, in the region of the run. The functions read the key from that
+secret, as the self-monitoring functions do.
 
 ## 1. Get the layers
 
@@ -78,9 +85,12 @@ a timing run, because the extra logs make the extension slower.
 python3 .claude/skills/measure-extension-layer/scripts/summarize.py /tmp/extension-perf/<label> --compare old new
 ```
 
-The output has the layer sizes, the medians of each variant, and differences. Each difference
-is the difference of two medians, with a bootstrap 95% interval. If the interval contains 0, the
-run does not show a difference. Run again with a larger `-n` before you report a change.
+The output has the layer sizes, the medians of each variant, and differences. It leaves out each
+execution environment that had a failed invocation, and the `dropped` column counts them. Each
+difference is the difference of two medians, with a bootstrap 95% interval. The bootstrap
+resamples whole execution environments, because invocations in one environment are not
+independent. If the interval contains 0, the run does not show a difference. Run again with a
+larger `-n` before you report a change.
 
 How the metrics relate to the release dashboard, Lambda Extension Overhead per Runtime:
 
@@ -89,7 +99,7 @@ How the metrics relate to the release dashboard, Lambda Extension Overhead per R
 | `init_duration_ms`, variant minus `noext` | Init Duration Overhead |
 | `cold_duration_ms` | Duration Overhead. That widget shows the duration of the extension function itself. |
 | `warm_duration_ms` or `cold_duration_ms`, variant minus `noext` | Post Runtime Extension Duration. This is an estimate, see below. |
-| `each_warm_duration_ms` | The same as `warm_duration_ms`, but each warm invocation is one sample. Use it for a run with few cold starts and many warm invocations. |
+| `each_warm_duration_ms` | The median of all warm invocations, not of one median per environment. Use it for a run with few cold starts and many warm invocations. |
 | `zipped` | The layer size, `CodeSize` in AWS. |
 | `ext.*` | No widget. These are the steps of the extension's init, from the cold start log line. |
 
@@ -98,21 +108,30 @@ almost all of the difference in duration from `noext` is time after the handler 
 also includes any time the extension adds while the handler runs, so it is an upper limit of the
 post-runtime duration.
 
-For post-runtime duration, choose the warm interval for the traffic pattern that you check. Use
-the setup of the prod self-monitoring functions, `--region us-east-1 --arch x86_64 --runtime
-python314`, to get numbers near the dashboard:
+For post-runtime duration, choose the flush strategy and the warm interval for the traffic
+pattern that you check. The functions use `DD_SERVERLESS_FLUSH_STRATEGY=end`, so each invocation
+flushes when it ends. With the extension's default strategy, an environment changes its flush
+mode at its 20th invocation. The prod self-monitoring functions run for days, so they always use
+the later mode. To measure in that mode from the first invocation, set it with `--env`:
 
-| Dashboard traffic | Harness options | Result on 2026-10-19 |
+| Dashboard traffic | Mode after 20 invocations | Harness options |
 | --- | --- | --- |
-| `1min`, one flush in each invocation | `--warm-interval 60` | v101: 89.5 ms. The dashboard showed about 87 ms. |
+| `traffic:1min` | Periodic: a blocking flush when an invocation starts, at most every 20 s | `--warm-interval 60 --env DD_SERVERLESS_FLUSH_STRATEGY=periodically,20000` |
+| `traffic:busy` | Continuous: a flush in the background, at most every 20 s | `--warm-interval 1 --env DD_SERVERLESS_FLUSH_STRATEGY=continuously,20000` |
+
+Use the setup of the prod self-monitoring functions, `--region us-east-1 --arch x86_64 --runtime
+python314`, to get numbers near the dashboard. On 2026-10-19, with the default strategy,
+`--warm 30` and `--warm-interval 60`, v101 measured 89.5 ms. The dashboard showed about 87 ms.
 
 Other setups gave slower flushes, and the cause is not known. In `us-east-2` on `arm64`, a warm
 invocation took about 210 ms with 60 s gaps and about 125 ms with 1 s gaps. In the prod setup with
 gaps of about 95 s, it took about 137 ms.
 
-With 60 s between warm invocations, one warm duration had a standard deviation of about 30 ms.
-To see a change of about 10 ms, get about 300 warm invocations for each variant, for example
-`--copies 8 -n 1 --warm 35 --warm-interval 60`.
+The width of the interval depends mostly on the number of execution environments, because
+environments differ from each other. So add copies before you add warm invocations. In one run
+with 6 to 8 environments for each variant, the interval of a warm duration difference was about
+23 ms wide per environment, and about 12 ms wide per invocation. For a change of about 10 ms, use
+more environments than that, for example `--copies 16 -n 1 --warm 20 --warm-interval 60`.
 
 Outside the prod setup, do not compare the numbers from this harness with the dashboard
 numbers. In all setups, compare variants within one run.
@@ -133,6 +152,7 @@ REGION=us-east-2
 for f in $(awsv lambda list-functions --region $REGION --query "Functions[?starts_with(FunctionName, '<user>-extperf-')].FunctionName" --output text); do
   awsv lambda delete-function --region $REGION --function-name "$f" > /dev/null
 done
+awsv secretsmanager delete-secret --region $REGION --secret-id <user>-extension-perf-api-key --force-delete-without-recovery
 awsv iam delete-role-policy --role-name <user>-extension-perf-role --policy-name read-api-key
 awsv iam detach-role-policy --role-name <user>-extension-perf-role --policy-arn arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
 awsv iam delete-role --role-name <user>-extension-perf-role
