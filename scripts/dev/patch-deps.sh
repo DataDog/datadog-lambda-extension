@@ -12,8 +12,9 @@
 # It backs up Cargo.lock once, because cargo rewrites it for patched crates.
 # Works for serverless-components, libdatadog, saluki, dd-trace-rs and libddwaf-rust.
 #
-# A crates.io patch is only used when the local version is semver compatible
-# with the locked one. The script prints "NOT USED" when cargo ignores a patch.
+# When a local version differs from the locked one, `add` runs `cargo update` on
+# that crate so cargo selects the patch. Cargo ignores a patch whose version does
+# not match bottlecap's requirements; the script then prints "NOT USED".
 # `add`, `remove` and `restore` refuse to run when Cargo.lock changed since the
 # last patch-deps run (for example after you added a dependency); `restore --force`
 # restores the backup anyway. Never commit the managed region or the patched lock.
@@ -125,13 +126,17 @@ def record_lock_hash():
             f.write(sha256_of(lock))
 
 
-def check_lock_unchanged():
-    if not (os.path.exists(lock_hash_file) and os.path.exists(lock)):
-        return
+def lock_unchanged():
+    if not os.path.exists(lock_hash_file):
+        return True
     with open(lock_hash_file) as f:
         recorded = f.read().strip()
-    if recorded != sha256_of(lock) and not force:
-        die("Cargo.lock changed since the last patch-deps run (did you add or bump a dependency?). "
+    return os.path.exists(lock) and recorded == sha256_of(lock)
+
+
+def check_lock_unchanged():
+    if not (force or lock_unchanged()):
+        die("Cargo.lock changed or was deleted since the last patch-deps run (did you add or bump a dependency?). "
             "Inspect it with `git diff bottlecap/Cargo.lock`, then run `restore --force` to restore the backup anyway.", code=4)
 
 
@@ -145,18 +150,20 @@ def resolve_and_report(state, record=True):
     """Re-run cargo metadata on bottlecap so Cargo.lock updates, then show what is in effect."""
     meta, stderr = metadata(manifest, no_deps=False)
     unused = [l.strip() for l in stderr.splitlines() if "was not used in the crate graph" in l]
+    ok = not unused
     for name, entries in sorted(state.items()):
         print(f"{name} ({entries['checkout']})")
         for crate, info in sorted(entries["crates"].items()):
             active = any(p["name"] == crate and p["source"] is None and os.path.dirname(p["manifest_path"]) == info["path"]
                          for p in meta["packages"])
+            ok = ok and active
             status = "active" if active else "NOT USED (version not compatible with the locked one?)"
             print(f"  {crate:28s} locked {', '.join(info['locked']):>8s}  local {info['local']:>8s}  {status}")
     for l in unused:
         print(f"  cargo: {l}", file=sys.stderr)
     if record:
         record_lock_hash()
-    return not unused
+    return ok
 
 
 def cmd_add(checkout):
@@ -168,6 +175,9 @@ def cmd_add(checkout):
     local_pkgs = {p["name"]: p for p in local["packages"]}
     name = os.path.basename(checkout.rstrip("/"))
     state = load_state()
+    old = state.get(name, {}).get("checkout")
+    if old and os.path.exists(old) and not os.path.samefile(old, checkout):
+        die(f"{name} is already patched from {old}. Run `remove {name}` first.")
     check_lock_unchanged()
     # Point an earlier `add` of this checkout at the new path first, so a moved checkout still resolves.
     patched = {c: dict(info, path=os.path.dirname(local_pkgs[c]["manifest_path"]))
@@ -175,7 +185,7 @@ def cmd_add(checkout):
     if name in state:
         write_region({**state, name: {"checkout": checkout, "crates": patched}})
     graph, _ = metadata(manifest, no_deps=False)
-    crates = {}
+    crates, updates = {}, []
     for p in graph["packages"]:
         if p["name"] not in local_pkgs:
             continue
@@ -191,6 +201,10 @@ def cmd_add(checkout):
             if key is None:
                 continue
             keys, locked = [key], [p["version"]]
+            if p["version"] != lp["version"]:
+                # Cargo keeps a locked version that differs from the patch, so unlock it. For crates.io,
+                # --precise selects the local version, or fails and changes nothing if no requirement allows it.
+                updates.append(["-p", p["id"]] + (["--precise", lp["version"]] if key == "crates-io" else []))
         # The same crate can come from several sources or versions: patch each source.
         info = crates.setdefault(p["name"], {"keys": [], "locked": [], "path": os.path.dirname(lp["manifest_path"]),
                                              "local": lp["version"]})
@@ -209,6 +223,8 @@ def cmd_add(checkout):
         if all(v.split(".")[0] != info["local"].split(".")[0] for v in info["locked"]):
             print(f"patch-deps: warning: {c} local {info['local']} vs locked {', '.join(info['locked'])}: major version differs, cargo will not use the patch",
                   file=sys.stderr)
+    for u in updates:
+        subprocess.run(["cargo", "update", "--manifest-path", manifest] + u, capture_output=True)
     ok = resolve_and_report(new_state)
     print(f"patch-deps: {len(crates)} crate(s) from {name} written to {manifest}", file=sys.stderr)
     sys.exit(0 if ok else 3)
@@ -244,7 +260,8 @@ def cmd_status():
     if not state:
         print("patch-deps: nothing patched")
         return
-    sys.exit(0 if resolve_and_report(state, record=False) else 3)
+    # Record the lock update that this resolve makes, but never accept an earlier foreign edit.
+    sys.exit(0 if resolve_and_report(state, record=lock_unchanged()) else 3)
 
 
 if not args or args[0] in ("-h", "--help"):

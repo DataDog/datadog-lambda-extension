@@ -153,13 +153,18 @@ Cargo rewrites `Cargo.lock` for patched crates, so the first `add` (no patch
 active) backs the lock up in `bottlecap/.patch-deps/` (in `.gitignore`), after
 the manifest was written. `restore` puts it back. After each change the script
 resolves the graph, prints one line per crate with `active` or `NOT USED`, and
-records the sha256 of the patched lock. If the lock changed since then (you
+records the sha256 of the patched lock (`status` records it only when the lock
+was unchanged before it ran). If the lock changed or was deleted since then (you
 added or bumped a dependency), `add`, `remove` and `restore` refuse (exit 4) so
 the backup does not erase that change; check `git diff bottlecap/Cargo.lock`,
 then `restore --force`. Only `restore` takes `--force`.
-A crates.io patch is only used when the local version is semver compatible
-with the locked one; a libdatadog checkout that is behind the lock shows
-`NOT USED` for every crate. Exit code 3 means at least one patch is not used.
+When a local version differs from the locked one, `add` runs `cargo update` on
+that crate (`--precise <local version>` for crates.io) so cargo selects the
+patch. Cargo ignores a patch whose version does not match the requirements on
+that crate, for example a libdatadog checkout with another major version; the
+script shows `NOT USED` and exits 3.
+A checkout is known by its directory name. `add` refuses a second checkout with
+the same name while the first one exists; a moved checkout replaces the old entry.
 
 ## CI release binaries per commit
 
