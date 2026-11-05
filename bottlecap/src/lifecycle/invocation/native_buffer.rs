@@ -125,6 +125,10 @@ impl NativeInvocations {
         if span.name != "aws.lambda"
             || span.span_id != context.identity.span_id
             || span.trace_id != trace_id
+            || span.parent_id != context.identity.parent_id
+            || span.meta.get("_dd.p.tid").is_some_and(|high| {
+                u64::from_str_radix(high, 16).ok() != Some((context.identity.trace_id >> 64) as u64)
+            })
         {
             return false;
         }
@@ -154,6 +158,12 @@ impl NativeInvocations {
                 platform.runtime_duration_ms,
             );
             span.error |= platform.invocation_span.error;
+            // The native invocation may arrive below an inferred root carrying the priority.
+            if let Some(priority) = native.identity.sampling_priority {
+                span.metrics
+                    .entry("_sampling_priority_v1".into())
+                    .or_insert(f64::from(priority));
+            }
             ready.invocation = Some((span, stats));
             native.span_sent = true;
         }
@@ -305,6 +315,73 @@ mod tests {
             assert!(buffer.ready("request-1").invocation.is_none());
             assert!(buffer.ready("request-1").telemetry.is_none());
         }
+    }
+
+    #[test]
+    fn preserves_full_identity_and_sampling_when_split_from_an_inferred_root() {
+        let message = update("child", 10);
+        let mut buffer = NativeInvocations::default();
+        buffer
+            .register(&message)
+            .expect("valid native invocation test fixture");
+        buffer.platform_done(platform(&message));
+        let mut child = span(&message);
+        child.meta.remove("_dd.p.tid");
+        child.metrics.remove("_sampling_priority_v1");
+        assert!(buffer.receive_span(child, true));
+        let (ready, stats) = buffer
+            .ready("child")
+            .invocation
+            .expect("valid native invocation test fixture");
+        assert!(stats);
+        assert_eq!(ready.parent_id, 7);
+        assert_eq!(ready.meta["_dd.p.tid"], "0123456789abcdef");
+        assert!((ready.metrics["_sampling_priority_v1"] - 2.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn mismatched_trace_high_bits_or_parent_do_not_consume_the_native_slot() {
+        let message = update("a", 10);
+        let mut buffer = NativeInvocations::default();
+        buffer
+            .register(&message)
+            .expect("valid native invocation test fixture");
+        let mut wrong_parent = span(&message);
+        wrong_parent.parent_id = 9;
+        assert!(!buffer.receive_span(wrong_parent, false));
+        let mut wrong_trace = span(&message);
+        wrong_trace
+            .meta
+            .insert("_dd.p.tid".into(), "fedcba9876543210".into());
+        assert!(!buffer.receive_span(wrong_trace, false));
+        let mut invalid_trace = span(&message);
+        invalid_trace
+            .meta
+            .insert("_dd.p.tid".into(), "invalid".into());
+        assert!(!buffer.receive_span(invalid_trace, false));
+        assert!(buffer.receive_span(span(&message), false));
+        buffer.platform_done(platform(&message));
+        assert!(buffer.ready("a").invocation.is_some());
+    }
+
+    #[test]
+    fn bounds_active_entries_and_expires_reported_entries_first() {
+        let mut buffer = NativeInvocations::default();
+        for index in 0..MAX_INVOCATIONS {
+            buffer
+                .register(&update(&index.to_string(), index as u64 + 1))
+                .expect("valid native invocation test fixture");
+        }
+        assert!(buffer.register(&update("overflow", 2000)).is_err());
+        buffer.report("0");
+        buffer.prune(Instant::now() + COMPLETED_RETENTION);
+        assert!(buffer.get("0").is_none());
+        assert!(buffer.get("1").is_some());
+        buffer
+            .register(&update("replacement", 2001))
+            .expect("valid native invocation test fixture");
+        buffer.prune(Instant::now() + ACTIVE_RETENTION);
+        assert!(buffer.contexts.is_empty());
     }
 
     #[test]
