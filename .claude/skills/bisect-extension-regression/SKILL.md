@@ -144,7 +144,7 @@ in one run:
    the good and the bad tag as the two ends, so that all variants come from the same build
    process.
 2. Build and publish them. The script writes `<commit> <layer ARN>` lines to `layers.txt` in the
-   worktree:
+   worktree. Each call starts with an empty file, so the file has only this round's layers:
 
    ```sh
    $SKILLS/bisect-extension-regression/scripts/build_layers.sh ../dle-bisect <your-name>-bisect v99 <cut1> <cut2> <cut3> v100
@@ -173,7 +173,8 @@ in one run:
 For a size regression, build only, and run `layer_size.py --zip` after each build. Size has no
 noise, so one cut point at a time is fast enough.
 
-When you finish, remove the worktree.
+When you finish, remove the worktree with `git worktree remove --force ../dle-bisect`. It needs
+`--force`, because the build logs and `layers.txt` in it are untracked files.
 
 ### Test the cause with a revert
 

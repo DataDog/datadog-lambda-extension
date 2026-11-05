@@ -2,13 +2,14 @@
 # Build and publish one layer for each commit, in order, in a separate worktree.
 # Usage: [ARCHITECTURE=amd64] [REGION=us-east-1] [FIPS=1] build_layers.sh <worktree> <layer-suffix> <commit>...
 # The defaults are ARCHITECTURE=arm64, REGION=us-east-2 and FIPS=0.
-# Appends "<commit> <layer version ARN>" to <worktree>/layers.txt.
+# Writes "<commit> <layer version ARN>" lines to <worktree>/layers.txt, for this call's commits only.
 set -uo pipefail
 WORKTREE="$(cd "$1" && pwd)" || exit 1; SUFFIX="$2"; shift 2
 ARCHITECTURE="${ARCHITECTURE:-arm64}"; REGION="${REGION:-us-east-2}"; FIPS="${FIPS:-0}"
 ZIP=".layers/datadog_extension-$ARCHITECTURE.zip"
 [ "$ARCHITECTURE" = arm64 ] && LAYER="Datadog-Bottlecap-Beta-ARM-$SUFFIX" || LAYER="Datadog-Bottlecap-Beta-$SUFFIX"
 cd "$WORKTREE" || exit 1
+: > "$WORKTREE/layers.txt"
 for c in "$@"; do
   git checkout -q --detach "$c" || exit 1
   log="$WORKTREE/build-$c.log"
