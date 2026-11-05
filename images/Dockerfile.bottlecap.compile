@@ -5,8 +5,8 @@ ARG FIPS
 ARG DEBUG
 
 # Install dependencies
-# sharing=private gives each concurrent build its own yum cache; concurrent
-# builds on a shared cache have failed here with Errno 16 / HTTPS 416
+# sharing=private gives each concurrent build its own yum cache; on a shared
+# cache, concurrent builds fail here with corrupted repodata and missing rpms
 RUN --mount=type=cache,sharing=private,target=/var/cache/yum \
     yum install -y clang cmake3 compiler-rt curl go make perl unzip
 
