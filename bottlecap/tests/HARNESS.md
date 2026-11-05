@@ -3,14 +3,14 @@
 Process-level contract tests run the real `bottlecap` binary against a fake
 Lambda control plane and a Datadog intake that misbehaves on demand. Each test
 asserts what Lambda or the customer would see: `/next` is called before the
-deadline, the process exits on SHUTDOWN, data is redriven after a fault clears,
-nothing panics, memory stays bounded. No test reads internal state.
+deadline, the process exits within the SHUTDOWN deadline, data reaches the
+intake, and nothing panics. No test reads internal state.
 
 Every reliability fix should come with one of these tests. A test for a bug that
 is not fixed yet is committed `#[ignore = "<ID>: <what the extension does today>"]`,
 so CI stays green and the test turns into a regression test when the fix lands
-(remove the attribute in the same PR). The ID names the backlog item that fixes
-the bug. A reason that starts with `needs owner decision` marks
+(remove the attribute in the same PR). The ID names the Jira ticket that tracks
+the fix (for example `SVLS-10061`). A reason that starts with `needs owner decision` marks
 a test whose expected behavior is a design choice, not a plain bug.
 
 ## Layout
@@ -23,11 +23,11 @@ a test whose expected behavior is a design choice, not a plain bug.
 | `tests/common/bottlecap_process.rs` | `BottlecapProcess`: spawn the binary with the base env, capture stdout/stderr, RSS/CPU, exit with a deadline, kill on drop. |
 | `tests/common/port_guard.rs` | Hold or probe the fixed ports (8124, 8125/udp, 8126, 8999, 9000). |
 | `tests/common/telemetry_events.rs` | Telemetry API records as `Value`, thin wrappers over `tests/fixtures/telemetry.rs`. |
-| `tests/fixtures/` | The shared corpus (benches, harness, simulator). Each test crate declares `mod fixtures;`. |
+| `tests/fixtures/` | The shared corpus for benches and these tests (see its `README.md`). Each test crate declares `mod fixtures;`. |
 | `tests/lifecycle_contract_test.rs` | Shutdown and `/next` contracts. |
-| `tests/fault_injection_test.rs` | Intake faults, secrets, oversized payloads, memory. |
-| `tests/config_robustness_test.rs` | Wrong-typed config values, INIT-panic values. |
-| `tests/port_conflict_test.rs` | One test per fixed port. |
+| `tests/fault_injection_test.rs` | Intake faults: a 503 storm, an oversized trace, a response cut off mid-body. |
+| `tests/config_robustness_test.rs` | Wrong-typed config values. |
+| `tests/port_conflict_test.rs` | Another process holds port 8124 or 8126. |
 | `.config/nextest.toml` | `fixed-ports` test group (`max-threads = 1`) for these binaries. |
 
 ## Write a new fault test in 10 lines
@@ -40,7 +40,7 @@ use harness::prelude::*;
 
 #[tokio::test(flavor = "multi_thread")]
 #[serial_test::serial(bottlecap_ports)]
-#[ignore = "RV-2.x: <what the extension does today>"]
+#[ignore = "SVLS-xxxxx: <what the extension does today>"]
 async fn my_fault() {
     let s = Scenario::start(FaultMode::Ok).await;          // fake API + intake, fixed ports checked
     let mut bc = s.bottlecap().spawn();                     // real binary, base env points at the fakes
@@ -97,7 +97,7 @@ async fn my_fault() {
   Any other path gets `202`.
 - `FaultIntake` (HTTP/1.1): modes `Ok`, `Status(code)`, `Slow(d)`, `Blackhole`,
   `RetryAfter{status, secs}`, `CloseMidBody`; string forms `ok`, `status:<c>`, `slow:<ms>`,
-  `blackhole`, `retry_after:<c>:<s>`, `close_mid_body` (shared with the Lambda simulator).
+  `blackhole`, `retry_after:<c>:<s>`, `close_mid_body`.
   `Blackhole` never reads a body: with a path mode set, it reads only the request head to pick
   the mode, and records the request with `body_len` 0. An upload that breaks off is not
   recorded and gets no answer.
@@ -134,8 +134,7 @@ async fn my_fault() {
 prior knowledge), `DD_PROXY_HTTPS=http://127.0.0.1:1` (trace stats follow
 `DD_SITE` over https; an https-only proxy on a closed port fails them at once
 while the `http://` intake URLs bypass it). Managed Instance mode adds
-`AWS_LAMBDA_INITIALIZATION_TYPE=lambda-managed-instances`. The Lambda simulator
-uses the same names.
+`AWS_LAMBDA_INITIALIZATION_TYPE=lambda-managed-instances`.
 
 ## Running
 
@@ -143,7 +142,7 @@ uses the same names.
 cd bottlecap
 cargo nextest run --test lifecycle_contract_test --test fault_injection_test \
     --test config_robustness_test --test port_conflict_test            # CI set, ignored skipped
-cargo nextest run --test fault_injection_test --run-ignored only          # the not-yet-fixed ones
+cargo nextest run --test fault_injection_test --run-ignored only          # not-yet-fixed tests (none yet)
 cargo test --test fault_injection_test                                    # also serialized
 ```
 
@@ -161,6 +160,6 @@ holds one.
   mode per request. `blackhole` needs the accept loop, so the crate must expose
   it. Until then `fault_intake.rs` stays here next to the shared crate's payload
   decoding.
-- The T4(b) secret-recovery test needs the extension to honor
+- A secret-recovery test (the secret fetch fails, then recovers) needs the extension to honor
   `AWS_ENDPOINT_URL_<SERVICE>` / `AWS_ENDPOINT_URL` (the AWS SDK convention) for
   its Secrets Manager call; that hook is a separate small change.

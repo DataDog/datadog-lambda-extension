@@ -9,12 +9,11 @@
 //! extension). Every request is recorded with its path, size, headers and
 //! the mode that answered it; an upload that breaks off is not recorded and
 //! gets no answer. The fault mode can change at runtime, and one
-//! path can get its own mode (for example `/credentials` for the secret-fetch
-//! tests).
+//! path can get its own mode (for example `/credentials`, for a secret fetch).
 //!
-//! Mode names, shared with the Lambda simulator: `ok`, `status:<code>`,
-//! `slow:<ms>`, `blackhole`, `retry_after:<code>:<secs>`, `close_mid_body`,
-//! and `syn_blackhole` for [`SynBlackhole`]. These modes belong in the shared
+//! Mode names: `ok`, `status:<code>`, `slow:<ms>`, `blackhole`,
+//! `retry_after:<code>:<secs>`, `close_mid_body`, and `syn_blackhole` for
+//! [`SynBlackhole`]. These modes belong in the shared
 //! `datadog-mock-intake` crate once bottlecap consumes it; see `tests/HARNESS.md`.
 
 use std::collections::HashMap;
