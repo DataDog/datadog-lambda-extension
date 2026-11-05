@@ -87,7 +87,8 @@ async fn my_fault() {
   `send_telemetry_raw` posts its body as is. Like Lambda, `/next` serves only the event types from
   the register body and drops the rest, `/next` and subscribe get `403` without the
   `Lambda-Extension-Identifier` issued at register, register gets `403` without
-  `Lambda-Extension-Name: datadog-agent`, and a malformed register body gets `400`.
+  `Lambda-Extension-Name: datadog-agent` or with an invalid body, a subscribe body outside the
+  Telemetry API reference rules gets `400`, and `accountId` needs `Lambda-Extension-Accept-Feature`.
   Any other path gets `202`.
 - `FaultIntake` (HTTP/1.1): modes `Ok`, `Status(code)`, `Slow(d)`, `Blackhole`,
   `RetryAfter{status, secs}`, `CloseMidBody`; string forms `ok`, `status:<c>`, `slow:<ms>`,

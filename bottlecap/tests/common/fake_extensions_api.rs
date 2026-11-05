@@ -10,7 +10,8 @@
 //! long-poll returns it. Like Lambda, `/next` serves only the event types the
 //! extension registered for, `/next` and `subscribe` get a `403` without the
 //! identifier issued at register, register gets a `403` without the
-//! extension's name, and a malformed register body gets a `400`.
+//! extension's name or with an invalid body, an invalid subscribe body gets a
+//! `400`, and register returns `accountId` only when the extension asks for it.
 //! It also answers any other request with `202`, so the same port can stand in
 //! for the Datadog intake when a test does not need a `FaultIntake`.
 //!
@@ -21,6 +22,7 @@
 
 use std::collections::VecDeque;
 use std::net::SocketAddr;
+use std::ops::RangeInclusive;
 use std::sync::atomic::{AtomicU16, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -39,6 +41,7 @@ use tokio::sync::Notify;
 use tokio::task::JoinHandle;
 
 const EXTENSION_NAME_HEADER: &str = "Lambda-Extension-Name";
+const ACCEPT_FEATURE_HEADER: &str = "Lambda-Extension-Accept-Feature";
 /// The extension's file name under `/opt/extensions`.
 const EXTENSION_NAME: &str = "datadog-agent";
 const EXTENSION_ID_HEADER: &str = "Lambda-Extension-Identifier";
@@ -319,32 +322,42 @@ async fn register(
     {
         return Err(StatusCode::FORBIDDEN);
     }
-    // Lambda accepts only these event types and rejects any other body.
-    let events = serde_json::from_slice::<Value>(&body)
-        .ok()
-        .and_then(|v| {
-            v["events"]
-                .as_array()?
-                .iter()
-                .map(|e| {
-                    e.as_str()
-                        .filter(|e| matches!(*e, "INVOKE" | "SHUTDOWN"))
-                        .map(str::to_string)
-                })
-                .collect::<Option<Vec<_>>>()
-        })
-        .ok_or(StatusCode::BAD_REQUEST)?;
+    let events = register_events(&body).ok_or(StatusCode::FORBIDDEN)?;
     *shared
         .registered_events
         .lock()
         .expect("registered events lock") = events;
+    let mut response =
+        json!({"functionName": "test", "functionVersion": "$LATEST", "handler": "index.handler"});
+    // Lambda adds `accountId` only when the extension asks for that feature.
+    if headers
+        .get(ACCEPT_FEATURE_HEADER)
+        .and_then(|v| v.to_str().ok())
+        .is_some_and(|v| v.split(',').any(|f| f.trim() == "accountId"))
+    {
+        response["accountId"] = json!("123456789012");
+    }
     let mut headers = HeaderMap::new();
     headers.insert(EXTENSION_ID_HEADER, EXTENSION_ID.parse().expect("header"));
-    Ok((
-        StatusCode::OK,
-        headers,
-        json!({"accountId": "123456789012", "functionName": "test", "functionVersion": "$LATEST", "handler": "index.handler"}).to_string(),
-    ))
+    Ok((StatusCode::OK, headers, response.to_string()))
+}
+
+/// Event types of a register body, `None` when Lambda answers `403`. Lambda
+/// accepts a body without `events`, and only `INVOKE` and `SHUTDOWN` in it.
+fn register_events(body: &[u8]) -> Option<Vec<String>> {
+    let body = serde_json::from_slice::<Value>(body).ok()?;
+    match body.as_object()?.get("events") {
+        None | Some(Value::Null) => Some(Vec::new()),
+        Some(events) => events
+            .as_array()?
+            .iter()
+            .map(|e| {
+                e.as_str()
+                    .filter(|e| matches!(*e, "INVOKE" | "SHUTDOWN"))
+                    .map(str::to_string)
+            })
+            .collect(),
+    }
 }
 
 /// Lambda answers `403` to a `/next` or `subscribe` call without the
@@ -367,25 +380,50 @@ async fn subscribe(
 ) -> Result<impl IntoResponse, StatusCode> {
     record(&shared, "PUT", "/2022-07-01/telemetry");
     check_extension_id(&headers)?;
+    let (port, types) = subscription(&body).ok_or(StatusCode::BAD_REQUEST)?;
     let status = StatusCode::from_u16(shared.subscribe_status.load(Ordering::SeqCst))
         .unwrap_or(StatusCode::OK);
-    if status.is_success()
-        && let Ok(v) = serde_json::from_slice::<Value>(&body)
-        && let Some(uri) = v["destination"]["URI"].as_str()
-        && let Some(port) = uri
-            .rsplit(':')
-            .next()
-            .and_then(|p| p.trim_end_matches('/').parse::<u16>().ok())
-    {
-        *shared.telemetry_types.lock().expect("telemetry types lock") = v["types"]
-            .as_array()
-            .into_iter()
-            .flatten()
-            .filter_map(|t| t.as_str().map(str::to_string))
-            .collect();
+    if status.is_success() {
+        *shared.telemetry_types.lock().expect("telemetry types lock") = types;
         shared.telemetry_port.store(port, Ordering::SeqCst);
     }
     Ok((status, "{}"))
+}
+
+/// Destination port and `types` of a subscribe body, `None` when Lambda answers
+/// `400`: the Telemetry API reference rules, and a `sandbox` URI with a port.
+/// The fake sender speaks only HTTP, so it also rejects a `TCP` destination.
+fn subscription(body: &[u8]) -> Option<(u16, Vec<String>)> {
+    let v = serde_json::from_slice::<Value>(body).ok()?;
+    let types = v["types"]
+        .as_array()
+        .filter(|types| !types.is_empty())?
+        .iter()
+        .map(|t| {
+            t.as_str()
+                .filter(|t| matches!(*t, "platform" | "function" | "extension"))
+                .map(str::to_string)
+        })
+        .collect::<Option<Vec<_>>>()?;
+    let buffering_ok = v.get("buffering").is_none_or(|b| {
+        let in_range = |key: &str, range: RangeInclusive<u64>| {
+            b.get(key)
+                .is_none_or(|n| n.as_u64().is_some_and(|n| range.contains(&n)))
+        };
+        b.is_object()
+            && in_range("maxItems", 1_000..=10_000)
+            && in_range("maxBytes", 262_144..=1_048_576)
+            && in_range("timeoutMs", 25..=30_000)
+    });
+    let uri = reqwest::Url::parse(v["destination"]["URI"].as_str()?).ok()?;
+    let valid = matches!(
+        v["schemaVersion"].as_str(),
+        Some("2022-07-01" | "2022-12-13" | "2025-01-29")
+    ) && v["destination"]["protocol"] == "HTTP"
+        && matches!(uri.host_str(), Some("sandbox" | "sandbox.localdomain"))
+        && buffering_ok;
+    let port = uri.port().filter(|&p| p != 0)?;
+    valid.then_some((port, types))
 }
 
 async fn next(
