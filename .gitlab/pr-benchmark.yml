@@ -1,0 +1,21 @@
+stages: [publish]
+
+publish PR benchmark:
+  stage: publish
+  image: registry.ddbuild.io/ci/datadog-lambda-extension:latest
+  tags: ["arch:amd64"]
+  allow_failure: true
+  interruptible: false
+  timeout: 10m
+  needs:
+    - pipeline: $PR_BENCHMARK_BUILD_PIPELINE_ID
+      job: layer (amd64)
+  before_script:
+    - EXTERNAL_ID_NAME=sandbox-publish-externalid ROLE_TO_ASSUME=sandbox-layer-deployer AWS_ACCOUNT=425362996713 source .gitlab/scripts/get_secrets.sh
+  script:
+    - node .gitlab/scripts/publish_pr_benchmark.js
+  artifacts:
+    when: always
+    expire_in: 14 days
+    paths:
+      - .layers/pr-benchmark/*.json
