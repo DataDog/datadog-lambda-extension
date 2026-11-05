@@ -5,14 +5,15 @@ use bottlecap::tags::lambda::tags::EXTENSION_VERSION;
 use crate::fixtures::telemetry::FUNCTION_ARN;
 
 /// The tags bottlecap adds to every metric of the `$LATEST` version of [`FUNCTION_ARN`]
-/// (`SortedTags::parse(&enrich_tags())`).
+/// (`SortedTags::parse(&enrich_tags())`). No `runtime` tag: Lambda does not give
+/// `AWS_EXECUTION_ENV` to extensions.
 pub fn enrich_tags() -> String {
     let name = FUNCTION_ARN
         .rsplit(':')
         .next()
         .expect("function name in the ARN");
     format!(
-        "function_arn:{FUNCTION_ARN},region:us-east-1,account_id:123456789012,aws_account:123456789012,functionname:{name},resource:{name},memorysize:128,architecture:arm64,runtime:nodejs22.x,_dd.runtime_family:nodejs,env:prod,service:checkout,version:1.2.3,dd_extension_version:{EXTENSION_VERSION}"
+        "function_arn:{FUNCTION_ARN},region:us-east-1,account_id:123456789012,aws_account:123456789012,functionname:{name},resource:{name},memorysize:128,architecture:arm64,init_type:on-demand,env:prod,service:checkout,version:1.2.3,dd_extension_version:{EXTENSION_VERSION}"
     )
 }
 

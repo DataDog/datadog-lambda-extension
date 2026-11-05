@@ -6,6 +6,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde_json::{Value, json};
 
+use crate::fixtures::telemetry::XRAY_TRACE_HEADER;
 use crate::fixtures::traces::BASE_NS;
 
 fn payloads_dir() -> PathBuf {
@@ -101,12 +102,14 @@ pub fn sqs_220kb() -> Value {
     sqs_event(10, 22_000)
 }
 
-/// A DynamoDB stream batch of `records` INSERT records with `attrs` attributes each, created
-/// at [`BASE_NS`].
+/// A DynamoDB stream batch of `records` INSERT records, created at [`BASE_NS`]. Each
+/// `NewImage` holds the `Id` key plus `attrs` other attributes.
 pub fn dynamodb_event(records: usize, attrs: usize) -> Value {
     let recs: Vec<Value> = (0..records)
         .map(|i| {
+            let key = json!({"N": (101 + i).to_string()});
             let mut img = serde_json::Map::new();
+            img.insert("Id".to_string(), key.clone());
             for a in 0..attrs {
                 img.insert(format!("attr{a}"), json!({"S": format!("value-{i}-{a}")}));
             }
@@ -118,7 +121,7 @@ pub fn dynamodb_event(records: usize, attrs: usize) -> Value {
                 "awsRegion": "us-east-1",
                 "dynamodb": {
                     "ApproximateCreationDateTime": BASE_NS / 1_000_000_000,
-                    "Keys": {"Id": {"N": "101"}},
+                    "Keys": {"Id": key},
                     "NewImage": Value::Object(img),
                     "SequenceNumber": format!("{i}00000000000000000"),
                     "SizeBytes": 26,
@@ -154,7 +157,7 @@ pub fn lwa_next_headers(request_id: &str) -> Vec<(&'static str, String)> {
         ),
         (
             "lambda-runtime-trace-id",
-            "Root=1-67d448e8-3ae320be0e2cdf2f53ccdaba;Lineage=1:73f724a8:0".to_string(),
+            format!("{XRAY_TRACE_HEADER};Lineage=1:73f724a8:0"),
         ),
     ]
 }

@@ -14,6 +14,10 @@ pub const REQUEST_ID: &str = "8f5c1b9e-3a2d-4c6f-9e1b-7d2a5c8e4f10";
 /// Function ARN used by every fixture.
 pub const FUNCTION_ARN: &str = "arn:aws:lambda:us-east-1:123456789012:function:orders-prod-handler";
 
+/// X-Ray trace header (active tracing) that `platform_start` and `lwa_next_headers` carry.
+pub const XRAY_TRACE_HEADER: &str =
+    "Root=1-62e900b2-710d76f009d6e7785905449a;Parent=0efbd19962d95b05;Sampled=1";
+
 /// Which shape a function log record takes in the Telemetry API.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum LogKind {
@@ -82,7 +86,7 @@ pub fn platform_start(request_id: &str) -> String {
         50,
         "platform.start",
         &format!(
-            r#"{{"requestId":"{request_id}","version":"$LATEST","tracing":{{"spanId":"54565fb41ac79632","type":"X-Amzn-Trace-Id","value":"Root=1-62e900b2-710d76f009d6e7785905449a;Parent=0efbd19962d95b05;Sampled=1"}}}}"#
+            r#"{{"requestId":"{request_id}","version":"$LATEST","tracing":{{"spanId":"54565fb41ac79632","type":"X-Amzn-Trace-Id","value":"{XRAY_TRACE_HEADER}"}}}}"#
         ),
     )
 }

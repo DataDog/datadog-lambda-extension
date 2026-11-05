@@ -27,7 +27,7 @@ pub mod telemetry;
 pub mod traces;
 
 use std::fs;
-use std::io::Write as _;
+use std::io::{ErrorKind, Write as _};
 use std::path::{Path, PathBuf};
 
 /// Default output directory for [`write_corpus`]: `bottlecap/tests/fixtures/generated`.
@@ -43,10 +43,18 @@ pub fn default_corpus_dir() -> PathBuf {
 
 /// Writes every fixture to `dir` and returns the written files with their sizes. First removes
 /// the files the previous `MANIFEST.txt` lists, so a renamed or removed fixture does not stay.
+/// Panics on any I/O error other than a missing file.
 pub fn write_corpus(dir: &Path) -> Vec<(PathBuf, usize)> {
-    if let Ok(previous) = fs::read_to_string(dir.join("MANIFEST.txt")) {
-        for rel in previous.lines().filter_map(|l| l.split_whitespace().nth(1)) {
-            let _ = fs::remove_file(dir.join(rel));
+    let previous = match fs::read_to_string(dir.join("MANIFEST.txt")) {
+        Ok(previous) => previous,
+        Err(e) if e.kind() == ErrorKind::NotFound => String::new(),
+        Err(e) => panic!("read previous MANIFEST.txt: {e}"),
+    };
+    for rel in previous.lines().filter_map(|l| l.split_whitespace().nth(1)) {
+        if let Err(e) = fs::remove_file(dir.join(rel))
+            && e.kind() != ErrorKind::NotFound
+        {
+            panic!("remove previous fixture {rel}: {e}");
         }
     }
     let mut written = Vec::new();

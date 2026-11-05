@@ -22,7 +22,7 @@ use fixtures::{dogstatsd, events, logs, telemetry, traces};
 | | `split_record_single_post(total, piece) -> Vec<u8>` | All pieces of one split record in one body (seams only) |
 | | `runtime_done_with(id, status, with_metrics)`, `logs_dropped(n)`, `unknown_event()` | A `runtimeDone` of any status with or without `metrics` (Lambda omits it on a timeout), a `platform.logsDropped`, an event of an unknown type |
 | | `event(millis, type, record_json)`, `init_start()`, `platform_start(id)`, `runtime_done(id)`, `report(id)` (cold), `warm_report(id)`, `function_event(kind, i)`, `extension_event(i)`, `batch(&[String])` | Building blocks |
-| | `REQUEST_ID`, `FUNCTION_ARN` | Constants used everywhere |
+| | `REQUEST_ID`, `FUNCTION_ARN`, `XRAY_TRACE_HEADER` | Constants used everywhere |
 | `logs` | `text_line(i)`, `json_object(i) -> Value`, `json_line(i)`, `text_line_of_len(i, len)`, `OOM_LINES` | Raw log lines: Lambda text format (~200 B), Powertools-like JSON (~2 KB), one OOM line per runtime |
 | `traces` | `make_traces(n_traces, spans_per_trace, with_sql) -> Vec<Vec<pb::Span>>` | Synthetic traces: `aws.lambda` root, SQL and HTTP clients, internal spans |
 | | `trace_2000_spans()`, `v04_2000_spans() -> Vec<u8>` | The reference payload: 100 x 20 spans, ~1 MB v0.4 msgpack |
@@ -32,8 +32,8 @@ use fixtures::{dogstatsd, events, logs, telemetry, traces};
 | | `DIST_8_TAGS`, `COUNT_2_TAGS`, `SKIPPED_LINES` | Constants |
 | `events` | `payload(name)`, `payload_names()`, `all_payloads()` | The 38 trigger events in `tests/payloads/` |
 | | `sqs_event(records, body_bytes)`, `sqs_220kb()` | SQS batch with `_datadog` trace context; reference 10 x 22 KB |
-| | `dynamodb_event(records, attrs)`, `dynamodb_100_records()` | DynamoDB stream batch; reference 100 x 30 attributes |
-| | `lwa_next_headers(request_id)` | Headers of the `/invocation/next` response LWA intercepts |
+| | `dynamodb_event(records, attrs)`, `dynamodb_100_records()` | DynamoDB stream batch, `Id` key plus `attrs` attributes per image; reference 100 x 30 |
+| | `lwa_next_headers(request_id)` | Headers of the `/invocation/next` response LWA intercepts, with `XRAY_TRACE_HEADER` |
 | root | `write_corpus(&dir) -> Vec<(PathBuf, usize)>`, `default_corpus_dir()` | Writes the files below |
 
 ## Files on disk
