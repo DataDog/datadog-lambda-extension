@@ -213,7 +213,16 @@ impl Processor {
         self.context_buffer
             .sorted_reparenting_info
             .retain(|entry| entry.request_id != update.request_id);
+        if update.phase == super::native::Phase::Complete && update.error {
+            self.increment_native_error(&update.request_id, chrono::Utc::now().timestamp());
+        }
         Ok(())
+    }
+
+    fn increment_native_error(&mut self, request_id: &str, timestamp: i64) {
+        if self.native_invocations.record_error(request_id) {
+            self.enhanced_metrics.increment_errors_metric(timestamp);
+        }
     }
 
     pub async fn on_native_span(
@@ -666,8 +675,20 @@ impl Processor {
             .set_runtime_done_metrics(&metrics, timestamp);
 
         if status != Status::Success {
-            // Increment the error metric
-            self.enhanced_metrics.increment_errors_metric(timestamp);
+            if self.native_invocations.get(request_id).is_some() {
+                self.increment_native_error(request_id, timestamp);
+                if let Some(context) = self.context_buffer.get_mut(request_id) {
+                    context.invocation_span.error = 1;
+                    if let Some(error_type) = &error_type {
+                        context
+                            .invocation_span
+                            .meta
+                            .insert("error.type".into(), error_type.clone());
+                    }
+                }
+            } else {
+                self.enhanced_metrics.increment_errors_metric(timestamp);
+            }
 
             // Increment the error type metric
             if status == Status::Timeout {
@@ -1034,6 +1055,26 @@ impl Processor {
                 .await;
             }
             ReportMetrics::OnDemand(metrics) => {
+                if self.native_invocations.get(request_id).is_some()
+                    && self
+                        .context_buffer
+                        .get(request_id)
+                        .is_some_and(|ctx| !ctx.runtime_done_received)
+                {
+                    self.on_platform_runtime_done(
+                        request_id,
+                        RuntimeDoneMetrics {
+                            duration_ms: metrics.duration_ms,
+                            produced_bytes: None,
+                        },
+                        status,
+                        error_type,
+                        tags_provider,
+                        trace_sender,
+                        timestamp,
+                    )
+                    .await;
+                }
                 self.handle_ondemand_report(request_id, metrics, timestamp);
             }
         }
@@ -1880,6 +1921,70 @@ mod tests {
             assert_eq!(context.invocation_span.error, 0);
             assert!(!processor.tracer_detected);
         }
+    }
+
+    #[tokio::test]
+    async fn native_application_and_platform_errors_increment_once() {
+        let mut p = setup();
+        let request_id = "native-error".to_string();
+        p.context_buffer.start_context(&request_id, Span::default());
+        let update = super::super::native::InvocationUpdate {
+            version: 1,
+            phase: super::super::native::Phase::Complete,
+            request_id: request_id.clone(),
+            trace_id: "0000000000000000000000000000002a".into(),
+            span_id: "000000000000000b".into(),
+            parent_id: "0000000000000000".into(),
+            start_ns: 100,
+            service: "test".into(),
+            resource: "handler".into(),
+            sampling_priority: Some(1),
+            duration_ns: 10,
+            error: true,
+        };
+        p.on_native_invocation(&update).unwrap();
+        p.on_native_invocation(&update).unwrap();
+        let now = chrono::Utc::now().timestamp();
+        let config = Arc::clone(&p.config);
+        let tags = Arc::new(provider::Provider::new(
+            Arc::clone(&config),
+            LAMBDA_RUNTIME_SLUG.into(),
+            &HashMap::new(),
+        ));
+        let (sender, _rx) = make_trace_sender_with_rx(config);
+        p.on_platform_runtime_done(
+            &request_id,
+            RuntimeDoneMetrics {
+                duration_ms: 10.0,
+                produced_bytes: None,
+            },
+            Status::Error,
+            Some("Runtime.OutOfMemory".into()),
+            tags,
+            sender,
+            now,
+        )
+        .await;
+        let entry = p
+            .enhanced_metrics
+            .aggr_handle
+            .get_entry_by_id(
+                crate::metrics::enhanced::constants::ERRORS_METRIC.into(),
+                None,
+                (now / 10) * 10,
+            )
+            .await
+            .unwrap()
+            .unwrap();
+        assert!((entry.value.get_sketch().unwrap().sum().unwrap() - 1.0).abs() < f64::EPSILON);
+        assert_eq!(
+            p.context_buffer
+                .get(&request_id)
+                .unwrap()
+                .invocation_span
+                .meta["error.type"],
+            "Runtime.OutOfMemory"
+        );
     }
 
     fn sqs_payload() -> Value {

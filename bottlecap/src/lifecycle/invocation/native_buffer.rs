@@ -82,6 +82,19 @@ impl NativeInvocations {
         Ok(())
     }
 
+    /// Returns true once for an application or platform error on a native invocation.
+    pub fn record_error(&mut self, request_id: &str) -> bool {
+        let Some(native) = self.contexts.get_mut(request_id) else {
+            return false;
+        };
+        native.error = true;
+        if native.error_counted {
+            return false;
+        }
+        native.error_counted = true;
+        true
+    }
+
     #[must_use]
     pub fn get(&self, request_id: &str) -> Option<&NativeContext> {
         self.contexts.get(request_id)
@@ -141,6 +154,18 @@ impl NativeInvocations {
             span.error |= platform.invocation_span.error;
             ready.invocation = Some((span, stats));
             native.span_sent = true;
+        }
+        if !native.span_sent
+            && !native.fallback_sent
+            && !native.complete
+            && platform.invocation_span.error != 0
+        {
+            let mut span = platform.invocation_span.clone();
+            native.identity.apply(&mut span);
+            span.meta
+                .insert("_dd.lambda.native_fallback".into(), "true".into());
+            ready.invocation = Some((span, false));
+            native.fallback_sent = true;
         }
         if !native.telemetry_sent {
             if let Some(mut span) = platform
@@ -373,5 +398,58 @@ mod tests {
                 .name,
             "aws.lambda.snapstart_restore"
         );
+    }
+    #[test]
+    fn hard_failure_uses_registered_identity_and_suppresses_late_native_span() {
+        let message = update("timeout", 55);
+        let mut buffer = NativeInvocations::default();
+        buffer
+            .register(&message)
+            .expect("valid native invocation test fixture");
+        let mut context = platform(&message);
+        context.invocation_span.error = 1;
+        context.invocation_span.duration = 10_000_000;
+        context
+            .invocation_span
+            .meta
+            .insert("error.type".into(), "Timeout".into());
+        buffer.platform_done(context);
+        let (fallback, stats) = buffer
+            .ready("timeout")
+            .invocation
+            .expect("valid native invocation test fixture");
+        assert!(!stats);
+        assert_eq!(fallback.span_id, 55);
+        assert_eq!(fallback.parent_id, 7);
+        assert_eq!(fallback.duration, 10_000_000);
+        assert_eq!(fallback.meta["error.type"], "Timeout");
+        assert!(buffer.receive_span(span(&message), true));
+        let mut end = message.clone();
+        end.phase = Phase::Complete;
+        buffer
+            .register(&end)
+            .expect("valid native invocation test fixture");
+        assert!(buffer.ready("timeout").invocation.is_none());
+    }
+
+    #[test]
+    fn completed_sampled_out_error_does_not_synthesize_another_invocation() {
+        let mut message = update("complete", 55);
+        message.phase = Phase::Complete;
+        message.error = true;
+        let mut buffer = NativeInvocations::default();
+        buffer
+            .register(&message)
+            .expect("valid native invocation test fixture");
+        let mut context = platform(&message);
+        context.invocation_span.error = 1;
+        buffer.platform_done(context);
+        assert!(buffer.ready("complete").invocation.is_none());
+        assert!(buffer.record_error("complete"));
+        assert!(!buffer.record_error("complete"));
+        buffer
+            .register(&message)
+            .expect("valid native invocation test fixture");
+        assert!(!buffer.record_error("complete"));
     }
 }
