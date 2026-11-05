@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use axum::{
-    Router,
+    Json, Router,
     extract::{DefaultBodyLimit, Request, State},
     http::{HeaderMap, StatusCode},
     response::{IntoResponse, Response},
@@ -31,6 +31,7 @@ use crate::{
     traces::propagation::DatadogCompositePropagator,
 };
 
+const NATIVE_INVOCATION_PATH: &str = "/lambda/trace-context";
 const HELLO_PATH: &str = "/lambda/hello";
 const START_INVOCATION_PATH: &str = "/lambda/start-invocation";
 const END_INVOCATION_PATH: &str = "/lambda/end-invocation";
@@ -102,8 +103,37 @@ impl Listener {
             .route(START_INVOCATION_PATH, post(Self::handle_start_invocation))
             .route(END_INVOCATION_PATH, post(Self::handle_end_invocation))
             .route(HELLO_PATH, get(Self::handle_hello))
+            .route(
+                NATIVE_INVOCATION_PATH,
+                get(Self::native_capabilities)
+                    .post(Self::native_invocation)
+                    .layer(DefaultBodyLimit::max(16 * 1024)),
+            )
             .with_state(state)
             .layer(DefaultBodyLimit::max(LAMBDA_INVOCATION_MAX_PAYLOAD))
+    }
+
+    #[allow(clippy::unused_async)]
+    async fn native_capabilities() -> Json<Value> {
+        Json(json!({"version": 1, "native_invocation": true}))
+    }
+
+    async fn native_invocation(
+        State((processor, _, _)): State<ListenerState>,
+        Json(update): Json<crate::lifecycle::invocation::native::InvocationUpdate>,
+    ) -> Response {
+        if let Err(error) = update.identity() {
+            return (StatusCode::BAD_REQUEST, error).into_response();
+        }
+        match processor.on_native_invocation(update).await {
+            Ok(()) => (StatusCode::OK, Json(json!({}))).into_response(),
+            Err(
+                crate::lifecycle::invocation::processor_service::ProcessorError::NativeInvocation(
+                    error,
+                ),
+            ) => (StatusCode::CONFLICT, error).into_response(),
+            Err(_) => StatusCode::SERVICE_UNAVAILABLE.into_response(),
+        }
     }
 
     async fn graceful_shutdown(tasks: Arc<Mutex<JoinSet<()>>>, shutdown_token: CancellationToken) {
@@ -267,6 +297,51 @@ mod tests {
     use axum::{body::Body, http::Request, routing::post};
     use http_body_util::BodyExt;
     use tower::ServiceExt;
+
+    #[tokio::test]
+    async fn native_protocol_advertises_capabilities_and_limits_metadata() {
+        let state = (
+            InvocationProcessorHandle::noop(),
+            Arc::new(DatadogCompositePropagator::new(Arc::new(
+                crate::config::Config::default(),
+            ))),
+            Arc::new(Mutex::new(JoinSet::new())),
+        );
+        let router = Listener::make_router(state);
+        let response = router
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri(NATIVE_INVOCATION_PATH)
+                    .body(Body::empty())
+                    .expect("valid native invocation test fixture"),
+            )
+            .await
+            .expect("valid native invocation test fixture");
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = response
+            .into_body()
+            .collect()
+            .await
+            .expect("valid native invocation test fixture")
+            .to_bytes();
+        assert_eq!(
+            serde_json::from_slice::<Value>(&body).expect("valid native invocation test fixture"),
+            json!({"version": 1, "native_invocation": true})
+        );
+        let response = router
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(NATIVE_INVOCATION_PATH)
+                    .header("Content-Type", "application/json")
+                    .body(Body::from(vec![b' '; 16 * 1024 + 1]))
+                    .expect("valid native invocation test fixture"),
+            )
+            .await
+            .expect("valid native invocation test fixture");
+        assert_eq!(response.status(), StatusCode::PAYLOAD_TOO_LARGE);
+    }
 
     /// Builds a minimal router that applies only the body limit layer.
     /// The handler reads the full body (via the `Bytes` extractor), which

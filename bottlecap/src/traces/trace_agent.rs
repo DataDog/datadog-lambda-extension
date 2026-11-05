@@ -764,6 +764,22 @@ impl TraceAgent {
                     continue;
                 }
 
+                if span.name == "aws.lambda" && span.resource != INVOCATION_SPAN_RESOURCE {
+                    match invocation_processor_handle
+                        .on_native_span(
+                            span.clone(),
+                            tracer_header_tags.generic.client_computed_stats,
+                            tags_provider.clone(),
+                            trace_sender.clone(),
+                        )
+                        .await
+                    {
+                        Ok(true) => continue,
+                        Ok(false) => {}
+                        Err(error) => debug!("Native invocation correlation unavailable: {error}"),
+                    }
+                }
+
                 // If the aws.lambda.load span is found, we're in Python or Node.
                 // We need to update the trace ID of the cold start span, reparent the `aws.lambda.load`
                 // span to the cold start span, and eventually send the cold start span.

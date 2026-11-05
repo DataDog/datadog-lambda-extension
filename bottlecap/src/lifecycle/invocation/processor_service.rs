@@ -29,11 +29,24 @@ pub enum ProcessorError {
     ChannelSend(String),
     #[error("Channel receive error: {0}")]
     ChannelReceive(String),
+    #[error("Native invocation: {0}")]
+    NativeInvocation(String),
     #[error("Service is shutting down")]
     ServiceShutdown,
 }
 
 pub enum ProcessorCommand {
+    NativeInvocation {
+        update: super::native::InvocationUpdate,
+        response: oneshot::Sender<Result<(), String>>,
+    },
+    NativeSpan {
+        span: Box<Span>,
+        client_computed_stats: bool,
+        tags_provider: Arc<provider::Provider>,
+        trace_sender: Arc<SendingTraceProcessor>,
+        response: oneshot::Sender<bool>,
+    },
     InvokeEvent {
         request_id: String,
     },
@@ -168,6 +181,12 @@ impl InvocationProcessorHandle {
         tokio::spawn(async move {
             while let Some(command) = receiver.recv().await {
                 match command {
+                    ProcessorCommand::NativeInvocation { response, .. } => {
+                        let _ = response.send(Err("native lifecycle unavailable".into()));
+                    }
+                    ProcessorCommand::NativeSpan { response, .. } => {
+                        let _ = response.send(false);
+                    }
                     // Request-response commands: reply with a default so the
                     // caller doesn't block on the oneshot forever.
                     ProcessorCommand::GetReparentingInfo { response } => {
@@ -335,6 +354,44 @@ impl InvocationProcessorHandle {
         rx.await
             .map_err(|e| ProcessorError::ChannelReceive(e.to_string()))?;
         Ok(())
+    }
+
+    pub async fn on_native_invocation(
+        &self,
+        update: super::native::InvocationUpdate,
+    ) -> Result<(), ProcessorError> {
+        let (response, receiver) = oneshot::channel();
+        self.sender
+            .send(ProcessorCommand::NativeInvocation { update, response })
+            .await
+            .map_err(|error| ProcessorError::ChannelSend(error.to_string()))?;
+        receiver
+            .await
+            .map_err(|error| ProcessorError::ChannelReceive(error.to_string()))?
+            .map_err(ProcessorError::NativeInvocation)
+    }
+
+    pub async fn on_native_span(
+        &self,
+        span: Span,
+        client_computed_stats: bool,
+        tags_provider: Arc<provider::Provider>,
+        trace_sender: Arc<SendingTraceProcessor>,
+    ) -> Result<bool, ProcessorError> {
+        let (response, receiver) = oneshot::channel();
+        self.sender
+            .send(ProcessorCommand::NativeSpan {
+                span: Box::new(span),
+                client_computed_stats,
+                tags_provider,
+                trace_sender,
+                response,
+            })
+            .await
+            .map_err(|error| ProcessorError::ChannelSend(error.to_string()))?;
+        receiver
+            .await
+            .map_err(|error| ProcessorError::ChannelReceive(error.to_string()))
     }
 
     pub async fn on_universal_instrumentation_start(
@@ -577,6 +634,22 @@ impl InvocationProcessorService {
 
         while let Some(command) = self.receiver.recv().await {
             match command {
+                ProcessorCommand::NativeInvocation { update, response } => {
+                    let _ = response.send(self.processor.on_native_invocation(&update));
+                }
+                ProcessorCommand::NativeSpan {
+                    span,
+                    client_computed_stats,
+                    tags_provider,
+                    trace_sender,
+                    response,
+                } => {
+                    let handled = self
+                        .processor
+                        .on_native_span(*span, client_computed_stats, &tags_provider, &trace_sender)
+                        .await;
+                    let _ = response.send(handled);
+                }
                 ProcessorCommand::InvokeEvent { request_id } => {
                     self.processor.on_invoke_event(request_id);
                 }

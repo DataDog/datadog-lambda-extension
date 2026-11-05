@@ -79,6 +79,7 @@ pub struct Processor {
     /// Flag to determine if a tracer was detected through
     /// universal instrumentation.
     tracer_detected: bool,
+    native_invocations: super::native_buffer::NativeInvocations,
     /// Runtime of the Lambda function.
     ///
     /// This is set on the first invocation and reused for every
@@ -176,6 +177,7 @@ impl Processor {
             enhanced_metrics,
             aws_config,
             tracer_detected: false,
+            native_invocations: super::native_buffer::NativeInvocations::default(),
             runtime: None,
             config: Arc::clone(&config),
             service,
@@ -189,6 +191,68 @@ impl Processor {
             dsm_processor: None,
             dsm_processed_request_ids: HashSet::new(),
             first_invocation_metric_status: FirstInvocationMetricStatus::Pending,
+        }
+    }
+
+    pub fn on_native_invocation(
+        &mut self,
+        update: &super::native::InvocationUpdate,
+    ) -> Result<(), String> {
+        self.native_invocations
+            .register(update)
+            .map_err(str::to_string)?;
+        if let Some(context) = self.context_buffer.get_mut(&update.request_id) {
+            self.native_invocations
+                .get(&update.request_id)
+                .ok_or("native invocation was not registered")?
+                .identity
+                .apply(&mut context.invocation_span);
+            context.inferred = super::span_inferrer::InferredSpanData::default();
+            context.extracted_span_context = None;
+        }
+        self.context_buffer
+            .sorted_reparenting_info
+            .retain(|entry| entry.request_id != update.request_id);
+        Ok(())
+    }
+
+    pub async fn on_native_span(
+        &mut self,
+        span: Span,
+        client_computed_stats: bool,
+        tags_provider: &Arc<provider::Provider>,
+        trace_sender: &Arc<SendingTraceProcessor>,
+    ) -> bool {
+        let Some(request_id) = span.meta.get("request_id").cloned() else {
+            return false;
+        };
+        if !self
+            .native_invocations
+            .receive_span(span, client_computed_stats)
+        {
+            return false;
+        }
+        self.send_native_spans(&request_id, tags_provider, trace_sender)
+            .await;
+        true
+    }
+
+    async fn send_native_spans(
+        &mut self,
+        request_id: &str,
+        tags_provider: &Arc<provider::Provider>,
+        trace_sender: &Arc<SendingTraceProcessor>,
+    ) {
+        let ready = self.native_invocations.ready(request_id);
+        if let Some((span, stats)) = ready.invocation {
+            let size = std::mem::size_of_val(&span);
+            self.send_spans(vec![span], size, tags_provider, trace_sender, stats, None)
+                .await;
+        }
+        if let Some(span) = ready.telemetry {
+            let size = std::mem::size_of_val(&span);
+            self.send_spans(vec![span], size, tags_provider, trace_sender, false, None)
+                .await;
         }
     }
 
@@ -242,6 +306,16 @@ impl Processor {
             self.set_init_tags();
             self.context_buffer
                 .start_context(&request_id, invocation_span);
+        }
+
+        if let Some(context) = self.context_buffer.get_mut(&request_id) {
+            context
+                .invocation_span
+                .meta
+                .extend(self.dynamic_tags.clone());
+            if let Some(native) = self.native_invocations.get(&request_id) {
+                native.identity.apply(&mut context.invocation_span);
+            }
         }
 
         let timestamp = std::time::UNIX_EPOCH
@@ -655,6 +729,15 @@ impl Processor {
     ) {
         let context = self.enrich_ctx_at_platform_done(request_id, status);
 
+        if self.native_invocations.get(request_id).is_some() {
+            if let Some(context) = context {
+                self.native_invocations.platform_done(context);
+            }
+            self.send_native_spans(request_id, &tags_provider, &trace_sender)
+                .await;
+            return;
+        }
+
         if self.tracer_detected {
             if let Some(ctx) = context
                 && ctx.invocation_span.trace_id != 0
@@ -675,6 +758,7 @@ impl Processor {
         status: Status,
     ) -> Option<Context> {
         let tracer_detected = self.tracer_detected;
+        let native = self.native_invocations.get(request_id).is_some();
         let Some(context) = self.context_buffer.get_mut(request_id) else {
             debug!(
                 "Cannot process on platform runtime done, no invocation context found for request_id: {request_id}"
@@ -711,10 +795,12 @@ impl Processor {
         }
 
         // Add dynamic and trigger tags
-        context
-            .invocation_span
-            .meta
-            .extend(self.dynamic_tags.clone());
+        if !native {
+            context
+                .invocation_span
+                .meta
+                .extend(self.dynamic_tags.clone());
+        }
 
         if let Some(trigger_tags) = context.inferred.get_trigger_tags() {
             context.invocation_span.meta.extend(trigger_tags);
@@ -782,6 +868,7 @@ impl Processor {
     fn release_invocation_context(&mut self, request_id: &String) {
         // Release the context now that all processing for this invocation is complete.
         // This prevents unbounded memory growth across warm invocations.
+        self.native_invocations.report(request_id);
         self.context_buffer.remove(request_id);
         // Prune DSM idempotency state at the same lifecycle boundary as the context,
         // not on flush. A flush can happen while an invocation is still active.
@@ -1166,6 +1253,9 @@ impl Processor {
         headers: HashMap<String, String>,
         payload_value: Value,
     ) {
+        if self.native_invocations.get(&request_id).is_some() {
+            return;
+        }
         // Infer the span for this specific invocation and store it on its own
         // Context. Computed before borrowing the context mutably.
         let inferred = self.inferrer.infer_span(&payload_value, &self.aws_config);
@@ -1447,6 +1537,9 @@ impl Processor {
         headers: HashMap<String, String>,
         payload_value: Value,
     ) {
+        if self.native_invocations.get(&request_id).is_some() {
+            return;
+        }
         let Some(context) = self.context_buffer.get_mut(&request_id) else {
             debug!("Cannot process on invocation end, no context for request_id: {request_id}");
             return;
@@ -1742,6 +1835,52 @@ mod tests {
     use dogstatsd::aggregator::AggregatorService;
     use dogstatsd::metric::EMPTY_TAGS;
     use serde_json::json;
+
+    #[tokio::test]
+    async fn native_identity_pairs_in_either_invoke_order_and_ignores_legacy_payloads() {
+        for native_first in [true, false] {
+            let mut processor = setup();
+            let request_id = "native-request".to_string();
+            let update = super::super::native::InvocationUpdate {
+                version: 1,
+                phase: super::super::native::Phase::Begin,
+                request_id: request_id.clone(),
+                trace_id: "0123456789abcdef000000000000002a".into(),
+                span_id: "000000000000000b".into(),
+                parent_id: "0000000000000007".into(),
+                start_ns: 100,
+                service: "native-service".into(),
+                resource: "function".into(),
+                sampling_priority: Some(2),
+                duration_ns: 0,
+                error: false,
+            };
+            if native_first {
+                processor.on_native_invocation(&update).unwrap();
+            }
+            processor.on_invoke_event(request_id.clone());
+            if !native_first {
+                processor.on_native_invocation(&update).unwrap();
+            }
+            processor.process_on_universal_instrumentation_start(
+                request_id.clone(),
+                HashMap::new(),
+                sqs_payload(),
+            );
+            processor.process_on_universal_instrumentation_end(
+                request_id.clone(),
+                HashMap::from([("x-datadog-span-id".into(), "999".into())]),
+                json!({"statusCode": 500}),
+            );
+            let context = processor.context_buffer.get(&request_id).unwrap();
+            assert_eq!(context.invocation_span.span_id, 11);
+            assert_eq!(context.invocation_span.trace_id, 42);
+            assert_eq!(context.invocation_span.parent_id, 7);
+            assert!(context.inferred.inferred_span.is_none());
+            assert_eq!(context.invocation_span.error, 0);
+            assert!(!processor.tracer_detected);
+        }
+    }
 
     fn sqs_payload() -> Value {
         json!({
