@@ -19,16 +19,19 @@
 # `status` is read-only: it never writes Cargo.lock or the recorded lock hash.
 # `add`, `remove` and `restore` refuse to run when Cargo.lock changed since the
 # last `add` or `remove` (for example after you added a dependency); `restore --force`
-# restores the backup anyway. Never commit the managed region or the patched lock.
+# restores the backup anyway. `add` and `remove` also refuse when Cargo.toml changed
+# and Cargo.lock does not match it. Never commit the managed region or the patched lock.
 set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 exec python3 -I - "$here/../../bottlecap" "$@" <<'PY'
-import hashlib, json, os, re, shutil, subprocess, sys
+import hashlib, itertools, json, os, re, shutil, subprocess, sys
 
 BEGIN = "# >>> patch-deps: managed by scripts/dev/patch-deps.sh. Do not commit. >>>"
 END = "# <<< patch-deps <<<"
 REGION = re.compile(re.escape(BEGIN) + r".*?" + re.escape(END) + r"\n?", re.S)
+# TOML allows whitespace before and inside a table header, and quoted keys: ` [ "patch" . crates-io ]`.
+HEADER, PATCH = r"\s*\[", r"""\s*(?:patch|"patch"|'patch')\s*"""
 
 bottlecap = os.path.abspath(sys.argv[1])
 manifest = os.path.join(bottlecap, "Cargo.toml")
@@ -37,6 +40,7 @@ state_dir = os.path.join(bottlecap, ".patch-deps")
 state_file = os.path.join(state_dir, "state.json")
 lock_backup = os.path.join(state_dir, "Cargo.lock.orig")
 lock_hash_file = os.path.join(state_dir, "Cargo.lock.sha256")
+manifest_hash_file = os.path.join(state_dir, "Cargo.toml.sha256")
 args = sys.argv[2:]
 force = "--force" in args
 args = [a for a in args if a != "--force"]
@@ -92,9 +96,11 @@ def read_manifest():
 def write_region(state):
     """Rewrite the managed region. Dies before touching any file when the manifest has a foreign [patch]."""
     text = REGION.sub("", read_manifest()).rstrip("\n") + "\n"
-    stray = [l for l in text.splitlines() if l.startswith("[patch")]
+    lines = text.splitlines()
+    root = itertools.takewhile(lambda l: not re.match(HEADER, l), lines)  # keys before the first table header
+    stray = [l for l in lines if re.match(HEADER + PATCH + r"[.\]]", l)] + [l for l in root if re.match(PATCH + "[.=]", l)]
     if stray:
-        die(f"Cargo.toml already has a [patch] table outside the managed region: {stray}")
+        die(f"Cargo.toml already has a [patch] table or key outside the managed region: {stray}")
     if state:
         tables = {}
         for name, entries in sorted(state.items()):
@@ -124,6 +130,8 @@ def record_lock_hash():
         os.makedirs(state_dir, exist_ok=True)
         with open(lock_hash_file, "w") as f:
             f.write(sha256_of(lock))
+        with open(manifest_hash_file, "w") as f:
+            f.write(sha256_of(manifest))
 
 
 def check_lock_unchanged():
@@ -134,6 +142,16 @@ def check_lock_unchanged():
     if not (os.path.exists(lock) and recorded == sha256_of(lock)):
         die("Cargo.lock changed or was deleted since the last `add` or `remove` (did you add or bump a dependency?). "
             "Inspect it with `git diff bottlecap/Cargo.lock`, then run `restore --force` to restore the backup anyway.", code=4)
+
+
+def check_lock_matches_manifest():
+    """Refuse when Cargo.toml changed since the last `add` or `remove` and Cargo.lock does not match it."""
+    if os.path.exists(manifest_hash_file):
+        with open(manifest_hash_file) as f:
+            if f.read() == sha256_of(manifest):
+                return
+    metadata(manifest, "--locked", hint="patch-deps: update Cargo.lock first: " +
+             ("run `restore`, `cargo check`, then `add` again." if os.path.exists(state_file) else "run `cargo check`."))
 
 
 def restore_lock():
@@ -172,6 +190,7 @@ def cmd_add(checkout):
     if old and os.path.exists(old) and not os.path.samefile(old, checkout):
         die(f"{name} is already patched from {old}. Run `remove {name}` first.")
     check_lock_unchanged()
+    check_lock_matches_manifest()
     # Point an earlier `add` of this checkout at the new path first, so a moved checkout still resolves.
     patched = {c: dict(info, path=os.path.dirname(local_pkgs[c]["manifest_path"]))
                for c, info in state.get(name, {}).get("crates", {}).items() if c in local_pkgs}
@@ -233,6 +252,7 @@ def cmd_remove(which):
     if len(state) == 1:
         cmd_restore()
         return
+    check_lock_matches_manifest()
     del state[name]
     write_region(state)
     save_state(state)

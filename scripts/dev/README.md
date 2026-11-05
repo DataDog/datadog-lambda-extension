@@ -165,6 +165,13 @@ If the lock changed or was deleted since the last `add` or `remove` (you added
 or bumped a dependency), `add`, `remove` and `restore` refuse (exit 4) so the
 backup does not erase that change; check `git diff bottlecap/Cargo.lock`, then
 `restore --force`. Only `restore` takes `--force`.
+If `Cargo.toml` changed since the last `add` or `remove` and `Cargo.lock` does
+not match it, `add` and `remove` refuse (exit 1), so the recorded lock holds
+only the script's own changes. Run `restore`, then `cargo check`, then `add`
+again. Before the first `add`, the lock must also match `Cargo.toml`.
+The script refuses a `[patch]` table or a root-level `patch.<source>` key outside
+the managed region, also with leading spaces or quoted keys. The check reads lines,
+not TOML, so it does not see a header inside a multi-line string or array.
 When a local version differs from the locked one, `add` runs `cargo update` on
 that crate (`--precise <local version>` for crates.io) so cargo selects the
 patch. Cargo ignores a patch whose version does not match the requirements on
