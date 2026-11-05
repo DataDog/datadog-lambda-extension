@@ -15,8 +15,10 @@
 # When a local version differs from the locked one, `add` runs `cargo update` on
 # that crate so cargo selects the patch. Cargo ignores a patch whose version does
 # not match bottlecap's requirements; the script then prints "NOT USED".
+# A crate is active only when no package of that name still comes from crates.io or git.
+# `status` is read-only: it never writes Cargo.lock or the recorded lock hash.
 # `add`, `remove` and `restore` refuse to run when Cargo.lock changed since the
-# last patch-deps run (for example after you added a dependency); `restore --force`
+# last `add` or `remove` (for example after you added a dependency); `restore --force`
 # restores the backup anyway. Never commit the managed region or the patched lock.
 set -euo pipefail
 
@@ -45,14 +47,12 @@ def die(msg, code=1):
     sys.exit(code)
 
 
-def metadata(path, no_deps):
-    cmd = ["cargo", "metadata", "--format-version", "1", "--manifest-path", path]
-    if no_deps:
-        cmd.append("--no-deps")
+def metadata(path, *flags, hint=""):
+    cmd = ["cargo", "metadata", "--format-version", "1", "--manifest-path", path, *flags]
     r = subprocess.run(cmd, capture_output=True, text=True)
     if r.returncode != 0:
-        die(f"cargo metadata failed for {path}:\n{r.stderr}")
-    return json.loads(r.stdout), r.stderr
+        die(f"cargo metadata failed for {path}:\n{r.stderr}{hint}")
+    return json.loads(r.stdout)
 
 
 def patch_key(source):
@@ -126,17 +126,13 @@ def record_lock_hash():
             f.write(sha256_of(lock))
 
 
-def lock_unchanged():
-    if not os.path.exists(lock_hash_file):
-        return True
+def check_lock_unchanged():
+    if force or not os.path.exists(lock_hash_file):
+        return
     with open(lock_hash_file) as f:
         recorded = f.read().strip()
-    return os.path.exists(lock) and recorded == sha256_of(lock)
-
-
-def check_lock_unchanged():
-    if not (force or lock_unchanged()):
-        die("Cargo.lock changed or was deleted since the last patch-deps run (did you add or bump a dependency?). "
+    if not (os.path.exists(lock) and recorded == sha256_of(lock)):
+        die("Cargo.lock changed or was deleted since the last `add` or `remove` (did you add or bump a dependency?). "
             "Inspect it with `git diff bottlecap/Cargo.lock`, then run `restore --force` to restore the backup anyway.", code=4)
 
 
@@ -146,23 +142,20 @@ def restore_lock():
         print("patch-deps: restored Cargo.lock", file=sys.stderr)
 
 
-def resolve_and_report(state, record=True):
-    """Re-run cargo metadata on bottlecap so Cargo.lock updates, then show what is in effect."""
-    meta, stderr = metadata(manifest, no_deps=False)
-    unused = [l.strip() for l in stderr.splitlines() if "was not used in the crate graph" in l]
-    ok = not unused
+def report(state, meta):
+    """Show what is in effect. A crate is active only if no package of that name still comes from crates.io or git."""
+    ok = True
     for name, entries in sorted(state.items()):
         print(f"{name} ({entries['checkout']})")
         for crate, info in sorted(entries["crates"].items()):
-            active = any(p["name"] == crate and p["source"] is None and os.path.dirname(p["manifest_path"]) == info["path"]
-                         for p in meta["packages"])
-            ok = ok and active
-            status = "active" if active else "NOT USED (version not compatible with the locked one?)"
+            pkgs = [p for p in meta["packages"] if p["name"] == crate]
+            used = any(p["source"] is None and os.path.dirname(p["manifest_path"]) == info["path"] for p in pkgs)
+            remote = [p for p in pkgs if p["source"] and patch_key(p["source"])]
+            ok = ok and used and not remote
+            status = ("active" if not remote else "PARTLY USED") if used else "NOT USED (version not compatible with the locked one?)"
             print(f"  {crate:28s} locked {', '.join(info['locked']):>8s}  local {info['local']:>8s}  {status}")
-    for l in unused:
-        print(f"  cargo: {l}", file=sys.stderr)
-    if record:
-        record_lock_hash()
+            for p in remote:
+                print(f"    still remote: {p['version']} {p['source']}")
     return ok
 
 
@@ -171,7 +164,7 @@ def cmd_add(checkout):
     cm = os.path.join(checkout, "Cargo.toml")
     if not os.path.exists(cm):
         die(f"{cm} not found")
-    local, _ = metadata(cm, no_deps=True)
+    local = metadata(cm, "--no-deps")
     local_pkgs = {p["name"]: p for p in local["packages"]}
     name = os.path.basename(checkout.rstrip("/"))
     state = load_state()
@@ -184,7 +177,7 @@ def cmd_add(checkout):
                for c, info in state.get(name, {}).get("crates", {}).items() if c in local_pkgs}
     if name in state:
         write_region({**state, name: {"checkout": checkout, "crates": patched}})
-    graph, _ = metadata(manifest, no_deps=False)
+    graph = metadata(manifest)
     crates, updates = {}, []
     for p in graph["packages"]:
         if p["name"] not in local_pkgs:
@@ -225,7 +218,8 @@ def cmd_add(checkout):
                   file=sys.stderr)
     for u in updates:
         subprocess.run(["cargo", "update", "--manifest-path", manifest] + u, capture_output=True)
-    ok = resolve_and_report(new_state)
+    ok = report(new_state, metadata(manifest))  # cargo metadata updates Cargo.lock for the new patches
+    record_lock_hash()
     print(f"patch-deps: {len(crates)} crate(s) from {name} written to {manifest}", file=sys.stderr)
     sys.exit(0 if ok else 3)
 
@@ -242,7 +236,8 @@ def cmd_remove(which):
     del state[name]
     write_region(state)
     save_state(state)
-    ok = resolve_and_report(state)
+    ok = report(state, metadata(manifest))
+    record_lock_hash()
     print(f"patch-deps: removed {name}", file=sys.stderr)
     sys.exit(0 if ok else 3)
 
@@ -260,8 +255,9 @@ def cmd_status():
     if not state:
         print("patch-deps: nothing patched")
         return
-    # Record the lock update that this resolve makes, but never accept an earlier foreign edit.
-    sys.exit(0 if resolve_and_report(state, record=lock_unchanged()) else 3)
+    meta = metadata(manifest, "--locked", hint="patch-deps: status never writes Cargo.lock. "
+                    "After a checkout changed its dependencies, run `add <checkout>` again.")
+    sys.exit(0 if report(state, meta) else 3)
 
 
 if not args or args[0] in ("-h", "--help"):
