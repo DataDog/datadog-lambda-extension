@@ -9,7 +9,8 @@
 //! `/next` that the test drives: push an INVOKE or a SHUTDOWN and the pending
 //! long-poll returns it. Like Lambda, `/next` serves only the event types the
 //! extension registered for, `/next` and `subscribe` get a `403` without the
-//! identifier issued at register, and a malformed register body gets a `400`.
+//! identifier issued at register, register gets a `403` without the
+//! extension's name, and a malformed register body gets a `400`.
 //! It also answers any other request with `202`, so the same port can stand in
 //! for the Datadog intake when a test does not need a `FaultIntake`.
 //!
@@ -37,6 +38,9 @@ use tokio::net::TcpListener;
 use tokio::sync::Notify;
 use tokio::task::JoinHandle;
 
+const EXTENSION_NAME_HEADER: &str = "Lambda-Extension-Name";
+/// The extension's file name under `/opt/extensions`.
+const EXTENSION_NAME: &str = "datadog-agent";
 const EXTENSION_ID_HEADER: &str = "Lambda-Extension-Identifier";
 /// The identifier the fake issues at register.
 const EXTENSION_ID: &str = "fake-extension-id";
@@ -303,9 +307,18 @@ fn record(shared: &Shared, method: &str, path: &str) {
 
 async fn register(
     State(shared): State<Shared>,
+    headers: HeaderMap,
     body: Bytes,
 ) -> Result<impl IntoResponse, StatusCode> {
     record(&shared, "POST", "/2020-01-01/extension/register");
+    // Lambda answers `403` without a name. Any name but the file under
+    // `/opt/extensions` registers an internal extension, which cannot take SHUTDOWN.
+    if headers
+        .get(EXTENSION_NAME_HEADER)
+        .is_none_or(|v| v != EXTENSION_NAME)
+    {
+        return Err(StatusCode::FORBIDDEN);
+    }
     // Lambda accepts only these event types and rejects any other body.
     let events = serde_json::from_slice::<Value>(&body)
         .ok()

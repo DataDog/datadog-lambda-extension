@@ -7,7 +7,8 @@
 //!
 //! Plain HTTP/1.1 on a random local port (set `DD_HTTP_PROTOCOL=http1` on the
 //! extension). Every request is recorded with its path, size, headers and
-//! the mode that answered it. The fault mode can change at runtime, and one
+//! the mode that answered it; an upload that breaks off is not recorded and
+//! gets no answer. The fault mode can change at runtime, and one
 //! path can get its own mode (for example `/credentials` for the secret-fetch
 //! tests).
 //!
@@ -90,22 +91,26 @@ impl IntakeRequest {
         self.header("dd-api-key")
     }
 
-    /// Body, zstd- or gzip-decoded when `Content-Encoding` says so.
-    pub fn decoded_body(&self) -> Vec<u8> {
-        match self.header("content-encoding") {
-            Some("zstd") => zstd::decode_all(self.body.as_slice()).unwrap_or_default(),
+    /// Body, zstd- or gzip-decoded when `Content-Encoding` says so. A body that
+    /// does not decode is an error, never partial output.
+    pub fn decoded_body(&self) -> Result<Vec<u8>, String> {
+        let decoded = match self.header("content-encoding") {
+            Some("zstd") => zstd::decode_all(self.body.as_slice()),
             Some("gzip") => {
                 use std::io::Read;
                 let mut out = Vec::new();
-                let _ = flate2::read::GzDecoder::new(self.body.as_slice()).read_to_end(&mut out);
-                out
+                flate2::read::GzDecoder::new(self.body.as_slice())
+                    .read_to_end(&mut out)
+                    .map(|_| out)
             }
-            _ => self.body.clone(),
-        }
+            _ => Ok(self.body.clone()),
+        };
+        decoded.map_err(|e| format!("{} {}: undecodable body: {e}", self.method, self.path))
     }
 
-    pub fn body_text(&self) -> String {
-        String::from_utf8_lossy(&self.decoded_body()).into_owned()
+    pub fn body_text(&self) -> Result<String, String> {
+        self.decoded_body()
+            .map(|b| String::from_utf8_lossy(&b).into_owned())
     }
 }
 
@@ -316,7 +321,7 @@ fn status_response(status: u16, body: String) -> Response<BoxBody<Bytes, Infalli
 async fn handle(
     shared: Shared,
     req: Request<Incoming>,
-) -> Result<Response<BoxBody<Bytes, Infallible>>, Infallible> {
+) -> Result<Response<BoxBody<Bytes, Infallible>>, hyper::Error> {
     let method = req.method().as_str().to_string();
     let path = req.uri().path().to_string();
     let headers: HashMap<String, String> = req
@@ -336,12 +341,15 @@ async fn handle(
         record(&shared, &method, &path, headers, Vec::new(), &mode, 0);
         match std::future::pending::<Infallible>().await {}
     }
-    let body = req
-        .into_body()
-        .collect()
-        .await
-        .map(|c| c.to_bytes().to_vec())
-        .unwrap_or_default();
+    let body = match req.into_body().collect().await {
+        Ok(c) => c.to_bytes().to_vec(),
+        Err(e) => {
+            // The upload broke off, so the intake never received it: record
+            // nothing and close the connection without an answer.
+            eprintln!("fault intake: incomplete {method} {path}: {e}");
+            return Err(e);
+        }
+    };
     let reject_over = *shared.reject_over.lock().expect("reject lock");
 
     let (status, response) = if reject_over.is_some_and(|max| body.len() > max) {

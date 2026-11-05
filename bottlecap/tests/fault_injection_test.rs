@@ -22,23 +22,27 @@ mod harness;
 use harness::prelude::*;
 
 const TRACES_PATH: &str = "/api/v0.2/traces";
+const LOGS_PATH: &str = "/api/v2/logs";
 /// Deliver a log and `runtimeDone` for `request_id`, then wait for `/next`
 /// call number `next_call` until `budget` after `invoked`, when the INVOKE
-/// was queued. Returns `(released, time since the INVOKE)`.
+/// was queued. On a cold start the log follows `platform.initStart`, as in
+/// Lambda: until it arrives the extension holds logs. Returns
+/// `(released, time since the INVOKE)`.
 async fn end_invocation_and_wait(
     s: &Scenario,
     request_id: &str,
+    cold_start: bool,
     next_call: usize,
     invoked: Instant,
     budget: Duration,
 ) -> (bool, Duration) {
-    s.api
-        .send_telemetry(
-            &[function_log(&format!("log for {request_id}"))],
-            STARTUP_BUDGET,
-        )
-        .await
-        .unwrap();
+    let log = function_log(&format!("log for {request_id}"));
+    let batch = if cold_start {
+        vec![platform_init_start(), log]
+    } else {
+        vec![log]
+    };
+    s.api.send_telemetry(&batch, STARTUP_BUDGET).await.unwrap();
     deliver_runtime_done(&s.api, request_id, true)
         .await
         .unwrap();
@@ -61,7 +65,13 @@ async fn status_503_storm_does_not_hold_next() {
     let invoked = Instant::now();
 
     s.intake.set_mode(FaultMode::Status(503));
-    let (released, took) = end_invocation_and_wait(&s, "req-1", 2, invoked, secs(10)).await;
+    let (released, took) = end_invocation_and_wait(&s, "req-1", true, 2, invoked, secs(10)).await;
+    // Read before the fault clears: the end-of-invocation flush sends the log.
+    let logs_faulted = s
+        .intake
+        .requests_to(LOGS_PATH)
+        .iter()
+        .any(|r| r.status == 503);
 
     s.intake.set_mode(FaultMode::Ok);
     let exit = s.shutdown(&mut bc).await;
@@ -72,8 +82,8 @@ async fn status_503_storm_does_not_hold_next() {
         bc.log_tail(40)
     );
     assert!(
-        s.intake.requests().iter().any(|r| r.status == 503),
-        "the storm never hit the intake. Intake:\n{}",
+        logs_faulted,
+        "the storm never hit the logs intake. Intake:\n{}",
         s.intake.summary()
     );
     assert!(exit.is_some_and(|e| e.success()), "exit {exit:?}");
@@ -99,7 +109,7 @@ async fn oversized_trace_is_dropped_and_later_traces_flow() {
         .await
         .unwrap();
     eprintln!("trace agent answered {status} to a 4 MB span");
-    let (released, _) = end_invocation_and_wait(&s, "req-1", 2, invoked, secs(10)).await;
+    let (released, _) = end_invocation_and_wait(&s, "req-1", true, 2, invoked, secs(10)).await;
     assert!(
         released,
         "the oversized trace held /next. {}",
@@ -120,7 +130,7 @@ async fn oversized_trace_is_dropped_and_later_traces_flow() {
     post_trace(msgpack_trace(2, 0), STARTUP_BUDGET)
         .await
         .unwrap();
-    let (released, _) = end_invocation_and_wait(&s, "req-2", 3, invoked, secs(10)).await;
+    let (released, _) = end_invocation_and_wait(&s, "req-2", false, 3, invoked, secs(10)).await;
     assert!(released, "no /next after the second invocation");
     let later_trace = s
         .intake
@@ -173,7 +183,13 @@ async fn intake_closing_mid_body_does_not_hold_next() {
     let invoked = Instant::now();
 
     s.intake.set_mode(FaultMode::CloseMidBody);
-    let (released, took) = end_invocation_and_wait(&s, "req-1", 2, invoked, secs(10)).await;
+    let (released, took) = end_invocation_and_wait(&s, "req-1", true, 2, invoked, secs(10)).await;
+    // Read before the fault clears: the end-of-invocation flush sends the log.
+    let logs_faulted = s
+        .intake
+        .requests_to(LOGS_PATH)
+        .iter()
+        .any(|r| r.mode == "close_mid_body");
 
     s.intake.set_mode(FaultMode::Ok);
     let exit = s.shutdown(&mut bc).await;
@@ -184,11 +200,8 @@ async fn intake_closing_mid_body_does_not_hold_next() {
         bc.log_tail(40)
     );
     assert!(
-        s.intake
-            .requests()
-            .iter()
-            .any(|r| r.mode == "close_mid_body"),
-        "the truncating mode never served a request. Intake:\n{}",
+        logs_faulted,
+        "the truncating mode never served a logs request. Intake:\n{}",
         s.intake.summary()
     );
     assert!(exit.is_some_and(|e| e.success()), "exit {exit:?}");

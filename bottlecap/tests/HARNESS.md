@@ -66,6 +66,8 @@ async fn my_fault() {
 - Always check `bc.assert_no_panic()` (or use `shutdown_cleanly`). Dev builds
   unwind and keep running, release builds abort; both print `panicked at`.
 - Check memory growth only on Linux (`BottlecapProcess::can_measure_memory()`).
+- Send `platform_init_start()` once per cold start, as Lambda does, in a test
+  that checks logs: until it arrives the extension holds every log.
 - Every spawning test carries `#[serial_test::serial(bottlecap_ports)]`: the
   binary binds fixed ports, and plain `cargo test` runs tests in parallel. New
   test binaries must also match the regex in `.config/nextest.toml`.
@@ -84,17 +86,20 @@ async fn my_fault() {
   events whose type (`platform`, `function`, `extension`) the subscribe body did not ask for;
   `send_telemetry_raw` posts its body as is. Like Lambda, `/next` serves only the event types from
   the register body and drops the rest, `/next` and subscribe get `403` without the
-  `Lambda-Extension-Identifier` issued at register, and a malformed register body gets `400`.
+  `Lambda-Extension-Identifier` issued at register, register gets `403` without
+  `Lambda-Extension-Name: datadog-agent`, and a malformed register body gets `400`.
   Any other path gets `202`.
 - `FaultIntake` (HTTP/1.1): modes `Ok`, `Status(code)`, `Slow(d)`, `Blackhole`,
   `RetryAfter{status, secs}`, `CloseMidBody`; string forms `ok`, `status:<c>`, `slow:<ms>`,
   `blackhole`, `retry_after:<c>:<s>`, `close_mid_body` (shared with the Lambda simulator).
   `Blackhole` never reads a body: with a path mode set, it reads only the request head to pick
-  the mode, and records the request with `body_len` 0.
+  the mode, and records the request with `body_len` 0. An upload that breaks off is not
+  recorded and gets no answer.
   `set_mode`, `set_path_mode(path, mode)`, `clear_path_mode`, `set_reject_over(Some(bytes))`,
   `set_ok_body(path, body)`; `requests()`, `requests_to`, `count`, `connections()`, `summary()`,
-  `wait_for(n, pred, budget)`, `wait_for_path`; `IntakeRequest::api_key()`, `decoded_body()`,
-  `body_text()`. `SynBlackhole::start()` (backlog 1, queue pre-filled), `is_saturated()`.
+  `wait_for(n, pred, budget)`, `wait_for_path`; `IntakeRequest::api_key()`, `decoded_body()`
+  and `body_text()` (`Err` when the body does not decode). `SynBlackhole::start()` (backlog 1,
+  queue pre-filled), `is_saturated()`.
 - `BottlecapProcess`: `scenario.bottlecap()` then `.intake(url)`, `.env`, `.envs`, `.remove_env`,
   `.managed_instance()`, `.flush_strategy(s)`, `.secret_from(credentials_url)`, `.spawn()`;
   `wait_for_exit(budget)` (kills on timeout), `is_running()`, `kill()`, `stdout()`, `stderr()`,

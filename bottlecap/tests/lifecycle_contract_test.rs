@@ -75,7 +75,7 @@ async fn invoke_then_shutdown_exits_cleanly() {
         .intake
         .requests_to("/api/v2/logs")
         .iter()
-        .any(|r| r.body_text().contains("hello from the function"));
+        .any(|r| r.body_text().unwrap().contains("hello from the function"));
     s.shutdown_cleanly(&mut bc).await;
 
     // The end-of-invocation flush reached the intake with the configured key.
