@@ -115,7 +115,7 @@ impl Listener {
 
     #[allow(clippy::unused_async)]
     async fn native_capabilities() -> Json<Value> {
-        Json(json!({"version": 1, "native_invocation": true}))
+        Json(json!({"version": 1, "native_invocation": true, "native_dsm": true}))
     }
 
     async fn native_invocation(
@@ -126,7 +126,11 @@ impl Listener {
             return (StatusCode::BAD_REQUEST, error).into_response();
         }
         match processor.on_native_invocation(update).await {
-            Ok(()) => (StatusCode::OK, Json(json!({}))).into_response(),
+            Ok(dsm_consumed) => (
+                StatusCode::OK,
+                Json(json!({"version": 1, "dsm_consumed": dsm_consumed})),
+            )
+                .into_response(),
             Err(
                 crate::lifecycle::invocation::processor_service::ProcessorError::NativeInvocation(
                     error,
@@ -327,7 +331,7 @@ mod tests {
             .to_bytes();
         assert_eq!(
             serde_json::from_slice::<Value>(&body).expect("valid native invocation test fixture"),
-            json!({"version": 1, "native_invocation": true})
+            json!({"version": 1, "native_invocation": true, "native_dsm": true})
         );
         let response = router
             .oneshot(

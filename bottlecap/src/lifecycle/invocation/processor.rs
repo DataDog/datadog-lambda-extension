@@ -197,10 +197,18 @@ impl Processor {
     pub fn on_native_invocation(
         &mut self,
         update: &super::native::InvocationUpdate,
-    ) -> Result<(), String> {
+    ) -> Result<bool, String> {
+        let registered = self.native_invocations.get(&update.request_id).is_some();
         self.native_invocations
             .register(update)
             .map_err(str::to_string)?;
+        if !registered {
+            self.native_invocations
+                .get_mut(&update.request_id)
+                .ok_or("native invocation was not registered")?
+                .dsm_extension_consumed =
+                self.dsm_processed_request_ids.contains(&update.request_id);
+        }
         if let Some(context) = self.context_buffer.get_mut(&update.request_id) {
             self.native_invocations
                 .get(&update.request_id)
@@ -216,7 +224,11 @@ impl Processor {
         if update.phase == super::native::Phase::Complete && update.error {
             self.increment_native_error(&update.request_id, chrono::Utc::now().timestamp());
         }
-        Ok(())
+        Ok(self
+            .native_invocations
+            .get(&update.request_id)
+            .ok_or("native invocation was not registered")?
+            .dsm_extension_consumed)
     }
 
     fn increment_native_error(&mut self, request_id: &str, timestamp: i64) {
@@ -1349,6 +1361,9 @@ impl Processor {
     }
 
     pub fn record_dsm_consume_from_payload(&mut self, request_id: String, payload_value: &Value) {
+        if self.native_invocations.get(&request_id).is_some() {
+            return;
+        }
         // Extension-side DSM: record a consume (`direction:in`) checkpoint for
         // DSM-eligible event sources, continuing any inbound pathway context.
         if let Some(dsm) = self.dsm_processor.as_ref() {
@@ -1985,6 +2000,41 @@ mod tests {
                 .meta["error.type"],
             "Runtime.OutOfMemory"
         );
+    }
+
+    #[tokio::test]
+    async fn native_dsm_ownership_handles_proxy_before_and_after_identity() {
+        for proxy_first in [true, false] {
+            let mut p = setup();
+            attach_test_dsm_processor(&mut p);
+            let request_id = "native-dsm".to_string();
+            p.context_buffer.start_context(&request_id, Span::default());
+            let update = super::super::native::InvocationUpdate {
+                version: 1,
+                phase: super::super::native::Phase::Begin,
+                request_id: request_id.clone(),
+                trace_id: "0000000000000000000000000000002a".into(),
+                span_id: "000000000000000b".into(),
+                parent_id: "0000000000000000".into(),
+                start_ns: 100,
+                service: "test".into(),
+                resource: "handler".into(),
+                sampling_priority: Some(1),
+                duration_ns: 0,
+                error: false,
+            };
+            if proxy_first {
+                p.record_dsm_consume_from_payload(request_id.clone(), &sqs_payload());
+            }
+            assert_eq!(p.on_native_invocation(&update).unwrap(), proxy_first);
+            p.record_dsm_consume_from_payload(request_id.clone(), &sqs_payload());
+            assert_eq!(
+                p.dsm_processed_request_ids.contains(&request_id),
+                proxy_first
+            );
+            p.release_invocation_context(&request_id);
+            assert_eq!(p.on_native_invocation(&update).unwrap(), proxy_first);
+        }
     }
 
     fn sqs_payload() -> Value {

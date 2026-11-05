@@ -38,7 +38,7 @@ pub enum ProcessorError {
 pub enum ProcessorCommand {
     NativeInvocation {
         update: super::native::InvocationUpdate,
-        response: oneshot::Sender<Result<(), String>>,
+        response: oneshot::Sender<Result<bool, String>>,
     },
     NativeSpan {
         span: Box<Span>,
@@ -359,7 +359,7 @@ impl InvocationProcessorHandle {
     pub async fn on_native_invocation(
         &self,
         update: super::native::InvocationUpdate,
-    ) -> Result<(), ProcessorError> {
+    ) -> Result<bool, ProcessorError> {
         let (response, receiver) = oneshot::channel();
         self.sender
             .send(ProcessorCommand::NativeInvocation { update, response })
