@@ -8,10 +8,11 @@
 //! Serves `register`, the Telemetry API `subscribe` (with a status knob), and a
 //! `/next` that the test drives: push an INVOKE or a SHUTDOWN and the pending
 //! long-poll returns it. Like Lambda, `/next` serves only the event types the
-//! extension registered for, `/next` and `subscribe` get a `403` without the
-//! identifier issued at register, register gets a `403` without the
-//! extension's name or with an invalid body, an invalid subscribe body gets a
-//! `400`, and register returns `accountId` only when the extension asks for it.
+//! extension registered for, a `/next` while another is pending gets a `403`,
+//! `/next` and `subscribe` get a `403` without the identifier issued at
+//! register, register gets a `403` without the extension's name or with an
+//! invalid body, an invalid subscribe body gets a `400`, and register returns
+//! `accountId` only when the extension asks for it.
 //! It also answers any other request with `202`, so the same port can stand in
 //! for the Datadog intake when a test does not need a `FaultIntake`.
 //!
@@ -23,7 +24,7 @@
 use std::collections::VecDeque;
 use std::net::SocketAddr;
 use std::ops::RangeInclusive;
-use std::sync::atomic::{AtomicU16, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU16, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -55,6 +56,8 @@ struct Shared {
     next_notify: Arc<Notify>,
     /// Arrival time of every accepted `/next` call, in order.
     next_arrivals: Arc<Mutex<Vec<Instant>>>,
+    /// An accepted `/next` call waits for an event.
+    next_pending: Arc<AtomicBool>,
     /// Event types from the last accepted register body.
     registered_events: Arc<Mutex<Vec<String>>>,
     /// `METHOD path` of every request, in arrival order.
@@ -105,6 +108,7 @@ impl FakeExtensionsApi {
             next_queue: Arc::new(Mutex::new(VecDeque::new())),
             next_notify: Arc::new(Notify::new()),
             next_arrivals: Arc::new(Mutex::new(Vec::new())),
+            next_pending: Arc::new(AtomicBool::new(false)),
             registered_events: Arc::new(Mutex::new(Vec::new())),
             requests: Arc::new(Mutex::new(Vec::new())),
             subscribe_status: Arc::new(AtomicU16::new(StatusCode::OK.as_u16())),
@@ -432,6 +436,11 @@ async fn next(
 ) -> Result<impl IntoResponse, StatusCode> {
     record(&shared, "GET", "/2020-01-01/extension/event/next");
     check_extension_id(&headers)?;
+    // Lambda answers `403` to a `/next` while the extension's last one waits.
+    // A poll the client drops stays pending, as in Lambda.
+    if shared.next_pending.swap(true, Ordering::SeqCst) {
+        return Err(StatusCode::FORBIDDEN);
+    }
     shared
         .next_arrivals
         .lock()
@@ -455,6 +464,7 @@ async fn next(
             .iter()
             .any(|e| e == event_type);
         if registered {
+            shared.next_pending.store(false, Ordering::SeqCst);
             return Ok((StatusCode::OK, event.to_string()));
         }
         // Lambda never sends an event type the extension did not register for.
