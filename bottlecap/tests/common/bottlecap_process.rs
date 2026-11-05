@@ -34,15 +34,16 @@ pub const TEST_API_KEY: &str = "0000000000000000000000000000000a";
 
 const BINARY: &str = env!("CARGO_BIN_EXE_bottlecap");
 
-pub struct BottlecapBuilder {
+pub struct BottlecapBuilder<'api> {
+    api: &'api FakeExtensionsApi,
     env: BTreeMap<String, String>,
     task_root: tempfile::TempDir,
 }
 
-impl BottlecapBuilder {
+impl<'api> BottlecapBuilder<'api> {
     /// Base env for a process that talks to `api`. Every intake URL points at
     /// `api` too, until [`intake`](Self::intake) replaces them.
-    pub fn new(api: &FakeExtensionsApi) -> Self {
+    pub fn new(api: &'api FakeExtensionsApi) -> Self {
         let task_root = tempfile::tempdir().expect("tempdir");
         let mut env = BTreeMap::new();
         let set = |env: &mut BTreeMap<String, String>, k: &str, v: &str| {
@@ -69,7 +70,11 @@ impl BottlecapBuilder {
         // port so they fail at once instead of reaching the network; the http
         // intake URLs bypass an https-only proxy.
         set(&mut env, "DD_PROXY_HTTPS", CLOSED_PORT_URL);
-        let mut builder = Self { env, task_root };
+        let mut builder = Self {
+            api,
+            env,
+            task_root,
+        };
         builder.set_intake(&api.base_url());
         builder
     }
@@ -108,8 +113,9 @@ impl BottlecapBuilder {
         self
     }
 
-    /// Lambda Managed Instances mode.
+    /// Lambda Managed Instances mode, for the process and the fake API.
     pub fn managed_instance(self) -> Self {
+        self.api.set_managed_instance();
         self.env("AWS_LAMBDA_INITIALIZATION_TYPE", "lambda-managed-instances")
     }
 
@@ -171,7 +177,7 @@ pub struct BottlecapProcess {
 }
 
 impl BottlecapProcess {
-    pub fn builder(api: &FakeExtensionsApi) -> BottlecapBuilder {
+    pub fn builder(api: &FakeExtensionsApi) -> BottlecapBuilder<'_> {
         BottlecapBuilder::new(api)
     }
 

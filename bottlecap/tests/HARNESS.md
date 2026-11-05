@@ -82,14 +82,18 @@ async fn my_fault() {
   the `Instant`), `set_subscribe_status(StatusCode)`, `request_lines()`,
   `send_telemetry(&[Value], budget)`, `send_telemetry_raw(Vec<u8>, budget)`, `telemetry_port()`
   (from the last accepted subscribe body, `None` before one; `send_telemetry` fails without it,
-  as Lambda delivers telemetry only to subscribers). Like Lambda, `send_telemetry` withholds
+  as Lambda delivers telemetry only to subscribers). Both post to the port and path of the
+  subscribed URI. Like Lambda, `send_telemetry` withholds
   events whose type (`platform`, `function`, `extension`) the subscribe body did not ask for;
   `send_telemetry_raw` posts its body as is. Like Lambda, `/next` serves only the event types from
   the register body and drops the rest, a `/next` while another is pending gets `403`, `/next`
   and subscribe get `403` without the `Lambda-Extension-Identifier` issued at register, register
   gets `403` without `Lambda-Extension-Name: datadog-agent` or with an invalid body, a subscribe
-  body outside the Telemetry API reference rules gets `400`, and `accountId` needs
-  `Lambda-Extension-Accept-Feature`.
+  body outside the Telemetry API reference rules gets `400` (also an `https://` URI), and
+  `accountId` needs `Lambda-Extension-Accept-Feature`. `set_managed_instance()` applies the Lambda
+  Managed Instances rules: register gets `403` for `INVOKE`, and subscribe gets `400` for any
+  `schemaVersion` but `2025-01-29`. The SHUTDOWN reason is lower case (`spindown`), as the Runtime
+  Interface Emulator sends it.
   Any other path gets `202`.
 - `FaultIntake` (HTTP/1.1): modes `Ok`, `Status(code)`, `Slow(d)`, `Blackhole`,
   `RetryAfter{status, secs}`, `CloseMidBody`; string forms `ok`, `status:<c>`, `slow:<ms>`,
@@ -103,10 +107,11 @@ async fn my_fault() {
   and `body_text()` (`Err` when the body does not decode). `SynBlackhole::start()` (backlog 1,
   queue pre-filled), `is_saturated()`.
 - `BottlecapProcess`: `scenario.bottlecap()` then `.intake(url)`, `.env`, `.envs`, `.remove_env`,
-  `.managed_instance()`, `.flush_strategy(s)`, `.secret_from(credentials_url)`, `.spawn()`;
-  `wait_for_exit(budget)` (kills on timeout), `is_running()`, `kill()`, `stdout()`, `stderr()`,
-  `log_tail(n)`, `log_contains`, `panic_lines()`, `assert_no_panic()`, `rss_kb()`, `hwm_kb()`,
-  `cpu_ms()`, `uptime()`; `STARTUP_BUDGET`, `EXIT_BUDGET`, `TEST_API_KEY`.
+  `.managed_instance()` (also switches the fake API to its rules), `.flush_strategy(s)`,
+  `.secret_from(credentials_url)`, `.spawn()`; `wait_for_exit(budget)` (kills on timeout),
+  `is_running()`, `kill()`, `stdout()`, `stderr()`, `log_tail(n)`, `log_contains`, `panic_lines()`,
+  `assert_no_panic()`, `rss_kb()`, `hwm_kb()`, `cpu_ms()`, `uptime()`; `STARTUP_BUDGET`,
+  `EXIT_BUDGET`, `TEST_API_KEY`.
 - `Scenario`: `start(mode)`, `bottlecap()`, `invoke(id, deadline, poll)` (waits for the poll,
   then answers it), `wait_next_or_exit`, `shutdown(&mut bc)` (asserts the process is still
   running when SHUTDOWN is queued and exits within the 2 s SHUTDOWN deadline),

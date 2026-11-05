@@ -78,7 +78,7 @@ impl Scenario {
     }
 
     /// A process builder pointed at this scenario's fakes.
-    pub fn bottlecap(&self) -> bottlecap_process::BottlecapBuilder {
+    pub fn bottlecap(&self) -> bottlecap_process::BottlecapBuilder<'_> {
         BottlecapProcess::builder(&self.api).intake(&self.intake.url())
     }
 
@@ -131,6 +131,8 @@ impl Scenario {
             bc.log_tail(40)
         );
         let start = std::time::Instant::now();
+        // Lambda sends the reason in lower case (Runtime Interface Emulator
+        // source); the Extensions API docs list it in upper case.
         self.api.push_shutdown("spindown", SHUTDOWN_DEADLINE);
         let exit = bc.wait_for_exit(bottlecap_process::EXIT_BUDGET).await;
         let took = start.elapsed();

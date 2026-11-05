@@ -12,12 +12,15 @@
 //! `/next` and `subscribe` get a `403` without the identifier issued at
 //! register, register gets a `403` without the extension's name or with an
 //! invalid body, an invalid subscribe body gets a `400`, and register returns
-//! `accountId` only when the extension asks for it.
+//! `accountId` only when the extension asks for it. In Lambda Managed Instances
+//! mode ([`set_managed_instance`](FakeExtensionsApi::set_managed_instance)),
+//! register gets a `403` for `INVOKE` and subscribe a `400` for any schema
+//! version but `2025-01-29`.
 //! It also answers any other request with `202`, so the same port can stand in
 //! for the Datadog intake when a test does not need a `FaultIntake`.
 //!
 //! It also plays Lambda's Telemetry API sender: `send_telemetry` posts a batch
-//! to the extension's listener (the port taken from the subscribe body). Like
+//! to the extension's listener (the port and path of the subscribe URI). Like
 //! Lambda, it delivers nothing until a subscribe call was accepted, and then
 //! only the event types that call asked for.
 
@@ -29,7 +32,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use axum::{
-    Router,
+    Json, Router,
     body::Bytes,
     extract::State,
     http::{HeaderMap, StatusCode},
@@ -46,8 +49,8 @@ const ACCEPT_FEATURE_HEADER: &str = "Lambda-Extension-Accept-Feature";
 /// The extension's file name under `/opt/extensions`.
 const EXTENSION_NAME: &str = "datadog-agent";
 const EXTENSION_ID_HEADER: &str = "Lambda-Extension-Identifier";
-/// The identifier the fake issues at register.
-const EXTENSION_ID: &str = "fake-extension-id";
+/// The identifier the fake issues at register, a UUID like Lambda's.
+const EXTENSION_ID: &str = "3f8e4b6a-1c2d-4e5f-8a9b-0c1d2e3f4a5b";
 
 #[derive(Clone)]
 struct Shared {
@@ -58,14 +61,16 @@ struct Shared {
     next_arrivals: Arc<Mutex<Vec<Instant>>>,
     /// An accepted `/next` call waits for an event.
     next_pending: Arc<AtomicBool>,
+    /// Lambda Managed Instances rules for register and subscribe.
+    managed_instance: Arc<AtomicBool>,
     /// Event types from the last accepted register body.
     registered_events: Arc<Mutex<Vec<String>>>,
     /// `METHOD path` of every request, in arrival order.
     requests: Arc<Mutex<Vec<String>>>,
     subscribe_status: Arc<AtomicU16>,
-    /// Port in the `destination.URI` of the last accepted subscribe body, 0
-    /// until one.
-    telemetry_port: Arc<AtomicU16>,
+    /// `destination.URI` of the last accepted subscribe body with the host set
+    /// to `127.0.0.1`, `None` until one.
+    telemetry_url: Arc<Mutex<Option<reqwest::Url>>>,
     /// `types` of the last accepted subscribe body.
     telemetry_types: Arc<Mutex<Vec<String>>>,
 }
@@ -109,10 +114,11 @@ impl FakeExtensionsApi {
             next_notify: Arc::new(Notify::new()),
             next_arrivals: Arc::new(Mutex::new(Vec::new())),
             next_pending: Arc::new(AtomicBool::new(false)),
+            managed_instance: Arc::new(AtomicBool::new(false)),
             registered_events: Arc::new(Mutex::new(Vec::new())),
             requests: Arc::new(Mutex::new(Vec::new())),
             subscribe_status: Arc::new(AtomicU16::new(StatusCode::OK.as_u16())),
-            telemetry_port: Arc::new(AtomicU16::new(0)),
+            telemetry_url: Arc::new(Mutex::new(None)),
             telemetry_types: Arc::new(Mutex::new(Vec::new())),
         };
         let router = Router::new()
@@ -158,6 +164,11 @@ impl FakeExtensionsApi {
         self.shared
             .subscribe_status
             .store(status.as_u16(), Ordering::SeqCst);
+    }
+
+    /// Apply the Lambda Managed Instances rules to calls made after it.
+    pub fn set_managed_instance(&self) {
+        self.shared.managed_instance.store(true, Ordering::SeqCst);
     }
 
     // --- driving /next ------------------------------------------------------
@@ -222,15 +233,20 @@ impl FakeExtensionsApi {
     /// Port the extension asked Lambda to deliver telemetry to, `None` until
     /// a subscribe call was accepted.
     pub fn telemetry_port(&self) -> Option<u16> {
-        match self.shared.telemetry_port.load(Ordering::SeqCst) {
-            0 => None,
-            port => Some(port),
-        }
+        self.telemetry_url_parsed()?.port()
     }
 
+    /// Where Lambda would post telemetry: the subscribed port and path.
     pub fn telemetry_url(&self) -> Option<String> {
-        self.telemetry_port()
-            .map(|port| format!("http://127.0.0.1:{port}/"))
+        self.telemetry_url_parsed().map(String::from)
+    }
+
+    fn telemetry_url_parsed(&self) -> Option<reqwest::Url> {
+        self.shared
+            .telemetry_url
+            .lock()
+            .expect("telemetry url lock")
+            .clone()
     }
 
     /// Post a raw body (a JSON array of events) to the extension's listener.
@@ -326,7 +342,8 @@ async fn register(
     {
         return Err(StatusCode::FORBIDDEN);
     }
-    let events = register_events(&body).ok_or(StatusCode::FORBIDDEN)?;
+    let managed_instance = shared.managed_instance.load(Ordering::SeqCst);
+    let events = register_events(&body, managed_instance).ok_or(StatusCode::FORBIDDEN)?;
     *shared
         .registered_events
         .lock()
@@ -343,12 +360,13 @@ async fn register(
     }
     let mut headers = HeaderMap::new();
     headers.insert(EXTENSION_ID_HEADER, EXTENSION_ID.parse().expect("header"));
-    Ok((StatusCode::OK, headers, response.to_string()))
+    Ok((StatusCode::OK, headers, Json(response)))
 }
 
 /// Event types of a register body, `None` when Lambda answers `403`. Lambda
-/// accepts a body without `events`, and only `INVOKE` and `SHUTDOWN` in it.
-fn register_events(body: &[u8]) -> Option<Vec<String>> {
+/// accepts a body without `events`, and only `INVOKE` and `SHUTDOWN` in it
+/// (only `SHUTDOWN` on Lambda Managed Instances).
+fn register_events(body: &[u8], managed_instance: bool) -> Option<Vec<String>> {
     let body = serde_json::from_slice::<Value>(body).ok()?;
     match body.as_object()?.get("events") {
         None | Some(Value::Null) => Some(Vec::new()),
@@ -357,7 +375,7 @@ fn register_events(body: &[u8]) -> Option<Vec<String>> {
             .iter()
             .map(|e| {
                 e.as_str()
-                    .filter(|e| matches!(*e, "INVOKE" | "SHUTDOWN"))
+                    .filter(|e| *e == "SHUTDOWN" || (*e == "INVOKE" && !managed_instance))
                     .map(str::to_string)
             })
             .collect(),
@@ -384,20 +402,23 @@ async fn subscribe(
 ) -> Result<impl IntoResponse, StatusCode> {
     record(&shared, "PUT", "/2022-07-01/telemetry");
     check_extension_id(&headers)?;
-    let (port, types) = subscription(&body).ok_or(StatusCode::BAD_REQUEST)?;
+    let managed_instance = shared.managed_instance.load(Ordering::SeqCst);
+    let (url, types) = subscription(&body, managed_instance).ok_or(StatusCode::BAD_REQUEST)?;
     let status = StatusCode::from_u16(shared.subscribe_status.load(Ordering::SeqCst))
         .unwrap_or(StatusCode::OK);
     if status.is_success() {
         *shared.telemetry_types.lock().expect("telemetry types lock") = types;
-        shared.telemetry_port.store(port, Ordering::SeqCst);
+        *shared.telemetry_url.lock().expect("telemetry url lock") = Some(url);
     }
     Ok((status, "{}"))
 }
 
-/// Destination port and `types` of a subscribe body, `None` when Lambda answers
-/// `400`: the Telemetry API reference rules, and a `sandbox` URI with a port.
-/// The fake sender speaks only HTTP, so it also rejects a `TCP` destination.
-fn subscription(body: &[u8]) -> Option<(u16, Vec<String>)> {
+/// Delivery URL and `types` of a subscribe body, `None` when Lambda answers
+/// `400`: the Telemetry API reference rules, and an `http://sandbox` URI with a
+/// port (Lambda does not deliver over HTTPS). Lambda Managed Instances take
+/// only schema `2025-01-29`. The fake sender speaks only HTTP, so it also
+/// rejects a `TCP` destination.
+fn subscription(body: &[u8], managed_instance: bool) -> Option<(reqwest::Url, Vec<String>)> {
     let v = serde_json::from_slice::<Value>(body).ok()?;
     let types = v["types"]
         .as_array()
@@ -419,15 +440,24 @@ fn subscription(body: &[u8]) -> Option<(u16, Vec<String>)> {
             && in_range("maxBytes", 262_144..=1_048_576)
             && in_range("timeoutMs", 25..=30_000)
     });
-    let uri = reqwest::Url::parse(v["destination"]["URI"].as_str()?).ok()?;
-    let valid = matches!(
-        v["schemaVersion"].as_str(),
-        Some("2022-07-01" | "2022-12-13" | "2025-01-29")
-    ) && v["destination"]["protocol"] == "HTTP"
+    let schema_ok = match v["schemaVersion"].as_str() {
+        Some("2025-01-29") => true,
+        Some("2022-07-01" | "2022-12-13") => !managed_instance,
+        _ => false,
+    };
+    let mut uri = reqwest::Url::parse(v["destination"]["URI"].as_str()?).ok()?;
+    let valid = schema_ok
+        && v["destination"]["protocol"] == "HTTP"
+        && uri.scheme() == "http"
         && matches!(uri.host_str(), Some("sandbox" | "sandbox.localdomain"))
+        && uri.port().is_some_and(|p| p != 0)
         && buffering_ok;
-    let port = uri.port().filter(|&p| p != 0)?;
-    valid.then_some((port, types))
+    if !valid {
+        return None;
+    }
+    // Lambda posts to the URI's port and path inside the sandbox.
+    uri.set_host(Some("127.0.0.1")).ok()?;
+    Some((uri, types))
 }
 
 async fn next(
@@ -465,7 +495,7 @@ async fn next(
             .any(|e| e == event_type);
         if registered {
             shared.next_pending.store(false, Ordering::SeqCst);
-            return Ok((StatusCode::OK, event.to_string()));
+            return Ok((StatusCode::OK, Json(event)));
         }
         // Lambda never sends an event type the extension did not register for.
         eprintln!("fake extensions api: dropped an unregistered {event_type} event");
