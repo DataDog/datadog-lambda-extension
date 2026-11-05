@@ -2,13 +2,16 @@
 
 use serde_json::Value;
 
-use crate::fixtures::telemetry::REQUEST_ID;
+use crate::fixtures::invocation::{
+    FUNCTION_NAME, MEMORY_SIZE_MB, REGION, REQUEST_ID, SERVICE, XRAY_ROOT, log_millis, time,
+};
 
-/// Lambda text-format line (about 200 bytes): `<time>\t<request id>\t<level>\t<message>`.
+/// Lambda text-format line (about 200 bytes): `<time>\t<request id>\t<level>\t<message>`,
+/// timed as the `i`th log line of the invocation.
 pub fn text_line(i: usize) -> String {
     let mut s = format!(
-        "2026-10-27T12:00:00.{:03}Z\t{REQUEST_ID}\tINFO\tUser {i} performed checkout action on cart {} with status=ok latency_ms={} region=us-east-1 path=/api/v1/orders",
-        i % 1000,
+        "{}\t{REQUEST_ID}\tINFO\tUser {i} performed checkout action on cart {} with status=ok latency_ms={} region={REGION} path=/api/v1/orders",
+        time(log_millis(i)),
         i * 7,
         i % 300
     );
@@ -18,7 +21,8 @@ pub fn text_line(i: usize) -> String {
     s
 }
 
-/// Structured line in the Lambda JSON log format (Powertools-like, about 2 KB).
+/// Structured line in the Lambda JSON log format (Powertools-like, about 2 KB), timed as the
+/// `i`th log line of the invocation.
 pub fn json_object(i: usize) -> Value {
     let items: Vec<Value> = (0..12)
         .map(|k| {
@@ -31,16 +35,16 @@ pub fn json_object(i: usize) -> Value {
         })
         .collect();
     serde_json::json!({
-        "timestamp": "2026-10-27T12:00:00.123Z",
+        "timestamp": time(log_millis(i)),
         "level": "INFO",
         "requestId": REQUEST_ID,
         "message": format!("Processed order {i} for customer cust-{} with \"quoted\" note", i * 3),
         "logger": "orders.handler",
-        "service": "orders",
-        "cold_start": false,
-        "function_name": "orders-prod-handler",
-        "function_memory_size": "128",
-        "xray_trace_id": "1-5759e988-bd862e3fe1be46a994272793",
+        "service": SERVICE,
+        "cold_start": true,
+        "function_name": FUNCTION_NAME,
+        "function_memory_size": MEMORY_SIZE_MB.to_string(),
+        "xray_trace_id": XRAY_ROOT,
         "items": items,
     })
 }

@@ -2,23 +2,23 @@
 
 use bottlecap::tags::lambda::tags::EXTENSION_VERSION;
 
-use crate::fixtures::telemetry::FUNCTION_ARN;
+use crate::fixtures::invocation::{
+    ACCOUNT_ID, ARCHITECTURE, ENV, FUNCTION_ARN, FUNCTION_NAME, INIT_TYPE, MEMORY_SIZE_MB, REGION,
+    SERVICE, VERSION,
+};
 
 /// The tags bottlecap adds to every metric of the `$LATEST` version of [`FUNCTION_ARN`]
 /// (`SortedTags::parse(&enrich_tags())`). No `runtime` tag: Lambda does not give
 /// `AWS_EXECUTION_ENV` to extensions.
 pub fn enrich_tags() -> String {
-    let name = FUNCTION_ARN
-        .rsplit(':')
-        .next()
-        .expect("function name in the ARN");
     format!(
-        "function_arn:{FUNCTION_ARN},region:us-east-1,account_id:123456789012,aws_account:123456789012,functionname:{name},resource:{name},memorysize:128,architecture:arm64,init_type:on-demand,env:prod,service:checkout,version:1.2.3,dd_extension_version:{EXTENSION_VERSION}"
+        "function_arn:{FUNCTION_ARN},region:{REGION},account_id:{ACCOUNT_ID},aws_account:{ACCOUNT_ID},functionname:{FUNCTION_NAME},resource:{FUNCTION_NAME},memorysize:{MEMORY_SIZE_MB},architecture:{ARCHITECTURE},init_type:{INIT_TYPE},env:{ENV},service:{SERVICE},version:{VERSION},dd_extension_version:{EXTENSION_VERSION}"
     )
 }
 
-/// A distribution with 8 tags, the heaviest common line.
-pub const DIST_8_TAGS: &str = "app.checkout.latency:12.5|d|#env:prod,service:checkout,version:1.2.3,region:us-east-1,team:payments,endpoint:/api/v1/pay,status:200,method:POST";
+/// A distribution with 8 tags, the heaviest common line. Its `env`, `service`, `version` and
+/// `region` tags are those of the shared invocation.
+pub const DIST_8_TAGS: &str = "app.checkout.latency:12.5|d|#env:prod,service:orders,version:1.2.3,region:us-east-1,team:payments,endpoint:/api/v1/pay,status:200,method:POST";
 
 /// A count with 2 tags, the lightest common line.
 pub const COUNT_2_TAGS: &str = "my.metric:1|c|#tag1:a,tag2:b";
@@ -63,7 +63,7 @@ pub fn line(kind: Kind, i: usize) -> String {
 
 /// A line whose tag value is unique per `i` (one new interned string per line).
 pub fn unique_tag_line(i: usize) -> String {
-    format!("my.metric:1|c|#env:prod,service:api,request_id:{i:08x}-0000-4000-8000-{i:012x}")
+    format!("my.metric:1|c|#env:{ENV},service:{SERVICE},request_id:{i:08x}-0000-4000-8000-{i:012x}")
 }
 
 /// `n` lines joined by `\n`, one UDP datagram (keep it under 8 KiB).
