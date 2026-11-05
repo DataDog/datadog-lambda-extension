@@ -6,13 +6,15 @@
 
 use serde_json::Value;
 
+use crate::fixtures::invocation::{
+    FUNCTION_VERSION, HANDLER_MS, HANDLER_START_MS, INIT_TYPE, MEMORY_SIZE_MB, REGION,
+    RUNTIME_DONE_MS, RUNTIME_VERSION, START_MS, log_millis, time,
+};
 use crate::fixtures::logs;
 
-/// Request id used by every fixture.
-pub const REQUEST_ID: &str = "8f5c1b9e-3a2d-4c6f-9e1b-7d2a5c8e4f10";
-
-/// Function ARN used by every fixture.
-pub const FUNCTION_ARN: &str = "arn:aws:lambda:us-east-1:123456789012:function:orders-prod-handler";
+// Callers also reach these through `telemetry`; not every crate that includes it uses them.
+#[allow(unused_imports)]
+pub use crate::fixtures::invocation::{FUNCTION_ARN, REQUEST_ID, XRAY_TRACE_HEADER};
 
 /// Which shape a function log record takes in the Telemetry API.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -37,15 +39,8 @@ impl LogKind {
     }
 }
 
-fn time(millis: usize) -> String {
-    format!(
-        "2026-10-27T12:00:{:02}.{:03}Z",
-        (millis / 1000) % 60,
-        millis % 1000
-    )
-}
-
-/// One telemetry event: `{"time":"...","type":<kind>,"record":<record_json>}`.
+/// One telemetry event `millis` after `BASE_NS`:
+/// `{"time":"...","type":<kind>,"record":<record_json>}`.
 pub fn event(millis: usize, kind: &str, record_json: &str) -> String {
     format!(
         r#"{{"time":"{}","type":"{kind}","record":{record_json}}}"#,
@@ -57,7 +52,9 @@ pub fn init_start() -> String {
     event(
         0,
         "platform.initStart",
-        r#"{"initializationType":"on-demand","phase":"init","runtimeVersion":"nodejs:22.v10","runtimeVersionArn":"arn:aws:lambda:us-east-1::runtime:abc"}"#,
+        &format!(
+            r#"{{"initializationType":"{INIT_TYPE}","phase":"init","runtimeVersion":"{RUNTIME_VERSION}","runtimeVersionArn":"arn:aws:lambda:{REGION}::runtime:abc"}}"#
+        ),
     )
 }
 
@@ -65,7 +62,7 @@ pub fn init_runtime_done() -> String {
     event(
         40,
         "platform.initRuntimeDone",
-        r#"{"initializationType":"on-demand","phase":"init","status":"success"}"#,
+        &format!(r#"{{"initializationType":"{INIT_TYPE}","phase":"init","status":"success"}}"#),
     )
 }
 
@@ -73,26 +70,38 @@ pub fn init_report() -> String {
     event(
         41,
         "platform.initReport",
-        r#"{"initializationType":"on-demand","phase":"init","status":"success","metrics":{"durationMs":38.12}}"#,
+        &format!(
+            r#"{{"initializationType":"{INIT_TYPE}","phase":"init","status":"success","metrics":{{"durationMs":38.12}}}}"#
+        ),
     )
 }
 
 pub fn platform_start(request_id: &str) -> String {
     event(
-        50,
+        START_MS,
         "platform.start",
         &format!(
-            r#"{{"requestId":"{request_id}","version":"$LATEST","tracing":{{"spanId":"54565fb41ac79632","type":"X-Amzn-Trace-Id","value":"Root=1-62e900b2-710d76f009d6e7785905449a;Parent=0efbd19962d95b05;Sampled=1"}}}}"#
+            r#"{{"requestId":"{request_id}","version":"{FUNCTION_VERSION}","tracing":{{"spanId":"54565fb41ac79632","type":"X-Amzn-Trace-Id","value":"{XRAY_TRACE_HEADER}"}}}}"#
         ),
+    )
+}
+
+/// The `responseLatency` span of `platform.runtimeDone`: the handler.
+fn response_latency_span() -> String {
+    format!(
+        r#"{{"name":"responseLatency","start":"{}","durationMs":{HANDLER_MS}.0}}"#,
+        time(HANDLER_START_MS)
     )
 }
 
 pub fn runtime_done(request_id: &str) -> String {
     event(
-        150,
+        RUNTIME_DONE_MS,
         "platform.runtimeDone",
         &format!(
-            r#"{{"requestId":"{request_id}","status":"success","spans":[{{"name":"responseLatency","start":"2026-10-27T12:00:00.051Z","durationMs":90.0}},{{"name":"responseDuration","start":"2026-10-27T12:00:00.141Z","durationMs":1.0}}],"metrics":{{"durationMs":98.5,"producedBytes":1024}}}}"#
+            r#"{{"requestId":"{request_id}","status":"success","spans":[{},{{"name":"responseDuration","start":"{}","durationMs":1.0}}],"metrics":{{"durationMs":98.5,"producedBytes":1024}}}}"#,
+            response_latency_span(),
+            time(HANDLER_START_MS + HANDLER_MS)
         ),
     )
 }
@@ -111,10 +120,11 @@ pub fn runtime_done_with(request_id: &str, status: &str, with_metrics: bool) -> 
         r#","errorType":"Runtime.ExitError""#.to_string()
     };
     event(
-        150,
+        RUNTIME_DONE_MS,
         "platform.runtimeDone",
         &format!(
-            r#"{{"requestId":"{request_id}","status":"{status}","spans":[{{"name":"responseLatency","start":"2026-10-27T12:00:00.051Z","durationMs":90.0}}]{metrics}{error}}}"#
+            r#"{{"requestId":"{request_id}","status":"{status}","spans":[{}]{metrics}{error}}}"#,
+            response_latency_span()
         ),
     )
 }
@@ -122,7 +132,7 @@ pub fn runtime_done_with(request_id: &str, status: &str, with_metrics: bool) -> 
 /// `platform.logsDropped` for `n` records, as Lambda sends when its buffer overflows.
 pub fn logs_dropped(n: u64) -> String {
     event(
-        149,
+        RUNTIME_DONE_MS - 1,
         "platform.logsDropped",
         &format!(
             r#"{{"droppedBytes":{},"droppedRecords":{n},"reason":"Consumer seems to have fallen behind"}}"#,
@@ -133,15 +143,30 @@ pub fn logs_dropped(n: u64) -> String {
 
 /// An event of a type the extension does not know. Must never break a batch.
 pub fn unknown_event() -> String {
-    event(70, "platform.somethingNew", r#"{"field":"value"}"#)
+    event(
+        START_MS + 20,
+        "platform.somethingNew",
+        r#"{"field":"value"}"#,
+    )
 }
 
+/// `platform.report` of a cold start such as [`REQUEST_ID`]: it has `initDurationMs`.
 pub fn report(request_id: &str) -> String {
+    report_with(request_id, r#","initDurationMs":38.12"#)
+}
+
+/// `platform.report` of a warm invocation: Lambda omits `initDurationMs`. [`REQUEST_ID`] is a
+/// cold start, so use another request id.
+pub fn warm_report(request_id: &str) -> String {
+    report_with(request_id, "")
+}
+
+fn report_with(request_id: &str, init_duration: &str) -> String {
     event(
-        151,
+        RUNTIME_DONE_MS + 1,
         "platform.report",
         &format!(
-            r#"{{"requestId":"{request_id}","status":"success","metrics":{{"durationMs":98.5,"billedDurationMs":99,"memorySizeMB":128,"maxMemoryUsedMB":64,"initDurationMs":38.12}}}}"#
+            r#"{{"requestId":"{request_id}","status":"success","metrics":{{"durationMs":98.5,"billedDurationMs":99,"memorySizeMB":{MEMORY_SIZE_MB},"maxMemoryUsedMB":64{init_duration}}}}}"#
         ),
     )
 }
@@ -154,7 +179,7 @@ pub fn function_event(kind: LogKind, i: usize) -> String {
         LogKind::JsonString => serde_json::to_string(&Value::String(logs::json_line(i))),
     }
     .expect("serialize function record");
-    event(60 + i % 80, "function", &record)
+    event(log_millis(i), "function", &record)
 }
 
 /// An `extension` log event (bottlecap's own stdout as Lambda re-ingests it), in the JSON
@@ -163,7 +188,7 @@ pub fn extension_event(i: usize) -> String {
     let line =
         format!(r#"{{"status":"DEBUG","message":"DD_EXTENSION | DEBUG | processed batch {i}"}}"#);
     event(
-        60 + i % 80,
+        log_millis(i),
         "extension",
         &serde_json::to_string(&Value::String(line)).expect("serialize extension record"),
     )
@@ -209,8 +234,8 @@ pub fn log_batches(kind: LogKind, n: usize, per_post: usize) -> Vec<Vec<u8>> {
     events.chunks(per_post.max(1)).map(batch).collect()
 }
 
-/// One warm invocation as the Telemetry API delivers it: `platform.start`, `n` function
-/// lines, `platform.runtimeDone`, `platform.report`.
+/// The [`REQUEST_ID`] invocation in the POST that follows its init events: `platform.start`,
+/// `n` function lines, `platform.runtimeDone`, and the cold-start `platform.report`.
 pub fn invocation_batch(kind: LogKind, n: usize) -> Vec<u8> {
     let mut events = Vec::with_capacity(n + 3);
     events.push(platform_start(REQUEST_ID));
@@ -237,7 +262,8 @@ pub fn large_json_record(total_bytes: usize) -> String {
 }
 
 /// Cuts `record` into `function` events of `piece_bytes` each, the way Lambda does: every
-/// piece has its own envelope and carries a raw slice of the record's bytes.
+/// piece has its own envelope, timed as the `n`th log line, and carries a raw slice of the
+/// record's bytes.
 pub fn record_pieces(record: &str, piece_bytes: usize) -> Vec<String> {
     record
         .as_bytes()
@@ -245,7 +271,7 @@ pub fn record_pieces(record: &str, piece_bytes: usize) -> Vec<String> {
         .enumerate()
         .map(|(n, chunk)| {
             event(
-                n,
+                log_millis(n),
                 "function",
                 std::str::from_utf8(chunk).expect("fixture record is ASCII"),
             )
