@@ -11,8 +11,9 @@
 //! extension registered for, a `/next` while another is pending gets a `403`,
 //! `/next` and `subscribe` get a `403` without the identifier issued at
 //! register, register gets a `403` without the extension's name or with an
-//! invalid body, an invalid subscribe body gets a `400`, and register returns
-//! `accountId` only when the extension asks for it. In Lambda Managed Instances
+//! invalid body, a subscribe after the first `/next` gets a `403`, an invalid
+//! subscribe body gets a `400`, and register returns `accountId` only when the
+//! extension asks for it. In Lambda Managed Instances
 //! mode ([`set_managed_instance`](FakeExtensionsApi::set_managed_instance)),
 //! register gets a `403` for `INVOKE` and subscribe a `400` for any schema
 //! version but `2025-01-29`.
@@ -412,6 +413,15 @@ async fn subscribe(
 ) -> Result<impl IntoResponse, StatusCode> {
     record(&shared, "PUT", "/2022-07-01/telemetry");
     check_extension_id(&headers)?;
+    // Lambda takes subscriptions only during init, which the first `/next` ends.
+    if !shared
+        .next_arrivals
+        .lock()
+        .expect("next arrivals lock")
+        .is_empty()
+    {
+        return Err(StatusCode::FORBIDDEN);
+    }
     // The Subscribe API takes a JSON body with `Content-Type: application/json`.
     if !headers
         .get("content-type")

@@ -161,6 +161,7 @@ impl<'api> BottlecapBuilder<'api> {
             pid: child.id(),
             child,
             started,
+            seen_running: started,
             stdout_path,
             stderr_path,
             _task_root: self.task_root,
@@ -173,6 +174,8 @@ pub struct BottlecapProcess {
     child: Child,
     /// Taken before the spawn, so a startup deadline counts from it.
     pub started: Instant,
+    /// See [`seen_running`](Self::seen_running).
+    seen_running: Instant,
     stdout_path: PathBuf,
     stderr_path: PathBuf,
     _task_root: tempfile::TempDir,
@@ -194,7 +197,20 @@ impl BottlecapProcess {
 
     /// Exit status if the process already exited.
     pub fn try_exit(&mut self) -> Option<ExitStatus> {
-        self.child.try_wait().ok().flatten()
+        let polled = Instant::now();
+        let status = self.child.try_wait().ok().flatten();
+        if status.is_none() {
+            self.seen_running = polled;
+        }
+        status
+    }
+
+    /// Start of the last poll that found the process running (the spawn
+    /// before one). A process seen running after a deadline missed it; the
+    /// instant a wait returns does not prove that, as a slow test thread
+    /// delays it.
+    pub fn seen_running(&self) -> Instant {
+        self.seen_running
     }
 
     pub fn is_running(&mut self) -> bool {

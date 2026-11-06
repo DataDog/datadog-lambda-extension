@@ -38,16 +38,9 @@ async fn invoke_then_shutdown_exits_cleanly() {
         .invoke("req-1", INVOKE_DEADLINE, 1, bc.startup_deadline())
         .await
         .unwrap_or_else(|| panic!("no /next poll. {}", bc.log_tail(40)));
-    // Lambda sends `platform.initStart` on a cold start. Until it arrives the
-    // extension holds logs, as it cannot yet tell a durable function.
+    deliver_start(&s.api, "req-1", true).await.unwrap();
     s.api
-        .send_telemetry(
-            &[
-                platform_init_start(),
-                function_log("hello from the function"),
-            ],
-            STARTUP_BUDGET,
-        )
+        .send_telemetry(&[function_log("hello from the function")], STARTUP_BUDGET)
         .await
         .unwrap();
     deliver_runtime_done(&s.api, "req-1", true).await.unwrap();

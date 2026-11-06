@@ -410,6 +410,7 @@ async fn handle(
     request.at = Instant::now();
     let reject_over = *shared.reject_over.lock().expect("reject lock");
 
+    let mut delay = None;
     let (status, response) = if reject_over.is_some_and(|max| request.body_len > max) {
         (
             413,
@@ -435,8 +436,8 @@ async fn handle(
                 )
             }
             FaultMode::Status(code) => (*code, status_response(*code, format!("fault:{code}"))),
-            FaultMode::Slow(delay) => {
-                tokio::time::sleep(*delay).await;
+            FaultMode::Slow(d) => {
+                delay = Some(*d);
                 (202, status_response(202, "{}".into()))
             }
             FaultMode::Blackhole => unreachable!("held before the body is read"),
@@ -465,7 +466,11 @@ async fn handle(
         }
     };
     request.status = status;
+    // Record before a `Slow` delay, so `wait_for` sees the request from its arrival.
     record(&shared, request);
+    if let Some(delay) = delay {
+        tokio::time::sleep(delay).await;
+    }
     Ok(response)
 }
 

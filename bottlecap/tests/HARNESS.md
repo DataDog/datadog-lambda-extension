@@ -47,6 +47,7 @@ async fn my_fault() {
     let startup = bc.startup_deadline();                    // /next #1 must arrive by it
     let deadline = s.invoke("req-1", secs(10), 1, startup).await.unwrap(); // answer it with an INVOKE
     s.intake.set_mode(FaultMode::Status(503));              // the fault
+    deliver_start(&s.api, "req-1", true).await.unwrap();   // initStart (cold start), then platform.start
     deliver_runtime_done(&s.api, "req-1", true).await.unwrap();
     // /next #2 must arrive by the INVOKE's deadline, counted from before it was queued
     assert!(s.api.wait_for_next_calls(2, deadline).await, "{}", bc.log_tail(40));
@@ -66,13 +67,18 @@ async fn my_fault() {
 - Bound a flush by the invocation or shutdown deadline, not by a number from
   an implementation.
 - Count every deadline from the instant its event was queued: use the `Instant` that `invoke`, `push_invoke` or `push_shutdown` returns, and `bc.startup_deadline()` for the first `/next`.
+- Compare a deadline with the instant the fakes recorded (`next_call_at(n)`, `IntakeRequest::at`, `bc.seen_running()`), never with `Instant::now()` after a wait: a slow test thread delays the wait, not the event.
 - Match decoded content in every data assertion (the log text in `body_text()`, a name in `metric_names()`, an ID in `trace_ids()`), not only a path, status, size or API key; a check that only counts requests says why in a comment.
+- Require `api_key() == Some(TEST_API_KEY)` in every positive data assertion, a faulted request too: the fake intake accepts a request without the key, the real one does not.
 - Always check `bc.assert_no_panic()` (or use `shutdown_cleanly`). Dev builds
   unwind and keep running, release builds abort; both print `panicked at`.
 - Check memory growth only on Linux (`BottlecapProcess::can_measure_memory()`).
-- Send `platform_init_start()` once per cold start, as Lambda does, in a test
-  that checks logs or the invocation metric: until it arrives the extension
+- Send telemetry in Lambda's order: `deliver_start` (with `platform.initStart` on the cold
+  start), then the function logs, then `deliver_runtime_done`. Lambda sends `platform.report`
+  only after the extension's next `/next`. Until `platform.initStart` arrives the extension
   holds every log and the cold start's `aws.lambda.enhanced.invocations`.
+- When the extension could break a Lambda phase rule, make the fake refuse it (a subscribe
+  after the first `/next` gets `403`) and list the rule in the API summary.
 - Every spawning test carries `#[serial_test::serial(bottlecap_ports)]`: the
   binary binds fixed ports, and plain `cargo test` runs tests in parallel. New
   test binaries must also match the regex in `.config/nextest.toml`.
@@ -92,7 +98,8 @@ async fn my_fault() {
   events whose type (`platform`, `function`, `extension`) the subscribe body did not ask for;
   `send_telemetry_raw` posts its body as is. Like Lambda, `/next` serves only the event types from
   the register body and drops the rest, a `/next` while another is pending gets `403`, `/next`
-  and subscribe get `403` without the `Lambda-Extension-Identifier` issued at register, register
+  and subscribe get `403` without the `Lambda-Extension-Identifier` issued at register, subscribe
+  gets `403` after the first `/next` (Lambda takes subscriptions only during init), register
   gets `403` without `Lambda-Extension-Name: datadog-agent` or with an invalid body, a subscribe
   body outside the Telemetry API reference rules gets `400` (also an `https://` URI, port 9001,
   or a missing `Content-Type: application/json`), and
@@ -109,7 +116,8 @@ async fn my_fault() {
   recorded and gets no answer.
   `set_mode`, `set_path_mode(path, mode)`, `clear_path_mode`, `set_reject_over(Some(bytes))`,
   `set_ok_body(path, body)`; `requests()`, `requests_to`, `count`, `connections()`, `summary()`,
-  `wait_for(n, pred, deadline)` (true only when `n` matching requests arrived by the `Instant`),
+  `wait_for(n, pred, deadline)` (true only when `n` matching requests arrived by the `Instant`;
+  `Slow` records a request before its delay),
   `wait_for_path`; `IntakeRequest::at` (arrival), `api_key()`, `decoded_body()`, `body_text()`,
   `trace_ids()` (every span's trace ID in an `AgentPayload`) and `metric_names()` (a sketches or
   series payload), each `Err` when the body does not decode. `SynBlackhole::start()` (backlog 1,
@@ -119,14 +127,17 @@ async fn my_fault() {
   `.secret_from(credentials_url)`, `.spawn()`; `wait_for_exit(budget)` (kills on timeout),
   `is_running()`, `kill()`, `stdout()`, `stderr()`, `log_tail(n)`, `log_contains`, `panic_lines()`,
   `assert_no_panic()`, `rss_kb()`, `hwm_kb()`, `cpu_ms()`, `uptime()`, `startup_deadline()`
-  (`STARTUP_BUDGET` from before the spawn); `STARTUP_BUDGET`,
+  (`STARTUP_BUDGET` from before the spawn), `seen_running()` (start of the last poll that found
+  the process running); `STARTUP_BUDGET`,
   `EXIT_BUDGET`, `TEST_API_KEY`.
 - `Scenario`: `start(mode)`, `bottlecap()`, `invoke(id, deadline_in, poll, poll_by)` (waits for
   the poll by `poll_by`, then answers it; returns the INVOKE's deadline, `None` when the poll
   missed `poll_by`), `wait_next_or_exit(bc, n, deadline)`, `shutdown(&mut bc)` (asserts the process is still
-  running when SHUTDOWN is queued and exits within the 2 s SHUTDOWN deadline),
+  running when SHUTDOWN is queued and no poll saw it running after the 2 s SHUTDOWN deadline),
   `shutdown_cleanly(&mut bc)` (also asserts exit 0 and no panic).
-  Helpers: `deliver_runtime_done`, `msgpack_trace(trace_id, meta_bytes)`, `post_trace` (to 8126),
+  Helpers: `deliver_start(api, id, cold_start)` (`platform.initStart` on a cold start, then
+  `platform.start`), `deliver_runtime_done(api, id, with_metrics)` (`platform.runtimeDone` only),
+  `msgpack_trace(trace_id, meta_bytes)`, `post_trace` (to 8126),
   `INVOCATIONS_METRIC`,
   `incompressible_text`, `secs`, `ms`. Records: `platform_init_start`, `platform_start`,
   `platform_runtime_done(id, status, with_metrics)`, `platform_report`, `function_log`,

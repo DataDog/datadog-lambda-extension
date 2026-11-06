@@ -34,13 +34,7 @@ async fn runs_and_flushes_with_api_key(extra: &[(&str, &str)]) -> bool {
         .invoke("req-1", INVOKE_DEADLINE, 1, bc.startup_deadline())
         .await
         .unwrap_or_else(|| panic!("no /next poll. {}", bc.log_tail(40)));
-    // Lambda sends `platform.initStart` on a cold start. Until it arrives the
-    // extension holds the invocation metric, as it cannot yet tell a durable
-    // function.
-    s.api
-        .send_telemetry(&[platform_init_start()], STARTUP_BUDGET)
-        .await
-        .unwrap();
+    deliver_start(&s.api, "req-1", true).await.unwrap();
     deliver_runtime_done(&s.api, "req-1", true).await.unwrap();
     assert!(
         s.api.wait_for_next_calls(2, deadline).await,

@@ -34,8 +34,8 @@ pub mod prelude {
     };
     pub use super::telemetry_events::*;
     pub use super::{
-        INVOCATIONS_METRIC, Scenario, deliver_runtime_done, incompressible_text, ms, msgpack_trace,
-        post_trace, secs,
+        INVOCATIONS_METRIC, Scenario, deliver_runtime_done, deliver_start, incompressible_text, ms,
+        msgpack_trace, post_trace, secs,
     };
     pub use std::time::{Duration, Instant};
 }
@@ -124,10 +124,10 @@ impl Scenario {
     }
 
     /// Answer the open `/next` with a SHUTDOWN ([`SHUTDOWN_DEADLINE`]), wait
-    /// for the process to exit, and assert it exited within that deadline
-    /// (Lambda kills it after). Also asserts the process is still running
-    /// when the SHUTDOWN is queued: Lambda treats an earlier exit as a crash.
-    /// Returns the exit status, `None` when it had to be killed.
+    /// for the process to exit, and assert no poll saw it running after that
+    /// deadline (Lambda kills it after). Also asserts the process is still
+    /// running when the SHUTDOWN is queued: Lambda treats an earlier exit as a
+    /// crash. Returns the exit status, `None` when it had to be killed.
     pub async fn shutdown(&self, bc: &mut BottlecapProcess) -> Option<ExitStatus> {
         let early = bc.try_exit();
         assert!(
@@ -140,10 +140,10 @@ impl Scenario {
         // source); the Extensions API docs list it in upper case.
         let deadline = self.api.push_shutdown("spindown", SHUTDOWN_DEADLINE);
         let exit = bc.wait_for_exit(bottlecap_process::EXIT_BUDGET).await;
-        let late = Instant::now().saturating_duration_since(deadline);
+        let late = bc.seen_running().saturating_duration_since(deadline);
         assert!(
             late.is_zero(),
-            "exit came {late:?} after the {SHUTDOWN_DEADLINE:?} SHUTDOWN deadline. {}",
+            "still running {late:?} after the {SHUTDOWN_DEADLINE:?} SHUTDOWN deadline. {}",
             bc.log_tail(40)
         );
         exit
@@ -162,18 +162,39 @@ impl Scenario {
     }
 }
 
-/// `platform.start` then `platform.runtimeDone` for `request_id`, delivered
-/// to the extension's Telemetry API listener.
+/// `platform.start` for `request_id`, after `platform.initStart` on a cold
+/// start, delivered to the extension's Telemetry API listener. Until
+/// `platform.initStart` arrives the extension holds every log and the cold
+/// start's invocation metric. Send the invocation's function logs after it.
+pub async fn deliver_start(
+    api: &FakeExtensionsApi,
+    request_id: &str,
+    cold_start: bool,
+) -> Result<(), String> {
+    let start = telemetry_events::platform_start(request_id);
+    let events = if cold_start {
+        vec![telemetry_events::platform_init_start(), start]
+    } else {
+        vec![start]
+    };
+    api.send_telemetry(&events, bottlecap_process::STARTUP_BUDGET)
+        .await
+}
+
+/// `platform.runtimeDone` for `request_id`, delivered after the invocation's
+/// function logs. Lambda sends `platform.report` only after the extension's
+/// next `/next`.
 pub async fn deliver_runtime_done(
     api: &FakeExtensionsApi,
     request_id: &str,
     with_metrics: bool,
 ) -> Result<(), String> {
     api.send_telemetry(
-        &[
-            telemetry_events::platform_start(request_id),
-            telemetry_events::platform_runtime_done(request_id, "success", with_metrics),
-        ],
+        &[telemetry_events::platform_runtime_done(
+            request_id,
+            "success",
+            with_metrics,
+        )],
         bottlecap_process::STARTUP_BUDGET,
     )
     .await

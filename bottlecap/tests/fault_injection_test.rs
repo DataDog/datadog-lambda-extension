@@ -28,10 +28,9 @@ fn log_text(request_id: &str) -> String {
     format!("log for {request_id}")
 }
 
-/// Deliver a log and `runtimeDone` for `request_id`, then return whether
-/// `/next` call number `next_call` arrived by `deadline`, the INVOKE's. On a
-/// cold start the log follows `platform.initStart`, as in Lambda: until it
-/// arrives the extension holds logs.
+/// Deliver `platform.start`, a log and `runtimeDone` for `request_id`, then
+/// return whether `/next` call number `next_call` arrived by `deadline`, the
+/// INVOKE's.
 async fn end_invocation_and_wait(
     s: &Scenario,
     request_id: &str,
@@ -39,13 +38,11 @@ async fn end_invocation_and_wait(
     next_call: usize,
     deadline: Instant,
 ) -> bool {
-    let log = function_log(&log_text(request_id));
-    let batch = if cold_start {
-        vec![platform_init_start(), log]
-    } else {
-        vec![log]
-    };
-    s.api.send_telemetry(&batch, STARTUP_BUDGET).await.unwrap();
+    deliver_start(&s.api, request_id, cold_start).await.unwrap();
+    s.api
+        .send_telemetry(&[function_log(&log_text(request_id))], STARTUP_BUDGET)
+        .await
+        .unwrap();
     deliver_runtime_done(&s.api, request_id, true)
         .await
         .unwrap();
@@ -67,11 +64,11 @@ async fn status_503_storm_does_not_hold_next() {
     s.intake.set_mode(FaultMode::Status(503));
     let released = end_invocation_and_wait(&s, "req-1", true, 2, deadline).await;
     // Read before the fault clears: the end-of-invocation flush sends the log.
-    let logs_faulted = s
-        .intake
-        .requests_to(LOGS_PATH)
-        .iter()
-        .any(|r| r.status == 503 && r.body_text().unwrap().contains(&log_text("req-1")));
+    let logs_faulted = s.intake.requests_to(LOGS_PATH).iter().any(|r| {
+        r.status == 503
+            && r.api_key() == Some(TEST_API_KEY)
+            && r.body_text().unwrap().contains(&log_text("req-1"))
+    });
 
     s.intake.set_mode(FaultMode::Ok);
     let exit = s.shutdown(&mut bc).await;
@@ -83,7 +80,7 @@ async fn status_503_storm_does_not_hold_next() {
     );
     assert!(
         logs_faulted,
-        "the storm never hit the logs intake with the function log. Intake:\n{}",
+        "the storm never hit the logs intake with the function log and the API key. Intake:\n{}",
         s.intake.summary()
     );
     assert!(exit.is_some_and(|e| e.success()), "exit {exit:?}");
@@ -120,6 +117,7 @@ async fn oversized_trace_is_dropped_and_later_traces_flow() {
             |r| {
                 r.path.contains(TRACES_PATH)
                     && r.status == 413
+                    && r.api_key() == Some(TEST_API_KEY)
                     && r.trace_ids().unwrap().contains(&1)
             },
             deadline,
@@ -143,6 +141,7 @@ async fn oversized_trace_is_dropped_and_later_traces_flow() {
             |r| {
                 r.path.contains(TRACES_PATH)
                     && r.status == 202
+                    && r.api_key() == Some(TEST_API_KEY)
                     && r.trace_ids().unwrap().contains(&2)
             },
             deadline,
@@ -152,7 +151,7 @@ async fn oversized_trace_is_dropped_and_later_traces_flow() {
     s.shutdown_cleanly(&mut bc).await;
     assert!(
         rejected,
-        "the 4 MB trace (ID 1) never reached the intake by its invoke deadline (accepted by the agent: {status}). Intake:\n{}",
+        "the 4 MB trace (ID 1) never reached the intake with the API key by its invoke deadline (accepted by the agent: {status}). Intake:\n{}",
         s.intake.summary()
     );
     // The flusher retries the 413 within its flush today; the contract is
@@ -171,7 +170,7 @@ async fn oversized_trace_is_dropped_and_later_traces_flow() {
     );
     assert!(
         later_trace,
-        "trace ID 2, after the rejected one, never arrived by its invoke deadline. Intake:\n{}\n{}",
+        "trace ID 2, after the rejected one, never arrived with the API key by its invoke deadline. Intake:\n{}\n{}",
         s.intake.summary(),
         bc.log_tail(40)
     );
@@ -193,10 +192,11 @@ async fn intake_closing_mid_body_does_not_hold_next() {
     s.intake.set_mode(FaultMode::CloseMidBody);
     let released = end_invocation_and_wait(&s, "req-1", true, 2, deadline).await;
     // Read before the fault clears: the end-of-invocation flush sends the log.
-    let logs_faulted =
-        s.intake.requests_to(LOGS_PATH).iter().any(|r| {
-            r.mode == "close_mid_body" && r.body_text().unwrap().contains(&log_text("req-1"))
-        });
+    let logs_faulted = s.intake.requests_to(LOGS_PATH).iter().any(|r| {
+        r.mode == "close_mid_body"
+            && r.api_key() == Some(TEST_API_KEY)
+            && r.body_text().unwrap().contains(&log_text("req-1"))
+    });
 
     s.intake.set_mode(FaultMode::Ok);
     let exit = s.shutdown(&mut bc).await;
@@ -208,7 +208,7 @@ async fn intake_closing_mid_body_does_not_hold_next() {
     );
     assert!(
         logs_faulted,
-        "the truncating mode never served the function log. Intake:\n{}",
+        "the truncating mode never served the function log with the API key. Intake:\n{}",
         s.intake.summary()
     );
     assert!(exit.is_some_and(|e| e.success()), "exit {exit:?}");

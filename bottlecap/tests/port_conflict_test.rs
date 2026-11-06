@@ -48,13 +48,14 @@ async fn run_with_port_held(
 
     let startup_deadline = bc.startup_deadline();
     let reached_next = s.wait_next_or_exit(&mut bc, 1, startup_deadline).await;
-    let reached_at = bc.uptime();
     let telemetry_possible =
         port != TELEMETRY_PORT || s.api.telemetry_port() != Some(TELEMETRY_PORT);
     let mut ended = false;
     if reached_next && telemetry_possible {
         let deadline = s.api.push_invoke("req-1", INVOKE_DEADLINE);
-        if deliver_runtime_done(&s.api, "req-1", true).await.is_ok() {
+        if deliver_start(&s.api, "req-1", true).await.is_ok()
+            && deliver_runtime_done(&s.api, "req-1", true).await.is_ok()
+        {
             ended = s.api.wait_for_next_calls(2, deadline).await;
         }
     }
@@ -63,8 +64,9 @@ async fn run_with_port_held(
     // for the process's whole life.
     drop(guard);
     eprintln!(
-        "port {port} held: /next at {reached_at:?}, telemetry possible={telemetry_possible}, invocation ended={ended}, exit {exit:?} at {:?}, intake requests={}",
-        bc.uptime(),
+        "port {port} held: /next at {:?}, telemetry possible={telemetry_possible}, invocation ended={ended}, exit {exit:?}, last seen running at {:?}, intake requests={}",
+        s.api.next_call_at(1).map(|at| at - bc.started),
+        bc.seen_running() - bc.started,
         s.intake.requests().len()
     );
 
