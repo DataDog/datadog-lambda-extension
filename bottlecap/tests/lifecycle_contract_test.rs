@@ -63,35 +63,30 @@ async fn invoke_then_shutdown_exits_cleanly() {
 
     // Read the intake before SHUTDOWN: its final flush would hide a missing
     // end-of-invocation flush.
-    let with_key = s
-        .intake
-        .requests()
-        .iter()
-        .filter(|r| r.api_key() == Some(TEST_API_KEY))
-        .count();
     // Enhanced metrics are distributions, so they land on the sketches path.
-    let metrics = s.intake.count("/api/beta/sketches") + s.intake.count("/api/v2/series");
-    let log_flushed = s
-        .intake
-        .requests_to("/api/v2/logs")
-        .iter()
-        .any(|r| r.body_text().unwrap().contains("hello from the function"));
+    let metrics = [
+        s.intake.requests_to("/api/beta/sketches"),
+        s.intake.requests_to("/api/v2/series"),
+    ]
+    .concat();
+    let metrics_keyed =
+        !metrics.is_empty() && metrics.iter().all(|r| r.api_key() == Some(TEST_API_KEY));
+    let log_flushed = s.intake.requests_to("/api/v2/logs").iter().any(|r| {
+        r.api_key() == Some(TEST_API_KEY)
+            && r.body_text().unwrap().contains("hello from the function")
+    });
     s.shutdown_cleanly(&mut bc).await;
 
-    // The end-of-invocation flush reached the intake with the configured key.
+    // The end-of-invocation flush reached the intake, each payload with the
+    // configured key.
     assert!(
-        with_key > 0,
-        "no intake request carried the API key before SHUTDOWN. Intake:\n{}",
-        s.intake.summary()
-    );
-    assert!(
-        metrics > 0,
-        "no metrics flushed before SHUTDOWN. Intake:\n{}",
+        metrics_keyed,
+        "no metrics flushed before SHUTDOWN, or one without the API key. Intake:\n{}",
         s.intake.summary()
     );
     assert!(
         log_flushed,
-        "the function log was not flushed before SHUTDOWN. Intake:\n{}",
+        "the function log was not flushed with the API key before SHUTDOWN. Intake:\n{}",
         s.intake.summary()
     );
 }

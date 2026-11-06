@@ -406,7 +406,8 @@ async fn subscribe(
     if !headers
         .get("content-type")
         .and_then(|v| v.to_str().ok())
-        .is_some_and(|v| v.starts_with("application/json"))
+        .and_then(|v| v.split(';').next())
+        .is_some_and(|v| v.trim().eq_ignore_ascii_case("application/json"))
     {
         return Err(StatusCode::BAD_REQUEST);
     }
