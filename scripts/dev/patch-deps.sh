@@ -249,10 +249,10 @@ def cmd_remove(which):
     if name not in state:
         die(f"{which} is not patched (known: {', '.join(state) or 'none'})")
     check_lock_unchanged()
+    check_lock_matches_manifest()
     if len(state) == 1:
         cmd_restore()
         return
-    check_lock_matches_manifest()
     del state[name]
     write_region(state)
     save_state(state)
