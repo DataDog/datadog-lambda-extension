@@ -91,6 +91,8 @@ async fn run_with_port_held(
         s.intake.summary(),
         bc.log_tail(40)
     );
+    // A precondition, not the contract: the log line proves the held port
+    // really conflicted (see the log-line exception in HARNESS.md).
     if let Some(marker) = conflict_marker {
         assert!(
             bc.log_contains(marker),

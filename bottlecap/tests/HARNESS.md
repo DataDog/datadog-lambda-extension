@@ -60,7 +60,9 @@ async fn my_fault() {
   `api.wait_for_next_calls`, `intake.wait_for(...)`, `bc.wait_for_exit`.
 - Assert the customer-visible contract (a `/next` call, an exit, an intake
   request), never a log line. Print `bc.log_tail(40)` and `s.intake.summary()`
-  in the message.
+  in the message. One exception: a log line may prove that the fault was really
+  injected (the port-conflict tests check that the held port conflicted), never
+  that the contract holds.
 - Bound a flush by the invocation or shutdown deadline, not by a number from
   an implementation.
 - Always check `bc.assert_no_panic()` (or use `shutdown_cleanly`). Dev builds
@@ -89,7 +91,8 @@ async fn my_fault() {
   the register body and drops the rest, a `/next` while another is pending gets `403`, `/next`
   and subscribe get `403` without the `Lambda-Extension-Identifier` issued at register, register
   gets `403` without `Lambda-Extension-Name: datadog-agent` or with an invalid body, a subscribe
-  body outside the Telemetry API reference rules gets `400` (also an `https://` URI), and
+  body outside the Telemetry API reference rules gets `400` (also an `https://` URI, port 9001,
+  or a missing `Content-Type: application/json`), and
   `accountId` needs `Lambda-Extension-Accept-Feature`. `set_managed_instance()` applies the Lambda
   Managed Instances rules: register gets `403` for `INVOKE`, and subscribe gets `400` for any
   `schemaVersion` but `2025-01-29`. The SHUTDOWN reason is lower case (`spindown`), as the Runtime

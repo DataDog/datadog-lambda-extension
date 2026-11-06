@@ -402,6 +402,14 @@ async fn subscribe(
 ) -> Result<impl IntoResponse, StatusCode> {
     record(&shared, "PUT", "/2022-07-01/telemetry");
     check_extension_id(&headers)?;
+    // The Subscribe API takes a JSON body with `Content-Type: application/json`.
+    if !headers
+        .get("content-type")
+        .and_then(|v| v.to_str().ok())
+        .is_some_and(|v| v.starts_with("application/json"))
+    {
+        return Err(StatusCode::BAD_REQUEST);
+    }
     let managed_instance = shared.managed_instance.load(Ordering::SeqCst);
     let (url, types) = subscription(&body, managed_instance).ok_or(StatusCode::BAD_REQUEST)?;
     let status = StatusCode::from_u16(shared.subscribe_status.load(Ordering::SeqCst))
@@ -450,7 +458,8 @@ fn subscription(body: &[u8], managed_instance: bool) -> Option<(reqwest::Url, Ve
         && v["destination"]["protocol"] == "HTTP"
         && uri.scheme() == "http"
         && matches!(uri.host_str(), Some("sandbox" | "sandbox.localdomain"))
-        && uri.port().is_some_and(|p| p != 0)
+        // Lambda reserves port 9001 for the Runtime API.
+        && uri.port().is_some_and(|p| p != 0 && p != 9001)
         && buffering_ok;
     if !valid {
         return None;
