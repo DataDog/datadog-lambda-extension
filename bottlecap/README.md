@@ -16,6 +16,25 @@ The binary wraps the shared `datadog-mock-intake` crate from the `serverless-com
 
 For configuration, endpoints, failure injection, request summaries, JSON dumps, and a smoke procedure, see [mock-intake/README.md](src/bin/mock-intake/README.md).
 
+## Stats retry experiments
+
+Run the local ambiguous-delivery reproduction without sending data to Datadog:
+
+```bash
+cd bottlecap
+cargo test --locked --features test-mode --test double_count_integration_test
+```
+
+The test-mode binary sends computed stats through a test-local proxy to the shared mock intake. Normal delivery yields one accepted payload; a 500 rejection followed by a retry also yields one. When the proxy drops the first successful stats response, the retry yields two accepted payloads with identical wire bytes and two total hits for one source span. This demonstrates the local retry mechanism, not whether the real Datadog intake deduplicates requests.
+
+The separate `dedup_probe` test sends synthetic stats to the real US1 intake. It is ignored by default and requires explicit authorization and `DEDUP_PROBE_API_KEY` to run:
+
+```bash
+cargo test --locked --test dedup_probe real_intake_dedup_probe -- --ignored --nocapture
+```
+
+It verifies HTTP acknowledgements and prints a metrics query for manual readback. Wait for all three control resources before interpreting counts. The sequence arm holds runtime identity fixed and changes only the sequence number.
+
 ## Flush Strategies
 
 Bottlecap supports several flush strategies that control when and how observability data (metrics, logs, traces) is sent to Datadog. The strategy is configured via the `DD_SERVERLESS_FLUSH_STRATEGY` environment variable.
