@@ -130,6 +130,40 @@ faster than production. The ratios between benches, and between main and a fix, 
 The lambda-sim environment (`scripts/lambda-sim/`) can reuse this image and the fixture
 corpus to measure the whole extension under a CPU quota.
 
+## CI
+
+`.github/workflows/bench.yml` runs a non-blocking part of this plan: `bench-build` compiles the
+suite on every PR that touches `bottlecap/`, and `bench-measure` (`scripts/ci/bench-measure.sh`)
+runs the smoke list of item 2 on PRs with the `bench` label, nightly on `main`, and on demand,
+then compares it with the last `main` baseline. The list below is the full plan.
+
+Goal: catch a broken bench and a large regression on every PR without a flaky gate.
+
+1. **On every PR, blocking:** `cargo bench --no-run` with
+   `CARGO_PROFILE_BENCH_LTO=false CARGO_PROFILE_BENCH_CODEGEN_UNITS=16` (compile only, a few
+   minutes with the cache), and `cargo test --test fixtures_corpus` (the generators). This
+   keeps the suite compiling as the code changes.
+2. **On every PR, non-blocking job `bench-smoke`:** run a fixed short list with the production
+   profile and `--quick` (about 2 minutes of measurement): `logs/processor_process`,
+   `logs/oom_check`, `traces/process_traces/default`, `traces/decode_v04`,
+   `invocation/trigger/from_value/sqs_event`, `enhanced_metrics/set_max`,
+   `config/get_config/typical`. Save the baseline `pr`, download the baseline artifact from the
+   last `main` run, and post `critcmp main pr -t 10` as a PR comment (or a job summary). The job
+   never fails on a number; it fails only if a bench panics. A shared GitHub runner is noisy,
+   so 10 % is the reporting threshold, and the comment says "informational".
+3. **On `main`, nightly or per merge:** the full suite with the production profile, baseline
+   saved as an artifact (`critcmp --export main > main.json`) and kept 90 days. A second
+   nightly job runs `scripts/bench-docker-arm64.sh` on an arm64 runner for the Linux-only
+   `/proc` benches. Track the exported JSON over time (a small script or a Datadog metric per
+   bench id) and alert on a 20 % move that holds for 3 nights, which filters runner noise.
+4. **Cost note:** `rs_ci.yml` runs `cargo clippy --all-targets` for `default`, `fips` and
+   `default,test-mode`, so the six bench targets compile three times per PR. The `fips` clippy
+   does not run on a Mac (libddwaf-sys aborts at load); check it on Linux before merging.
+5. **Hardware note:** GitHub-hosted runners vary between runs. If the numbers matter more
+   than the trend, use a self-hosted or dedicated runner and pin the CPU set. Until then, the
+   nightly trend and the PR comment are hints; the developer confirms a regression locally
+   with `scripts/bench-compare.sh`.
+
 ## Backlog to bench
 
 Review = `consolidated-findings-v3` (Confluence page 7384761389). Numbers are the first
