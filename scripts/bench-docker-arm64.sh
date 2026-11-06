@@ -11,12 +11,13 @@
 #   scripts/bench-docker-arm64.sh linux-main enhanced_metrics -- --quick
 #
 # Results land in bottlecap/target-linux-arm64/criterion/<bench>/<name>/, so they never mix
-# with the host baselines. Compare them on the host with
+# with the host baselines, with the same baseline-<name>.txt note as `bench-compare.sh save`
+# (machine, image and limits, load, profile, commit). Compare them on the host with
 #   CARGO_TARGET_DIR=bottlecap/target-linux-arm64 scripts/bench-compare.sh compare <old> <new>
 #
 # Environment:
-#   RUST_IMAGE   docker image (default rust:1.93-bookworm; keep it on the toolchain in rust-toolchain
-#                or CI uses). bottlecap needs protoc for the build script: the image installs it.
+#   RUST_IMAGE   docker image (default rust:1.93-bookworm; keep it on the stable toolchain CI
+#                uses). bottlecap needs protoc for the build script: the image installs it.
 #   DOCKER_CPUS  CPU limit for the container (default 2, like a Lambda sandbox's 2 vCPUs. Lambda
 #                at 128 MB gets about 0.07 vCPU of that, so absolute numbers here are still
 #                faster than production; the ratios between benches are what transfer).
@@ -51,6 +52,13 @@ done
 # shell metacharacters pass through unchanged.
 cargo_args=(${benches[@]+"${benches[@]}"} -- --save-baseline "$name" ${extra[@]+"${extra[@]}"})
 
+# HEAD, plus a hash of the uncommitted diff when the tree has changes, as `bench-compare.sh`
+# records it.
+git_rev="$(git -C "$here" rev-parse --short HEAD 2>/dev/null)" || git_rev=unknown
+if [[ "$git_rev" != unknown && -n "$(git -C "$here" status --porcelain --untracked-files=no)" ]]; then
+  git_rev="$git_rev-dirty (diff $(git -C "$here" diff HEAD | git hash-object --stdin | cut -c1-12))"
+fi
+
 # Optional docker flags.
 docker_flags=()
 if [[ "${BENCH_FAST:-0}" == 1 ]]; then
@@ -70,6 +78,9 @@ docker run --rm \
   -w /src/bottlecap \
   -e CARGO_TARGET_DIR=/src/bottlecap/target-linux-arm64 \
   -e CARGO_NET_GIT_FETCH_WITH_CLI=true \
+  -e BENCH_NAME="$name" \
+  -e BENCH_GIT="$git_rev" \
+  -e BENCH_CONTAINER="$image --cpus $cpus --memory $mem" \
   ${docker_flags[@]+"${docker_flags[@]}"} \
   "$image" \
   bash -c "
@@ -77,8 +88,14 @@ docker run --rm \
     if ! command -v protoc >/dev/null; then
       apt-get update -qq && apt-get install -y -qq --no-install-recommends protobuf-compiler >/dev/null
     fi
-    echo 'machine:' \$(uname -sm) \$(nproc) 'cpus visible,' \$(grep -m1 'model name' /proc/cpuinfo | cut -d: -f2- || true)
-    echo 'profile:' \${CARGO_PROFILE_BENCH_LTO:+bench FAST (no LTO, NOT production)}\${CARGO_PROFILE_BENCH_LTO:-bench = release (opt-level z, lto, codegen-units 1)}
+    cpu=\$(grep -m1 'model name' /proc/cpuinfo | cut -d: -f2- | sed 's/^ //' || true)
+    overrides=\$(env | grep '^CARGO_PROFILE_BENCH_' | sort | tr '\n' ' ' || true)
+    profile=\${overrides:+bench with \${overrides}(NOT production)}
+    note=\"machine: \$(uname -sm), \$(nproc) cpus visible\${cpu:+, \$cpu}; container: \$BENCH_CONTAINER; load average: \$(cut -d' ' -f1-3 /proc/loadavg); profile: \${profile:-bench = release (opt-level z, lto, codegen-units 1)}\"
+    echo \"\$note\"
     cargo bench \"\$@\"
+    mkdir -p \"\$CARGO_TARGET_DIR/criterion\"
+    printf '%s\nsaved: %s\ngit: %s\n' \"\$note\" \"\$(date -u +%Y-%m-%dT%H:%M:%SZ)\" \"\$BENCH_GIT\" \\
+      > \"\$CARGO_TARGET_DIR/criterion/baseline-\$BENCH_NAME.txt\"
   " bench "${cargo_args[@]}"
-echo "saved baseline '$name' under bottlecap/target-linux-arm64/criterion"
+echo "saved baseline '$name' under bottlecap/target-linux-arm64/criterion (notes in baseline-$name.txt)"

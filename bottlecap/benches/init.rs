@@ -6,13 +6,15 @@
 //! With `BOTTLECAP_BENCH_CHILD=<step>` the binary runs one step in a fresh process, prints the
 //! elapsed nanoseconds on stdout and exits. The child builds the runtime first, as `main` does.
 //! The `first_*` benches sum those child timings with `iter_custom`; the process spawn is not
-//! measured.
+//! measured. The child never drops what a step builds (`mem::forget`, then exit), so the timing
+//! leaves out the teardown and the RSS sample counts everything the step keeps alive.
 
 mod common;
 #[path = "../tests/fixtures/mod.rs"]
 mod fixtures;
 
 use std::hint::black_box;
+use std::mem;
 use std::process::Command;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -52,7 +54,17 @@ fn trace_client(config: &Config) -> impl Sized {
     .expect("trace client")
 }
 
+/// RSS in KiB: `VmRSS` from `/proc/self/status` on Linux (no `ps` needed), `ps` elsewhere.
 fn rss_kib() -> u64 {
+    if cfg!(target_os = "linux") {
+        let status = std::fs::read_to_string("/proc/self/status").expect("read /proc/self/status");
+        return status
+            .lines()
+            .find_map(|l| l.strip_prefix("VmRSS:"))
+            .and_then(|v| v.split_whitespace().next())
+            .and_then(|v| v.parse().ok())
+            .expect("VmRSS in /proc/self/status");
+    }
     let out = Command::new("ps")
         .args(["-o", "rss=", "-p", &std::process::id().to_string()])
         .output()
@@ -72,17 +84,19 @@ fn run_step(step: &str, config: &Arc<Config>) {
         // The first interner use when `init_ustr` has not finished: `start_dogstatsd` parses
         // the enrichment tags.
         SORTED_TAGS_FIRST_PARSE => {
-            black_box(SortedTags::parse(&enrich_tags()).expect("enrichment tags"));
+            mem::forget(black_box(
+                SortedTags::parse(&enrich_tags()).expect("enrichment tags"),
+            ));
         }
         FIRST_REGISTER_CLIENT => {
-            black_box(register_client());
+            mem::forget(black_box(register_client()));
         }
         // The three client builds of a cold start, in order: register, shared `http::get_client`,
-        // and the trace client from `build_trace_agent`.
+        // and the trace client from `build_trace_agent`. All three stay alive, as in `main`.
         FIRST_CLIENT_SEQUENCE => {
-            black_box(register_client());
-            black_box(bottlecap::http::get_client(config));
-            black_box(trace_client(config));
+            mem::forget(black_box(register_client()));
+            mem::forget(black_box(bottlecap::http::get_client(config)));
+            mem::forget(black_box(trace_client(config)));
         }
         other => panic!("unknown child step {other}"),
     }
@@ -196,17 +210,30 @@ fn http_client(c: &mut Criterion) {
     });
     bottlecap::fips::prepare_client_provider().expect("crypto provider");
 
-    // Warm builds: the second and later client in a process.
+    // Warm builds: the second and later client in a process. `main` keeps its clients, so the
+    // drop is outside the measurement.
     let mut g = c.benchmark_group("init/http_client");
     // `http::get_client` as `main` calls it, HTTP/2 by default (no proxy).
     g.bench_function("shared_get_client", |b| {
-        b.iter(|| bottlecap::http::get_client(&config));
+        b.iter_batched(
+            || (),
+            |()| bottlecap::http::get_client(&config),
+            BatchSize::PerIteration,
+        );
     });
     g.bench_function("shared_get_client_http1", |b| {
-        b.iter(|| bottlecap::http::get_client(&config_http1));
+        b.iter_batched(
+            || (),
+            |()| bottlecap::http::get_client(&config_http1),
+            BatchSize::PerIteration,
+        );
     });
-    g.bench_function("register_client", |b| b.iter(register_client));
-    g.bench_function("trace_client", |b| b.iter(|| trace_client(&config)));
+    g.bench_function("register_client", |b| {
+        b.iter_batched(|| (), |()| register_client(), BatchSize::PerIteration);
+    });
+    g.bench_function("trace_client", |b| {
+        b.iter_batched(|| (), |()| trace_client(&config), BatchSize::PerIteration);
+    });
 
     g.finish();
 

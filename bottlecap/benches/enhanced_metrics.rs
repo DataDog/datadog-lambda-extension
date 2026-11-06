@@ -24,6 +24,7 @@ use bottlecap::proc::{self, constants};
 use criterion::{Criterion, criterion_group, criterion_main};
 use dogstatsd::aggregator::AggregatorService;
 use dogstatsd::metric::{EMPTY_TAGS, Metric, MetricValue, SortedTags};
+use fixtures::invocation::{BASE_NS, INIT_TYPE, RUNTIME};
 use regex::Regex;
 
 const PROC_FIXTURE: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/proc");
@@ -163,7 +164,7 @@ fn set_max(c: &mut Criterion) {
     rt.spawn(service.run());
     let mut lambda = Lambda::new(handle, common::config());
     lambda.set_init_tags(false, true);
-    lambda.set_runtime_tag("python3.12");
+    lambda.set_runtime_tag(RUNTIME);
     g.bench_function("lambda_method", |b| {
         b.iter(|| lambda.set_max_enhanced_metrics())
     });
@@ -259,8 +260,8 @@ fn dynamic_tags(c: &mut Criterion) {
 
     let tags: HashMap<String, String> = HashMap::from([
         ("cold_start".to_string(), "false".to_string()),
-        ("runtime".to_string(), "python3.12".to_string()),
-        ("init_type".to_string(), "on-demand".to_string()),
+        ("runtime".to_string(), RUNTIME.to_string()),
+        ("init_type".to_string(), INIT_TYPE.to_string()),
     ]);
     // `Lambda::get_dynamic_value_tags`, `src/metrics/enhanced/lambda.rs`.
     g.bench_function("rebuild_3_tags", |b| {
@@ -270,7 +271,10 @@ fn dynamic_tags(c: &mut Criterion) {
         });
     });
 
-    let cached = SortedTags::parse("cold_start:false,runtime:python3.12,init_type:on-demand").ok();
+    let cached = SortedTags::parse(&format!(
+        "cold_start:false,runtime:{RUNTIME},init_type:{INIT_TYPE}"
+    ))
+    .ok();
     g.bench_function("cached_clone", |b| b.iter(|| cached.clone()));
     g.finish();
 
@@ -281,7 +285,7 @@ fn dynamic_tags(c: &mut Criterion) {
                 "aws.lambda.enhanced.duration".into(),
                 MetricValue::distribution(0.123),
                 cached.clone(),
-                Some(1_700_000_000),
+                Some(BASE_NS / 1_000_000_000),
             )
         });
     });

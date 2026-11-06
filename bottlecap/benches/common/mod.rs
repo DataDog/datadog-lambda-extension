@@ -11,35 +11,41 @@ use bottlecap::config::Config;
 use bottlecap::tags::provider::Provider;
 use criterion::Criterion;
 
+use crate::fixtures::invocation::{
+    ENV, FUNCTION_ARN, FUNCTION_NAME, FUNCTION_VERSION, INIT_TYPE, MEMORY_SIZE_MB, REGION, SERVICE,
+    VERSION,
+};
+
 /// Production uses jemalloc; measure with it.
 #[global_allocator]
 static GLOBAL: tikv_jemallocator::Jemalloc = tikv_jemallocator::Jemalloc;
 
-pub use crate::fixtures::telemetry::FUNCTION_ARN;
-
-/// Sets the AWS variables the tags provider and the config read.
+/// Sets the AWS variables the tags provider and the config read, for the fixture function. No
+/// `AWS_EXECUTION_ENV`: Lambda gives it to the runtime process only, not to extensions.
 pub fn setup_env() {
     for (k, v) in [
-        ("AWS_LAMBDA_FUNCTION_NAME", "orders-prod-handler"),
-        ("AWS_LAMBDA_FUNCTION_VERSION", "$LATEST"),
-        ("AWS_LAMBDA_FUNCTION_MEMORY_SIZE", "128"),
-        ("AWS_EXECUTION_ENV", "AWS_Lambda_python3.12"),
-        ("AWS_LAMBDA_INITIALIZATION_TYPE", "on-demand"),
-        ("AWS_REGION", "us-east-1"),
+        ("AWS_LAMBDA_FUNCTION_NAME", FUNCTION_NAME.to_string()),
+        ("AWS_LAMBDA_FUNCTION_VERSION", FUNCTION_VERSION.to_string()),
+        (
+            "AWS_LAMBDA_FUNCTION_MEMORY_SIZE",
+            MEMORY_SIZE_MB.to_string(),
+        ),
+        ("AWS_LAMBDA_INITIALIZATION_TYPE", INIT_TYPE.to_string()),
+        ("AWS_REGION", REGION.to_string()),
     ] {
         // Benches are single-threaded at setup time.
         unsafe { std::env::set_var(k, v) };
     }
 }
 
-/// A typical customer config: service, env, version and 4 custom tags.
+/// A typical customer config: the fixture service, env and version, and 4 custom tags.
 pub fn config() -> Arc<Config> {
     let mut config = Config {
-        service: Some("orders".to_string()),
-        env: Some("prod".to_string()),
-        version: Some("1.42.0".to_string()),
+        service: Some(SERVICE.to_string()),
+        env: Some(ENV.to_string()),
+        version: Some(VERSION.to_string()),
         tags: HashMap::from([
-            ("env".to_string(), "prod".to_string()),
+            ("env".to_string(), ENV.to_string()),
             ("team".to_string(), "checkout".to_string()),
             ("cost_center".to_string(), "cc-1234".to_string()),
             ("owner".to_string(), "payments-platform".to_string()),

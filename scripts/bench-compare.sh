@@ -41,7 +41,7 @@ if [[ -z "$critcmp_bin" ]] && command -v critcmp >/dev/null 2>&1; then
 fi
 
 usage() {
-  sed -n '2,30p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+  sed -n '2,29p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
   exit 1
 }
 
@@ -64,6 +64,18 @@ git_note() {
   echo "$rev"
 }
 
+# The bench profile, with every CARGO_PROFILE_BENCH_* override (BENCH_FAST sets two), so a
+# baseline saved with, say, CARGO_PROFILE_BENCH_OPT_LEVEL=3 is not recorded as production.
+profile_note() {
+  local overrides
+  overrides="$(env | grep '^CARGO_PROFILE_BENCH_' | sort | tr '\n' ' ' || true)"
+  if [[ -n "$overrides" ]]; then
+    echo "bench with ${overrides}(NOT production)"
+  else
+    echo 'bench = release (opt-level z, lto, codegen-units 1)'
+  fi
+}
+
 machine_note() {
   local os cpu load
   os="$(uname -sm)"
@@ -73,7 +85,7 @@ machine_note() {
     cpu="$(grep -m1 'model name' /proc/cpuinfo 2>/dev/null | cut -d: -f2- | sed 's/^ //' || echo unknown)"
   fi
   load="$(uptime | sed 's/.*load average[s]*: //')"
-  echo "machine: $os, $cpu; load average: $load; profile: $([[ "${BENCH_FAST:-0}" == 1 ]] && echo 'bench FAST (no LTO, NOT production)' || echo 'bench = release (opt-level z, lto, codegen-units 1)')"
+  echo "machine: $os, $cpu; load average: $load; profile: $(profile_note)"
 }
 
 cmd="${1:-}"
