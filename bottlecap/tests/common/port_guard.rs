@@ -100,7 +100,9 @@ impl PortGuard {
 /// wildcard address, since a listener on either would conflict on Linux.
 /// The two probes run one after the other: the first listener is dropped
 /// before the second bind, or on Linux the second would fail against our own
-/// probe (two listeners cannot overlap, even with `SO_REUSEADDR`).
+/// probe (two listeners cannot overlap, even with `SO_REUSEADDR`). Like
+/// Tokio's, `std`'s `TcpListener::bind` sets `SO_REUSEADDR` on Unix, so a
+/// connection left in TIME_WAIT does not count as busy.
 pub fn tcp_port_free(port: u16) -> bool {
     let loopback = TcpListener::bind((LOOPBACK, port)).is_ok();
     if !loopback {

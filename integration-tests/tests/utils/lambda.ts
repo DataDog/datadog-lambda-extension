@@ -37,6 +37,10 @@ export interface InvocationResult {
   functionName: string;
   requestId: string;
   statusCode?: number;
+  // Set by Lambda when the function errored, timed out, or crashed (e.g. "Unhandled").
+  functionError?: string;
+  // Decoded response payload; on failure this is Lambda's `{errorType, errorMessage}` body.
+  payload?: string;
 }
 
 export async function invokeLambda(
@@ -62,6 +66,8 @@ export async function invokeLambda(
     functionName,
     requestId,
     statusCode: response.StatusCode || 200,
+    functionError: response.FunctionError,
+    payload: response.Payload ? Buffer.from(response.Payload).toString('utf-8') : undefined,
   };
 }
 

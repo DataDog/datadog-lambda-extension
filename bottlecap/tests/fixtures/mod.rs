@@ -1,7 +1,10 @@
-//! Shared fixture corpus for benchmarks, the fault-injection harness and the Lambda simulator.
+//! Shared fixture corpus for the benchmarks and the fault-injection harness.
 //!
-//! Everything is generated in-process, so nothing large is checked in. Use the generators
-//! directly from a bench or a test:
+//! The generators describe one simulated invocation, whose identity is in [`invocation`]: the
+//! function, request id, X-Ray root, times, tracer and tags. The checked-in trigger events in
+//! `tests/payloads/` keep their own. The generators write the same bytes on every run, except
+//! where a doc comment says they read the clock. Nothing large is checked in. Use the
+//! generators directly from a bench or a test:
 //!
 //! ```ignore
 //! #[path = "../tests/fixtures/mod.rs"]
@@ -9,8 +12,7 @@
 //! let body = fixtures::telemetry::log_batch(fixtures::telemetry::LogKind::Text, 1000);
 //! ```
 //!
-//! To write the corpus to disk once (for tools that read files, such as a simulator written in
-//! another language), run:
+//! To write the corpus to disk once, for tools that read files, run:
 //!
 //! ```text
 //! cargo test --test fixtures_corpus write_fixture_corpus -- --ignored
@@ -22,13 +24,14 @@
 
 pub mod dogstatsd;
 pub mod events;
+pub mod invocation;
 pub mod logs;
 pub mod telemetry;
 pub mod traces;
 
 use std::fs;
-use std::io::Write as _;
-use std::path::{Path, PathBuf};
+use std::io::{ErrorKind, Write as _};
+use std::path::{Component, Path, PathBuf};
 
 /// Default output directory for [`write_corpus`]: `bottlecap/tests/fixtures/generated`.
 pub fn default_corpus_dir() -> PathBuf {
@@ -41,8 +44,38 @@ pub fn default_corpus_dir() -> PathBuf {
         .join("generated")
 }
 
-/// Writes every fixture to `dir` and returns the written files with their sizes.
+/// Writes every fixture to `dir` and returns the written files with their sizes. First removes
+/// the files the previous `MANIFEST.txt` lists, so a renamed or removed fixture does not stay.
+/// Panics, before it removes anything, if an entry is not a relative path under `dir`. Panics
+/// on any I/O error other than a missing file.
 pub fn write_corpus(dir: &Path) -> Vec<(PathBuf, usize)> {
+    let previous = match fs::read_to_string(dir.join("MANIFEST.txt")) {
+        Ok(previous) => previous,
+        Err(e) if e.kind() == ErrorKind::NotFound => String::new(),
+        Err(e) => panic!("read previous MANIFEST.txt: {e}"),
+    };
+    let stale: Vec<&Path> = previous
+        .lines()
+        .filter_map(|l| l.split_whitespace().nth(1))
+        .map(Path::new)
+        .collect();
+    if let Some(bad) = stale
+        .iter()
+        .find(|rel| !rel.components().all(|c| matches!(c, Component::Normal(_))))
+    {
+        panic!(
+            "{} lists {}, which is not a relative path under the corpus directory; fix or delete the manifest",
+            dir.join("MANIFEST.txt").display(),
+            bad.display()
+        );
+    }
+    for rel in stale {
+        if let Err(e) = fs::remove_file(dir.join(rel))
+            && e.kind() != ErrorKind::NotFound
+        {
+            panic!("remove previous fixture {}: {e}", rel.display());
+        }
+    }
     let mut written = Vec::new();
     let mut put = |rel: &str, bytes: &[u8]| {
         let path = dir.join(rel);
