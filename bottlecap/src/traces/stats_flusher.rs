@@ -154,12 +154,16 @@ impl StatsFlusher {
         // shutdown awaits pending flush handles before the final flush.
         // Batches are snapshotted up front so stats added while a slow send
         // is in flight remain queued for the next flush instead of extending
-        // this one indefinitely.
+        // this one indefinitely. Only the first concentrator pull is forced:
+        // a forced pull returns every span added since the previous one, so
+        // forcing them all would not end while spans keep arriving.
         let mut batches = Vec::new();
         {
             let mut guard = self.aggregator.lock().await;
+            let mut force_pull = force_flush;
             loop {
-                let stats = guard.get_batch(force_flush).await;
+                let stats = guard.get_batch(force_pull).await;
+                force_pull = false;
                 if stats.is_empty() {
                     break;
                 }
@@ -653,6 +657,78 @@ mod tests {
         drop(guard);
 
         assert!(flush.await.expect("flush task").is_none());
+    }
+
+    /// Regression: a forced flush must end while spans keep arriving. Each forced
+    /// concentrator pull returns the spans added since the previous one, so forcing
+    /// every pull extended the flush, one stats request per pull, until ingress paused.
+    #[tokio::test]
+    async fn forced_flush_ends_while_spans_keep_arriving() {
+        const SPANS_DURING_FLUSH: usize = 200;
+
+        let server = MockServer::start_async().await;
+        let mock = server
+            .mock_async(|when, then| {
+                when.method(POST).path("/api/v0.2/stats");
+                then.status(202);
+            })
+            .await;
+        let client = create_client(None, None, false).expect("client should build");
+        let config = Arc::new(Config::default());
+        let (concentrator_service, concentrator) =
+            StatsConcentratorService::new(Arc::clone(&config));
+        tokio::spawn(concentrator_service.run());
+
+        let now_ns = i64::try_from(
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("system time before unix epoch")
+                .as_nanos(),
+        )
+        .expect("nanos since epoch must fit in i64");
+        let mut span = pb::Span {
+            service: "service".to_string(),
+            name: "web.request".to_string(),
+            resource: "GET /".to_string(),
+            start: now_ns - 1_000_000,
+            duration: 1_000_000,
+            ..pb::Span::default()
+        };
+        span.metrics.insert("_top_level".to_string(), 1.0);
+
+        // The current-thread runtime runs this producer between the flusher's
+        // concentrator pulls, so spans keep arriving while the flush is running.
+        let producer = tokio::spawn({
+            let concentrator = concentrator.clone();
+            async move {
+                for _ in 0..SPANS_DURING_FLUSH {
+                    concentrator.add(&span).expect("add span");
+                    tokio::task::yield_now().await;
+                }
+            }
+        });
+        tokio::task::yield_now().await;
+
+        let flusher = StatsFlusher::new(
+            Arc::new(ApiKeyFactory::new("test-api-key")),
+            Arc::new(Mutex::new(StatsAggregator::new_with_concentrator(
+                concentrator,
+            ))),
+            config,
+            client,
+            server.url("/api/v0.2/stats"),
+        );
+        let failed = tokio::time::timeout(Duration::from_secs(10), flusher.flush(true, None))
+            .await
+            .expect("forced flush must end while spans keep arriving");
+        producer.await.expect("producer task");
+
+        assert!(failed.is_none());
+        assert_eq!(
+            mock.hits_async().await,
+            1,
+            "one forced flush must send its stats in one request"
+        );
     }
 
     #[tokio::test]

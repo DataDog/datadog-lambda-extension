@@ -725,6 +725,8 @@ async fn extension_loop_active(
     let next_lambda_response =
         extension::next_event(client, &aws_config.runtime_api, &r.extension_id).await;
     // first invoke we must call next
+    // The sandbox can freeze right after any on-demand flush, so stats must leave
+    // with the traces they describe rather than wait for the next invocation.
     let mut flushing_service = FlushingService::new(
         logs_flusher.clone(),
         Arc::clone(&trace_flusher),
@@ -733,7 +735,8 @@ async fn extension_loop_active(
         Arc::clone(&metrics_flushers),
         metrics_aggregator_handle.clone(),
         dsm_processor.clone(),
-    );
+    )
+    .with_forced_stats();
     handle_next_invocation(next_lambda_response, &invocation_processor_handle).await;
     loop {
         let maybe_shutdown_event;
