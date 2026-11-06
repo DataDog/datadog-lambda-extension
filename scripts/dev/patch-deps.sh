@@ -1,0 +1,299 @@
+#!/usr/bin/env bash
+# Point bottlecap at a local checkout of a dependency repo, and undo it again.
+#
+#   scripts/dev/patch-deps.sh add <checkout>          # e.g. ../serverless-components or ~/src/libdatadog
+#   scripts/dev/patch-deps.sh remove <checkout|name>  # drop one checkout
+#   scripts/dev/patch-deps.sh restore [--force]       # drop all, restore Cargo.lock
+#   scripts/dev/patch-deps.sh status
+#
+# `add` reads `cargo metadata` of the checkout and of bottlecap, takes every
+# crate that appears in both, groups them by source (crates.io or git URL) and
+# writes one managed `[patch]` region at the end of bottlecap/Cargo.toml.
+# It backs up Cargo.lock once, because cargo rewrites it for patched crates.
+# Works for serverless-components, libdatadog, saluki, dd-trace-rs and libddwaf-rust.
+#
+# When a local version differs from the locked one, `add` runs `cargo update` on
+# that crate so cargo selects the patch. Cargo ignores a patch whose version does
+# not match bottlecap's requirements; the script then prints "NOT USED".
+# A crate is active only when no package of that name still comes from crates.io or git.
+# `status` is read-only: it never writes Cargo.lock or the recorded lock hash.
+# `add`, `remove` and `restore` refuse to run when Cargo.lock changed since the
+# last `add` or `remove` (for example after you added a dependency); `restore --force`
+# restores the backup anyway. `add` and `remove` also refuse when Cargo.toml changed
+# and Cargo.lock does not match it. Never commit the managed region or the patched lock.
+set -euo pipefail
+
+here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+exec python3 -I - "$here/../../bottlecap" "$@" <<'PY'
+import hashlib, itertools, json, os, re, shutil, subprocess, sys
+
+BEGIN = "# >>> patch-deps: managed by scripts/dev/patch-deps.sh. Do not commit. >>>"
+END = "# <<< patch-deps <<<"
+REGION = re.compile(re.escape(BEGIN) + r".*?" + re.escape(END) + r"\n?", re.S)
+# TOML allows whitespace before and inside a table header, and quoted keys: ` [ "patch" . crates-io ]`.
+HEADER, PATCH = r"\s*\[", r"""\s*(?:patch|"patch"|'patch')\s*"""
+
+bottlecap = os.path.abspath(sys.argv[1])
+manifest = os.path.join(bottlecap, "Cargo.toml")
+lock = os.path.join(bottlecap, "Cargo.lock")
+state_dir = os.path.join(bottlecap, ".patch-deps")
+state_file = os.path.join(state_dir, "state.json")
+lock_backup = os.path.join(state_dir, "Cargo.lock.orig")
+lock_hash_file = os.path.join(state_dir, "Cargo.lock.sha256")
+manifest_hash_file = os.path.join(state_dir, "Cargo.toml.sha256")
+args = sys.argv[2:]
+force = "--force" in args
+args = [a for a in args if a != "--force"]
+
+
+def die(msg, code=1):
+    print(f"patch-deps: error: {msg}", file=sys.stderr)
+    sys.exit(code)
+
+
+def metadata(path, *flags, hint=""):
+    cmd = ["cargo", "metadata", "--format-version", "1", "--manifest-path", path, *flags]
+    r = subprocess.run(cmd, capture_output=True, text=True)
+    if r.returncode != 0:
+        die(f"cargo metadata failed for {path}:\n{r.stderr}{hint}")
+    return json.loads(r.stdout)
+
+
+def patch_key(source):
+    # registry+https://github.com/rust-lang/crates.io-index  -> crates-io
+    # sparse+https://index.crates.io/                        -> crates-io
+    # git+https://github.com/DataDog/saluki/?rev=abc#abc    -> https://github.com/DataDog/saluki/
+    if source.startswith(("registry+", "sparse+")):
+        return "crates-io"
+    if source.startswith("git+"):
+        return source[4:].split("#", 1)[0].split("?", 1)[0]
+    return None
+
+
+def sha256_of(path):
+    with open(path, "rb") as f:
+        return hashlib.sha256(f.read()).hexdigest()
+
+
+def load_state():
+    if os.path.exists(state_file):
+        with open(state_file) as f:
+            return json.load(f)
+    return {}
+
+
+def save_state(state):
+    os.makedirs(state_dir, exist_ok=True)
+    with open(state_file, "w") as f:
+        json.dump(state, f, indent=2, sort_keys=True)
+
+
+def read_manifest():
+    with open(manifest) as f:
+        return f.read()
+
+
+def write_region(state):
+    """Rewrite the managed region. Dies before touching any file when the manifest has a foreign [patch]."""
+    text = REGION.sub("", read_manifest()).rstrip("\n") + "\n"
+    lines = text.splitlines()
+    root = itertools.takewhile(lambda l: not re.match(HEADER, l), lines)  # keys before the first table header
+    stray = [l for l in lines if re.match(HEADER + PATCH + r"[.\]]", l)] + [l for l in root if re.match(PATCH + "[.=]", l)]
+    if stray:
+        die(f"Cargo.toml already has a [patch] table or key outside the managed region: {stray}")
+    if state:
+        tables = {}
+        for name, entries in sorted(state.items()):
+            for crate, info in sorted(entries["crates"].items()):
+                for key in info["keys"]:
+                    tables.setdefault(key, []).append((crate, info["path"], name))
+        lines = ["", BEGIN]
+        for key, crates in sorted(tables.items()):
+            lines.append(f"[patch.{key}]" if key == "crates-io" else f'[patch."{key}"]')
+            for crate, path, name in crates:
+                lines.append(f"{crate} = {{ path = {json.dumps(path, ensure_ascii=False)} }}  # {name}")
+        lines.append(END)
+        text += "\n".join(lines) + "\n"
+    with open(manifest, "w") as f:
+        f.write(text)
+
+
+def backup_lock():
+    """Take a fresh backup. Called only when no patch was active, so the lock is the pristine one."""
+    if os.path.exists(lock):
+        os.makedirs(state_dir, exist_ok=True)
+        shutil.copy2(lock, lock_backup)
+
+
+def record_lock_hash():
+    if os.path.exists(lock):
+        os.makedirs(state_dir, exist_ok=True)
+        with open(lock_hash_file, "w") as f:
+            f.write(sha256_of(lock))
+        with open(manifest_hash_file, "w") as f:
+            f.write(sha256_of(manifest))
+
+
+def check_lock_unchanged():
+    if force or not os.path.exists(lock_hash_file):
+        return
+    with open(lock_hash_file) as f:
+        recorded = f.read().strip()
+    if not (os.path.exists(lock) and recorded == sha256_of(lock)):
+        die("Cargo.lock changed or was deleted since the last `add` or `remove` (did you add or bump a dependency?). "
+            "Inspect it with `git diff bottlecap/Cargo.lock`, then run `restore --force` to restore the backup anyway.", code=4)
+
+
+def check_lock_matches_manifest():
+    """Refuse when Cargo.toml changed since the last `add` or `remove` and Cargo.lock does not match it."""
+    if os.path.exists(manifest_hash_file):
+        with open(manifest_hash_file) as f:
+            if f.read() == sha256_of(manifest):
+                return
+    metadata(manifest, "--locked", hint="patch-deps: update Cargo.lock first: " +
+             ("run `restore`, `cargo check`, then `add` again." if os.path.exists(state_file) else "run `cargo check`."))
+
+
+def restore_lock():
+    if os.path.exists(lock_backup):
+        shutil.move(lock_backup, lock)
+        print("patch-deps: restored Cargo.lock", file=sys.stderr)
+
+
+def report(state, meta):
+    """Show what is in effect. A crate is active only if no package of that name still comes from crates.io or git."""
+    ok = True
+    for name, entries in sorted(state.items()):
+        print(f"{name} ({entries['checkout']})")
+        for crate, info in sorted(entries["crates"].items()):
+            pkgs = [p for p in meta["packages"] if p["name"] == crate]
+            used = any(p["source"] is None and os.path.dirname(p["manifest_path"]) == info["path"] for p in pkgs)
+            remote = [p for p in pkgs if p["source"] and patch_key(p["source"])]
+            ok = ok and used and not remote
+            status = ("active" if not remote else "PARTLY USED") if used else "NOT USED (version not compatible with the locked one?)"
+            print(f"  {crate:28s} locked {', '.join(info['locked']):>8s}  local {info['local']:>8s}  {status}")
+            for p in remote:
+                print(f"    still remote: {p['version']} {p['source']}")
+    return ok
+
+
+def cmd_add(checkout):
+    checkout = os.path.abspath(os.path.expanduser(checkout))
+    cm = os.path.join(checkout, "Cargo.toml")
+    if not os.path.exists(cm):
+        die(f"{cm} not found")
+    local = metadata(cm, "--no-deps")
+    local_pkgs = {p["name"]: p for p in local["packages"]}
+    name = os.path.basename(checkout.rstrip("/"))
+    state = load_state()
+    old = state.get(name, {}).get("checkout")
+    if old and os.path.exists(old) and not os.path.samefile(old, checkout):
+        die(f"{name} is already patched from {old}. Run `remove {name}` first.")
+    check_lock_unchanged()
+    check_lock_matches_manifest()
+    # Point an earlier `add` of this checkout at the new path first, so a moved checkout still resolves.
+    patched = {c: dict(info, path=os.path.dirname(local_pkgs[c]["manifest_path"]))
+               for c, info in state.get(name, {}).get("crates", {}).items() if c in local_pkgs}
+    if name in state:
+        write_region({**state, name: {"checkout": checkout, "crates": patched}})
+    graph = metadata(manifest)
+    crates, updates = {}, []
+    for p in graph["packages"]:
+        if p["name"] not in local_pkgs:
+            continue
+        lp = local_pkgs[p["name"]]
+        if not p["source"]:
+            # Already patched by an earlier `add` of this checkout: cargo shows it as a path package.
+            prev = patched.get(p["name"])
+            if not (prev and os.path.dirname(p["manifest_path"]) == prev["path"]):
+                continue
+            keys, locked = prev["keys"], prev["locked"]
+        else:
+            key = patch_key(p["source"])
+            if key is None:
+                continue
+            keys, locked = [key], [p["version"]]
+            if p["version"] != lp["version"]:
+                # Cargo keeps a locked version that differs from the patch, so unlock it. For crates.io,
+                # --precise selects the local version, or fails and changes nothing if no requirement allows it.
+                updates.append(["-p", p["id"]] + (["--precise", lp["version"]] if key == "crates-io" else []))
+        # The same crate can come from several sources or versions: patch each source.
+        info = crates.setdefault(p["name"], {"keys": [], "locked": [], "path": os.path.dirname(lp["manifest_path"]),
+                                             "local": lp["version"]})
+        info["keys"] = sorted(set(info["keys"] + keys))
+        info["locked"] = sorted(set(info["locked"] + locked))
+    if not crates:
+        die(f"no crate of {checkout} is in bottlecap's dependency graph")
+    fresh = not state
+    new_state = dict(state)
+    new_state[name] = {"checkout": checkout, "crates": crates}
+    write_region(new_state)
+    if fresh:
+        backup_lock()
+    save_state(new_state)
+    for c, info in sorted(crates.items()):
+        if all(v.split(".")[0] != info["local"].split(".")[0] for v in info["locked"]):
+            print(f"patch-deps: warning: {c} local {info['local']} vs locked {', '.join(info['locked'])}: major version differs, cargo will not use the patch",
+                  file=sys.stderr)
+    for u in updates:
+        subprocess.run(["cargo", "update", "--manifest-path", manifest] + u, capture_output=True)
+    ok = report(new_state, metadata(manifest))  # cargo metadata updates Cargo.lock for the new patches
+    record_lock_hash()
+    print(f"patch-deps: {len(crates)} crate(s) from {name} written to {manifest}", file=sys.stderr)
+    sys.exit(0 if ok else 3)
+
+
+def cmd_remove(which):
+    state = load_state()
+    name = which if which in state else os.path.basename(os.path.abspath(os.path.expanduser(which)).rstrip("/"))
+    if name not in state:
+        die(f"{which} is not patched (known: {', '.join(state) or 'none'})")
+    check_lock_unchanged()
+    check_lock_matches_manifest()
+    if len(state) == 1:
+        cmd_restore()
+        return
+    del state[name]
+    write_region(state)
+    save_state(state)
+    ok = report(state, metadata(manifest))
+    record_lock_hash()
+    print(f"patch-deps: removed {name}", file=sys.stderr)
+    sys.exit(0 if ok else 3)
+
+
+def cmd_restore():
+    check_lock_unchanged()
+    write_region({})
+    restore_lock()
+    shutil.rmtree(state_dir, ignore_errors=True)
+    print("patch-deps: Cargo.toml has no managed region now", file=sys.stderr)
+
+
+def cmd_status():
+    state = load_state()
+    if not state:
+        print("patch-deps: nothing patched")
+        return
+    meta = metadata(manifest, "--locked", hint="patch-deps: status never writes Cargo.lock. "
+                    "After a checkout changed its dependencies, run `add <checkout>` again.")
+    sys.exit(0 if report(state, meta) else 3)
+
+
+if not args or args[0] in ("-h", "--help"):
+    print("usage: patch-deps.sh add <checkout> | remove <checkout|name> | restore [--force] | status", file=sys.stderr)
+    sys.exit(2)
+cmd, rest = args[0], args[1:]
+if force and cmd != "restore":
+    die("--force is only valid with restore", code=2)
+if cmd == "add" and len(rest) == 1:
+    cmd_add(rest[0])
+elif cmd == "remove" and len(rest) == 1:
+    cmd_remove(rest[0])
+elif cmd == "restore" and not rest:
+    cmd_restore()
+elif cmd == "status" and not rest:
+    cmd_status()
+else:
+    die("bad arguments. usage: add <checkout> | remove <checkout|name> | restore [--force] | status", code=2)
+PY
