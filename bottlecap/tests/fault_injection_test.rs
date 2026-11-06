@@ -10,10 +10,9 @@
 )]
 
 //! Fault-injection contract tests: the real `bottlecap` binary against a fake
-//! Extensions API and an intake that misbehaves (T1 to T4, T7, T8 of the
-//! review's test plan). Each test asserts what Lambda or the customer would
-//! observe: the Invoke phase ends before the deadline, data is redriven after
-//! the fault clears, nothing panics, memory stays bounded.
+//! Extensions API and an intake that misbehaves. Each test asserts what Lambda
+//! or the customer would observe: the Invoke phase ends before the deadline,
+//! the faulted request reaches the intake, and nothing panics.
 
 mod fixtures;
 #[path = "common/harness.rs"]
