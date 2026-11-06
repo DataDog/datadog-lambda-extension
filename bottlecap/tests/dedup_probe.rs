@@ -1,21 +1,21 @@
 // Copyright 2023-Present Datadog, Inc. https://www.datadoghq.com/
 // SPDX-License-Identifier: Apache-2.0
 
-//! Real-intake dedup probe (investigation doc step 2b).
+//! Real-intake dedup probe, with manual metrics readback.
 //!
-//! Sends synthetic stats payloads to Datadog's real intake and reads the
-//! resulting hits back through the metrics API to answer: does the intake
-//! deduplicate retried `POST /api/v0.2/stats` requests?
-//!
-//! Three arms (all sends fire within one 10s bucket window to rule out
-//! late-bucket drops):
+//! Sends synthetic stats payloads to Datadog's real intake to investigate
+//! deduplication of retried `POST /api/v0.2/stats` requests. It verifies HTTP
+//! acknowledgements, not resulting hit counts; poll the printed metrics query
+//! separately. The three arms share a bucket timestamp, but network delays can
+//! cross bucket boundaries and must be considered when interpreting results.
+//! Arms use distinct runtime identities to avoid cross-arm deduplication.
 //!
 //! - control: 3 payloads with distinct resource names -> 3 series x k hits
 //!   proves ingestion and readback work; without it a null result is
 //!   uninterpretable
 //! - test: 3 byte-identical payloads -> 1 series, 3xk hits if no dedup
 //! - sequence variant: 3 payloads identical except incrementing `sequence`
-//!   -> identifies the dedup identity if the test arm collapses
+//!   -> tests whether changing sequence affects the observed hit count
 //!
 //! Run with:
 //!   DEDUP_PROBE_API_KEY=... cargo test --test dedup_probe -- --ignored --nocapture
@@ -37,25 +37,30 @@ const N: u64 = 3;
 fn hex_id(len: usize) -> String {
     use rand::Rng;
     let mut rng = rand::thread_rng();
-    (0..len).map(|_| format!("{:x}", rng.r#gen::<u8>() & 0xf)).collect()
+    (0..len)
+        .map(|_| format!("{:x}", rng.r#gen::<u8>() & 0xf))
+        .collect()
 }
 
 /// Build one ClientStatsPayload. `resource` and `sequence` are the per-arm
-/// knobs; everything else is identical across arms.
-fn synthetic_payload(service: &str, resource: &str, sequence: u64, bucket_start_ns: u64) -> pb::ClientStatsPayload {
+/// knobs; runtime identity is held fixed within each retry or sequence arm.
+fn synthetic_payload(
+    service: &str,
+    runtime_id: &str,
+    resource: &str,
+    sequence: u64,
+    bucket_start_ns: u64,
+) -> pb::ClientStatsPayload {
     pb::ClientStatsPayload {
         hostname: String::new(),
         env: "dedup-probe".to_string(),
         version: "probe".to_string(),
         lang: "rust-probe".to_string(),
         tracer_version: "probe".to_string(),
-        runtime_id: format!("probe-{}", hex_id(16)),
+        runtime_id: runtime_id.to_string(),
         sequence,
         service: service.to_string(),
-        ..pb::ClientStatsPayload::default()
-    }
-    .tap(|p| {
-        p.stats.push(pb::ClientStatsBucket {
+        stats: vec![pb::ClientStatsBucket {
             start: bucket_start_ns,
             duration: 10_000_000_000,
             stats: vec![pb::ClientGroupedStats {
@@ -71,20 +76,22 @@ fn synthetic_payload(service: &str, resource: &str, sequence: u64, bucket_start_
                 ..pb::ClientGroupedStats::default()
             }],
             ..pb::ClientStatsBucket::default()
-        });
-    })
-}
-
-// Tiny extension trait so the payload build stays linear above.
-trait Tap: Sized {
-    fn tap<F: FnOnce(&mut Self)>(mut self, f: F) -> Self {
-        f(&mut self);
-        self
+        }],
+        ..pb::ClientStatsPayload::default()
     }
 }
-impl<T> Tap for T {}
 
-async fn send(api_key: &str, bytes: Vec<u8>, label: &str) -> u16 {
+#[test]
+fn sequence_variants_only_change_sequence() {
+    let first = synthetic_payload("service", "runtime", "resource", 1, 0);
+    let mut second = synthetic_payload("service", "runtime", "resource", 2, 0);
+    assert_eq!(first.runtime_id, second.runtime_id);
+    assert_ne!(first.sequence, second.sequence);
+    second.sequence = first.sequence;
+    assert_eq!(first, second);
+}
+
+async fn send(api_key: &str, bytes: Vec<u8>, label: &str) {
     let client = reqwest::Client::new();
     let resp = client
         .post(SITE_TRACE_INTAKE)
@@ -97,18 +104,22 @@ async fn send(api_key: &str, bytes: Vec<u8>, label: &str) -> u16 {
         .await
         .expect("probe: send failed");
     let status = resp.status();
-    let body = resp.text().await.unwrap_or_default();
-    println!("{label}: status={status} body={}", &body[..body.len().min(200)]);
+    println!("{label}: status={status}");
     assert!(
         status.as_u16() == 202,
         "{label}: real intake did not acknowledge (status {status}); this send is not part of the test"
     );
-    status.as_u16()
 }
 
 /// Bucket start truncated to the current 10s boundary in nanoseconds.
 fn current_bucket_start_ns() -> u64 {
-    let now_ns = SystemTime::now().duration_since(UNIX_EPOCH).expect("clock").as_nanos() as u64;
+    let now_ns = u64::try_from(
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("clock")
+            .as_nanos(),
+    )
+    .expect("timestamp must fit in u64");
     now_ns - (now_ns % 10_000_000_000)
 }
 
@@ -119,29 +130,48 @@ async fn real_intake_dedup_probe() {
     assert!(!api_key.is_empty(), "DEDUP_PROBE_API_KEY is empty");
 
     let service = format!("dedup-probe-{}", hex_id(12));
+    let runtime_id = format!("probe-{}", hex_id(16));
     let bucket_start = current_bucket_start_ns();
     println!("probe service: {service}");
     println!("bucket start (ns): {bucket_start}");
 
-    // Serialize all payloads up front. The test and sequence arms re-send
-    // byte-identical bytes from the same buffer, exactly like the flusher's
-    // retry loop does.
+    // Serialize up front. Only the identical-retry arm reuses the same bytes;
+    // the sequence arm changes sequence while holding runtime identity fixed.
     let control_payloads: Vec<Vec<u8>> = (1..=N)
         .map(|i| {
             stats_utils::serialize_stats_payload(stats_utils::construct_stats_payload(vec![
-                synthetic_payload(&service, &format!("control-{i}"), 1, bucket_start),
+                synthetic_payload(
+                    &service,
+                    &format!("{runtime_id}-control-{i}"),
+                    &format!("control-{i}"),
+                    1,
+                    bucket_start,
+                ),
             ]))
             .expect("probe: serialize failed")
         })
         .collect();
-    let test_payload = stats_utils::serialize_stats_payload(stats_utils::construct_stats_payload(vec![
-        synthetic_payload(&service, "dedup-test", 1, bucket_start),
-    ]))
-    .expect("probe: serialize failed");
+    let test_payload =
+        stats_utils::serialize_stats_payload(stats_utils::construct_stats_payload(vec![
+            synthetic_payload(
+                &service,
+                &format!("{runtime_id}-retry"),
+                "dedup-test",
+                1,
+                bucket_start,
+            ),
+        ]))
+        .expect("probe: serialize failed");
     let seq_payloads: Vec<Vec<u8>> = (1..=N)
         .map(|s| {
             stats_utils::serialize_stats_payload(stats_utils::construct_stats_payload(vec![
-                synthetic_payload(&service, "dedup-seq", s, bucket_start),
+                synthetic_payload(
+                    &service,
+                    &format!("{runtime_id}-sequence"),
+                    "dedup-seq",
+                    s,
+                    bucket_start,
+                ),
             ]))
             .expect("probe: serialize failed")
         })
@@ -149,7 +179,12 @@ async fn real_intake_dedup_probe() {
 
     println!("\n=== control arm: 3 distinct resources, sent once each ===");
     for (i, payload) in control_payloads.iter().enumerate() {
-        send(&api_key, payload.clone(), &format!("control-{}/{}", i + 1, N)).await;
+        send(
+            &api_key,
+            payload.clone(),
+            &format!("control-{}/{}", i + 1, N),
+        )
+        .await;
     }
 
     println!("\n=== test arm: 3 byte-identical payloads ===");
@@ -159,17 +194,33 @@ async fn real_intake_dedup_probe() {
 
     println!("\n=== sequence arm: 3 payloads, incrementing sequence ===");
     for (i, payload) in seq_payloads.iter().enumerate() {
-        send(&api_key, payload.clone(), &format!("sequence-{}/{}", i + 1, N)).await;
+        send(
+            &api_key,
+            payload.clone(),
+            &format!("sequence-{}/{}", i + 1, N),
+        )
+        .await;
     }
 
     println!("\nReadback (poll, do not single-shot; lag is minutes):");
-    println!("  query: sum:trace.probe.request.hits{{service:{service}}}");
+    println!(
+        "  query: sum:trace.probe.request.hits{{service:{service}}} by {{resource_name}}.as_count()"
+    );
     println!("  expectations if no dedup:");
     println!("    control-1..3 series: {HITS_PER_PAYLOAD} each");
-    println!("    dedup-test series:   {} (3x{HITS_PER_PAYLOAD})", HITS_PER_PAYLOAD * N);
-    println!("    dedup-seq series:    {} (3x{HITS_PER_PAYLOAD})", HITS_PER_PAYLOAD * N);
-    println!("  expectations if content-identity dedup:");
-    println!("    dedup-test series:   {HITS_PER_PAYLOAD}; dedup-seq series: {} (sequence is the key)", HITS_PER_PAYLOAD * N);
-    println!("  expectations if sequence-identity dedup:");
-    println!("    both test and seq series: {HITS_PER_PAYLOAD}");
+    println!(
+        "    dedup-test series:   {} (3x{HITS_PER_PAYLOAD})",
+        HITS_PER_PAYLOAD * N
+    );
+    println!(
+        "    dedup-seq series:    {} (3x{HITS_PER_PAYLOAD})",
+        HITS_PER_PAYLOAD * N
+    );
+    println!("  dedup-test = {HITS_PER_PAYLOAD}: identical retries collapsed");
+    println!(
+        "  dedup-seq = {}: changing sequence avoided that collapse",
+        HITS_PER_PAYLOAD * N
+    );
+    println!("  dedup-seq = {HITS_PER_PAYLOAD}: changing sequence did not avoid collapse");
+    println!("  Interpret only after all three controls appear with {HITS_PER_PAYLOAD} hits each.");
 }
