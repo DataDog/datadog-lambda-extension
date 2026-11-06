@@ -6,8 +6,8 @@
 //! A Datadog intake that misbehaves on demand.
 //!
 //! Plain HTTP/1.1 on a random local port (set `DD_HTTP_PROTOCOL=http1` on the
-//! extension). Every request is recorded with its path, size, headers and
-//! the mode that answered it; an upload that breaks off is not recorded and
+//! extension). Every request is recorded with its path, size, headers, arrival
+//! time and the mode that answered it; an upload that breaks off is not recorded and
 //! gets no answer. The fault mode can change at runtime, and one
 //! path can get its own mode (for example `/credentials`, for a secret fetch).
 //!
@@ -21,9 +21,10 @@ use std::convert::Infallible;
 use std::net::SocketAddr;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use bytes::Bytes;
+use datadog_protos::metrics::{MetricPayload, SketchPayload};
 use futures::stream;
 use http_body_util::{BodyExt, Full, StreamBody, combinators::BoxBody};
 use hyper::body::{Frame, Incoming};
@@ -31,6 +32,9 @@ use hyper::server::conn::http1;
 use hyper::service::service_fn;
 use hyper::{Request, Response, StatusCode};
 use hyper_util::rt::TokioIo;
+use libdd_trace_protobuf::pb;
+use prost::Message as _;
+use protobuf::Message as _;
 use tokio::net::{TcpListener, TcpSocket, TcpStream};
 use tokio::task::JoinHandle;
 
@@ -74,6 +78,8 @@ pub struct IntakeRequest {
     pub headers: HashMap<String, String>,
     pub body_len: usize,
     pub body: Vec<u8>,
+    /// When the intake had the whole body (the head, for `Blackhole`).
+    pub at: Instant,
     /// Mode in force when it was answered.
     pub mode: String,
     pub status: u16,
@@ -110,6 +116,37 @@ impl IntakeRequest {
     pub fn body_text(&self) -> Result<String, String> {
         self.decoded_body()
             .map(|b| String::from_utf8_lossy(&b).into_owned())
+    }
+
+    /// Trace ID of every span in a `/api/v0.2/traces` body (`AgentPayload`).
+    pub fn trace_ids(&self) -> Result<Vec<u64>, String> {
+        let payload = pb::AgentPayload::decode(self.decoded_body()?.as_slice()).map_err(|e| {
+            format!(
+                "{} {}: undecodable AgentPayload: {e}",
+                self.method, self.path
+            )
+        })?;
+        Ok(payload
+            .tracer_payloads
+            .iter()
+            .flat_map(|t| &t.chunks)
+            .flat_map(|c| &c.spans)
+            .map(|span| span.trace_id)
+            .collect())
+    }
+
+    /// Metric name of every sketch or series in a `/api/beta/sketches` or
+    /// `/api/v2/series` body.
+    pub fn metric_names(&self) -> Result<Vec<String>, String> {
+        let body = self.decoded_body()?;
+        let names = match self.path.as_str() {
+            "/api/beta/sketches" => SketchPayload::parse_from_bytes(&body)
+                .map(|p| p.sketches.iter().map(|m| m.metric.to_string()).collect()),
+            "/api/v2/series" => MetricPayload::parse_from_bytes(&body)
+                .map(|p| p.series.iter().map(|m| m.metric.to_string()).collect()),
+            _ => return Err(format!("{} {}: not a metrics path", self.method, self.path)),
+        };
+        names.map_err(|e| format!("{} {}: undecodable metrics: {e}", self.method, self.path))
     }
 }
 
@@ -267,28 +304,35 @@ impl FaultIntake {
             .join("\n")
     }
 
-    /// Wait until `n` requests match `pred`. Returns whether it happened within `budget`.
+    /// Wait until `n` requests that match `pred` arrived by `deadline`. A
+    /// request that came late counts as missed even when the wait starts after it.
     pub async fn wait_for(
         &self,
         n: usize,
         pred: impl Fn(&IntakeRequest) -> bool,
-        budget: Duration,
+        deadline: Instant,
     ) -> bool {
-        let start = std::time::Instant::now();
         loop {
-            if self.requests().iter().filter(|r| pred(r)).count() >= n {
+            let now = Instant::now();
+            let matched = self
+                .requests()
+                .iter()
+                .filter(|r| r.at <= deadline && pred(r))
+                .count();
+            if matched >= n {
                 return true;
             }
-            if start.elapsed() > budget {
+            if now > deadline {
                 return false;
             }
             tokio::time::sleep(Duration::from_millis(20)).await;
         }
     }
 
-    /// Wait until `n` requests to a path containing `needle` arrived.
-    pub async fn wait_for_path(&self, needle: &str, n: usize, budget: Duration) -> bool {
-        self.wait_for(n, |r| r.path.contains(needle), budget).await
+    /// Wait until `n` requests to a path containing `needle` arrived by `deadline`.
+    pub async fn wait_for_path(&self, needle: &str, n: usize, deadline: Instant) -> bool {
+        self.wait_for(n, |r| r.path.contains(needle), deadline)
+            .await
     }
 }
 
@@ -334,24 +378,39 @@ async fn handle(
         })
         .collect();
     let mode = effective_mode(&shared, &path);
+    let mut request = IntakeRequest {
+        method,
+        path,
+        headers,
+        body_len: 0,
+        body: Vec::new(),
+        at: Instant::now(),
+        mode: mode.name(),
+        status: 0,
+    };
     if mode == FaultMode::Blackhole {
         // Reached when a path has its own mode, or the mode changed on an open
         // connection: record the head, never read the body, hold the connection.
-        record(&shared, &method, &path, headers, Vec::new(), &mode, 0);
+        record(&shared, request);
         match std::future::pending::<Infallible>().await {}
     }
-    let body = match req.into_body().collect().await {
+    request.body = match req.into_body().collect().await {
         Ok(c) => c.to_bytes().to_vec(),
         Err(e) => {
             // The upload broke off, so the intake never received it: record
             // nothing and close the connection without an answer.
-            eprintln!("fault intake: incomplete {method} {path}: {e}");
+            eprintln!(
+                "fault intake: incomplete {} {}: {e}",
+                request.method, request.path
+            );
             return Err(e);
         }
     };
+    request.body_len = request.body.len();
+    request.at = Instant::now();
     let reject_over = *shared.reject_over.lock().expect("reject lock");
 
-    let (status, response) = if reject_over.is_some_and(|max| body.len() > max) {
+    let (status, response) = if reject_over.is_some_and(|max| request.body_len > max) {
         (
             413,
             status_response(413, "fault:413 payload too large".into()),
@@ -363,7 +422,7 @@ async fn handle(
                     .ok_bodies
                     .lock()
                     .expect("ok bodies lock")
-                    .get(&path)
+                    .get(&request.path)
                     .cloned()
                     .unwrap_or_else(|| "{}".to_string());
                 (
@@ -405,32 +464,13 @@ async fn handle(
             }
         }
     };
-    record(&shared, &method, &path, headers, body, &mode, status);
+    request.status = status;
+    record(&shared, request);
     Ok(response)
 }
 
-fn record(
-    shared: &Shared,
-    method: &str,
-    path: &str,
-    headers: HashMap<String, String>,
-    body: Vec<u8>,
-    mode: &FaultMode,
-    status: u16,
-) {
-    shared
-        .requests
-        .lock()
-        .expect("requests lock")
-        .push(IntakeRequest {
-            method: method.to_string(),
-            path: path.to_string(),
-            headers,
-            body_len: body.len(),
-            body,
-            mode: mode.name(),
-            status,
-        });
+fn record(shared: &Shared, request: IntakeRequest) {
+    shared.requests.lock().expect("requests lock").push(request);
 }
 
 /// A listener whose accept queue is full, so new connections never complete

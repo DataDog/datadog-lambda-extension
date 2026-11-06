@@ -46,19 +46,16 @@ async fn run_with_port_held(
     .unwrap_or_else(|| panic!("could not hold port {port}"));
     let mut bc = s.bottlecap().envs(extra_env.iter().copied()).spawn();
 
-    let reached_next = s.wait_next_or_exit(&mut bc, 1, STARTUP_BUDGET).await;
+    let startup_deadline = bc.startup_deadline();
+    let reached_next = s.wait_next_or_exit(&mut bc, 1, startup_deadline).await;
     let reached_at = bc.uptime();
     let telemetry_possible =
         port != TELEMETRY_PORT || s.api.telemetry_port() != Some(TELEMETRY_PORT);
-    let mut flushed = false;
+    let mut ended = false;
     if reached_next && telemetry_possible {
-        let invoked = Instant::now();
-        s.api.push_invoke("req-1", INVOKE_DEADLINE);
+        let deadline = s.api.push_invoke("req-1", INVOKE_DEADLINE);
         if deliver_runtime_done(&s.api, "req-1", true).await.is_ok() {
-            flushed = s
-                .api
-                .wait_for_next_calls(2, invoked + INVOKE_DEADLINE)
-                .await;
+            ended = s.api.wait_for_next_calls(2, deadline).await;
         }
     }
     let exit = s.shutdown(&mut bc).await;
@@ -66,7 +63,7 @@ async fn run_with_port_held(
     // for the process's whole life.
     drop(guard);
     eprintln!(
-        "port {port} held: /next at {reached_at:?}, telemetry possible={telemetry_possible}, invocation flushed={flushed}, exit {exit:?} at {:?}, intake requests={}",
+        "port {port} held: /next at {reached_at:?}, telemetry possible={telemetry_possible}, invocation ended={ended}, exit {exit:?} at {:?}, intake requests={}",
         bc.uptime(),
         s.intake.requests().len()
     );
@@ -79,7 +76,7 @@ async fn run_with_port_held(
         bc.log_tail(40)
     );
     assert!(
-        flushed || !telemetry_possible,
+        ended || !telemetry_possible,
         "with port {port} held, the invocation did not end within its {INVOKE_DEADLINE:?} deadline. API: {:?}\n{}",
         s.api.request_lines(),
         bc.log_tail(40)

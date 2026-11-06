@@ -34,12 +34,10 @@ async fn invoke_then_shutdown_exits_cleanly() {
     let s = Scenario::start(FaultMode::Ok).await;
     let mut bc = s.bottlecap().spawn();
 
-    assert!(
-        s.invoke("req-1", INVOKE_DEADLINE, 1).await,
-        "no /next poll. {}",
-        bc.log_tail(40)
-    );
-    let invoked = Instant::now();
+    let deadline = s
+        .invoke("req-1", INVOKE_DEADLINE, 1, bc.startup_deadline())
+        .await
+        .unwrap_or_else(|| panic!("no /next poll. {}", bc.log_tail(40)));
     // Lambda sends `platform.initStart` on a cold start. Until it arrives the
     // extension holds logs, as it cannot yet tell a durable function.
     s.api
@@ -54,9 +52,7 @@ async fn invoke_then_shutdown_exits_cleanly() {
         .unwrap();
     deliver_runtime_done(&s.api, "req-1", true).await.unwrap();
     assert!(
-        s.api
-            .wait_for_next_calls(2, invoked + INVOKE_DEADLINE)
-            .await,
+        s.api.wait_for_next_calls(2, deadline).await,
         "no second /next within the {INVOKE_DEADLINE:?} invoke deadline. {}",
         bc.log_tail(40)
     );
@@ -69,8 +65,13 @@ async fn invoke_then_shutdown_exits_cleanly() {
         s.intake.requests_to("/api/v2/series"),
     ]
     .concat();
-    let metrics_keyed =
-        !metrics.is_empty() && metrics.iter().all(|r| r.api_key() == Some(TEST_API_KEY));
+    let metrics_keyed = metrics.iter().all(|r| r.api_key() == Some(TEST_API_KEY));
+    let invocations_flushed = metrics.iter().any(|r| {
+        r.metric_names()
+            .unwrap()
+            .iter()
+            .any(|n| n == INVOCATIONS_METRIC)
+    });
     let log_flushed = s.intake.requests_to("/api/v2/logs").iter().any(|r| {
         r.api_key() == Some(TEST_API_KEY)
             && r.body_text().unwrap().contains("hello from the function")
@@ -80,8 +81,13 @@ async fn invoke_then_shutdown_exits_cleanly() {
     // The end-of-invocation flush reached the intake, each payload with the
     // configured key.
     assert!(
+        invocations_flushed,
+        "no {INVOCATIONS_METRIC} flushed before SHUTDOWN. Intake:\n{}",
+        s.intake.summary()
+    );
+    assert!(
         metrics_keyed,
-        "no metrics flushed before SHUTDOWN, or one without the API key. Intake:\n{}",
+        "a metrics payload without the API key. Intake:\n{}",
         s.intake.summary()
     );
     assert!(

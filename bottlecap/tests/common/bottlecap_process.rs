@@ -150,6 +150,7 @@ impl<'api> BottlecapBuilder<'api> {
         for (k, v) in &self.env {
             cmd.env(k, v);
         }
+        let started = Instant::now();
         let child = cmd
             .stdin(Stdio::null())
             .stdout(Stdio::from(stdout))
@@ -159,7 +160,7 @@ impl<'api> BottlecapBuilder<'api> {
         BottlecapProcess {
             pid: child.id(),
             child,
-            started: Instant::now(),
+            started,
             stdout_path,
             stderr_path,
             _task_root: self.task_root,
@@ -170,6 +171,7 @@ impl<'api> BottlecapBuilder<'api> {
 pub struct BottlecapProcess {
     pub pid: u32,
     child: Child,
+    /// Taken before the spawn, so a startup deadline counts from it.
     pub started: Instant,
     stdout_path: PathBuf,
     stderr_path: PathBuf,
@@ -183,6 +185,11 @@ impl BottlecapProcess {
 
     pub fn uptime(&self) -> Duration {
         self.started.elapsed()
+    }
+
+    /// When the first `/next` must have arrived: [`STARTUP_BUDGET`] after the spawn.
+    pub fn startup_deadline(&self) -> Instant {
+        self.started + STARTUP_BUDGET
     }
 
     /// Exit status if the process already exited.

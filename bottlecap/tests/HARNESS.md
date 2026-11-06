@@ -44,11 +44,11 @@ use harness::prelude::*;
 async fn my_fault() {
     let s = Scenario::start(FaultMode::Ok).await;          // fake API + intake, fixed ports checked
     let mut bc = s.bottlecap().spawn();                     // real binary, base env points at the fakes
-    assert!(s.invoke("req-1", secs(10), 1).await);          // wait for /next #1, answer with INVOKE
-    let invoked = Instant::now();                           // the invoke deadline runs from here
+    let startup = bc.startup_deadline();                    // /next #1 must arrive by it
+    let deadline = s.invoke("req-1", secs(10), 1, startup).await.unwrap(); // answer it with an INVOKE
     s.intake.set_mode(FaultMode::Status(503));              // the fault
     deliver_runtime_done(&s.api, "req-1", true).await.unwrap();
-    let deadline = invoked + secs(10);                      // /next #2 must arrive by it
+    // /next #2 must arrive by the INVOKE's deadline, counted from before it was queued
     assert!(s.api.wait_for_next_calls(2, deadline).await, "{}", bc.log_tail(40));
     s.shutdown_cleanly(&mut bc).await;                      // SHUTDOWN, exit 0 within 2 s, no panic
 }
@@ -65,11 +65,14 @@ async fn my_fault() {
   that the contract holds.
 - Bound a flush by the invocation or shutdown deadline, not by a number from
   an implementation.
+- Count every deadline from the instant its event was queued: use the `Instant` that `invoke`, `push_invoke` or `push_shutdown` returns, and `bc.startup_deadline()` for the first `/next`.
+- Match decoded content in every data assertion (the log text in `body_text()`, a name in `metric_names()`, an ID in `trace_ids()`), not only a path, status, size or API key; a check that only counts requests says why in a comment.
 - Always check `bc.assert_no_panic()` (or use `shutdown_cleanly`). Dev builds
   unwind and keep running, release builds abort; both print `panicked at`.
 - Check memory growth only on Linux (`BottlecapProcess::can_measure_memory()`).
 - Send `platform_init_start()` once per cold start, as Lambda does, in a test
-  that checks logs: until it arrives the extension holds every log.
+  that checks logs or the invocation metric: until it arrives the extension
+  holds every log and the cold start's `aws.lambda.enhanced.invocations`.
 - Every spawning test carries `#[serial_test::serial(bottlecap_ports)]`: the
   binary binds fixed ports, and plain `cargo test` runs tests in parallel. New
   test binaries must also match the regex in `.config/nextest.toml`.
@@ -79,8 +82,8 @@ async fn my_fault() {
 
 ## API summary
 
-- `FakeExtensionsApi`: `push_invoke(id, deadline_in)`, `push_shutdown(reason, deadline_in)`,
-  `next_calls()`, `next_call_at(n)`, `wait_for_next_calls(n, deadline)` (true only when `/next` call `n` arrived by
+- `FakeExtensionsApi`: `push_invoke(id, deadline_in)`, `push_shutdown(reason, deadline_in)` (each
+  returns the event's deadline as an `Instant`, taken before the event is queued), `next_calls()`, `next_call_at(n)`, `wait_for_next_calls(n, deadline)` (true only when `/next` call `n` arrived by
   the `Instant`), `set_subscribe_status(StatusCode)`, `request_lines()`,
   `send_telemetry(&[Value], budget)`, `send_telemetry_raw(Vec<u8>, budget)`, `telemetry_port()`
   (from the last accepted subscribe body, `None` before one; `send_telemetry` fails without it,
@@ -106,20 +109,25 @@ async fn my_fault() {
   recorded and gets no answer.
   `set_mode`, `set_path_mode(path, mode)`, `clear_path_mode`, `set_reject_over(Some(bytes))`,
   `set_ok_body(path, body)`; `requests()`, `requests_to`, `count`, `connections()`, `summary()`,
-  `wait_for(n, pred, budget)`, `wait_for_path`; `IntakeRequest::api_key()`, `decoded_body()`
-  and `body_text()` (`Err` when the body does not decode). `SynBlackhole::start()` (backlog 1,
+  `wait_for(n, pred, deadline)` (true only when `n` matching requests arrived by the `Instant`),
+  `wait_for_path`; `IntakeRequest::at` (arrival), `api_key()`, `decoded_body()`, `body_text()`,
+  `trace_ids()` (every span's trace ID in an `AgentPayload`) and `metric_names()` (a sketches or
+  series payload), each `Err` when the body does not decode. `SynBlackhole::start()` (backlog 1,
   queue pre-filled), `is_saturated()`.
 - `BottlecapProcess`: `scenario.bottlecap()` then `.intake(url)`, `.env`, `.envs`, `.remove_env`,
   `.managed_instance()` (also switches the fake API to its rules), `.flush_strategy(s)`,
   `.secret_from(credentials_url)`, `.spawn()`; `wait_for_exit(budget)` (kills on timeout),
   `is_running()`, `kill()`, `stdout()`, `stderr()`, `log_tail(n)`, `log_contains`, `panic_lines()`,
-  `assert_no_panic()`, `rss_kb()`, `hwm_kb()`, `cpu_ms()`, `uptime()`; `STARTUP_BUDGET`,
+  `assert_no_panic()`, `rss_kb()`, `hwm_kb()`, `cpu_ms()`, `uptime()`, `startup_deadline()`
+  (`STARTUP_BUDGET` from before the spawn); `STARTUP_BUDGET`,
   `EXIT_BUDGET`, `TEST_API_KEY`.
-- `Scenario`: `start(mode)`, `bottlecap()`, `invoke(id, deadline, poll)` (waits for the poll,
-  then answers it), `wait_next_or_exit`, `shutdown(&mut bc)` (asserts the process is still
+- `Scenario`: `start(mode)`, `bottlecap()`, `invoke(id, deadline_in, poll, poll_by)` (waits for
+  the poll by `poll_by`, then answers it; returns the INVOKE's deadline, `None` when the poll
+  missed `poll_by`), `wait_next_or_exit(bc, n, deadline)`, `shutdown(&mut bc)` (asserts the process is still
   running when SHUTDOWN is queued and exits within the 2 s SHUTDOWN deadline),
   `shutdown_cleanly(&mut bc)` (also asserts exit 0 and no panic).
   Helpers: `deliver_runtime_done`, `msgpack_trace(trace_id, meta_bytes)`, `post_trace` (to 8126),
+  `INVOCATIONS_METRIC`,
   `incompressible_text`, `secs`, `ms`. Records: `platform_init_start`, `platform_start`,
   `platform_runtime_done(id, status, with_metrics)`, `platform_report`, `function_log`,
   `platform_logs_dropped`, `unknown_event`; larger bodies come from `fixtures::telemetry`.

@@ -183,12 +183,19 @@ impl FakeExtensionsApi {
         self.shared.next_notify.notify_one();
     }
 
-    pub fn push_invoke(&self, request_id: &str, deadline_in: Duration) {
+    /// Queue an INVOKE whose `deadlineMs` is `deadline_in` from now. Returns
+    /// that deadline, taken before the event is queued.
+    pub fn push_invoke(&self, request_id: &str, deadline_in: Duration) -> Instant {
+        let deadline = Instant::now() + deadline_in;
         self.push_next(invoke_event(request_id, deadline_in));
+        deadline
     }
 
-    pub fn push_shutdown(&self, reason: &str, deadline_in: Duration) {
+    /// Queue a SHUTDOWN, and return its deadline as `push_invoke` does.
+    pub fn push_shutdown(&self, reason: &str, deadline_in: Duration) -> Instant {
+        let deadline = Instant::now() + deadline_in;
         self.push_next(shutdown_event(reason, deadline_in));
+        deadline
     }
 
     /// Number of `/next` calls that arrived so far.
