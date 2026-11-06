@@ -95,6 +95,51 @@ bottlecap ({{ $flavor.name }}):
   script:
     - .gitlab/scripts/compile_bottlecap.sh
 
+{{ if index $flavor "keep_symbols" }}
+# Per-commit release binaries for analysis. Runs on main and tags (manual elsewhere),
+# never blocks the pipeline. Bundles the shipped stripped binary from
+# `bottlecap ({{ $flavor.name }})` with a second compile that keeps the symbol table,
+# under one artifact named after the commit, kept for 90 days. The shipped layer does not change.
+#   latest main: $CI_API_V4_URL/projects/$CI_PROJECT_ID/jobs/artifacts/main/raw/.binaries/bottlecap-{{ $flavor.suffix }}-unstripped?job=bottlecap+symbols+({{ $flavor.name }})
+bottlecap symbols ({{ $flavor.name }}):
+  stage: compile
+  image: registry.ddbuild.io/images/docker:20.10
+  tags: ["arch:{{ $flavor.arch }}"]
+  rules:
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
+      allow_failure: true
+    - if: '$CI_COMMIT_TAG'
+      allow_failure: true
+    - when: manual
+      allow_failure: true
+  needs:
+    - bottlecap ({{ $flavor.name }})
+  timeout: 20m
+  retry:
+    max: 2
+    when:
+      - stuck_or_timeout_failure
+      - runner_system_failure
+  artifacts:
+    name: bottlecap-{{ $flavor.suffix }}-${CI_COMMIT_SHORT_SHA}
+    expire_in: 90 days
+    paths:
+      - .binaries/bottlecap-{{ $flavor.suffix }}
+      - .binaries/bottlecap-{{ $flavor.suffix }}-unstripped
+      - .binaries/bottlecap-{{ $flavor.suffix }}.build-info
+  variables:
+    ARCHITECTURE: {{ $flavor.arch }}
+    ALPINE: {{ $flavor.alpine }}
+    FIPS: {{ $flavor.fips }}
+    FILE_SUFFIX: {{ $flavor.suffix }}
+    KEEP_SYMBOLS: "1"
+  script:
+    - .gitlab/scripts/compile_bottlecap.sh
+    - printf 'commit=%s\nref=%s\npipeline=%s\njob=%s\n' "$CI_COMMIT_SHA" "$CI_COMMIT_REF_NAME" "$CI_PIPELINE_URL" "$CI_JOB_URL" > .binaries/bottlecap-{{ $flavor.suffix }}.build-info
+    - ls -la .binaries/
+    - echo "unstripped binary for ${CI_COMMIT_SHA}:" "${CI_JOB_URL}/artifacts/raw/.binaries/bottlecap-{{ $flavor.suffix }}-unstripped"
+{{ end }}{{/* end keep_symbols */}}
+
 layer ({{ $flavor.name }}):
   stage: build
   image: registry.ddbuild.io/images/docker:20.10
