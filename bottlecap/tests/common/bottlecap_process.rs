@@ -34,15 +34,16 @@ pub const TEST_API_KEY: &str = "0000000000000000000000000000000a";
 
 const BINARY: &str = env!("CARGO_BIN_EXE_bottlecap");
 
-pub struct BottlecapBuilder {
+pub struct BottlecapBuilder<'api> {
+    api: &'api FakeExtensionsApi,
     env: BTreeMap<String, String>,
     task_root: tempfile::TempDir,
 }
 
-impl BottlecapBuilder {
+impl<'api> BottlecapBuilder<'api> {
     /// Base env for a process that talks to `api`. Every intake URL points at
     /// `api` too, until [`intake`](Self::intake) replaces them.
-    pub fn new(api: &FakeExtensionsApi) -> Self {
+    pub fn new(api: &'api FakeExtensionsApi) -> Self {
         let task_root = tempfile::tempdir().expect("tempdir");
         let mut env = BTreeMap::new();
         let set = |env: &mut BTreeMap<String, String>, k: &str, v: &str| {
@@ -69,7 +70,11 @@ impl BottlecapBuilder {
         // port so they fail at once instead of reaching the network; the http
         // intake URLs bypass an https-only proxy.
         set(&mut env, "DD_PROXY_HTTPS", CLOSED_PORT_URL);
-        let mut builder = Self { env, task_root };
+        let mut builder = Self {
+            api,
+            env,
+            task_root,
+        };
         builder.set_intake(&api.base_url());
         builder
     }
@@ -108,8 +113,9 @@ impl BottlecapBuilder {
         self
     }
 
-    /// Lambda Managed Instances mode.
+    /// Lambda Managed Instances mode, for the process and the fake API.
     pub fn managed_instance(self) -> Self {
+        self.api.set_managed_instance();
         self.env("AWS_LAMBDA_INITIALIZATION_TYPE", "lambda-managed-instances")
     }
 
@@ -144,6 +150,7 @@ impl BottlecapBuilder {
         for (k, v) in &self.env {
             cmd.env(k, v);
         }
+        let started = Instant::now();
         let child = cmd
             .stdin(Stdio::null())
             .stdout(Stdio::from(stdout))
@@ -153,7 +160,8 @@ impl BottlecapBuilder {
         BottlecapProcess {
             pid: child.id(),
             child,
-            started: Instant::now(),
+            started,
+            seen_running: started,
             stdout_path,
             stderr_path,
             _task_root: self.task_root,
@@ -164,14 +172,17 @@ impl BottlecapBuilder {
 pub struct BottlecapProcess {
     pub pid: u32,
     child: Child,
+    /// Taken before the spawn, so a startup deadline counts from it.
     pub started: Instant,
+    /// See [`seen_running`](Self::seen_running).
+    seen_running: Instant,
     stdout_path: PathBuf,
     stderr_path: PathBuf,
     _task_root: tempfile::TempDir,
 }
 
 impl BottlecapProcess {
-    pub fn builder(api: &FakeExtensionsApi) -> BottlecapBuilder {
+    pub fn builder(api: &FakeExtensionsApi) -> BottlecapBuilder<'_> {
         BottlecapBuilder::new(api)
     }
 
@@ -179,9 +190,27 @@ impl BottlecapProcess {
         self.started.elapsed()
     }
 
+    /// When the first `/next` must have arrived: [`STARTUP_BUDGET`] after the spawn.
+    pub fn startup_deadline(&self) -> Instant {
+        self.started + STARTUP_BUDGET
+    }
+
     /// Exit status if the process already exited.
     pub fn try_exit(&mut self) -> Option<ExitStatus> {
-        self.child.try_wait().ok().flatten()
+        let polled = Instant::now();
+        let status = self.child.try_wait().ok().flatten();
+        if status.is_none() {
+            self.seen_running = polled;
+        }
+        status
+    }
+
+    /// Start of the last poll that found the process running (the spawn
+    /// before one). A process seen running after a deadline missed it; the
+    /// instant a wait returns does not prove that, as a slow test thread
+    /// delays it.
+    pub fn seen_running(&self) -> Instant {
+        self.seen_running
     }
 
     pub fn is_running(&mut self) -> bool {

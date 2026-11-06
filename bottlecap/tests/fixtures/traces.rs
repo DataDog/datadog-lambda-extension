@@ -7,21 +7,23 @@ use libdd_trace_protobuf::pb;
 use libdd_trace_utils::tracer_header_tags::TracerHeaderTags;
 use serde::Serialize;
 
-use crate::fixtures::telemetry::REQUEST_ID;
+use crate::fixtures::invocation::{
+    ENV, FUNCTION_NAME, HANDLER_MS, HANDLER_START_MS, REQUEST_ID, SERVICE, TRACER_INTERPRETER,
+    TRACER_LANG, TRACER_LANG_VERSION, TRACER_VERSION, VERSION, millis_to_ns,
+};
 
-/// Headers a Python tracer sends with the reference payload ([`v04_2000_spans`], 100 traces).
-/// Set `X-Datadog-Trace-Count` to the trace count when sending another payload.
+pub use crate::fixtures::invocation::BASE_NS;
+
+/// Headers the Node.js tracer sends with the reference payload ([`v04_2000_spans`], 100
+/// traces). Set `X-Datadog-Trace-Count` to the trace count when sending another payload.
 pub const TRACE_HEADERS: &[(&str, &str)] = &[
     ("Content-Type", "application/msgpack"),
-    ("Datadog-Meta-Lang", "python"),
-    ("Datadog-Meta-Lang-Version", "3.12"),
-    ("Datadog-Meta-Tracer-Version", "2.10.0"),
+    ("Datadog-Meta-Lang", TRACER_LANG),
+    ("Datadog-Meta-Lang-Version", TRACER_LANG_VERSION),
+    ("Datadog-Meta-Lang-Interpreter", TRACER_INTERPRETER),
+    ("Datadog-Meta-Tracer-Version", TRACER_VERSION),
     ("X-Datadog-Trace-Count", "100"),
 ];
-
-/// Fixed start time of the generated spans: 2026-10-27T12:00:00Z, the instant the log
-/// fixtures use. Fixed, so the encoded payload is the same on every run.
-pub const BASE_NS: i64 = 1_793_102_400_000_000_000;
 
 /// The current time, for consumers that drop old spans (the stats concentrator keeps a time
 /// window): `make_traces_at(now_ns(), ...)`.
@@ -37,22 +39,28 @@ pub fn now_ns() -> i64 {
 /// The tracer header tags that match [`TRACE_HEADERS`].
 pub fn header_tags() -> TracerHeaderTags<'static> {
     TracerHeaderTags {
-        lang: "python",
-        lang_version: "3.12",
-        tracer_version: "2.10.0",
+        lang: TRACER_LANG,
+        lang_version: TRACER_LANG_VERSION,
+        lang_interpreter: TRACER_INTERPRETER,
+        tracer_version: TRACER_VERSION,
         ..Default::default()
     }
 }
 
-/// `n_traces` traces of `spans_per_trace` spans each, starting at `base_ns`. Span 0 is the
-/// `aws.lambda` root; spans 1 to 4 are SQL clients when `with_sql` is set, else HTTP clients;
-/// spans 5 to 9 are HTTP clients; the rest are internal work. Trace ids start at 1_000_000.
+/// `n_traces` traces of `spans_per_trace` spans each, for the invocation that starts at
+/// `base_ns` (in place of [`BASE_NS`]). Every trace repeats the invocation's `aws.lambda`
+/// root, which spans the handler; the other spans start 1 µs apart and last 1 ms inside it.
+/// Spans 1 to 4 are SQL clients when `with_sql` is set, else HTTP clients; spans 5 to 9 are
+/// HTTP clients; the rest are internal work. Trace ids start at 1_000_000.
 pub fn make_traces_at(
     base_ns: i64,
     n_traces: usize,
     spans_per_trace: usize,
     with_sql: bool,
 ) -> Vec<Vec<pb::Span>> {
+    let root_start = base_ns + millis_to_ns(HANDLER_START_MS);
+    // The upper 64 bits of a 128-bit trace id start with the trace's start time in seconds.
+    let tid = format!("{:08x}00000000", root_start / 1_000_000_000);
     (0..n_traces)
         .map(|t| {
             let trace_id = 1_000_000 + t as u64;
@@ -64,7 +72,7 @@ pub fn make_traces_at(
                         match s {
                             0 => (
                                 "aws.lambda",
-                                "my-function",
+                                FUNCTION_NAME,
                                 "serverless",
                                 vec![
                                     ("span.kind", "server"),
@@ -101,12 +109,12 @@ pub fn make_traces_at(
                         };
                     let mut meta: HashMap<String, String> = [
                         ("runtime-id", "f45568ad09d5480b99087d86ebda26e6"),
-                        ("language", "python"),
+                        ("language", "javascript"),
                         ("_dd.p.dm", "-0"),
-                        ("_dd.p.tid", "66f1a2b300000000"),
-                        ("env", "prod"),
-                        ("version", "1.2.3"),
-                        ("component", "requests"),
+                        ("_dd.p.tid", tid.as_str()),
+                        ("env", ENV),
+                        ("version", VERSION),
+                        ("component", "http"),
                     ]
                     .into_iter()
                     .chain(extra)
@@ -123,15 +131,20 @@ pub fn make_traces_at(
                     if typ == "sql" || typ == "http" {
                         metrics.insert("_dd.measured".to_string(), 1.0);
                     }
+                    let (start, duration) = if s == 0 {
+                        (root_start, millis_to_ns(HANDLER_MS))
+                    } else {
+                        (root_start + (s as i64) * 1000, 1_000_000)
+                    };
                     pb::Span {
-                        service: "my-service".to_string(),
+                        service: SERVICE.to_string(),
                         name: name.to_string(),
                         resource: resource.to_string(),
                         trace_id,
                         span_id,
                         parent_id,
-                        start: base_ns + (s as i64) * 1000,
-                        duration: 1_000_000,
+                        start,
+                        duration,
                         error: 0,
                         meta,
                         metrics,
@@ -144,7 +157,7 @@ pub fn make_traces_at(
         .collect()
 }
 
-/// [`make_traces_at`] starting at [`BASE_NS`].
+/// [`make_traces_at`] for the shared invocation, at [`BASE_NS`].
 pub fn make_traces(n_traces: usize, spans_per_trace: usize, with_sql: bool) -> Vec<Vec<pb::Span>> {
     make_traces_at(BASE_NS, n_traces, spans_per_trace, with_sql)
 }

@@ -1,12 +1,13 @@
-//! Invocation payloads: the 38 trigger events in `tests/payloads/`, plus large generated
-//! SQS and DynamoDB events.
+//! Invocation payloads: the 38 trigger events in `tests/payloads/`, checked in with their own
+//! ids and times, plus large generated SQS and DynamoDB events in the region, account and time
+//! of the shared invocation.
 
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde_json::{Value, json};
 
-use crate::fixtures::traces::BASE_NS;
+use crate::fixtures::invocation::{ACCOUNT_ID, BASE_NS, FUNCTION_ARN, REGION, XRAY_TRACE_HEADER};
 
 fn payloads_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -46,9 +47,9 @@ pub fn all_payloads() -> Vec<(String, Value)> {
         .collect()
 }
 
-/// An SQS batch of `records` messages, each with a JSON array body of exactly `body_bytes`
-/// bytes (at least 2) and a `_datadog` message attribute carrying trace context. Sent at
-/// [`BASE_NS`].
+/// An SQS batch of `records` messages from a queue in the function's region and account, each
+/// with a JSON array body of exactly `body_bytes` bytes (at least 2) and a `_datadog` message
+/// attribute carrying the producer's trace context. Sent at [`BASE_NS`].
 pub fn sqs_event(records: usize, body_bytes: usize) -> Value {
     let mut body = String::from("[");
     for i in 0.. {
@@ -88,8 +89,8 @@ pub fn sqs_event(records: usize, body_bytes: usize) -> Value {
                 },
                 "md5OfBody": "e4e68fb7bd0e697a0ae8f1bb342846b3",
                 "eventSource": "aws:sqs",
-                "eventSourceARN": "arn:aws:sqs:us-east-1:123456789012:my-queue",
-                "awsRegion": "us-east-1"
+                "eventSourceARN": format!("arn:aws:sqs:{REGION}:{ACCOUNT_ID}:my-queue"),
+                "awsRegion": REGION
             })
         })
         .collect();
@@ -101,12 +102,15 @@ pub fn sqs_220kb() -> Value {
     sqs_event(10, 22_000)
 }
 
-/// A DynamoDB stream batch of `records` INSERT records with `attrs` attributes each, created
-/// at [`BASE_NS`].
+/// A DynamoDB stream batch of `records` INSERT records from a table in the function's region
+/// and account, created at [`BASE_NS`]. Each `NewImage` holds the `Id` key plus `attrs` other
+/// attributes.
 pub fn dynamodb_event(records: usize, attrs: usize) -> Value {
     let recs: Vec<Value> = (0..records)
         .map(|i| {
+            let key = json!({"N": (101 + i).to_string()});
             let mut img = serde_json::Map::new();
+            img.insert("Id".to_string(), key.clone());
             for a in 0..attrs {
                 img.insert(format!("attr{a}"), json!({"S": format!("value-{i}-{a}")}));
             }
@@ -115,16 +119,16 @@ pub fn dynamodb_event(records: usize, attrs: usize) -> Value {
                 "eventName": "INSERT",
                 "eventVersion": "1.1",
                 "eventSource": "aws:dynamodb",
-                "awsRegion": "us-east-1",
+                "awsRegion": REGION,
                 "dynamodb": {
                     "ApproximateCreationDateTime": BASE_NS / 1_000_000_000,
-                    "Keys": {"Id": {"N": "101"}},
+                    "Keys": {"Id": key},
                     "NewImage": Value::Object(img),
                     "SequenceNumber": format!("{i}00000000000000000"),
                     "SizeBytes": 26,
                     "StreamViewType": "NEW_AND_OLD_IMAGES"
                 },
-                "eventSourceARN": "arn:aws:dynamodb:us-east-1:123456789012:table/ExampleTableWithStream/stream/2015-06-27T00:48:05.899"
+                "eventSourceARN": format!("arn:aws:dynamodb:{REGION}:{ACCOUNT_ID}:table/ExampleTableWithStream/stream/2015-06-27T00:48:05.899")
             })
         })
         .collect();
@@ -150,11 +154,11 @@ pub fn lwa_next_headers(request_id: &str) -> Vec<(&'static str, String)> {
         ("lambda-runtime-deadline-ms", deadline_ms.to_string()),
         (
             "lambda-runtime-invoked-function-arn",
-            crate::fixtures::telemetry::FUNCTION_ARN.to_string(),
+            FUNCTION_ARN.to_string(),
         ),
         (
             "lambda-runtime-trace-id",
-            "Root=1-67d448e8-3ae320be0e2cdf2f53ccdaba;Lineage=1:73f724a8:0".to_string(),
+            format!("{XRAY_TRACE_HEADER};Lineage=1:73f724a8:0"),
         ),
     ]
 }

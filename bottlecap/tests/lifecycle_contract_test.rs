@@ -34,64 +34,58 @@ async fn invoke_then_shutdown_exits_cleanly() {
     let s = Scenario::start(FaultMode::Ok).await;
     let mut bc = s.bottlecap().spawn();
 
-    assert!(
-        s.invoke("req-1", INVOKE_DEADLINE, 1).await,
-        "no /next poll. {}",
-        bc.log_tail(40)
-    );
-    let invoked = Instant::now();
-    // Lambda sends `platform.initStart` on a cold start. Until it arrives the
-    // extension holds logs, as it cannot yet tell a durable function.
+    let deadline = s
+        .invoke("req-1", INVOKE_DEADLINE, 1, bc.startup_deadline())
+        .await
+        .unwrap_or_else(|| panic!("no /next poll. {}", bc.log_tail(40)));
+    deliver_start(&s.api, "req-1", true).await.unwrap();
     s.api
-        .send_telemetry(
-            &[
-                platform_init_start(),
-                function_log("hello from the function"),
-            ],
-            STARTUP_BUDGET,
-        )
+        .send_telemetry(&[function_log("hello from the function")], STARTUP_BUDGET)
         .await
         .unwrap();
     deliver_runtime_done(&s.api, "req-1", true).await.unwrap();
     assert!(
-        s.api
-            .wait_for_next_calls(2, INVOKE_DEADLINE.saturating_sub(invoked.elapsed()))
-            .await,
+        s.api.wait_for_next_calls(2, deadline).await,
         "no second /next within the {INVOKE_DEADLINE:?} invoke deadline. {}",
         bc.log_tail(40)
     );
 
     // Read the intake before SHUTDOWN: its final flush would hide a missing
     // end-of-invocation flush.
-    let with_key = s
-        .intake
-        .requests()
-        .iter()
-        .filter(|r| r.api_key() == Some(TEST_API_KEY))
-        .count();
     // Enhanced metrics are distributions, so they land on the sketches path.
-    let metrics = s.intake.count("/api/beta/sketches") + s.intake.count("/api/v2/series");
-    let log_flushed = s
-        .intake
-        .requests_to("/api/v2/logs")
-        .iter()
-        .any(|r| r.body_text().contains("hello from the function"));
+    let metrics = [
+        s.intake.requests_to("/api/beta/sketches"),
+        s.intake.requests_to("/api/v2/series"),
+    ]
+    .concat();
+    let metrics_keyed = metrics.iter().all(|r| r.api_key() == Some(TEST_API_KEY));
+    let invocations_flushed = metrics.iter().any(|r| {
+        r.metric_names()
+            .unwrap()
+            .iter()
+            .any(|n| n == INVOCATIONS_METRIC)
+    });
+    let log_flushed = s.intake.requests_to("/api/v2/logs").iter().any(|r| {
+        r.api_key() == Some(TEST_API_KEY)
+            && r.body_text().unwrap().contains("hello from the function")
+    });
     s.shutdown_cleanly(&mut bc).await;
 
-    // The end-of-invocation flush reached the intake with the configured key.
+    // The end-of-invocation flush reached the intake, each payload with the
+    // configured key.
     assert!(
-        with_key > 0,
-        "no intake request carried the API key before SHUTDOWN. Intake:\n{}",
+        invocations_flushed,
+        "no {INVOCATIONS_METRIC} flushed before SHUTDOWN. Intake:\n{}",
         s.intake.summary()
     );
     assert!(
-        metrics > 0,
-        "no metrics flushed before SHUTDOWN. Intake:\n{}",
+        metrics_keyed,
+        "a metrics payload without the API key. Intake:\n{}",
         s.intake.summary()
     );
     assert!(
         log_flushed,
-        "the function log was not flushed before SHUTDOWN. Intake:\n{}",
+        "the function log was not flushed with the API key before SHUTDOWN. Intake:\n{}",
         s.intake.summary()
     );
 }
