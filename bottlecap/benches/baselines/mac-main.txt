@@ -1,0 +1,3 @@
+machine: Darwin arm64, Apple M4 Max; load average: 4.99 5.16 9.46; profile: bench = release (opt-level z, lto, codegen-units 1)
+saved: 2026-10-28T06:23:10Z
+git: 8a2cc021
