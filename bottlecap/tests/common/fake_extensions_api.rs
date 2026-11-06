@@ -200,20 +200,23 @@ impl FakeExtensionsApi {
             .len()
     }
 
+    /// When `/next` call number `n` (1-based) arrived, `None` before it does.
+    pub fn next_call_at(&self, n: usize) -> Option<Instant> {
+        self.shared
+            .next_arrivals
+            .lock()
+            .expect("next arrivals lock")
+            .get(n.checked_sub(1)?)
+            .copied()
+    }
+
     /// Wait for `/next` call number `n`. Returns whether it arrived by
     /// `deadline`, so a call that came late counts as missed even when the
     /// wait starts after it.
     pub async fn wait_for_next_calls(&self, n: usize, deadline: Instant) -> bool {
         loop {
             let now = Instant::now();
-            let arrived = self
-                .shared
-                .next_arrivals
-                .lock()
-                .expect("next arrivals lock")
-                .get(n - 1)
-                .copied();
-            if let Some(at) = arrived {
+            if let Some(at) = self.next_call_at(n) {
                 return at <= deadline;
             }
             if now > deadline {

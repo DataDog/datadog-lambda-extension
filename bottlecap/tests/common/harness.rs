@@ -99,22 +99,25 @@ impl Scenario {
         true
     }
 
-    /// Wait for `/next` call number `n`, giving up early when the process
-    /// exits (a crash at INIT should not cost the whole budget).
+    /// Wait for `/next` call number `n` and return whether it arrived within
+    /// `budget`, giving up early when the process exits (a crash at INIT
+    /// should not cost the whole budget).
     pub async fn wait_next_or_exit(
         &self,
         bc: &mut BottlecapProcess,
         n: usize,
         budget: Duration,
     ) -> bool {
-        let start = std::time::Instant::now();
-        while self.api.next_calls() < n {
-            if start.elapsed() > budget || !bc.is_running() {
-                return self.api.next_calls() >= n;
+        let deadline = std::time::Instant::now() + budget;
+        loop {
+            if let Some(at) = self.api.next_call_at(n) {
+                return at <= deadline;
+            }
+            if std::time::Instant::now() > deadline || !bc.is_running() {
+                return self.api.next_call_at(n).is_some_and(|at| at <= deadline);
             }
             tokio::time::sleep(Duration::from_millis(10)).await;
         }
-        true
     }
 
     /// Answer the open `/next` with a SHUTDOWN ([`SHUTDOWN_DEADLINE`]), wait

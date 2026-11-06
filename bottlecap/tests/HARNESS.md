@@ -80,7 +80,7 @@ async fn my_fault() {
 ## API summary
 
 - `FakeExtensionsApi`: `push_invoke(id, deadline_in)`, `push_shutdown(reason, deadline_in)`,
-  `next_calls()`, `wait_for_next_calls(n, deadline)` (true only when `/next` call `n` arrived by
+  `next_calls()`, `next_call_at(n)`, `wait_for_next_calls(n, deadline)` (true only when `/next` call `n` arrived by
   the `Instant`), `set_subscribe_status(StatusCode)`, `request_lines()`,
   `send_telemetry(&[Value], budget)`, `send_telemetry_raw(Vec<u8>, budget)`, `telemetry_port()`
   (from the last accepted subscribe body, `None` before one; `send_telemetry` fails without it,
