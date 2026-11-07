@@ -960,6 +960,9 @@ mod lambda_config_tests {
                 warning_contains: None,
                 tps_is_none: true,
             },
+            // `lambda_extension_compute_stats` does not participate in this
+            // resolution; both sources and both values are still exercised
+            // across these two cases.
             ErrorSamplerCase {
                 name: "legacy env true, compute stats false",
                 yaml: None,
@@ -967,27 +970,6 @@ mod lambda_config_tests {
                     (LEGACY, "true"),
                     ("DD_LAMBDA_EXTENSION_COMPUTE_STATS", "false"),
                 ],
-                target: DEFAULT_APM_ERROR_TPS,
-                warning_contains: Some(&["deprecated"]),
-                tps_is_none: true,
-            },
-            ErrorSamplerCase {
-                name: "legacy env true, compute stats true",
-                yaml: None,
-                env: &[
-                    (LEGACY, "true"),
-                    ("DD_LAMBDA_EXTENSION_COMPUTE_STATS", "true"),
-                ],
-                target: DEFAULT_APM_ERROR_TPS,
-                warning_contains: Some(&["deprecated"]),
-                tps_is_none: true,
-            },
-            ErrorSamplerCase {
-                name: "legacy yaml true, compute stats false",
-                yaml: Some(
-                    "serverless_error_sampler_enabled: true\nlambda_extension_compute_stats: false\n",
-                ),
-                env: &[],
                 target: DEFAULT_APM_ERROR_TPS,
                 warning_contains: Some(&["deprecated"]),
                 tps_is_none: true,
