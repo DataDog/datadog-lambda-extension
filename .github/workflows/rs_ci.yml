@@ -149,6 +149,9 @@ jobs:
       - name: Test the test-mode binary
         working-directory: bottlecap
         run: cargo nextest run --features test-mode --bin bottlecap-test-mode
+      - name: Test the mock-intake binary
+        working-directory: bottlecap
+        run: cargo nextest run --features mock-intake --bin mock-intake
 
   format:
     name: Format
