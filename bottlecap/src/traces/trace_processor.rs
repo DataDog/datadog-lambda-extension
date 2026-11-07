@@ -1785,19 +1785,7 @@ mod tests {
         let traces: Vec<Vec<pb::Span>> = (0..50)
             .map(|i| {
                 let trace_id = ((call * 50 + i + 1) as u64).wrapping_mul(2_654_435_761);
-                let mut metrics = HashMap::new();
-                metrics.insert("_sampling_priority_v1".to_string(), 0.0);
-                vec![pb::Span {
-                    trace_id,
-                    span_id: trace_id,
-                    parent_id: 0,
-                    error: 1,
-                    metrics,
-                    service: "svc".to_string(),
-                    name: "op".to_string(),
-                    resource: "res".to_string(),
-                    ..Default::default()
-                }]
+                vec![make_tracer_drop_span(trace_id, 0.0, 1, None)]
             })
             .collect();
 
@@ -2038,19 +2026,7 @@ mod tests {
                 create_test_processor(&config, new_error_sampler(tps), false);
             let header_tags = create_test_header_tags();
 
-            let mut metrics = HashMap::new();
-            metrics.insert("_sampling_priority_v1".to_string(), 0.0);
-            let traces = vec![vec![pb::Span {
-                trace_id: 1,
-                span_id: 1,
-                parent_id: 0,
-                error: 1,
-                metrics,
-                service: "svc".to_string(),
-                name: "op".to_string(),
-                resource: "res".to_string(),
-                ..Default::default()
-            }]];
+            let traces = vec![vec![make_tracer_drop_span(1, 0.0, 1, None)]];
 
             let (payload_info, _stats) =
                 processor.process_traces(config, tags_provider, header_tags, traces, 0, None);

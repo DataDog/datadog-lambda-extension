@@ -31,12 +31,11 @@ fn decoded_root_span(request: &IntakeRequest, trace_id: u64) -> pb::Span {
     let payload = pb::AgentPayload::decode(body.as_slice()).expect("decode AgentPayload");
     payload
         .tracer_payloads
-        .iter()
-        .flat_map(|t| &t.chunks)
-        .flat_map(|c| &c.spans)
+        .into_iter()
+        .flat_map(|payload| payload.chunks)
+        .flat_map(|chunk| chunk.spans)
         .find(|span| span.trace_id == trace_id)
         .expect("the trace must reach the intake")
-        .clone()
 }
 
 /// The function log [`end_invocation_and_wait`] sends for `request_id`.

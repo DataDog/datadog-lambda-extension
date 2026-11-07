@@ -551,7 +551,6 @@ async fn e2e_error_sampler_rescues_only_errored_p0_traces() {
             .iter()
             .find(|s| s.trace_id == rescued_trace_id)
             .expect("rescued trace present");
-        assert_eq!(rescued_span.trace_id, rescued_trace_id);
         assert!(
             rescued_span.metrics.contains_key("_dd.errors_sr"),
             "the rescued root span must carry its error sampling rate (owner={owner})",
@@ -742,15 +741,16 @@ async fn e2e_error_rare_sample_tracer_drop_rescues_tracer_drops_selectively() {
             "the rescued root span must carry its error sampling rate (owner={owner})",
         );
 
-        // Dropped inputs must still be accounted for in stats, but only when the
-        // extension computes them: with tracer-owned stats the extension
-        // suppresses its own stats generation entirely.
         assert!(
             captured_spans
                 .iter()
                 .filter(|s| s.trace_id != rescued_trace_id)
                 .all(|s| !s.metrics.contains_key("_dd.errors_sr"))
         );
+
+        // Dropped inputs must still be accounted for in stats, but only when the
+        // extension computes them: with tracer-owned stats the extension
+        // suppresses its own stats generation entirely.
         if compute_on_extension && !client_computed_stats {
             let grouped = captured_grouped_stats(&outcome.stats);
             let total_hits: u64 = grouped.iter().map(|g| g.hits).sum();
