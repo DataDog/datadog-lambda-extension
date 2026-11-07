@@ -415,7 +415,7 @@ impl LambdaConfig {
                 "DD_SERVERLESS_ERROR_SAMPLER_ENABLED (serverless_error_sampler_enabled) is deprecated; its value {enabled} is ignored because DD_APM_ERROR_TPS (apm_error_tps) is set to {tps}"
             )),
             (None, Some(true)) => Some(format!(
-                "DD_SERVERLESS_ERROR_SAMPLER_ENABLED (serverless_error_sampler_enabled) is deprecated and has no effect: error trace rescue is on by default at {DEFAULT_APM_ERROR_TPS} traces per second; use DD_APM_ERROR_TPS (apm_error_tps) to change the budget"
+                "DD_SERVERLESS_ERROR_SAMPLER_ENABLED (serverless_error_sampler_enabled) is deprecated and has no effect: when filtering sampled-out traces, error trace rescue uses a default budget of {DEFAULT_APM_ERROR_TPS} traces per second; use DD_APM_ERROR_TPS (apm_error_tps) to change the budget"
             )),
             (None, Some(false)) => Some(String::from(
                 "DD_SERVERLESS_ERROR_SAMPLER_ENABLED (serverless_error_sampler_enabled) is deprecated; set DD_APM_ERROR_TPS (apm_error_tps) to 0 to disable error trace rescue instead",
@@ -961,9 +961,43 @@ mod lambda_config_tests {
                 tps_is_none: true,
             },
             ErrorSamplerCase {
-                name: "legacy true",
+                name: "legacy env true, compute stats false",
                 yaml: None,
-                env: &[(LEGACY, "true")],
+                env: &[
+                    (LEGACY, "true"),
+                    ("DD_LAMBDA_EXTENSION_COMPUTE_STATS", "false"),
+                ],
+                target: DEFAULT_APM_ERROR_TPS,
+                warning_contains: Some(&["deprecated"]),
+                tps_is_none: true,
+            },
+            ErrorSamplerCase {
+                name: "legacy env true, compute stats true",
+                yaml: None,
+                env: &[
+                    (LEGACY, "true"),
+                    ("DD_LAMBDA_EXTENSION_COMPUTE_STATS", "true"),
+                ],
+                target: DEFAULT_APM_ERROR_TPS,
+                warning_contains: Some(&["deprecated"]),
+                tps_is_none: true,
+            },
+            ErrorSamplerCase {
+                name: "legacy yaml true, compute stats false",
+                yaml: Some(
+                    "serverless_error_sampler_enabled: true\nlambda_extension_compute_stats: false\n",
+                ),
+                env: &[],
+                target: DEFAULT_APM_ERROR_TPS,
+                warning_contains: Some(&["deprecated"]),
+                tps_is_none: true,
+            },
+            ErrorSamplerCase {
+                name: "legacy yaml true, compute stats true",
+                yaml: Some(
+                    "serverless_error_sampler_enabled: true\nlambda_extension_compute_stats: true\n",
+                ),
+                env: &[],
                 target: DEFAULT_APM_ERROR_TPS,
                 warning_contains: Some(&["deprecated"]),
                 tps_is_none: true,
@@ -1079,6 +1113,17 @@ mod lambda_config_tests {
                         assert!(
                             message.contains(needle),
                             "case {name:?}: warning {message:?} must contain {needle:?}"
+                        );
+                    }
+                    if config.ext.serverless_error_sampler_enabled == Some(true)
+                        && config.ext.apm_error_tps.is_none()
+                    {
+                        assert_eq!(
+                            message,
+                            format!(
+                                "DD_SERVERLESS_ERROR_SAMPLER_ENABLED (serverless_error_sampler_enabled) is deprecated and has no effect: when filtering sampled-out traces, error trace rescue uses a default budget of {DEFAULT_APM_ERROR_TPS} traces per second; use DD_APM_ERROR_TPS (apm_error_tps) to change the budget"
+                            ),
+                            "case {name:?}: warning must qualify when error trace rescue applies"
                         );
                     }
                 }
