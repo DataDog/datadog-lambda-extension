@@ -51,6 +51,12 @@ use datadog_agent_config::{
     flush_strategy::FlushStrategy as UpstreamFlushStrategy,
 };
 
+/// Default error trace rescue budget in errored traces per second.
+///
+/// Matches the shared sampler's default (`ErrorSamplerConfig::default().target_tps`)
+/// and the Go agent's `ErrorTPS`.
+pub const DEFAULT_APM_ERROR_TPS: f64 = 10.0;
+
 /// Lambda-specific configuration that lives alongside the shared
 /// `datadog_agent_config::Config` core fields under `config.ext` once the
 /// migration onto upstream lands.
@@ -69,14 +75,23 @@ pub struct LambdaConfig {
     pub capture_lambda_payload_max_depth: u32,
     pub lambda_extension_compute_stats: bool,
 
-    /// `DD_SERVERLESS_ERROR_SAMPLER_ENABLED`: rescue errored trace chunks that would
-    /// otherwise be dropped, whenever stats are computed before the backend, by
-    /// either the tracer or the extension. The sampler runs in `AlwaysKeep` mode,
-    /// so this is a plain on/off switch with no volume ceiling: enabled rescues
-    /// every errored chunk, whatever the tracer's sampling rate. A function that
-    /// errors on most invocations under `DD_TRACE_SAMPLE_RATE=0.01` will ingest
-    /// close to every trace, not 1%. See APMSVLS-469.
-    pub serverless_error_sampler_enabled: bool,
+    /// Deprecated raw value of `DD_SERVERLESS_ERROR_SAMPLER_ENABLED`, kept so
+    /// the legacy on/off switch still resolves. Read only through
+    /// [`LambdaConfig::error_sampler_target_tps`] and
+    /// [`LambdaConfig::legacy_error_sampler_warning`]; set `DD_APM_ERROR_TPS`
+    /// instead.
+    pub serverless_error_sampler_enabled: Option<bool>,
+
+    /// `DD_APM_ERROR_TPS`: approximate error trace rescue budget per execution
+    /// environment, in traces per second, shared across trace signatures.
+    /// `None` uses [`DEFAULT_APM_ERROR_TPS`]; `<= 0` disables rescue. Rescue
+    /// runs independently of where stats are computed; rescued traces carry
+    /// `_dd.errors_sr` for backend retention.
+    ///
+    /// Uses 5s buckets over a 30s window, with no hard ceiling. Freeze/thaw
+    /// expires counters but preserves throttled rates, which recover by at most
+    /// 20% per recomputation. The lowest stored rate also caps new signatures.
+    pub apm_error_tps: Option<f64>,
 
     pub span_dedup_timeout: Option<Duration>,
     pub api_key_secret_reload_interval: Option<Duration>,
@@ -144,7 +159,8 @@ impl Default for LambdaConfig {
             capture_lambda_payload: false,
             capture_lambda_payload_max_depth: 10,
             lambda_extension_compute_stats: false,
-            serverless_error_sampler_enabled: false,
+            serverless_error_sampler_enabled: None,
+            apm_error_tps: None,
             span_dedup_timeout: None,
             api_key_secret_reload_interval: None,
             serverless_appsec_enabled: false,
@@ -162,6 +178,24 @@ impl Default for LambdaConfig {
             additional_metric_tags: Vec::new(),
             additional_metric_tags_cardinality_limit: None,
         }
+    }
+}
+
+/// Deserialize an optional `f64`, discarding non-finite values.
+///
+/// `figment` accepts non-finite floats from YAML (`.inf`, `.nan`) and from
+/// dotted exponent strings (`1.0e999`), so filter them out here.
+fn deserialize_optional_finite_f64<'de, D>(deserializer: D) -> Result<Option<f64>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let value = deser_opt_lossless::<_, f64>(deserializer)?;
+    match value {
+        Some(v) if !v.is_finite() => {
+            tracing::warn!("Ignoring non-finite DD_APM_ERROR_TPS (apm_error_tps) value {v}");
+            Ok(None)
+        }
+        other => Ok(other),
     }
 }
 
@@ -212,6 +246,11 @@ pub struct LambdaConfigSource {
 
     #[serde(deserialize_with = "deser_opt_bool")]
     pub serverless_error_sampler_enabled: Option<bool>,
+
+    /// `DD_APM_ERROR_TPS`: error trace rescue budget in errored traces per
+    /// second.
+    #[serde(deserialize_with = "deserialize_optional_finite_f64")]
+    pub apm_error_tps: Option<f64>,
 
     #[serde(deserialize_with = "deser_dur_secs_ignore_zero")]
     pub span_dedup_timeout: Option<Duration>,
@@ -294,7 +333,6 @@ impl DatadogConfigExtension for LambdaConfig {
                 capture_lambda_payload,
                 capture_lambda_payload_max_depth,
                 lambda_extension_compute_stats,
-                serverless_error_sampler_enabled,
                 serverless_appsec_enabled,
                 appsec_waf_timeout,
                 api_security_enabled,
@@ -303,7 +341,7 @@ impl DatadogConfigExtension for LambdaConfig {
                 lambda_durable_function_log_buffer_size,
                 trace_experimental_features_enabled,
             ],
-            option: [span_dedup_timeout, api_key_secret_reload_interval, appsec_rules, dsm_exchange_name, dsm_kafka_group],
+            option: [span_dedup_timeout, api_key_secret_reload_interval, appsec_rules, serverless_error_sampler_enabled, apm_error_tps, dsm_exchange_name, dsm_kafka_group],
         );
 
         // data_streams_enabled (source / DD_DATA_STREAMS_ENABLED) →
@@ -353,6 +391,38 @@ impl DatadogConfigExtension for LambdaConfig {
 }
 
 impl LambdaConfig {
+    /// Effective error trace rescue budget in errored traces per second.
+    ///
+    /// `DD_APM_ERROR_TPS` wins when set. Otherwise the deprecated
+    /// `DD_SERVERLESS_ERROR_SAMPLER_ENABLED=false` is a kill switch, and
+    /// everything else falls back to [`DEFAULT_APM_ERROR_TPS`].
+    #[must_use]
+    pub fn error_sampler_target_tps(&self) -> f64 {
+        match (self.apm_error_tps, self.serverless_error_sampler_enabled) {
+            (Some(tps), _) => tps,
+            (None, Some(false)) => 0.0,
+            _ => DEFAULT_APM_ERROR_TPS,
+        }
+    }
+
+    /// Deprecation warning for `DD_SERVERLESS_ERROR_SAMPLER_ENABLED`, or `None`
+    /// when it is unset.
+    #[must_use]
+    pub fn legacy_error_sampler_warning(&self) -> Option<String> {
+        match (self.apm_error_tps, self.serverless_error_sampler_enabled) {
+            (_, None) => None,
+            (Some(tps), Some(enabled)) => Some(format!(
+                "DD_SERVERLESS_ERROR_SAMPLER_ENABLED (serverless_error_sampler_enabled) is deprecated; its value {enabled} is ignored because DD_APM_ERROR_TPS (apm_error_tps) is set to {tps}"
+            )),
+            (None, Some(true)) => Some(format!(
+                "DD_SERVERLESS_ERROR_SAMPLER_ENABLED (serverless_error_sampler_enabled) is deprecated and has no effect: error trace rescue uses a default budget of {DEFAULT_APM_ERROR_TPS} traces per second; use DD_APM_ERROR_TPS (apm_error_tps) to change the budget"
+            )),
+            (None, Some(false)) => Some(String::from(
+                "DD_SERVERLESS_ERROR_SAMPLER_ENABLED (serverless_error_sampler_enabled) is deprecated; set DD_APM_ERROR_TPS (apm_error_tps) to 0 to disable error trace rescue instead",
+            )),
+        }
+    }
+
     /// Drop `additional_metric_tags` / `additional_metric_tags_cardinality_limit` unless
     /// `trace_experimental_features_enabled` is set, matching the Serverless Compatibility
     /// Layer (`datadog-trace-agent`).
@@ -715,30 +785,346 @@ mod lambda_config_tests {
         assert!(!config.ext.dsm_consume_enabled);
     }
 
-    // ---- error sampler (serverless_error_sampler_enabled) ----
+    // ---- error trace rescue budget (DD_APM_ERROR_TPS) ----
 
-    #[test]
-    fn serverless_error_sampler_enabled_defaults_to_false() {
-        let config = load(|_| Ok(()));
-        assert!(!config.ext.serverless_error_sampler_enabled);
+    const TPS: &str = "DD_APM_ERROR_TPS";
+    const LEGACY: &str = "DD_SERVERLESS_ERROR_SAMPLER_ENABLED";
+
+    /// One row in the error-sampler resolution table.
+    struct ErrorSamplerCase {
+        name: &'static str,
+        yaml: Option<&'static str>,
+        env: &'static [(&'static str, &'static str)],
+        target: f64,
+        /// Substrings the legacy-flag warning must contain; `None` expects no
+        /// warning.
+        warning_contains: Option<&'static [&'static str]>,
+        /// Whether the raw `apm_error_tps` is unset (missing or rejected).
+        tps_is_none: bool,
     }
 
     #[test]
-    fn serverless_error_sampler_enabled_from_env() {
-        let config = load(|jail| {
-            jail.set_env("DD_SERVERLESS_ERROR_SAMPLER_ENABLED", "true");
-            Ok(())
-        });
-        assert!(config.ext.serverless_error_sampler_enabled);
+    #[allow(clippy::too_many_lines)]
+    #[allow(clippy::float_cmp)]
+    fn error_sampler_target_tps_resolution_table() {
+        let cases = [
+            ErrorSamplerCase {
+                name: "default",
+                yaml: None,
+                env: &[],
+                target: DEFAULT_APM_ERROR_TPS,
+                warning_contains: None,
+                tps_is_none: true,
+            },
+            ErrorSamplerCase {
+                name: "env int",
+                yaml: None,
+                env: &[(TPS, "5")],
+                target: 5.0,
+                warning_contains: None,
+                tps_is_none: false,
+            },
+            ErrorSamplerCase {
+                name: "env float",
+                yaml: None,
+                env: &[(TPS, "2.5")],
+                target: 2.5,
+                warning_contains: None,
+                tps_is_none: false,
+            },
+            ErrorSamplerCase {
+                name: "env padded",
+                yaml: None,
+                env: &[(TPS, " 7 ")],
+                target: 7.0,
+                warning_contains: None,
+                tps_is_none: false,
+            },
+            ErrorSamplerCase {
+                name: "yaml",
+                yaml: Some("apm_error_tps: 3\n"),
+                env: &[],
+                target: 3.0,
+                warning_contains: None,
+                tps_is_none: false,
+            },
+            ErrorSamplerCase {
+                name: "env over yaml",
+                yaml: Some("apm_error_tps: 3\n"),
+                env: &[(TPS, "4")],
+                target: 4.0,
+                warning_contains: None,
+                tps_is_none: false,
+            },
+            ErrorSamplerCase {
+                name: "zero",
+                yaml: None,
+                env: &[(TPS, "0")],
+                target: 0.0,
+                warning_contains: None,
+                tps_is_none: false,
+            },
+            ErrorSamplerCase {
+                name: "negative",
+                yaml: None,
+                env: &[(TPS, "-1")],
+                target: -1.0,
+                warning_contains: None,
+                tps_is_none: false,
+            },
+            ErrorSamplerCase {
+                name: "large",
+                yaml: None,
+                env: &[(TPS, "1000000000")],
+                target: 1_000_000_000.0,
+                warning_contains: None,
+                tps_is_none: false,
+            },
+            ErrorSamplerCase {
+                name: "exponent without dot",
+                yaml: None,
+                env: &[(TPS, "1e3")],
+                target: DEFAULT_APM_ERROR_TPS,
+                warning_contains: None,
+                tps_is_none: true,
+            },
+            ErrorSamplerCase {
+                name: "exponent with dot",
+                yaml: None,
+                env: &[(TPS, "1.0e3")],
+                target: 1000.0,
+                warning_contains: None,
+                tps_is_none: false,
+            },
+            ErrorSamplerCase {
+                name: "invalid env: empty",
+                yaml: None,
+                env: &[(TPS, "")],
+                target: DEFAULT_APM_ERROR_TPS,
+                warning_contains: None,
+                tps_is_none: true,
+            },
+            ErrorSamplerCase {
+                name: "invalid env: text",
+                yaml: None,
+                env: &[(TPS, "abc")],
+                target: DEFAULT_APM_ERROR_TPS,
+                warning_contains: None,
+                tps_is_none: true,
+            },
+            ErrorSamplerCase {
+                name: "invalid env: inf",
+                yaml: None,
+                env: &[(TPS, "inf")],
+                target: DEFAULT_APM_ERROR_TPS,
+                warning_contains: None,
+                tps_is_none: true,
+            },
+            ErrorSamplerCase {
+                name: "invalid env: nan",
+                yaml: None,
+                env: &[(TPS, "nan")],
+                target: DEFAULT_APM_ERROR_TPS,
+                warning_contains: None,
+                tps_is_none: true,
+            },
+            ErrorSamplerCase {
+                name: "invalid env: overflow literal",
+                yaml: None,
+                env: &[(TPS, "1e400")],
+                target: DEFAULT_APM_ERROR_TPS,
+                warning_contains: None,
+                tps_is_none: true,
+            },
+            ErrorSamplerCase {
+                name: "non-finite float",
+                yaml: None,
+                env: &[(TPS, "1.0e999")],
+                target: DEFAULT_APM_ERROR_TPS,
+                warning_contains: None,
+                tps_is_none: true,
+            },
+            ErrorSamplerCase {
+                name: "invalid yaml: inf",
+                yaml: Some("apm_error_tps: .inf\n"),
+                env: &[],
+                target: DEFAULT_APM_ERROR_TPS,
+                warning_contains: None,
+                tps_is_none: true,
+            },
+            ErrorSamplerCase {
+                name: "invalid yaml: nan",
+                yaml: Some("apm_error_tps: .nan\n"),
+                env: &[],
+                target: DEFAULT_APM_ERROR_TPS,
+                warning_contains: None,
+                tps_is_none: true,
+            },
+            // `lambda_extension_compute_stats` does not participate in this
+            // resolution; both sources and both values are still exercised
+            // across these two cases.
+            ErrorSamplerCase {
+                name: "legacy env true, compute stats false",
+                yaml: None,
+                env: &[
+                    (LEGACY, "true"),
+                    ("DD_LAMBDA_EXTENSION_COMPUTE_STATS", "false"),
+                ],
+                target: DEFAULT_APM_ERROR_TPS,
+                warning_contains: Some(&["deprecated"]),
+                tps_is_none: true,
+            },
+            ErrorSamplerCase {
+                name: "legacy yaml true, compute stats true",
+                yaml: Some(
+                    "serverless_error_sampler_enabled: true\nlambda_extension_compute_stats: true\n",
+                ),
+                env: &[],
+                target: DEFAULT_APM_ERROR_TPS,
+                warning_contains: Some(&["deprecated"]),
+                tps_is_none: true,
+            },
+            ErrorSamplerCase {
+                name: "legacy false",
+                yaml: None,
+                env: &[(LEGACY, "false")],
+                target: 0.0,
+                warning_contains: Some(&["set DD_APM_ERROR_TPS (apm_error_tps) to 0"]),
+                tps_is_none: true,
+            },
+            ErrorSamplerCase {
+                name: "legacy yaml false",
+                yaml: Some("serverless_error_sampler_enabled: false\n"),
+                env: &[],
+                target: 0.0,
+                warning_contains: Some(&[
+                    "DD_SERVERLESS_ERROR_SAMPLER_ENABLED (serverless_error_sampler_enabled)",
+                    "set DD_APM_ERROR_TPS (apm_error_tps) to 0",
+                ]),
+                tps_is_none: true,
+            },
+            ErrorSamplerCase {
+                name: "both, tps 5 + legacy false",
+                yaml: None,
+                env: &[(TPS, "5"), (LEGACY, "false")],
+                target: 5.0,
+                warning_contains: Some(&[
+                    "DD_APM_ERROR_TPS (apm_error_tps) is set to 5",
+                    "its value false is ignored",
+                ]),
+                tps_is_none: false,
+            },
+            ErrorSamplerCase {
+                name: "both, tps 0 + legacy true",
+                yaml: None,
+                env: &[(TPS, "0"), (LEGACY, "true")],
+                target: 0.0,
+                warning_contains: Some(&[
+                    "DD_APM_ERROR_TPS (apm_error_tps) is set to 0",
+                    "its value true is ignored",
+                ]),
+                tps_is_none: false,
+            },
+            ErrorSamplerCase {
+                name: "cross-source",
+                yaml: Some("apm_error_tps: 5\n"),
+                env: &[(LEGACY, "false")],
+                target: 5.0,
+                warning_contains: Some(&[
+                    "DD_APM_ERROR_TPS (apm_error_tps) is set to 5",
+                    "its value false is ignored",
+                ]),
+                tps_is_none: false,
+            },
+            ErrorSamplerCase {
+                name: "invalid tps + legacy false",
+                yaml: None,
+                env: &[(TPS, "abc"), (LEGACY, "false")],
+                target: 0.0,
+                warning_contains: Some(&["set DD_APM_ERROR_TPS (apm_error_tps) to 0"]),
+                tps_is_none: true,
+            },
+            ErrorSamplerCase {
+                name: "invalid env over valid yaml + legacy false",
+                yaml: Some("apm_error_tps: 5\n"),
+                env: &[(TPS, "abc"), (LEGACY, "false")],
+                target: 5.0,
+                warning_contains: Some(&[
+                    "DD_APM_ERROR_TPS (apm_error_tps) is set to 5",
+                    "its value false is ignored",
+                ]),
+                tps_is_none: false,
+            },
+        ];
+
+        for case in cases {
+            let name = case.name;
+            let config = load(|jail| {
+                if let Some(yaml) = case.yaml {
+                    jail.create_file("datadog.yaml", yaml)?;
+                }
+                for (key, value) in case.env {
+                    jail.set_env(key, value);
+                }
+                Ok(())
+            });
+
+            assert_eq!(
+                config.ext.error_sampler_target_tps(),
+                case.target,
+                "case {name:?}: unexpected effective target TPS"
+            );
+            assert_eq!(
+                config.ext.apm_error_tps.is_none(),
+                case.tps_is_none,
+                "case {name:?}: unexpected raw apm_error_tps {:?}",
+                config.ext.apm_error_tps
+            );
+
+            match (
+                case.warning_contains,
+                config.ext.legacy_error_sampler_warning(),
+            ) {
+                (None, None) => {}
+                (Some(needles), Some(message)) => {
+                    assert!(
+                        !message.contains("removed"),
+                        "case {name:?}: deprecation warning must not promise removal: {message}"
+                    );
+                    for needle in needles {
+                        assert!(
+                            message.contains(needle),
+                            "case {name:?}: warning {message:?} must contain {needle:?}"
+                        );
+                    }
+                    if config.ext.serverless_error_sampler_enabled == Some(true)
+                        && config.ext.apm_error_tps.is_none()
+                    {
+                        assert_eq!(
+                            message,
+                            format!(
+                                "DD_SERVERLESS_ERROR_SAMPLER_ENABLED (serverless_error_sampler_enabled) is deprecated and has no effect: error trace rescue uses a default budget of {DEFAULT_APM_ERROR_TPS} traces per second; use DD_APM_ERROR_TPS (apm_error_tps) to change the budget"
+                            ),
+                            "case {name:?}: warning must describe the default rescue budget"
+                        );
+                    }
+                }
+                (expected, actual) => {
+                    panic!(
+                        "case {name:?}: expected warning containing {expected:?}, got {actual:?}"
+                    )
+                }
+            }
+        }
     }
 
     #[test]
-    fn serverless_error_sampler_enabled_from_yaml() {
-        let config = load(|jail| {
-            jail.create_file("datadog.yaml", "serverless_error_sampler_enabled: true\n")?;
-            Ok(())
-        });
-        assert!(config.ext.serverless_error_sampler_enabled);
+    #[allow(clippy::float_cmp)]
+    fn default_apm_error_tps_matches_shared_sampler_default() {
+        assert_eq!(
+            DEFAULT_APM_ERROR_TPS,
+            datadog_agent_trace_sampler::ErrorSamplerConfig::default().target_tps
+        );
     }
 
     // ---- APM features (DD_APM_FEATURES, error_rare_sample_tracer_drop) ----
@@ -751,6 +1137,7 @@ mod lambda_config_tests {
     }
 
     #[test]
+    #[allow(clippy::float_cmp)]
     fn apm_features_error_rare_sample_tracer_drop_from_env() {
         let config = load(|jail| {
             jail.set_env("DD_APM_FEATURES", "error_rare_sample_tracer_drop");
@@ -758,9 +1145,9 @@ mod lambda_config_tests {
         });
         assert_eq!(config.apm_features, ["error_rare_sample_tracer_drop"]);
         assert!(crate::traces::trace_processor::error_rare_sample_tracer_drop_enabled(&config));
-        // The feature only widens rescue eligibility; enabling it must not
-        // enable the sampler.
-        assert!(!config.ext.serverless_error_sampler_enabled);
+        // The feature only widens rescue eligibility; it must not change the
+        // rescue budget.
+        assert_eq!(config.ext.error_sampler_target_tps(), DEFAULT_APM_ERROR_TPS);
     }
 
     #[test]
@@ -769,6 +1156,22 @@ mod lambda_config_tests {
             jail.set_env(
                 "DD_APM_FEATURES",
                 "some_other_feature,error_rare_sample_tracer_drop",
+            );
+            Ok(())
+        });
+        assert_eq!(
+            config.apm_features,
+            ["some_other_feature", "error_rare_sample_tracer_drop"]
+        );
+        assert!(crate::traces::trace_processor::error_rare_sample_tracer_drop_enabled(&config));
+    }
+
+    #[test]
+    fn apm_features_space_separated_list_from_env() {
+        let config = load(|jail| {
+            jail.set_env(
+                "DD_APM_FEATURES",
+                "some_other_feature error_rare_sample_tracer_drop",
             );
             Ok(())
         });
