@@ -8,13 +8,7 @@
 //! tracer or the `bottlecap-test-mode` trace processor at it and inspect
 //! decoded payloads and JSON dumps locally. See `bottlecap/README.md` for usage.
 //!
-//! Environment variables:
-//!
-//! | Variable                        | Default | Purpose                                          |
-//! |---------------------------------|---------|--------------------------------------------------|
-//! | `MOCK_INTAKE_PORT`              | `8127`  | Loopback listener port (`0` = OS-assigned)       |
-//! | `MOCK_INTAKE_FAIL_STATS_FIRST_N`| `0`     | Return HTTP 500 for the first N stats attempts   |
-//! | `MOCK_INTAKE_DUMP_DIR`          | unset   | Write one JSON envelope per decoded request here |
+//! Environment variables are documented in `README.md` next to this file.
 
 #![deny(clippy::all)]
 #![deny(clippy::pedantic)]
