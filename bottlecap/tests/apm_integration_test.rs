@@ -556,6 +556,7 @@ async fn e2e_sampled_out_chunks_filtered_by_stats_owner() {
         ("backend", false, false, &[1, 2, 3][..]),
         ("extension", true, false, &[1][..]),
         ("tracer", false, true, &[1][..]),
+        ("tracer-precedence", true, true, &[1][..]),
     ];
 
     for (owner, compute_on_extension, client_computed_stats, expected_trace_ids) in cases {
@@ -579,6 +580,17 @@ async fn e2e_sampled_out_chunks_filtered_by_stats_owner() {
             captured_trace_ids, expected_trace_ids,
             "unexpected intake contents (owner={owner})"
         );
+
+        if compute_on_extension && client_computed_stats {
+            assert!(
+                outcome.stats.is_empty(),
+                "tracer-owned stats must not be computed again by the extension (owner={owner})"
+            );
+            assert!(
+                captured_compute_stats(&outcome.traces).is_none(),
+                "tracer-owned stats must not request backend computation (owner={owner})"
+            );
+        }
     }
 }
 
