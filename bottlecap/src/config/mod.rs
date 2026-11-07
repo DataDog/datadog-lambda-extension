@@ -85,8 +85,8 @@ pub struct LambdaConfig {
     /// `DD_APM_ERROR_TPS`: approximate error trace rescue budget per execution
     /// environment, in traces per second, shared across trace signatures.
     /// `None` uses [`DEFAULT_APM_ERROR_TPS`]; `<= 0` disables rescue. Rescue
-    /// runs whenever stats are computed before the backend, by either the
-    /// tracer or the extension.
+    /// runs independently of where stats are computed; rescued traces carry
+    /// `_dd.errors_sr` for backend retention.
     ///
     /// Uses 5s buckets over a 30s window, with no hard ceiling. Freeze/thaw
     /// expires counters but preserves throttled rates, which recover by at most
@@ -415,7 +415,7 @@ impl LambdaConfig {
                 "DD_SERVERLESS_ERROR_SAMPLER_ENABLED (serverless_error_sampler_enabled) is deprecated; its value {enabled} is ignored because DD_APM_ERROR_TPS (apm_error_tps) is set to {tps}"
             )),
             (None, Some(true)) => Some(format!(
-                "DD_SERVERLESS_ERROR_SAMPLER_ENABLED (serverless_error_sampler_enabled) is deprecated and has no effect: when filtering sampled-out traces, error trace rescue uses a default budget of {DEFAULT_APM_ERROR_TPS} traces per second; use DD_APM_ERROR_TPS (apm_error_tps) to change the budget"
+                "DD_SERVERLESS_ERROR_SAMPLER_ENABLED (serverless_error_sampler_enabled) is deprecated and has no effect: error trace rescue uses a default budget of {DEFAULT_APM_ERROR_TPS} traces per second; use DD_APM_ERROR_TPS (apm_error_tps) to change the budget"
             )),
             (None, Some(false)) => Some(String::from(
                 "DD_SERVERLESS_ERROR_SAMPLER_ENABLED (serverless_error_sampler_enabled) is deprecated; set DD_APM_ERROR_TPS (apm_error_tps) to 0 to disable error trace rescue instead",
@@ -1103,9 +1103,9 @@ mod lambda_config_tests {
                         assert_eq!(
                             message,
                             format!(
-                                "DD_SERVERLESS_ERROR_SAMPLER_ENABLED (serverless_error_sampler_enabled) is deprecated and has no effect: when filtering sampled-out traces, error trace rescue uses a default budget of {DEFAULT_APM_ERROR_TPS} traces per second; use DD_APM_ERROR_TPS (apm_error_tps) to change the budget"
+                                "DD_SERVERLESS_ERROR_SAMPLER_ENABLED (serverless_error_sampler_enabled) is deprecated and has no effect: error trace rescue uses a default budget of {DEFAULT_APM_ERROR_TPS} traces per second; use DD_APM_ERROR_TPS (apm_error_tps) to change the budget"
                             ),
-                            "case {name:?}: warning must qualify when error trace rescue applies"
+                            "case {name:?}: warning must describe the default rescue budget"
                         );
                     }
                 }

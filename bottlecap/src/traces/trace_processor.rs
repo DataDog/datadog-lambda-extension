@@ -93,11 +93,10 @@ pub fn error_rare_sample_tracer_drop_enabled(config: &config::Config) -> bool {
 #[allow(clippy::module_name_repetitions)]
 pub struct ServerlessTraceProcessor {
     pub obfuscation_config: Arc<obfuscation_config::ObfuscationConfig>,
-    /// Rescues errored chunks whenever stats are computed before the backend,
-    /// by either the tracer or the extension. Shared across invocations so the
-    /// `RateLimited` budget and rolling window span the whole execution
-    /// environment; a std Mutex rather than tokio because `process_traces` is
-    /// synchronous.
+    /// Rescues errored chunks independently of stats ownership. Shared across
+    /// invocations so the `RateLimited` budget and rolling window span the whole
+    /// execution environment; a std Mutex rather than tokio because
+    /// `process_traces` is synchronous.
     pub error_sampler: Arc<std::sync::Mutex<ErrorsSampler>>,
     /// Whether `DD_APM_FEATURES` enables [`ERROR_RARE_SAMPLE_TRACER_DROP`]. When
     /// true, chunks with a negative priority are rescued like `AutoDrop` chunks
@@ -150,10 +149,14 @@ pub fn new_error_sampler(target_tps: f64) -> Arc<std::sync::Mutex<ErrorsSampler>
 }
 
 impl ServerlessTraceProcessor {
-    /// Removes sampled-out chunks so they won't be sent to Datadog, then drops
-    /// any payload left without chunks. `SamplerPriority::None` (-128) means no
-    /// explicit priority was set and the trace is kept.
-    fn drop_sampled_out_chunks(&self, tracer_payloads: &mut Vec<pb::TracerPayload>) {
+    /// Marks rescued error chunks for every stats owner. When `drop_sampled_out`
+    /// is true, also removes rejected chunks and any payload left without chunks.
+    /// `SamplerPriority::None` (-128) means no explicit priority was set and is kept.
+    fn sample_and_filter_chunks(
+        &self,
+        tracer_payloads: &mut Vec<pb::TracerPayload>,
+        drop_sampled_out: bool,
+    ) {
         // Read once up front so non-errored and explicitly-dropped chunks never
         // touch the lock. Recover through poisoning: the sampler holds only
         // rolling-window counters, so a partially updated bucket is far cheaper
@@ -189,15 +192,18 @@ impl ServerlessTraceProcessor {
                 if chunk.priority < 0
                     && (!self.error_rare_sample_tracer_drop || Self::is_manual_tracer_drop(chunk))
                 {
-                    return false;
+                    return !drop_sampled_out;
                 }
                 if !rescue_enabled {
-                    return false;
+                    return !drop_sampled_out;
                 }
-                self.rescue_error_chunk(chunk, env, now_secs)
+                // Consult the sampler even when rejected chunks must be forwarded.
+                self.rescue_error_chunk(chunk, env, now_secs) || !drop_sampled_out
             });
         }
-        tracer_payloads.retain(|tp| !tp.chunks.is_empty());
+        if drop_sampled_out {
+            tracer_payloads.retain(|tp| !tp.chunks.is_empty());
+        }
     }
 
     /// Whether the chunk is an explicit tracer manual drop: priority exactly -1
@@ -647,15 +653,12 @@ impl TraceProcessor for ServerlessTraceProcessor {
             }
         };
 
-        // Sampled-out chunks are preserved in payloads_for_stats above, so their
-        // stats are still counted after they are removed here. Filter whenever
-        // stats are computed before the backend, by either the tracer or the
-        // extension: the backend only needs these chunks when it owns stats.
-        if stats_computed_by != StatsComputedBy::Backend
-            && let TracerPayloadCollection::V07(ref mut tracer_payloads) = payload
-        {
-            self.drop_sampled_out_chunks(tracer_payloads);
-            if tracer_payloads.is_empty() {
+        // Rescue is independent of stats ownership. Preserve the pre-rescue stats
+        // snapshot and existing forwarding behavior when the backend owns stats.
+        let drop_sampled_out = stats_computed_by != StatsComputedBy::Backend;
+        if let TracerPayloadCollection::V07(ref mut tracer_payloads) = payload {
+            self.sample_and_filter_chunks(tracer_payloads, drop_sampled_out);
+            if drop_sampled_out && tracer_payloads.is_empty() {
                 return (None, payloads_for_stats);
             }
         }
@@ -1426,8 +1429,8 @@ mod tests {
 
     /// Verifies that `process_traces` filters sampled-out chunks from the backend
     /// payload whenever stats are computed before the backend, by either the tracer
-    /// or the extension, while preserving them in the stats collection. When the
-    /// backend owns stats, all chunks are kept so the backend can compute stats.
+    /// or the extension, while preserving them in the stats collection. The
+    /// backend-owned stats path preserves its existing forwarding behavior.
     #[test]
     #[allow(clippy::unwrap_used)]
     fn test_process_traces_filters_sampled_out_chunks() {
@@ -1475,17 +1478,21 @@ mod tests {
         }
     }
 
-    /// On any stats path where stats are computed before the backend (extension or
-    /// tracer), the error sampler rescues errored chunks that would otherwise be
-    /// dropped (`AutoDrop`), stamping `_dd.errors_sr`, while non-errored P0 chunks
-    /// and explicit user drops are still dropped. Priorities are never rewritten.
+    /// Error rescue stamps eligible errored P0 chunks for every stats owner.
+    /// Rejected chunks are forwarded only on the backend-owned stats path.
+    /// Priorities and the pre-rescue stats snapshot are never rewritten.
     #[test]
     #[allow(clippy::float_cmp)]
     fn test_error_sampler_rescues_errored_p0_chunks() {
-        // (owner label, lambda_extension_compute_stats, client_computed_stats)
-        let cases = [("extension", true, false), ("tracer", false, true)];
+        // (owner, extension stats enabled, tracer computed stats, forwarded count)
+        let cases = [
+            ("backend", false, false, 4),
+            ("extension", true, false, 2),
+            ("tracer", false, true, 2),
+            ("tracer-precedence", true, true, 2),
+        ];
 
-        for (owner, compute_on_extension, client_computed_stats) in cases {
+        for (owner, compute_on_extension, client_computed_stats, forwarded_count) in cases {
             let config = create_compute_stats_config_with(compute_on_extension);
             let (tags_provider, processor) =
                 create_test_processor(&config, default_error_sampler(), false);
@@ -1493,7 +1500,7 @@ mod tests {
             header_tags.generic.client_computed_stats = client_computed_stats;
 
             // trace 1: kept normally (priority 1). trace 2: errored P0 (rescued).
-            // trace 3: non-errored P0 (dropped). trace 4: errored user drop (dropped).
+            // Traces 3 (non-errored P0) and 4 (errored user drop) are not rescued.
             let traces = vec![
                 vec![make_tracer_drop_span(1, 1.0, 0, None)],
                 vec![make_tracer_drop_span(2, 0.0, 1, None)],
@@ -1501,8 +1508,10 @@ mod tests {
                 vec![make_tracer_drop_span(4, -1.0, 1, None)],
             ];
 
-            let (payload_info, _stats) =
+            let (payload_info, stats) =
                 processor.process_traces(config, tags_provider, header_tags, traces, 0, None);
+            assert_eq!(trace_spans(&stats).count(), 4);
+            assert!(trace_spans(&stats).all(|s| !s.metrics.contains_key("_dd.errors_sr")));
             let payload_info = payload_info.expect("expected Some payload");
             let backend_send_data = payload_info.builder.build();
             let kept: Vec<(u64, f64)> = trace_spans(backend_send_data.get_payloads())
@@ -1510,8 +1519,8 @@ mod tests {
                 .collect();
             assert_eq!(
                 kept.len(),
-                2,
-                "kept normal trace + rescued errored trace (owner={owner})"
+                forwarded_count,
+                "unexpected forwarded count (owner={owner})"
             );
             assert!(
                 kept.contains(&(1, 1.0)),
@@ -1530,18 +1539,30 @@ mod tests {
                 Some(1.0),
                 "_dd.errors_sr is exactly 1.0 for a cold sampler at low volume (owner={owner})"
             );
+            assert!(
+                trace_spans(backend_send_data.get_payloads())
+                    .filter(|s| s.trace_id != 2)
+                    .all(|s| !s.metrics.contains_key("_dd.errors_sr"))
+            );
+            if owner == "backend" {
+                assert!(kept.contains(&(3, 0.0)));
+                assert!(kept.contains(&(4, -1.0)));
+            }
         }
     }
 
     /// With `error_rare_sample_tracer_drop` enabled, an errored chunk the tracer
     /// dropped itself (priority -1, no decision maker) is rescued like an
-    /// `AutoDrop` chunk, matching the Go agent. Runs for both stats owners: the
-    /// tracer-owned path reaches the rescue only when filtering also applies to
-    /// tracer-computed stats.
+    /// `AutoDrop` chunk, matching the Go agent, regardless of stats ownership.
     #[test]
     fn test_error_rare_sample_tracer_drop_rescues_errored_user_drop() {
         // (owner label, lambda_extension_compute_stats, client_computed_stats)
-        let cases = [("extension", true, false), ("tracer", false, true)];
+        let cases = [
+            ("backend", false, false),
+            ("extension", true, false),
+            ("tracer", false, true),
+            ("tracer-precedence", true, true),
+        ];
 
         for (owner, compute_on_extension, client_computed_stats) in cases {
             let config = create_compute_stats_config_with(compute_on_extension);
@@ -2037,6 +2058,40 @@ mod tests {
                 payload_info.is_none(),
                 "errored P0 trace must stay dropped when rescue is disabled (tps {tps})"
             );
+        }
+    }
+
+    #[test]
+    fn test_backend_stats_forwards_unrescued_chunks() {
+        for feature_enabled in [false, true] {
+            for tps in [0.0, -1.0] {
+                let config = create_compute_stats_config_with(false);
+                let (tags_provider, processor) =
+                    create_test_processor(&config, new_error_sampler(tps), feature_enabled);
+                let traces = vec![
+                    vec![make_tracer_drop_span(1, 0.0, 1, None)],
+                    vec![make_tracer_drop_span(2, -1.0, 1, Some("-4"))],
+                    vec![make_tracer_drop_span(3, 0.0, 0, None)],
+                ];
+                let (payload_info, stats) = processor.process_traces(
+                    config,
+                    tags_provider,
+                    create_test_header_tags(),
+                    traces,
+                    0,
+                    None,
+                );
+                let payload = payload_info
+                    .expect("backend path must forward rejected chunks")
+                    .builder
+                    .build();
+                assert_eq!(trace_spans(payload.get_payloads()).count(), 3);
+                assert!(
+                    trace_spans(payload.get_payloads())
+                        .all(|s| !s.metrics.contains_key("_dd.errors_sr"))
+                );
+                assert_eq!(trace_spans(&stats).count(), 3);
+            }
         }
     }
 

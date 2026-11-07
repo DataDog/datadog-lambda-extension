@@ -162,14 +162,6 @@ pub fn build_trace_agent(
     }
     let error_tps = config.ext.error_sampler_target_tps();
 
-    // Rescue currently runs only on the compute-stats path, so an explicit
-    // budget has no effect without it.
-    if config.ext.apm_error_tps.is_some() && !config.ext.lambda_extension_compute_stats {
-        warn!(
-            "DD_APM_ERROR_TPS (apm_error_tps) has no effect unless DD_LAMBDA_EXTENSION_COMPUTE_STATS (lambda_extension_compute_stats) is true"
-        );
-    }
-
     // One-time startup warning: the feature only widens rescue eligibility, it
     // does not change the rescue budget.
     let error_rare_sample_tracer_drop =
