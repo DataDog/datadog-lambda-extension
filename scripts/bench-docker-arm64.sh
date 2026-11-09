@@ -131,7 +131,7 @@ docker run --rm \
     echo "$note"
     bench_clear_baseline "$results" "$BENCH_NAME"
     cargo bench "$@"
-    bench_write_note "$results" "$BENCH_NAME" "$note" "$BENCH_GIT" "$*"
+    bench_write_note "$results" "$BENCH_NAME" "$note" "$BENCH_GIT" "$(bench_quote_args "$@")"
   ' bench "${cargo_args[@]}"
 # The bind mount lets cargo see an edit made during the run. The results belong to the
 # container user (root on a Linux host), so a second container marks the note.
