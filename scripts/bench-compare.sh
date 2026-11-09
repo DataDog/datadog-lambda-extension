@@ -5,7 +5,8 @@
 # Usage:
 #   scripts/bench-compare.sh save <name> [bench...] [-- <criterion args>]
 #       Run the suite (or only the named benches: logs, traces, invocation, enhanced_metrics,
-#       config, init) and save the baseline <name>.
+#       config, init) and save the baseline <name>. Any older results saved as <name> are
+#       removed first, so a baseline holds one run.
 #   scripts/bench-compare.sh compare <old> <new> [critcmp args]
 #       Print a table of <old> vs <new>. Extra args go to critcmp (for example `-t 5` hides
 #       differences of 5% or less, `-f 'logs/.*'` filters by regex).
@@ -41,7 +42,7 @@ if [[ -z "$critcmp_bin" ]] && command -v critcmp >/dev/null 2>&1; then
 fi
 
 usage() {
-  sed -n '2,29p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+  sed -n '2,30p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
   exit 1
 }
 
@@ -64,11 +65,13 @@ git_note() {
   echo "$rev"
 }
 
-# The bench profile, with every CARGO_PROFILE_BENCH_* override (BENCH_FAST sets two), so a
-# baseline saved with, say, CARGO_PROFILE_BENCH_OPT_LEVEL=3 is not recorded as production.
+# The bench profile, with every override from the environment (BENCH_FAST sets two): the bench
+# profile inherits the release one, and RUSTFLAGS reach every crate. So a baseline saved with,
+# say, CARGO_PROFILE_RELEASE_LTO=false or RUSTFLAGS=-Ctarget-cpu=native is not recorded as
+# production.
 profile_note() {
   local overrides
-  overrides="$(env | grep '^CARGO_PROFILE_BENCH_' | sort | tr '\n' ' ' || true)"
+  overrides="$(env | grep -E '^(CARGO_PROFILE_(BENCH|RELEASE)_[A-Z0-9_]*|([A-Z0-9_]*_)?RUSTFLAGS)=.' | sort | tr '\n' ' ' || true)"
   if [[ -n "$overrides" ]]; then
     echo "bench with ${overrides}(NOT production)"
   else
@@ -88,6 +91,17 @@ machine_note() {
   echo "machine: $os, $cpu; load average: $load; profile: $(profile_note)"
 }
 
+# Criterion keeps a baseline per bench ID and leaves the IDs a run skips (other bench targets,
+# a filter) as they were. Remove every result saved as <name>, so a baseline and its note
+# describe one run.
+clear_baseline() {
+  local dir="$CARGO_TARGET_DIR/criterion"
+  [[ -d "$dir" ]] || return 0
+  find "$dir" -type f -path "*/$1/benchmark.json" | sed 's|/benchmark.json$||' |
+    while IFS= read -r d; do rm -rf "$d"; done
+  rm -f "$dir/baseline-$1.txt"
+}
+
 cmd="${1:-}"
 [[ -n "$cmd" ]] || usage
 shift
@@ -97,6 +111,9 @@ case "$cmd" in
     name="${1:-}"
     [[ -n "$name" ]] || usage
     shift
+    # The name is a directory under every bench ID, and clear_baseline deletes it.
+    name_re='^[A-Za-z0-9][A-Za-z0-9._-]*$'
+    [[ "$name" =~ $name_re ]] || { echo "baseline name must match $name_re: $name" >&2; exit 1; }
     benches=()
     extra=()
     while [[ $# -gt 0 ]]; do
@@ -113,13 +130,19 @@ case "$cmd" in
       export CARGO_PROFILE_BENCH_CODEGEN_UNITS=16
     fi
     note="$(machine_note)"
+    # Before the run: the build compiles this tree, and an edit during a long run must not
+    # change the recorded revision.
+    rev="$(git_note)"
     echo "$note"
     # `${arr[@]+"${arr[@]}"}` expands to nothing when the array is empty; a bare "${arr[@]}"
     # is an unbound variable under `set -u` on bash 3.2 (/bin/bash on macOS).
-    (cd "$crate" && cargo bench ${benches[@]+"${benches[@]}"} -- --save-baseline "$name" ${extra[@]+"${extra[@]}"})
+    cargo_args=(${benches[@]+"${benches[@]}"} -- --save-baseline "$name" ${extra[@]+"${extra[@]}"})
+    clear_baseline "$name"
+    (cd "$crate" && cargo bench "${cargo_args[@]}")
+    [[ "$(git_note)" == "$rev" ]] || rev="$rev, changed during the run"
     mkdir -p "$CARGO_TARGET_DIR/criterion"
-    printf '%s\nsaved: %s\ngit: %s\n' "$note" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-      "$(git_note)" \
+    printf '%s\nsaved: %s\ngit: %s\nargs: %s\n' "$note" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+      "$rev" "${cargo_args[*]}" \
       > "$CARGO_TARGET_DIR/criterion/baseline-$name.txt"
     echo "saved baseline '$name' under $CARGO_TARGET_DIR/criterion (notes in baseline-$name.txt)"
     ;;

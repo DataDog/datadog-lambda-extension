@@ -20,9 +20,30 @@ use crate::fixtures::invocation::{
 #[global_allocator]
 static GLOBAL: tikv_jemallocator::Jemalloc = tikv_jemallocator::Jemalloc;
 
-/// Sets the AWS variables the tags provider and the config read, for the fixture function. No
-/// `AWS_EXECUTION_ENV`: Lambda gives it to the runtime process only, not to extensions.
+/// The variables Lambda gives only to the runtime process, not to extensions (Extensions API
+/// docs), and the per-invocation `_X_AMZN_TRACE_ID`. An inherited `AWS_EXECUTION_ENV` adds a
+/// `runtime` tag to every span and log line.
+const RUNTIME_ONLY: &[&str] = &[
+    "AWS_EXECUTION_ENV",
+    "AWS_LAMBDA_LOG_GROUP_NAME",
+    "AWS_LAMBDA_LOG_STREAM_NAME",
+    "AWS_XRAY_CONTEXT_MISSING",
+    "AWS_XRAY_DAEMON_ADDRESS",
+    "LAMBDA_RUNTIME_DIR",
+    "LAMBDA_TASK_ROOT",
+    "_AWS_XRAY_DAEMON_ADDRESS",
+    "_AWS_XRAY_DAEMON_PORT",
+    "_HANDLER",
+    "_X_AMZN_TRACE_ID",
+];
+
+/// Sets the AWS variables the tags provider and the config read, for the fixture function, and
+/// removes the `RUNTIME_ONLY` ones the host shell may have.
 pub fn setup_env() {
+    for k in RUNTIME_ONLY {
+        // Benches are single-threaded at setup time.
+        unsafe { std::env::remove_var(k) };
+    }
     for (k, v) in [
         ("AWS_LAMBDA_FUNCTION_NAME", FUNCTION_NAME.to_string()),
         ("AWS_LAMBDA_FUNCTION_VERSION", FUNCTION_VERSION.to_string()),

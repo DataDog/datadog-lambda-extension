@@ -25,7 +25,7 @@ use serde::de::value::{Error as DeError, StrDeserializer};
 // identity), without any DD_* variable. PATH is left out so the bench keeps the host PATH. The
 // variables Lambda gives only to the runtime process (`AWS_EXECUTION_ENV`, `LAMBDA_TASK_ROOT`,
 // `_HANDLER`, the log group and X-Ray ones; see the Extensions API docs) and the per-invocation
-// `_X_AMZN_TRACE_ID` are left out.
+// `_X_AMZN_TRACE_ID` are left out, and `common::setup_env` removes any the host shell has.
 const LAMBDA_BASE: &[(&str, &str)] = &[
     ("AWS_LAMBDA_LOG_FORMAT", "Text"),
     ("AWS_LAMBDA_RUNTIME_API", "127.0.0.1:9001"),

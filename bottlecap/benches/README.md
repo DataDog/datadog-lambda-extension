@@ -77,8 +77,10 @@ Without critcmp, criterion compares on its own: `cargo bench -- --baseline main`
 change against the saved baseline after each bench.
 
 `save` writes `target/criterion/baseline-<name>.txt` with the machine, the load average, the
-profile (with any `CARGO_PROFILE_BENCH_*` override) and the commit, so a number is never read
-without its context. `scripts/bench-docker-arm64.sh` writes the same note, with the image and
+profile (with any `CARGO_PROFILE_BENCH_*`, `CARGO_PROFILE_RELEASE_*` or `RUSTFLAGS` override),
+the commit at the start of the run and the cargo arguments, so a number is never read without
+its context. `save` first removes any older results saved under the same name, so a baseline
+holds one run. `scripts/bench-docker-arm64.sh` does the same, and its note adds the image and
 the container limits.
 
 ### First baseline
@@ -121,7 +123,8 @@ accepts a file path in place of a baseline name).
 The extension ships on Linux arm64 (Graviton). `scripts/bench-docker-arm64.sh` runs the suite
 in a `rust:1.93-bookworm` arm64 container (native on Apple Silicon), limited to 2 CPUs like a
 Lambda sandbox, with the target directory in `bottlecap/target-linux-arm64/` so the results
-never mix with host baselines:
+never mix with host baselines. It stops on an x86 Docker host, where arm64 runs under
+emulation:
 
 ```sh
 scripts/bench-docker-arm64.sh linux-main                       # whole suite
