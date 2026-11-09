@@ -4,8 +4,10 @@
 //! Review items: 5.5 (JSON line parsed twice, copied, serialized 2 or 3 times), 5.6 (OOM check),
 //! 5.7 (fixed fields serialized per line), 5.14 (zstd inline, quadratic stitch), 2.2.
 //!
-//! Every per-line bench runs over `LINES` events and reports with `Throughput::Elements`, so
-//! criterion prints the per-line cost.
+//! The benches over a Telemetry POST run over one full POST of each shape
+//! (`LogKind::max_events_per_post`), the other per-line benches over `LINES` events. All report
+//! with `Throughput::Elements`. Criterion's time is for the whole batch; divide it by the
+//! element count for the per-line cost.
 
 mod common;
 #[path = "../tests/fixtures/mod.rs"]
@@ -22,14 +24,21 @@ use bottlecap::logs::aggregator_service::{AggregatorHandle, AggregatorService};
 use bottlecap::logs::lambda::processor::{LambdaProcessor, is_oom_error};
 use bottlecap::logs::lambda::{IntakeLog, Lambda, Message};
 use criterion::{BatchSize, BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
+use fixtures::invocation::{BASE_NS, SERVICE, log_millis, millis_to_ns};
 use fixtures::logs;
 use fixtures::telemetry::{self, LogKind, REQUEST_ID};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use serde_json::value::RawValue;
 
-/// Events per POST body, the Telemetry API `maxItems`.
-const LINES: usize = 1000;
+/// Lines per batch in the benches that do not parse a POST: a full POST of text events, the
+/// Telemetry API `maxItems`.
+const LINES: usize = LogKind::Text.max_events_per_post();
+
+/// The `timestamp` of the generated intake logs: the first function log line, in milliseconds.
+fn log_timestamp_ms() -> i64 {
+    (BASE_NS + millis_to_ns(log_millis(0))) / 1_000_000
+}
 
 fn parse_events(body: &[u8]) -> Vec<TelemetryEvent> {
     serde_json::from_slice(body).expect("fixture body parses")
@@ -134,9 +143,10 @@ struct RawEvent<'a> {
 
 fn listener_parse(c: &mut Criterion) {
     let mut g = c.benchmark_group("logs/listener_parse");
-    g.throughput(Throughput::Elements(LINES as u64));
     for kind in LogKind::ALL {
-        let body = telemetry::log_batch(kind, LINES);
+        let n = kind.max_events_per_post();
+        g.throughput(Throughput::Elements(n as u64));
+        let body = telemetry::log_batch(kind, n);
         g.bench_with_input(
             BenchmarkId::new("flatten_telemetry_event", kind.name()),
             &body,
@@ -172,9 +182,10 @@ fn processor_process(c: &mut Criterion) {
     let mut p = pipeline(&rt);
 
     let mut g = c.benchmark_group("logs/processor_process");
-    g.throughput(Throughput::Elements(LINES as u64));
     for kind in LogKind::ALL {
-        let events = parse_events(&telemetry::log_batch(kind, LINES));
+        let n = kind.max_events_per_post();
+        g.throughput(Throughput::Elements(n as u64));
+        let events = parse_events(&telemetry::log_batch(kind, n));
         g.bench_function(BenchmarkId::new("per_line", kind.name()), |b| {
             b.iter_custom(|iters| {
                 let mut total = Duration::ZERO;
@@ -238,11 +249,11 @@ fn intake_log(message: &str, arn: &str, tags: &str) -> IntakeLog {
                 request_id: Some(REQUEST_ID.to_string()),
                 ..Lambda::default()
             },
-            timestamp: 1_761_566_400_123,
+            timestamp: log_timestamp_ms(),
             status: "info".to_string(),
         },
         hostname: arn.to_string(),
-        service: "orders".to_string(),
+        service: SERVICE.to_string(),
         tags: tags.to_string(),
         source: "lambda".to_string(),
     }
@@ -255,9 +266,10 @@ fn processor_parts(c: &mut Criterion) {
     let (arn, tags) = (p.arn.clone(), p.tags.clone());
 
     let mut g = c.benchmark_group("logs/processor_parts");
-    g.throughput(Throughput::Elements(LINES as u64));
     for kind in LogKind::ALL {
-        let body = telemetry::log_batch(kind, LINES);
+        let n = kind.max_events_per_post();
+        g.throughput(Throughput::Elements(n as u64));
+        let body = telemetry::log_batch(kind, n);
         let events = parse_events(&body);
         let messages: Vec<String> = events.iter().map(message_of).collect();
         let intake: Vec<IntakeLog> = messages
@@ -309,7 +321,7 @@ fn processor_parts(c: &mut Criterion) {
                         arn.clone(),
                         arn.clone(),
                         tags.clone(),
-                        "orders".to_string(),
+                        SERVICE.to_string(),
                         "lambda".to_string(),
                     ));
                     acc + fields.0.len()
@@ -380,7 +392,7 @@ fn processor_parts(c: &mut Criterion) {
                                         .unwrap_or("info"),
                                 },
                                 hostname: &arn,
-                                service: "orders",
+                                service: SERVICE,
                                 ddtags: &tags,
                                 ddsource: "lambda",
                             };
@@ -446,7 +458,7 @@ fn processor_parts(c: &mut Criterion) {
                                     .unwrap_or("info"),
                             },
                             hostname: &arn,
-                            service: "orders",
+                            service: SERVICE,
                             ddtags: &tags,
                             ddsource: "lambda",
                         };
@@ -460,12 +472,18 @@ fn processor_parts(c: &mut Criterion) {
         let suffix = {
             let mut s = String::from(",\"hostname\":");
             s.push_str(&serde_json::to_string(&arn).expect("arn"));
-            s.push_str(",\"service\":\"orders\",\"ddtags\":");
+            s.push_str(",\"service\":");
+            s.push_str(&serde_json::to_string(SERVICE).expect("service"));
+            s.push_str(",\"ddtags\":");
             s.push_str(&serde_json::to_string(&tags).expect("tags"));
             s.push_str(",\"ddsource\":\"lambda\"}");
             s
         };
         let arn_json = serde_json::to_string(&arn).expect("arn");
+        let message_tail = format!(
+            "\"}},\"timestamp\":{},\"status\":\"info\"}}",
+            log_timestamp_ms()
+        );
         let prebuilt = |m: &str| -> Vec<u8> {
             let mut out = Vec::with_capacity(m.len() + suffix.len() + 160);
             out.extend_from_slice(b"{\"message\":{\"message\":");
@@ -474,7 +492,7 @@ fn processor_parts(c: &mut Criterion) {
             out.extend_from_slice(arn_json.as_bytes());
             out.extend_from_slice(b",\"request_id\":\"");
             out.extend_from_slice(REQUEST_ID.as_bytes());
-            out.extend_from_slice(b"\"},\"timestamp\":1761566400123,\"status\":\"info\"}");
+            out.extend_from_slice(message_tail.as_bytes());
             out.extend_from_slice(suffix.as_bytes());
             out
         };
@@ -492,6 +510,7 @@ fn processor_parts(c: &mut Criterion) {
     }
 
     // `process()`: one `Vec` and one unbounded channel send per line.
+    g.throughput(Throughput::Elements(LINES as u64));
     g.bench_function("per_line_vec_and_unbounded_send", |b| {
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<Vec<String>>();
         let lines: Vec<String> = (0..LINES).map(|i| i.to_string()).collect();

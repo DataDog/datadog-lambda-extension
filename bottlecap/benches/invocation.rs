@@ -1,7 +1,7 @@
 //! Per-invocation payload work: trigger identification, payload parse and clones, and the
 //! LWA parse.
 //!
-//! Review items: 5.10, 5.20.
+//! Review item: 5.10.
 
 mod common;
 #[path = "../tests/fixtures/mod.rs"]

@@ -3,7 +3,8 @@
 //!
 //! Review items: 1, 3.4, 3.8.
 //!
-//! No tracing subscriber is installed, so the config warnings cost only their level check.
+//! No tracing subscriber is installed, so the config warnings cost only their level check. The
+//! extension keeps the config and the compiled rules, so their drop is outside the measurement.
 
 mod common;
 #[path = "../tests/fixtures/mod.rs"]
@@ -17,25 +18,18 @@ use bottlecap::logs::lambda::IntakeLog;
 use bottlecap::logs::lambda::processor::LambdaProcessor;
 use bottlecap::logs::processor::Processor;
 use criterion::{Criterion, criterion_group, criterion_main};
+use fixtures::invocation::{ENV, REGION, SERVICE, VERSION};
 use serde::de::value::{Error as DeError, StrDeserializer};
 
-// A Lambda sandbox environment (python3.13, arm64) without any DD_* variable. PATH is left out
-// so the bench keeps the host PATH.
+// The rest of the environment Lambda gives an extension (`common::setup_env` sets the function
+// identity), without any DD_* variable. PATH is left out so the bench keeps the host PATH. The
+// variables Lambda gives only to the runtime process (`AWS_EXECUTION_ENV`, `LAMBDA_TASK_ROOT`,
+// `_HANDLER`, the log group and X-Ray ones; see the Extensions API docs) and the per-invocation
+// `_X_AMZN_TRACE_ID` are left out, and `common::setup_env` removes any the host shell has.
 const LAMBDA_BASE: &[(&str, &str)] = &[
-    ("AWS_LAMBDA_FUNCTION_NAME", "my-function"),
-    ("AWS_LAMBDA_FUNCTION_VERSION", "$LATEST"),
-    ("AWS_LAMBDA_FUNCTION_MEMORY_SIZE", "1024"),
-    ("AWS_LAMBDA_LOG_GROUP_NAME", "/aws/lambda/my-function"),
-    (
-        "AWS_LAMBDA_LOG_STREAM_NAME",
-        "2026/10/27/[$LATEST]0123456789abcdef0123456789abcdef",
-    ),
     ("AWS_LAMBDA_LOG_FORMAT", "Text"),
     ("AWS_LAMBDA_RUNTIME_API", "127.0.0.1:9001"),
-    ("AWS_LAMBDA_INITIALIZATION_TYPE", "on-demand"),
-    ("AWS_EXECUTION_ENV", "AWS_Lambda_python3.13"),
-    ("AWS_REGION", "us-east-1"),
-    ("AWS_DEFAULT_REGION", "us-east-1"),
+    ("AWS_DEFAULT_REGION", REGION),
     ("AWS_ACCESS_KEY_ID", "ASIAEXAMPLEEXAMPLE12"),
     (
         "AWS_SECRET_ACCESS_KEY",
@@ -45,24 +39,12 @@ const LAMBDA_BASE: &[(&str, &str)] = &[
         "AWS_SESSION_TOKEN",
         "IQoJb3JpZ2luX2VjEJr//////////wEaCXVzLWVhc3QtMSJHMEUCIQDexampleexampleexampleexampleexampleexampleexampleexampleexampleexampleexampleexampleexampleexampleexampleexampleexampleexampleexampleexampleexampleexampleexampleexampleexampleexampleexampleexampleexampleexampleexampleexampleexampleexampleexampleexampleexampleexample",
     ),
-    ("AWS_XRAY_DAEMON_ADDRESS", "169.254.79.129:2000"),
-    ("AWS_XRAY_CONTEXT_MISSING", "LOG_ERROR"),
-    ("_AWS_XRAY_DAEMON_ADDRESS", "169.254.79.129"),
-    ("_AWS_XRAY_DAEMON_PORT", "2000"),
-    (
-        "_X_AMZN_TRACE_ID",
-        "Root=1-6720abcd-0123456789abcdef01234567;Parent=0123456789abcdef;Sampled=0;Lineage=1:abcd1234:0",
-    ),
-    ("LAMBDA_TASK_ROOT", "/var/task"),
-    ("LAMBDA_RUNTIME_DIR", "/var/runtime"),
     (
         "LD_LIBRARY_PATH",
         "/var/lang/lib:/lib64:/usr/lib64:/var/runtime:/var/runtime/lib:/var/task:/var/task/lib:/opt/lib",
     ),
     ("LANG", "en_US.UTF-8"),
     ("TZ", ":UTC"),
-    ("_HANDLER", "handler.handler"),
-    ("PYTHONPATH", "/var/runtime"),
     ("AWS_LAMBDA_EXEC_WRAPPER", "/opt/datadog_wrapper"),
     ("SHLVL", "0"),
 ];
@@ -74,9 +56,9 @@ const TYPICAL: &[(&str, &str)] = &[
         "arn:aws:secretsmanager:us-east-1:123456789012:secret:dd-api-key-AbCdEf",
     ),
     ("DD_SITE", "datadoghq.com"),
-    ("DD_ENV", "prod"),
-    ("DD_SERVICE", "checkout"),
-    ("DD_VERSION", "1.10.3"),
+    ("DD_ENV", ENV),
+    ("DD_SERVICE", SERVICE),
+    ("DD_VERSION", VERSION),
     ("DD_TAGS", "team:payments,tier:backend"),
     ("DD_LOG_LEVEL", "debug"),
     ("DD_TRACE_ENABLED", "true"),
@@ -163,6 +145,7 @@ fn clear_dd_env() {
 
 fn set_scenario(name: &str) {
     clear_dd_env();
+    common::setup_env();
     set_all(LAMBDA_BASE);
     match name {
         "none" => {}
@@ -183,7 +166,8 @@ fn set_scenario(name: &str) {
 
 fn get_config(c: &mut Criterion) {
     let mut g = c.benchmark_group("config/get_config");
-    // `main` reads `$LAMBDA_TASK_ROOT/datadog.yaml`; here the file does not exist.
+    // `main` reads `$LAMBDA_TASK_ROOT/datadog.yaml` (`/var/task` when unset, as for an
+    // extension); here the file does not exist.
     let dir = tempfile::tempdir().expect("tempdir");
     for scenario in ["none", "typical", "heavy", "heavy_no_replace_tags"] {
         set_scenario(scenario);
@@ -192,7 +176,7 @@ fn get_config(c: &mut Criterion) {
             std::env::vars_os().count()
         );
         g.bench_function(scenario, |b| {
-            b.iter(|| bottlecap::config::get_config(black_box(dir.path())));
+            b.iter_with_large_drop(|| bottlecap::config::get_config(black_box(dir.path())));
         });
     }
     clear_dd_env();
@@ -208,7 +192,7 @@ fn replace_rules(c: &mut Criterion) {
     let mut g = c.benchmark_group("config/replace_rules/compile");
     for (n, json) in [("1", REPLACE_TAGS_1), ("3", REPLACE_TAGS_3)] {
         g.bench_function(n, |b| {
-            b.iter(|| {
+            b.iter_with_large_drop(|| {
                 deserialize_apm_replace_rules(StrDeserializer::<DeError>::new(black_box(json)))
                     .expect("replace rules")
             });
@@ -224,7 +208,9 @@ fn processing_rules(c: &mut Criterion) {
         Some(serde_json::from_str(PROCESSING_RULES_3).expect("processing rules"));
     let mut g = c.benchmark_group("config/processing_rules/compile");
     g.bench_function("3", |b| {
-        b.iter(|| <LambdaProcessor as Processor<IntakeLog>>::compile_rules(black_box(&rules)));
+        b.iter_with_large_drop(|| {
+            <LambdaProcessor as Processor<IntakeLog>>::compile_rules(black_box(&rules))
+        });
     });
     g.finish();
 }

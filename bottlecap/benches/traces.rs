@@ -23,6 +23,7 @@ use criterion::measurement::WallTime;
 use criterion::{
     BatchSize, BenchmarkGroup, Criterion, Throughput, criterion_group, criterion_main,
 };
+use fixtures::invocation::SERVICE;
 use libdd_capabilities::MaybeSend;
 use libdd_capabilities::http::{HttpClientCapability, HttpError};
 use libdd_capabilities::sleep::SleepCapability;
@@ -218,10 +219,11 @@ fn process_traces(c: &mut Criterion) {
     let variants = [
         ("default", make_config(|_| {})),
         // Review 5.3: each regex compiles once per root span (`span_matches_tag_regex` in trace_processor.rs).
+        // The require filter matches the fixture service: every chunk is kept, both filters run.
         (
             "regex_filters_2",
             make_config(|c| {
-                c.apm_filter_tags_regex_require = Some(vec!["service:^my-.*$".to_string()]);
+                c.apm_filter_tags_regex_require = Some(vec![format!("service:^{SERVICE}$")]);
                 c.apm_filter_tags_regex_reject = Some(vec!["http.url:.*healthcheck.*".to_string()]);
             }),
         ),
@@ -235,8 +237,17 @@ fn process_traces(c: &mut Criterion) {
     for (name, config) in variants {
         let provider = common::provider(config.clone());
         let processor = processor(&config);
-        let (info, _) = process(&config, traces.clone(), body_len);
+        let (info, stats) = process(&config, traces.clone(), body_len);
         assert!(info.is_some(), "{name}: every chunk was dropped");
+        let TracerPayloadCollection::V07(payloads) = stats else {
+            unreachable!("process_traces returns V07")
+        };
+        let kept: usize = payloads
+            .iter()
+            .flat_map(|tp| &tp.chunks)
+            .map(|chunk| chunk.spans.len())
+            .sum();
+        assert_eq!(kept as u64, SPANS, "{name}: spans were filtered out");
         g.bench_function(format!("process_traces/{name}"), |b| {
             b.iter_batched(
                 || traces.clone(),

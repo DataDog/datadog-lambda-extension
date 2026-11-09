@@ -11,35 +11,62 @@ use bottlecap::config::Config;
 use bottlecap::tags::provider::Provider;
 use criterion::Criterion;
 
+use crate::fixtures::invocation::{
+    ENV, FUNCTION_ARN, FUNCTION_NAME, FUNCTION_VERSION, INIT_TYPE, MEMORY_SIZE_MB, REGION, SERVICE,
+    VERSION,
+};
+
 /// Production uses jemalloc; measure with it.
 #[global_allocator]
 static GLOBAL: tikv_jemallocator::Jemalloc = tikv_jemallocator::Jemalloc;
 
-pub use crate::fixtures::telemetry::FUNCTION_ARN;
+/// The variables Lambda gives only to the runtime process, not to extensions (Extensions API
+/// docs), and the per-invocation `_X_AMZN_TRACE_ID`. An inherited `AWS_EXECUTION_ENV` adds a
+/// `runtime` tag to every span and log line.
+const RUNTIME_ONLY: &[&str] = &[
+    "AWS_EXECUTION_ENV",
+    "AWS_LAMBDA_LOG_GROUP_NAME",
+    "AWS_LAMBDA_LOG_STREAM_NAME",
+    "AWS_XRAY_CONTEXT_MISSING",
+    "AWS_XRAY_DAEMON_ADDRESS",
+    "LAMBDA_RUNTIME_DIR",
+    "LAMBDA_TASK_ROOT",
+    "_AWS_XRAY_DAEMON_ADDRESS",
+    "_AWS_XRAY_DAEMON_PORT",
+    "_HANDLER",
+    "_X_AMZN_TRACE_ID",
+];
 
-/// Sets the AWS variables the tags provider and the config read.
+/// Sets the AWS variables the tags provider and the config read, for the fixture function, and
+/// removes the `RUNTIME_ONLY` ones the host shell may have.
 pub fn setup_env() {
+    for k in RUNTIME_ONLY {
+        // Benches are single-threaded at setup time.
+        unsafe { std::env::remove_var(k) };
+    }
     for (k, v) in [
-        ("AWS_LAMBDA_FUNCTION_NAME", "orders-prod-handler"),
-        ("AWS_LAMBDA_FUNCTION_VERSION", "$LATEST"),
-        ("AWS_LAMBDA_FUNCTION_MEMORY_SIZE", "128"),
-        ("AWS_EXECUTION_ENV", "AWS_Lambda_python3.12"),
-        ("AWS_LAMBDA_INITIALIZATION_TYPE", "on-demand"),
-        ("AWS_REGION", "us-east-1"),
+        ("AWS_LAMBDA_FUNCTION_NAME", FUNCTION_NAME.to_string()),
+        ("AWS_LAMBDA_FUNCTION_VERSION", FUNCTION_VERSION.to_string()),
+        (
+            "AWS_LAMBDA_FUNCTION_MEMORY_SIZE",
+            MEMORY_SIZE_MB.to_string(),
+        ),
+        ("AWS_LAMBDA_INITIALIZATION_TYPE", INIT_TYPE.to_string()),
+        ("AWS_REGION", REGION.to_string()),
     ] {
         // Benches are single-threaded at setup time.
         unsafe { std::env::set_var(k, v) };
     }
 }
 
-/// A typical customer config: service, env, version and 4 custom tags.
+/// A typical customer config: the fixture service, env and version, and 4 custom tags.
 pub fn config() -> Arc<Config> {
     let mut config = Config {
-        service: Some("orders".to_string()),
-        env: Some("prod".to_string()),
-        version: Some("1.42.0".to_string()),
+        service: Some(SERVICE.to_string()),
+        env: Some(ENV.to_string()),
+        version: Some(VERSION.to_string()),
         tags: HashMap::from([
-            ("env".to_string(), "prod".to_string()),
+            ("env".to_string(), ENV.to_string()),
             ("team".to_string(), "checkout".to_string()),
             ("cost_center".to_string(), "cc-1234".to_string()),
             ("owner".to_string(), "payments-platform".to_string()),
