@@ -90,13 +90,9 @@ pub fn write_corpus(dir: &Path) -> Vec<(PathBuf, usize)> {
         "telemetry/platform_batch.json",
         &telemetry::platform_batch(telemetry::REQUEST_ID),
     );
-    // As many events as one POST holds: 1000 text events, or 600 JSON events (1.3 to 1.5 KB
-    // each) to stay under the 1 MiB `maxBytes`.
-    for (kind, n) in [
-        (telemetry::LogKind::Text, 1000),
-        (telemetry::LogKind::JsonObject, 600),
-        (telemetry::LogKind::JsonString, 600),
-    ] {
+    // As many events as one POST holds.
+    for kind in telemetry::LogKind::ALL {
+        let n = kind.max_events_per_post();
         put(
             &format!("telemetry/function_{}_{n}.json", kind.name()),
             &telemetry::log_batch(kind, n),
