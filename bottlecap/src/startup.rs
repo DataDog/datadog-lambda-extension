@@ -27,7 +27,9 @@ use crate::config::Config;
 use crate::lifecycle::invocation::processor_service::InvocationProcessorHandle;
 use crate::tags::provider::Provider as TagProvider;
 use crate::traces::{
-    http_client as trace_http_client, proxy_aggregator,
+    http_client as trace_http_client,
+    passthrough::Passthrough,
+    proxy_aggregator,
     proxy_flusher::Flusher as ProxyFlusher,
     span_dedup_service,
     stats_aggregator::StatsAggregator,
@@ -207,7 +209,12 @@ pub fn build_trace_agent(
         Arc::clone(tags_provider),
         stats_concentrator_handle.clone(),
         span_dedup_handle,
-    );
+    )
+    .with_passthrough(Passthrough::new(
+        config,
+        api_key_factory.clone(),
+        client.clone(),
+    ));
     let pipeline = TraceAgentPipeline {
         trace_tx: trace_agent.get_sender_copy(),
         trace_flusher,
