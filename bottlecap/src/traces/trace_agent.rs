@@ -367,17 +367,36 @@ impl TraceAgent {
         self
     }
 
-    #[allow(clippy::cast_possible_truncation)]
+    /// Binds the listening socket synchronously, so connections are accepted
+    /// (and queued) before the caller goes on to call `/next`. Tracers probe
+    /// `/info` early in their own init; a refused connection makes them skip
+    /// the Extension for the life of the execution environment.
+    pub fn bind(&self) -> std::io::Result<std::net::TcpListener> {
+        let port = self
+            .receiver_port
+            .unwrap_or(u16::try_from(TRACE_AGENT_PORT).expect("TRACE_AGENT_PORT is too large"));
+        let listener = std::net::TcpListener::bind(SocketAddr::from(([127, 0, 0, 1], port)))?;
+        listener.set_nonblocking(true)?;
+        Ok(listener)
+    }
+
     pub async fn start(&self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        let listener = self.bind()?;
+        self.start_with_listener(listener).await
+    }
+
+    /// Serves on a listener from [`TraceAgent::bind`].
+    #[allow(clippy::cast_possible_truncation)]
+    pub async fn start_with_listener(
+        &self,
+        listener: std::net::TcpListener,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let now = Instant::now();
 
         let router = self.make_router()?;
 
-        let port = self
-            .receiver_port
-            .unwrap_or(u16::try_from(TRACE_AGENT_PORT).expect("TRACE_AGENT_PORT is too large"));
-        let socket = SocketAddr::from(([127, 0, 0, 1], port));
-        let listener = tokio::net::TcpListener::bind(&socket).await?;
+        let listener = tokio::net::TcpListener::from_std(listener)?;
+        let port = listener.local_addr()?.port();
 
         debug!("TRACE AGENT | Listening on port {port}");
         debug!(
@@ -1187,6 +1206,16 @@ mod tests {
         );
 
         SendDataBuilderInfo::new(builder, size, owned_tags)
+    }
+
+    /// Once `bind` returns, clients can connect before the agent serves.
+    #[tokio::test]
+    async fn bind_accepts_connections_before_serving() {
+        let (agent, _) = build_test_agent_with_aggregator();
+        let listener = agent.with_receiver_port(0).bind().expect("bind");
+        let addr = listener.local_addr().expect("local_addr");
+
+        std::net::TcpStream::connect(addr).expect("connect before serving");
     }
 
     /// A payload is only handed to the aggregator by a background forwarder

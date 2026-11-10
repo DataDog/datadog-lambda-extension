@@ -252,11 +252,17 @@ pub fn start_trace_agent(
         None,
     );
 
-    tokio::spawn(async move {
-        if let Err(e) = trace_agent.start().await {
-            error!("Error starting trace agent: {e:?}");
+    // Bind before returning so the listener is up before the caller calls `/next`.
+    match trace_agent.bind() {
+        Ok(listener) => {
+            tokio::spawn(async move {
+                if let Err(e) = trace_agent.start_with_listener(listener).await {
+                    error!("Error starting trace agent: {e:?}");
+                }
+            });
         }
-    });
+        Err(e) => error!("Error starting trace agent: {e:?}"),
+    }
 
     pipeline
 }
