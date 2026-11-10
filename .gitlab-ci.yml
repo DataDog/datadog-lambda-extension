@@ -16,7 +16,7 @@ stages:
 
 ci image:
   stage: prepare
-  image: registry.ddbuild.io/images/docker:20.10
+  image: registry.ddbuild.io/images/docker:27.3.1@sha256:966b6cd18c53e3730e7aaea2c0ca6b6b9877dcff11d9446f25ee5bc2293585d0
   tags: ["arch:arm64"]
   rules:
     - if: '$CI_COMMIT_BRANCH == "main" && $CI_PIPELINE_SOURCE == "push"'
