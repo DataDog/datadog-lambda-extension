@@ -122,6 +122,16 @@ async fn graceful_shutdown(tasks: Arc<Mutex<JoinSet<()>>>, shutdown_token: Cance
     }
 }
 
+/// A `JoinSet` keeps each finished task until it is joined, so remove them before adding one.
+/// Without this, the set grows by two tasks per invocation for the sandbox's lifetime.
+fn reap_finished(join_set: &mut JoinSet<()>) {
+    while let Some(result) = join_set.try_join_next() {
+        if let Err(e) = result {
+            error!("PROXY | Task error: {e}");
+        }
+    }
+}
+
 async fn record_dsm_consume_from_invocation_next(
     invocation_processor: &InvocationProcessorHandle,
     parts: &http::response::Parts,
@@ -228,6 +238,7 @@ async fn invocation_next_proxy(
         TeeBodyWithCompletion::new(intercepted_body);
 
     let mut join_set = tasks.lock().await;
+    reap_finished(&mut join_set);
     let intercepted_parts_clone = intercepted_parts.clone();
     let propagator = Arc::clone(&propagator);
     join_set.spawn(async move {
@@ -321,6 +332,7 @@ async fn invocation_response_proxy(
     // The outgoing body is what the final user will see.
     // Which is what AWS Lambda returns, in turn what we want to process.
     let mut join_set = tasks.lock().await;
+    reap_finished(&mut join_set);
     let aws_config_clone = aws_config.clone();
     join_set.spawn(async move {
         if let Ok(body) = outgoing_completion_receiver.await {
@@ -569,6 +581,24 @@ mod tests {
         assert_eq!(
             get_invocation_next_processing_mode(&test_aws_config(None), true, true),
             InvocationNextProcessingMode::UniversalInstrumentation
+        );
+    }
+
+    #[tokio::test]
+    async fn test_reap_finished_removes_finished_tasks() {
+        let mut join_set = JoinSet::new();
+        for _ in 0..10 {
+            join_set.spawn(async {});
+        }
+        // Let the spawned tasks finish.
+        tokio::task::yield_now().await;
+
+        reap_finished(&mut join_set);
+
+        assert!(
+            join_set.is_empty(),
+            "join set holds {} tasks",
+            join_set.len()
         );
     }
 
