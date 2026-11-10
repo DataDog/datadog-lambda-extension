@@ -53,6 +53,8 @@ use crate::traces::stats_concentrator_service::StatsConcentratorHandle;
 
 /// Default TCP port the trace agent listener binds to on 127.0.0.1.
 pub const TRACE_AGENT_PORT: usize = 8126;
+/// Listen backlog; the kernel caps it at `net.core.somaxconn`.
+const LISTEN_BACKLOG: u32 = 1024;
 
 // Agent endpoints
 const V4_TRACE_ENDPOINT_PATH: &str = "/v0.4/traces";
@@ -371,13 +373,17 @@ impl TraceAgent {
     /// (and queued) before the caller goes on to call `/next`. Tracers probe
     /// `/info` early in their own init; a refused connection makes them skip
     /// the Extension for the life of the execution environment.
-    pub fn bind(&self) -> std::io::Result<std::net::TcpListener> {
+    ///
+    /// Sets `SO_REUSEADDR` like `tokio::net::TcpListener::bind`. Must run
+    /// inside the tokio runtime.
+    pub fn bind(&self) -> std::io::Result<tokio::net::TcpListener> {
         let port = self
             .receiver_port
             .unwrap_or(u16::try_from(TRACE_AGENT_PORT).expect("TRACE_AGENT_PORT is too large"));
-        let listener = std::net::TcpListener::bind(SocketAddr::from(([127, 0, 0, 1], port)))?;
-        listener.set_nonblocking(true)?;
-        Ok(listener)
+        let socket = tokio::net::TcpSocket::new_v4()?;
+        socket.set_reuseaddr(true)?;
+        socket.bind(SocketAddr::from(([127, 0, 0, 1], port)))?;
+        socket.listen(LISTEN_BACKLOG)
     }
 
     pub async fn start(&self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
@@ -389,13 +395,12 @@ impl TraceAgent {
     #[allow(clippy::cast_possible_truncation)]
     pub async fn start_with_listener(
         &self,
-        listener: std::net::TcpListener,
+        listener: tokio::net::TcpListener,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let now = Instant::now();
 
         let router = self.make_router()?;
 
-        let listener = tokio::net::TcpListener::from_std(listener)?;
         let port = listener.local_addr()?.port();
 
         debug!("TRACE AGENT | Listening on port {port}");
