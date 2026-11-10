@@ -93,7 +93,7 @@ case "$cmd" in
     cargo_args=(${benches[@]+"${benches[@]}"} -- --save-baseline "$name" ${extra[@]+"${extra[@]}"})
     bench_clear_baseline "$results" "$name"
     (cd "$crate" && cargo bench "${cargo_args[@]}")
-    bench_write_note "$results" "$name" "$note" "$rev" "${cargo_args[*]}"
+    bench_write_note "$results" "$name" "$note" "$rev" "$(bench_quote_args "${cargo_args[@]}")"
     bench_check_after_run "$here" "$rev" bench_mark_changed "$(bench_note_file "$results" "$name")"
     echo "saved baseline '$name' under $results (notes in baseline-$name.txt)"
     ;;

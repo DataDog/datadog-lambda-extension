@@ -71,7 +71,7 @@ cargo clippy:
 
 bottlecap ({{ $flavor.name }}):
   stage: compile
-  image: registry.ddbuild.io/images/docker:20.10
+  image: registry.ddbuild.io/images/docker:27.3.1@sha256:966b6cd18c53e3730e7aaea2c0ca6b6b9877dcff11d9446f25ee5bc2293585d0
   tags: ["arch:{{ $flavor.arch }}"]
   needs: []
   # This job sometimes times out on GitLab for unclear reasons.
@@ -97,7 +97,7 @@ bottlecap ({{ $flavor.name }}):
 
 layer ({{ $flavor.name }}):
   stage: build
-  image: registry.ddbuild.io/images/docker:20.10
+  image: registry.ddbuild.io/images/docker:27.3.1@sha256:966b6cd18c53e3730e7aaea2c0ca6b6b9877dcff11d9446f25ee5bc2293585d0
   tags: ["arch:{{ $flavor.arch }}"]
   needs:
     - bottlecap ({{ $flavor.name }})
@@ -121,7 +121,7 @@ layer ({{ $flavor.name }}):
 
 check layer size ({{ $flavor.name }}):
   stage: build
-  image: registry.ddbuild.io/images/docker:20.10
+  image: registry.ddbuild.io/images/docker:27.3.1@sha256:966b6cd18c53e3730e7aaea2c0ca6b6b9877dcff11d9446f25ee5bc2293585d0
   tags: ["arch:amd64"]
   needs:
     - layer ({{ $flavor.name }})
@@ -325,7 +325,7 @@ e2e-test ({{ $f.name }}):
 
 e2e-test-status ({{ $f.name }}):
   stage: e2e
-  image: registry.ddbuild.io/images/docker:20.10-py3
+  image: registry.ddbuild.io/images/docker:27.3.1@sha256:966b6cd18c53e3730e7aaea2c0ca6b6b9877dcff11d9446f25ee5bc2293585d0
   tags: ["arch:amd64"]
   timeout: 3h
   variables:
@@ -367,7 +367,7 @@ publish private images ({{ $multi_arch_image_flavor.name }}):
 image ({{ $multi_arch_image_flavor.name }}):
   stage: build
   tags: ["arch:amd64"]
-  image: registry.ddbuild.io/images/docker:20.10
+  image: registry.ddbuild.io/images/docker:27.3.1@sha256:966b6cd18c53e3730e7aaea2c0ca6b6b9877dcff11d9446f25ee5bc2293585d0
   rules:
     - if: '$CI_COMMIT_TAG =~ /^v.*/'
   needs:
@@ -400,7 +400,7 @@ publish image ({{ $multi_arch_image_flavor.name }}):
 
 layer bundle:
   stage: build
-  image: registry.ddbuild.io/images/docker:20.10
+  image: registry.ddbuild.io/images/docker:27.3.1@sha256:966b6cd18c53e3730e7aaea2c0ca6b6b9877dcff11d9446f25ee5bc2293585d0
   tags: ["arch:amd64"]
   needs:
     {{ range (ds "flavors").flavors }}
@@ -422,7 +422,7 @@ layer bundle:
 
 signed layer bundle:
   stage: sign
-  image: registry.ddbuild.io/images/docker:20.10
+  image: registry.ddbuild.io/images/docker:27.3.1@sha256:966b6cd18c53e3730e7aaea2c0ca6b6b9877dcff11d9446f25ee5bc2293585d0
   tags: ["arch:amd64"]
   rules:
     - if: '$CI_COMMIT_TAG =~ /^v.*/'

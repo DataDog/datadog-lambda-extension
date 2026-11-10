@@ -65,12 +65,12 @@ BENCH_FAST=1 ../scripts/bench-compare.sh save scratch logs -- --quick
 [critcmp](https://github.com/BurntSushi/critcmp) (`cargo install critcmp`):
 
 ```sh
-scripts/bench-compare.sh save main                 # run the suite, save baseline "main"
+../scripts/bench-compare.sh save main                 # run the suite, save baseline "main"
 # ... apply a change ...
-scripts/bench-compare.sh save fix logs traces      # only two targets
-scripts/bench-compare.sh compare main fix -t 5     # table, differences over 5 % only
-scripts/bench-compare.sh export main /tmp/main.json
-scripts/bench-compare.sh list
+../scripts/bench-compare.sh save fix logs traces      # only two targets
+../scripts/bench-compare.sh compare main fix -t 5     # table, differences over 5 % only
+../scripts/bench-compare.sh export main /tmp/main.json
+../scripts/bench-compare.sh list
 ```
 
 Without critcmp, criterion compares on its own: `cargo bench -- --baseline main` prints the
@@ -114,7 +114,7 @@ in a `rust:1.93-bookworm` arm64 container (native on Apple Silicon), limited to 
 Lambda sandbox, with the target directory in `bottlecap/target-linux-arm64/` so the results
 never mix with host baselines. It stops on an x86 Docker host, where arm64 runs under
 emulation. A custom `RUST_IMAGE` must be Debian-based: the script runs bash in it and installs
-protoc with apt-get, and it stops before the run when the image cannot:
+protoc with apt-get, and it stops before the run when the image cannot. From the repository root:
 
 ```sh
 scripts/bench-docker-arm64.sh linux-main                       # whole suite

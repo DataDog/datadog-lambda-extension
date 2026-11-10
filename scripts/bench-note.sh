@@ -66,10 +66,27 @@ bench_machine_note() {
     load="$(uptime | sed 's/.*load average[s]*: //')"
   else
     cpu="$(grep -m1 'model name' /proc/cpuinfo 2>/dev/null | cut -d: -f2- | sed 's/^ //' || true)"
+    # ARM kernels have no "model name": use lscpu, else the implementer and part codes.
+    if [[ -z "$cpu" ]]; then
+      cpu="$(lscpu 2>/dev/null | sed -n 's/^Model name: *//p' | head -1 || true)"
+      if [[ "$cpu" == "-" ]]; then cpu=""; fi
+    fi
+    if [[ -z "$cpu" ]]; then
+      cpu="$(awk -F': *' '/^CPU implementer/ && !i {i=$2} /^CPU part/ && !p {p=$2}
+        END {if (i != "") print "arm implementer " i ", part " p}' /proc/cpuinfo 2>/dev/null || true)"
+    fi
     cpus="$(nproc)"
     load="$(cut -d' ' -f1-3 /proc/loadavg)"
   fi
   echo "machine: $(uname -sm), $cpus cpus visible${cpu:+, $cpu}${BENCH_CONTAINER:+; container: $BENCH_CONTAINER}; load average: $load; profile: $(bench_profile_note)"
+}
+
+# The cargo arguments as one shell-quoted line, so one argument `foo bar` and two arguments
+# `foo` `bar` stay apart in the note.
+bench_quote_args() {
+  local out="" a
+  for a in "$@"; do out="$out$(printf '%q' "$a") "; done
+  printf '%s' "${out% }"
 }
 
 # bench_write_note <criterion dir> <name> <machine note> <git rev> <cargo args>, with the
