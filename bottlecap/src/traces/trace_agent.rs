@@ -66,6 +66,10 @@ const LLM_OBS_EVAL_METRIC_ENDPOINT_PATH: &str = "/evp_proxy/v2/api/intake/llm-ob
 const LLM_OBS_EVAL_METRIC_ENDPOINT_PATH_V2: &str =
     "/evp_proxy/v2/api/intake/llm-obs/v2/eval-metric";
 const LLM_OBS_SPANS_ENDPOINT_PATH: &str = "/evp_proxy/v2/api/v2/llmobs";
+// Some tracers need this base path in /info before they use EVP proxy routes.
+const EVP_PROXY_V2_BASE_PATH: &str = "/evp_proxy/v2/";
+const FFE_FLAG_EVALUATION_ENDPOINT_PATH: &str = "/evp_proxy/v2/api/v2/flagevaluation";
+const FFE_EXPOSURES_ENDPOINT_PATH: &str = "/evp_proxy/v2/api/v2/exposures";
 const INFO_ENDPOINT_PATH: &str = "/info";
 const V1_DEBUGGER_ENDPOINT_PATH: &str = "/debugger/v1/input";
 const V2_DEBUGGER_ENDPOINT_PATH: &str = "/debugger/v2/input";
@@ -75,6 +79,8 @@ const INSTRUMENTATION_ENDPOINT_PATH: &str = "/telemetry/proxy/api/v2/apmtelemetr
 // Intake endpoints
 const DSM_INTAKE_PATH: &str = "/api/v0.1/pipeline_stats";
 const LLM_OBS_SPANS_INTAKE_PATH: &str = "/api/v2/llmobs";
+const FFE_FLAG_EVALUATION_INTAKE_PATH: &str = "/api/v2/flagevaluation";
+const FFE_EXPOSURES_INTAKE_PATH: &str = "/api/v2/exposures";
 const LLM_OBS_EVAL_METRIC_INTAKE_PATH: &str = "/api/intake/llm-obs/v1/eval-metric";
 const LLM_OBS_EVAL_METRIC_INTAKE_PATH_V2: &str = "/api/intake/llm-obs/v2/eval-metric";
 const PROFILING_INTAKE_PATH: &str = "/api/v2/profile";
@@ -481,6 +487,11 @@ impl TraceAgent {
                 post(Self::llm_obs_eval_metric_proxy_v2),
             )
             .route(LLM_OBS_SPANS_ENDPOINT_PATH, post(Self::llm_obs_spans_proxy))
+            .route(
+                FFE_FLAG_EVALUATION_ENDPOINT_PATH,
+                post(Self::ffe_flag_evaluation_proxy),
+            )
+            .route(FFE_EXPOSURES_ENDPOINT_PATH, post(Self::ffe_exposures_proxy))
             .route(V1_DEBUGGER_ENDPOINT_PATH, post(Self::debugger_logs_proxy))
             .route(V2_DEBUGGER_ENDPOINT_PATH, post(Self::debugger_intake_proxy))
             .route(
@@ -623,6 +634,33 @@ impl TraceAgent {
         .await
     }
 
+    async fn ffe_flag_evaluation_proxy(
+        State(state): State<ProxyState>,
+        request: Request,
+    ) -> Response {
+        Self::handle_proxy(
+            state.config,
+            state.proxy_aggregator,
+            request,
+            "event-platform-intake",
+            FFE_FLAG_EVALUATION_INTAKE_PATH,
+            "ffe_flag_evaluation",
+        )
+        .await
+    }
+
+    async fn ffe_exposures_proxy(State(state): State<ProxyState>, request: Request) -> Response {
+        Self::handle_proxy(
+            state.config,
+            state.proxy_aggregator,
+            request,
+            "event-platform-intake",
+            FFE_EXPOSURES_INTAKE_PATH,
+            "ffe_exposures",
+        )
+        .await
+    }
+
     // Used for `/debugger/v1/input` in Exception Replay
     async fn debugger_logs_proxy(State(state): State<ProxyState>, request: Request) -> Response {
         Self::handle_proxy(
@@ -675,10 +713,15 @@ impl TraceAgent {
                     LLM_OBS_EVAL_METRIC_ENDPOINT_PATH,
                     LLM_OBS_EVAL_METRIC_ENDPOINT_PATH_V2,
                     LLM_OBS_SPANS_ENDPOINT_PATH,
+                    EVP_PROXY_V2_BASE_PATH,
+                    FFE_FLAG_EVALUATION_ENDPOINT_PATH,
+                    FFE_EXPOSURES_ENDPOINT_PATH,
                     V1_DEBUGGER_ENDPOINT_PATH,
                     V2_DEBUGGER_ENDPOINT_PATH,
                     DEBUGGER_DIAGNOSTICS_ENDPOINT_PATH,
                 ],
+                // handle_proxy forwards request headers; tracers check these before using EVP.
+                "evp_proxy_allowed_headers": ["DD-EVP-ORIGIN", "DD-EVP-ORIGIN-VERSION"],
                 "client_drop_p0s": false,
             }
         );
@@ -1323,5 +1366,89 @@ mod tests {
             .expect("route response");
 
         assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn info_advertises_evp_proxy_for_feature_flags() {
+        let response = TraceAgent::info().await;
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("info body");
+        let info: serde_json::Value = serde_json::from_slice(&body).expect("info json");
+        let endpoints = info["endpoints"].as_array().expect("endpoints");
+        for path in [
+            EVP_PROXY_V2_BASE_PATH,
+            FFE_FLAG_EVALUATION_ENDPOINT_PATH,
+            FFE_EXPOSURES_ENDPOINT_PATH,
+        ] {
+            assert!(endpoints.iter().any(|e| e == path), "missing {path}");
+        }
+        let headers = info["evp_proxy_allowed_headers"]
+            .as_array()
+            .expect("evp_proxy_allowed_headers");
+        for header in ["DD-EVP-ORIGIN", "DD-EVP-ORIGIN-VERSION"] {
+            assert!(headers.iter().any(|h| h == header), "missing {header}");
+        }
+    }
+
+    /// Tracers that match `/evp_proxy/v2/` by prefix may send other EVP data
+    /// here. A 404 makes them send it directly instead.
+    #[tokio::test]
+    async fn unrouted_evp_paths_return_not_found() {
+        let agent = build_test_agent();
+        let router = agent.make_router().expect("make_router");
+        let response = router
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/evp_proxy/v2/api/v2/not-a-flag-route")
+                    .header("X-Datadog-EVP-Subdomain", "event-platform-intake")
+                    .body(Body::from("{}"))
+                    .expect("build request"),
+            )
+            .await
+            .expect("route response");
+
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+        assert!(agent.proxy_aggregator.lock().await.get_batch().is_empty());
+    }
+
+    #[tokio::test]
+    async fn feature_flag_events_are_relayed_to_event_platform_intake() {
+        let agent = build_test_agent();
+        let site = agent.config.site.clone();
+        let router = agent.make_router().expect("make_router");
+        for (path, intake) in [
+            (
+                FFE_FLAG_EVALUATION_ENDPOINT_PATH,
+                FFE_FLAG_EVALUATION_INTAKE_PATH,
+            ),
+            (FFE_EXPOSURES_ENDPOINT_PATH, FFE_EXPOSURES_INTAKE_PATH),
+        ] {
+            let response = router
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .method("POST")
+                        .uri(path)
+                        .header("Content-Type", "application/json")
+                        .header("DD-EVP-ORIGIN", "dd-trace-py")
+                        .header("DD-EVP-ORIGIN-VERSION", "4.17.0")
+                        .header("X-Datadog-EVP-Subdomain", "event-platform-intake")
+                        .body(Body::from(r#"{"events":[]}"#))
+                        .expect("build request"),
+                )
+                .await
+                .expect("route response");
+            assert_eq!(response.status(), StatusCode::OK, "{path}");
+            let batch = agent.proxy_aggregator.lock().await.get_batch();
+            assert_eq!(batch.len(), 1, "{path}");
+            assert_eq!(
+                batch[0].target_url,
+                format!("https://event-platform-intake.{site}{intake}")
+            );
+            assert_eq!(batch[0].headers["dd-evp-origin"], "dd-trace-py");
+            assert_eq!(batch[0].headers["dd-evp-origin-version"], "4.17.0");
+        }
     }
 }
