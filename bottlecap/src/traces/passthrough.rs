@@ -16,6 +16,7 @@ use axum::{
     routing::get,
 };
 use dogstatsd::api_key::ApiKeyFactory;
+use tokio::time::{Instant, timeout_at};
 use tracing::{debug, error};
 
 use crate::config::Config;
@@ -24,8 +25,9 @@ use crate::config::Config;
 pub const FLAG_CONFIG_PATH: &str = "/api/v2/feature-flagging/config/rules-based/server";
 const FLAG_CONFIG_SUBDOMAIN: &str = "ufc-server.ff-cdn";
 
-/// Below the tracers' default 5 second request timeout, so the tracer sees
-/// our error instead of timing out itself.
+/// Covers resolving the API key and the request to Datadog. Below the tracers'
+/// default 5 second request timeout, so the tracer sees our error instead of
+/// timing out itself.
 const UPSTREAM_TIMEOUT: Duration = Duration::from_secs(4);
 
 const FORWARDED_REQUEST_HEADERS: [HeaderName; 3] = [
@@ -43,9 +45,11 @@ const FORWARDED_RESPONSE_HEADERS: [HeaderName; 4] = [
 #[derive(Clone)]
 pub struct Passthrough {
     api_key_factory: Arc<ApiKeyFactory>,
+    /// Must not follow redirects, so the API key only goes to `flag_config_base_url`.
     client: reqwest::Client,
     flag_config_base_url: String,
     env: Option<String>,
+    timeout: Duration,
 }
 
 impl Passthrough {
@@ -60,6 +64,7 @@ impl Passthrough {
             client,
             flag_config_base_url: format!("https://{FLAG_CONFIG_SUBDOMAIN}.{}", config.site),
             env: config.env.clone(),
+            timeout: UPSTREAM_TIMEOUT,
         }
     }
 
@@ -75,11 +80,34 @@ async fn flag_config(
     RawQuery(query): RawQuery,
     headers: HeaderMap,
 ) -> Response {
-    // 403 makes the flag provider log the failure without retrying; a 5xx
-    // would be retried with backoff.
-    let Some(api_key) = passthrough.api_key_factory.get_api_key().await else {
-        error!("TRACE_AGENT | Failed to resolve API key, can't forward the flag config request");
-        return (StatusCode::FORBIDDEN, "Datadog API key unavailable").into_response();
+    let deadline = Instant::now() + passthrough.timeout;
+    // Resolve the key in its own task: if the tracer disconnects, this handler
+    // is dropped, and a key load cancelled midway would leave every other
+    // caller of the factory waiting on it forever.
+    let factory = Arc::clone(&passthrough.api_key_factory);
+    let api_key = match timeout_at(
+        deadline,
+        tokio::spawn(async move { factory.get_api_key().await }),
+    )
+    .await
+    {
+        Ok(Ok(Some(api_key))) => api_key,
+        // 403 makes the flag provider log the failure without retrying.
+        Ok(Ok(None)) => {
+            error!(
+                "TRACE_AGENT | Failed to resolve API key, can't forward the flag config request"
+            );
+            return (StatusCode::FORBIDDEN, "Datadog API key unavailable").into_response();
+        }
+        // A 5xx is retried with backoff, and the key load keeps running.
+        Ok(Err(e)) => {
+            error!("TRACE_AGENT | API key resolution failed: {e}");
+            return StatusCode::BAD_GATEWAY.into_response();
+        }
+        Err(_) => {
+            error!("TRACE_AGENT | Timed out resolving the API key for the flag config request");
+            return StatusCode::BAD_GATEWAY.into_response();
+        }
     };
 
     let mut url = format!("{}{FLAG_CONFIG_PATH}", passthrough.flag_config_base_url);
@@ -91,7 +119,7 @@ async fn flag_config(
     let mut request = passthrough
         .client
         .get(url)
-        .timeout(UPSTREAM_TIMEOUT)
+        .timeout(deadline.saturating_duration_since(Instant::now()))
         .header("DD-API-KEY", api_key);
     // The tracer drops `dd_env` when it uses a custom base URL.
     let has_env = query.as_deref().is_some_and(|q| {
@@ -143,11 +171,16 @@ mod tests {
     use tower::ServiceExt;
 
     fn passthrough(base_url: String, api_key_factory: ApiKeyFactory) -> Passthrough {
+        let config = Arc::new(Config {
+            http_protocol: Some("http1".to_string()),
+            ..Config::default()
+        });
         Passthrough {
             api_key_factory: Arc::new(api_key_factory),
-            client: reqwest::Client::new(),
+            client: crate::http::get_client_without_redirects(&config),
             flag_config_base_url: base_url,
             env: Some("prod".to_string()),
+            timeout: UPSTREAM_TIMEOUT,
         }
     }
 
@@ -269,6 +302,76 @@ mod tests {
         .await;
 
         assert_eq!(response.status(), StatusCode::BAD_GATEWAY);
+    }
+
+    #[tokio::test]
+    async fn does_not_follow_redirects() {
+        let elsewhere = MockServer::start_async().await;
+        let leaked = elsewhere
+            .mock_async(|when, then| {
+                when.any_request();
+                then.status(200);
+            })
+            .await;
+        let server = MockServer::start_async().await;
+        server
+            .mock_async(|when, then| {
+                when.method(GET).path(FLAG_CONFIG_PATH);
+                then.status(302)
+                    .header("Location", elsewhere.url(FLAG_CONFIG_PATH));
+            })
+            .await;
+
+        let response = call(
+            passthrough(server.base_url(), ApiKeyFactory::new("test-key")),
+            FLAG_CONFIG_PATH,
+            None,
+        )
+        .await;
+
+        assert_eq!(response.status(), StatusCode::FOUND);
+        assert_eq!(leaked.hits_async().await, 0);
+    }
+
+    #[tokio::test]
+    async fn slow_api_key_times_out_and_keeps_loading() {
+        let server = MockServer::start_async().await;
+        let mock = server
+            .mock_async(|when, then| {
+                when.method(GET)
+                    .path(FLAG_CONFIG_PATH)
+                    .header("DD-API-KEY", "slow-key");
+                then.status(200);
+            })
+            .await;
+        let slow_key = ApiKeyFactory::new_from_resolver(
+            Arc::new(|| {
+                Box::pin(async {
+                    tokio::time::sleep(Duration::from_millis(300)).await;
+                    Some("slow-key".to_string())
+                })
+            }),
+            None,
+        );
+        let passthrough = Passthrough {
+            timeout: Duration::from_millis(100),
+            ..passthrough(server.base_url(), slow_key)
+        };
+
+        let first = call(passthrough.clone(), FLAG_CONFIG_PATH, None).await;
+        assert_eq!(first.status(), StatusCode::BAD_GATEWAY);
+
+        // The load finishes in the background; a load cancelled midway would
+        // leave the factory waiting forever and the next request would hang.
+        tokio::time::sleep(Duration::from_millis(400)).await;
+        let second = tokio::time::timeout(
+            Duration::from_secs(5),
+            call(passthrough, FLAG_CONFIG_PATH, None),
+        )
+        .await
+        .expect("the key load never finished");
+        assert_eq!(second.status(), StatusCode::OK);
+        mock.assert_async().await;
     }
 
     #[tokio::test]

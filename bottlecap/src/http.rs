@@ -13,7 +13,7 @@ use tracing::{debug, error, warn};
 
 #[must_use]
 pub fn get_client(config: &Arc<config::Config>) -> reqwest::Client {
-    build_client(config).unwrap_or_else(|e| {
+    build_client(config, true).unwrap_or_else(|e| {
         error!(
             "Unable to parse proxy configuration: {}, no proxy will be used",
             e
@@ -23,7 +23,31 @@ pub fn get_client(config: &Arc<config::Config>) -> reqwest::Client {
     })
 }
 
-fn build_client(config: &Arc<config::Config>) -> Result<reqwest::Client, Box<dyn Error>> {
+/// Same as [`get_client`], but never follows redirects. reqwest keeps custom
+/// headers such as `DD-API-KEY` when it follows a redirect to another host.
+#[must_use]
+pub fn get_client_without_redirects(config: &Arc<config::Config>) -> reqwest::Client {
+    build_client(config, false).unwrap_or_else(|e| {
+        error!(
+            "Unable to parse proxy configuration: {}, no proxy will be used",
+            e
+        );
+        create_reqwest_client_builder()
+            .ok()
+            .and_then(|builder| {
+                builder
+                    .redirect(reqwest::redirect::Policy::none())
+                    .build()
+                    .ok()
+            })
+            .unwrap_or_default()
+    })
+}
+
+fn build_client(
+    config: &Arc<config::Config>,
+    follow_redirects: bool,
+) -> Result<reqwest::Client, Box<dyn Error>> {
     let mut client = create_reqwest_client_builder()?
         .timeout(Duration::from_secs(config.flush_timeout))
         // Disable connection pooling to avoid stale connections after Lambda freeze/resume.
@@ -33,6 +57,9 @@ fn build_client(config: &Arc<config::Config>) -> Result<reqwest::Client, Box<dyn
         // pattern in `traces/http_client.rs` and libdatadog's `new_client_periodic`.
         .pool_max_idle_per_host(0)
         .danger_accept_invalid_certs(config.skip_ssl_validation);
+    if !follow_redirects {
+        client = client.redirect(reqwest::redirect::Policy::none());
+    }
 
     // Determine if we should use HTTP/1 or HTTP/2
     let should_use_http1 = match &config.http_protocol {

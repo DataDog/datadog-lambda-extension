@@ -213,7 +213,7 @@ pub fn build_trace_agent(
     .with_passthrough(Passthrough::new(
         config,
         api_key_factory.clone(),
-        client.clone(),
+        crate::http::get_client_without_redirects(config),
     ));
     let pipeline = TraceAgentPipeline {
         trace_tx: trace_agent.get_sender_copy(),
