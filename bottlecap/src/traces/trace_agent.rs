@@ -369,17 +369,20 @@ impl TraceAgent {
         self
     }
 
-    /// Binds the listening socket synchronously, so connections are accepted
-    /// (and queued) before the caller goes on to call `/next`. Tracers probe
-    /// `/info` early in their own init; a refused connection makes them skip
-    /// the Extension for the life of the execution environment.
+    /// Binds the trace agent's listening socket on `port`, or
+    /// [`TRACE_AGENT_PORT`] when `None`. Connections are accepted (and queued)
+    /// from here on, before the agent serves.
+    ///
+    /// The extension calls this before it registers: Lambda starts the runtime
+    /// once every extension has registered, tracers probe `/info` early in
+    /// their init, and a refused connection makes them skip the Extension for
+    /// the life of the execution environment.
     ///
     /// Sets `SO_REUSEADDR` like `tokio::net::TcpListener::bind`. Must run
     /// inside the tokio runtime.
-    pub fn bind(&self) -> std::io::Result<tokio::net::TcpListener> {
-        let port = self
-            .receiver_port
-            .unwrap_or(u16::try_from(TRACE_AGENT_PORT).expect("TRACE_AGENT_PORT is too large"));
+    pub fn bind_listener(port: Option<u16>) -> std::io::Result<tokio::net::TcpListener> {
+        let port =
+            port.unwrap_or(u16::try_from(TRACE_AGENT_PORT).expect("TRACE_AGENT_PORT is too large"));
         let socket = tokio::net::TcpSocket::new_v4()?;
         socket.set_reuseaddr(true)?;
         socket.bind(SocketAddr::from(([127, 0, 0, 1], port)))?;
@@ -387,7 +390,7 @@ impl TraceAgent {
     }
 
     pub async fn start(&self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        let listener = self.bind()?;
+        let listener = Self::bind_listener(self.receiver_port)?;
         self.start_with_listener(listener).await
     }
 
@@ -1213,11 +1216,10 @@ mod tests {
         SendDataBuilderInfo::new(builder, size, owned_tags)
     }
 
-    /// Once `bind` returns, clients can connect before the agent serves.
+    /// Once `bind_listener` returns, clients can connect before the agent serves.
     #[tokio::test]
     async fn bind_accepts_connections_before_serving() {
-        let (agent, _) = build_test_agent_with_aggregator();
-        let listener = agent.with_receiver_port(0).bind().expect("bind");
+        let listener = TraceAgent::bind_listener(Some(0)).expect("bind");
         let addr = listener.local_addr().expect("local_addr");
 
         std::net::TcpStream::connect(addr).expect("connect before serving");

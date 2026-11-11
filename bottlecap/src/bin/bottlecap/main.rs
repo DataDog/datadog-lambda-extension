@@ -141,6 +141,13 @@ async fn main() -> anyhow::Result<()> {
         .map_err(|e| anyhow::anyhow!("Failed to create client: {e:?}"))?;
     cold_start_durations.create_extensions_api_client_ms = elapsed_ms(step_start_time);
 
+    // Lambda starts the runtime once every extension has registered, and
+    // tracers probe `/info` early in their init. Bind the trace agent's port
+    // before registering, so that probe queues instead of being refused.
+    let trace_listener = bottlecap::traces::trace_agent::TraceAgent::bind_listener(None)
+        .inspect_err(|e| error!("Error starting trace agent: {e:?}"))
+        .ok();
+
     let cloned_client = client.clone();
     let runtime_api = aws_config.runtime_api.clone();
     let managed_instance_mode = aws_config.is_managed_instance_mode();
@@ -193,6 +200,7 @@ async fn main() -> anyhow::Result<()> {
         &r,
         Arc::clone(&api_key_factory),
         cold_start_durations,
+        trace_listener,
     )
     .await
     {
@@ -326,6 +334,7 @@ async fn extension_loop_idle(
 }
 
 #[allow(clippy::too_many_lines)]
+#[allow(clippy::too_many_arguments)]
 async fn extension_loop_active(
     aws_config: Arc<AwsConfig>,
     config: &Arc<Config>,
@@ -334,6 +343,7 @@ async fn extension_loop_active(
     r: &RegisterResponse,
     api_key_factory: Arc<ApiKeyFactory>,
     mut cold_start_durations: ColdStartDurations,
+    trace_listener: Option<tokio::net::TcpListener>,
 ) -> anyhow::Result<()> {
     let (mut event_bus, event_bus_tx) = EventBus::run();
 
@@ -462,6 +472,7 @@ async fn extension_loop_active(
         appsec_processor.clone(),
         &shared_client,
         Arc::clone(&proxy_aggregator),
+        trace_listener,
     );
 
     let api_runtime_proxy_shutdown_signal = start_api_runtime_proxy(
