@@ -177,7 +177,7 @@ mod tests {
         });
         Passthrough {
             api_key_factory: Arc::new(api_key_factory),
-            client: crate::http::get_client_without_redirects(&config),
+            client: crate::http::get_client_without_redirects(&config).expect("client"),
             flag_config_base_url: base_url,
             env: Some("prod".to_string()),
             timeout: UPSTREAM_TIMEOUT,

@@ -25,23 +25,20 @@ pub fn get_client(config: &Arc<config::Config>) -> reqwest::Client {
 
 /// Same as [`get_client`], but never follows redirects. reqwest keeps custom
 /// headers such as `DD-API-KEY` when it follows a redirect to another host.
+/// Returns `None` rather than fall back to a client that follows redirects.
 #[must_use]
-pub fn get_client_without_redirects(config: &Arc<config::Config>) -> reqwest::Client {
-    build_client(config, false).unwrap_or_else(|e| {
-        error!(
-            "Unable to parse proxy configuration: {}, no proxy will be used",
-            e
-        );
-        create_reqwest_client_builder()
-            .ok()
-            .and_then(|builder| {
-                builder
+pub fn get_client_without_redirects(config: &Arc<config::Config>) -> Option<reqwest::Client> {
+    build_client(config, false)
+        .or_else(|e| {
+            error!("Unable to parse proxy configuration: {e}, no proxy will be used");
+            Ok::<_, Box<dyn Error>>(
+                create_reqwest_client_builder()?
                     .redirect(reqwest::redirect::Policy::none())
-                    .build()
-                    .ok()
-            })
-            .unwrap_or_default()
-    })
+                    .build()?,
+            )
+        })
+        .inspect_err(|e| error!("Unable to build an HTTP client without redirects: {e}"))
+        .ok()
 }
 
 fn build_client(

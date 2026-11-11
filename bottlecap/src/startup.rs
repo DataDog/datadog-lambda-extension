@@ -197,7 +197,7 @@ pub fn build_trace_agent(
         client.clone(),
     ));
 
-    let trace_agent = trace_agent::TraceAgent::new(
+    let mut trace_agent = trace_agent::TraceAgent::new(
         Arc::clone(config),
         trace_aggregator_handle.clone(),
         trace_processor.clone(),
@@ -209,12 +209,13 @@ pub fn build_trace_agent(
         Arc::clone(tags_provider),
         stats_concentrator_handle.clone(),
         span_dedup_handle,
-    )
-    .with_passthrough(Passthrough::new(
-        config,
-        api_key_factory.clone(),
-        crate::http::get_client_without_redirects(config),
-    ));
+    );
+    // Without a client that refuses redirects, leave the route out (404)
+    // rather than risk sending the API key elsewhere.
+    if let Some(client) = crate::http::get_client_without_redirects(config) {
+        trace_agent =
+            trace_agent.with_passthrough(Passthrough::new(config, api_key_factory.clone(), client));
+    }
     let pipeline = TraceAgentPipeline {
         trace_tx: trace_agent.get_sender_copy(),
         trace_flusher,
