@@ -114,8 +114,10 @@ async fn assert_trace_agent_listens_before_register(managed_instance: bool) {
         "the trace agent was not listening on 8126 when the extension registered. {}",
         bc.log_tail(40)
     );
-    // Only the startup order matters here; a SHUTDOWN before any INVOKE is
-    // covered elsewhere.
+    // Only the startup order matters here. The process is killed rather than
+    // shut down because the On-Demand loop does not yet act on a SHUTDOWN that
+    // answers the first `/next`.
+    bc.assert_no_panic();
     bc.kill();
 }
 

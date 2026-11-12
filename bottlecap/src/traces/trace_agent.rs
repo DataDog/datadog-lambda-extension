@@ -117,11 +117,12 @@ pub struct ProxyState {
 /// deterministic drain endpoint) without adding a dedicated field per
 /// route to [`TraceAgent`].
 ///
-/// Returning `Err` propagates out of [`TraceAgent::start`], aborting the
-/// HTTP listener task. Note that the production convenience entry point
-/// [`crate::startup::start_trace_agent`] spawns `start` and only logs its
-/// error; the surrounding pipeline does not observe the failure. Callers
-/// that need to react to startup errors must use
+/// Returning `Err` propagates out of [`TraceAgent::start_with_listener`]
+/// (and [`TraceAgent::start`]), aborting the HTTP listener task. Note that
+/// the production convenience entry point
+/// [`crate::startup::start_trace_agent`] spawns `start_with_listener` and
+/// only logs its error; the surrounding pipeline does not observe the
+/// failure. Callers that need to react to startup errors must use
 /// [`crate::startup::build_trace_agent`] and spawn the agent themselves.
 ///
 /// Note that a path collision is not an `Err`: `Router::merge` panics when
@@ -374,9 +375,8 @@ impl TraceAgent {
     /// from here on, before the agent serves.
     ///
     /// The extension calls this before it registers: Lambda starts the runtime
-    /// once every extension has registered, tracers probe `/info` early in
-    /// their init, and a refused connection makes them skip the Extension for
-    /// the life of the execution environment.
+    /// once every extension has registered, and tracers probe `/info` early in
+    /// their init, so the socket must already accept connections by then.
     ///
     /// Sets `SO_REUSEADDR` like `tokio::net::TcpListener::bind`. Must run
     /// inside the tokio runtime.
@@ -394,7 +394,7 @@ impl TraceAgent {
         self.start_with_listener(listener).await
     }
 
-    /// Serves on a listener from [`TraceAgent::bind`].
+    /// Serves on a listener from [`TraceAgent::bind_listener`].
     #[allow(clippy::cast_possible_truncation)]
     pub async fn start_with_listener(
         &self,
