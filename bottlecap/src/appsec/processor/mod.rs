@@ -981,6 +981,142 @@ mod tests {
         assert!(!span.meta.contains_key(ACCESS_KEY_ID_TAG));
     }
 
+    const TRACER_ACCESS_KEY_ID: &str = "ASIATRACER0000000002";
+
+    /// A processor with the key on and a fixed environment value, and one
+    /// monitored invocation `rid-1` whose response was seen.
+    async fn processor_with_monitored_invocation() -> Processor {
+        let mut processor = Processor::new(&appsec_config(true)).expect("Should not fail");
+        processor.aws_access_key_id = Some(AwsAccessKeyId::with_reader(|| {
+            Some(TEST_ACCESS_KEY_ID.to_string())
+        }));
+        processor
+            .process_invocation_next("rid-1", &function_url_trigger(None))
+            .await;
+        processor
+            .process_invocation_result("rid-1", &Bytes::from_static(br#"{"statusCode":200}"#))
+            .await;
+        processor
+    }
+
+    fn lambda_span(meta: &[(&str, &str)]) -> Span {
+        Span {
+            name: "aws.lambda".into(),
+            meta: meta
+                .iter()
+                .map(|(k, v)| ((*k).to_string(), (*v).to_string()))
+                .collect(),
+            ..Default::default()
+        }
+    }
+
+    /// Python and Node.js: the tracer builds the `aws.lambda` span and sets the tag.
+    #[tokio::test]
+    async fn access_key_id_keeps_tracer_value_on_tracer_built_span() {
+        let mut processor = processor_with_monitored_invocation().await;
+        let mut span = lambda_span(&[
+            ("request_id", "rid-1"),
+            (ACCESS_KEY_ID_TAG, TRACER_ACCESS_KEY_ID),
+        ]);
+        processor.process_span(&mut span);
+        assert_eq!(
+            span.meta.get(ACCESS_KEY_ID_TAG).map(String::as_str),
+            Some(TRACER_ACCESS_KEY_ID)
+        );
+        // Other security tags are still written: only the access key is kept.
+        assert_eq!(
+            span.meta.get("_dd.origin").map(String::as_str),
+            Some("appsec")
+        );
+    }
+
+    /// Java and Ruby: the placeholder's meta is merged into the extension-built
+    /// span before the extension writes its tags.
+    #[tokio::test]
+    async fn access_key_id_keeps_tracer_value_when_merge_precedes_write() {
+        use crate::lifecycle::invocation::context::ContextBuffer;
+
+        let mut processor = processor_with_monitored_invocation().await;
+        let rid = "rid-1".to_string();
+        let mut buffer = ContextBuffer::default();
+        buffer.start_context(&rid, lambda_span(&[]));
+        let placeholder = Span {
+            resource: crate::traces::INVOCATION_SPAN_RESOURCE.into(),
+            ..lambda_span(&[
+                ("request_id", "rid-1"),
+                (ACCESS_KEY_ID_TAG, TRACER_ACCESS_KEY_ID),
+            ])
+        };
+        buffer.add_tracer_span(&rid, &placeholder, false);
+
+        let mut span = buffer.remove(&rid).expect("context").invocation_span;
+        processor.process_span(&mut span);
+        assert_eq!(
+            span.meta.get(ACCESS_KEY_ID_TAG).map(String::as_str),
+            Some(TRACER_ACCESS_KEY_ID)
+        );
+    }
+
+    /// The same, if the extension writes its tags before the placeholder merge.
+    #[tokio::test]
+    async fn access_key_id_keeps_tracer_value_when_merge_follows_write() {
+        use crate::lifecycle::invocation::context::ContextBuffer;
+
+        let mut processor = processor_with_monitored_invocation().await;
+        let rid = "rid-1".to_string();
+        let mut buffer = ContextBuffer::default();
+        buffer.start_context(&rid, lambda_span(&[]));
+        processor.process_span(&mut buffer.get_mut(&rid).expect("context").invocation_span);
+        assert_eq!(
+            buffer
+                .get(&rid)
+                .expect("context")
+                .invocation_span
+                .meta
+                .get(ACCESS_KEY_ID_TAG)
+                .map(String::as_str),
+            Some(TEST_ACCESS_KEY_ID),
+            "precondition: the extension wrote its value first"
+        );
+
+        let placeholder = Span {
+            resource: crate::traces::INVOCATION_SPAN_RESOURCE.into(),
+            ..lambda_span(&[
+                ("request_id", "rid-1"),
+                (ACCESS_KEY_ID_TAG, TRACER_ACCESS_KEY_ID),
+            ])
+        };
+        buffer.add_tracer_span(&rid, &placeholder, false);
+        let span = buffer.remove(&rid).expect("context").invocation_span;
+        assert_eq!(
+            span.meta.get(ACCESS_KEY_ID_TAG).map(String::as_str),
+            Some(TRACER_ACCESS_KEY_ID)
+        );
+    }
+
+    /// Go and .NET: the placeholder carries no tag, so the extension adds its own.
+    #[tokio::test]
+    async fn access_key_id_set_when_merged_placeholder_has_none() {
+        use crate::lifecycle::invocation::context::ContextBuffer;
+
+        let mut processor = processor_with_monitored_invocation().await;
+        let rid = "rid-1".to_string();
+        let mut buffer = ContextBuffer::default();
+        buffer.start_context(&rid, lambda_span(&[]));
+        let placeholder = Span {
+            resource: crate::traces::INVOCATION_SPAN_RESOURCE.into(),
+            ..lambda_span(&[("request_id", "rid-1")])
+        };
+        buffer.add_tracer_span(&rid, &placeholder, false);
+
+        let mut span = buffer.remove(&rid).expect("context").invocation_span;
+        processor.process_span(&mut span);
+        assert_eq!(
+            span.meta.get(ACCESS_KEY_ID_TAG).map(String::as_str),
+            Some(TEST_ACCESS_KEY_ID)
+        );
+    }
+
     #[test]
     fn service_entry_span_mut_skips_placeholder_lambda_span() {
         let mut trace = vec![

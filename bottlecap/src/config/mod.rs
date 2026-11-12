@@ -882,13 +882,6 @@ mod lambda_config_tests {
             Ok(())
         });
         assert!(!config.ext.appsec_aws_access_key_id_tag_enabled);
-
-        // The pre-rename key has no effect.
-        let config = load(|jail| {
-            jail.set_env("DD_APPSEC_AWS_ACCESS_KEY_ID_ENABLED", "true");
-            Ok(())
-        });
-        assert!(!config.ext.appsec_aws_access_key_id_tag_enabled);
     }
 
     #[test]

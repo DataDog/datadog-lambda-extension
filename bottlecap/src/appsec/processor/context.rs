@@ -71,7 +71,7 @@ impl Context {
         if let Some(aws_access_key_id) = aws_access_key_id {
             trace_tags.insert(
                 TagName::AwsLambdaAccessKeyId,
-                TagValue::Always(aws_access_key_id.to_string()),
+                TagValue::IfAbsent(aws_access_key_id.to_string()),
             );
         }
 
@@ -246,6 +246,11 @@ impl Context {
             match value {
                 TagValue::Always(value) => {
                     span.meta.insert(key.to_string(), value.clone());
+                }
+                TagValue::IfAbsent(value) => {
+                    span.meta
+                        .entry(key.to_string())
+                        .or_insert_with(|| value.clone());
                 }
                 TagValue::AppSecEvents { triggers } => {
                     span.meta.insert(
@@ -605,6 +610,9 @@ impl std::fmt::Display for TagName {
 enum TagValue {
     /// A tag value that is always emitted.
     Always(String),
+    /// A tag value that is emitted only if the span does not carry the tag
+    /// yet, so a value set by a tracer is kept.
+    IfAbsent(String),
     /// A tag value that is only emitted when an event is matched.
     OnEvent(serde_json::Value),
     /// The special key used to encode AAP events
@@ -615,7 +623,7 @@ enum TagValue {
 impl std::fmt::Display for TagValue {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Always(str) => write!(f, "{str}"),
+            Self::Always(str) | Self::IfAbsent(str) => write!(f, "{str}"),
             Self::OnEvent(value) => write!(f, "{value}"),
             Self::AppSecEvents { triggers } => write!(
                 f,
