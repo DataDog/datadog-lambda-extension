@@ -34,7 +34,7 @@ pub struct Processor {
     waf_timeout: Duration,
     api_sec_sampler: Option<Arc<Mutex<apisec::Sampler>>>, // Must be [`Arc`] so [`Processor`] can be [`Send`].
     context_buffer: VecDeque<Context>,
-    /// [`None`] when `DD_APPSEC_AWS_ACCESS_KEY_ID_ENABLED` is off.
+    /// [`None`] when `DD_APPSEC_AWS_ACCESS_KEY_ID_TAG_ENABLED` is off.
     aws_access_key_id: Option<AwsAccessKeyId>,
 }
 impl Processor {
@@ -107,7 +107,7 @@ impl Processor {
             context_buffer: VecDeque::with_capacity(capacity.get()),
             aws_access_key_id: cfg
                 .ext
-                .appsec_aws_access_key_id_enabled
+                .appsec_aws_access_key_id_tag_enabled
                 .then(AwsAccessKeyId::from_env),
         })
     }
@@ -869,7 +869,7 @@ mod tests {
         Config {
             ext: crate::config::LambdaConfig {
                 serverless_appsec_enabled: true,
-                appsec_aws_access_key_id_enabled: access_key_id_enabled,
+                appsec_aws_access_key_id_tag_enabled: access_key_id_enabled,
                 ..Default::default()
             },
             ..Config::default()
