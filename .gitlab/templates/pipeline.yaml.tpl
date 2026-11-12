@@ -21,7 +21,7 @@ variables:
   CI_DOCKER_TARGET_VERSION: latest
 
 .dd-pkg-publish:
-  image: registry.ddbuild.io/agent-delivery/dd-pkg:v0.9.3
+  image: registry.ddbuild.io/agent-delivery/dd-pkg@sha256:92f67c32d25174dd7092408dff8de78c3d00f58b62aac288bf7f2c8a403f3b5b
   tags: ["arch:arm64"]
   variables:
     IMG_SIGNING: "false"
