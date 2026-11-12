@@ -53,6 +53,7 @@ impl Context {
         waf_handle: &mut Handle,
         ruleset_version: &str,
         waf_timeout: Duration,
+        aws_access_key_id: Option<&str>,
     ) -> Self {
         let mut trace_tags = HashMap::from([
             (TagName::AppsecEnabled, TagValue::Metric(1.0)),
@@ -65,6 +66,12 @@ impl Context {
             trace_tags.insert(
                 TagName::AppsecEventRulesVersion,
                 TagValue::Always(ruleset_version.to_string()),
+            );
+        }
+        if let Some(aws_access_key_id) = aws_access_key_id {
+            trace_tags.insert(
+                TagName::AwsLambdaAccessKeyId,
+                TagValue::Always(aws_access_key_id.to_string()),
             );
         }
 
@@ -559,6 +566,8 @@ enum TagName {
     HttpRoute,
     HttpStatusCode,
     NetworkClientIp,
+    // CADR correlation key
+    AwsLambdaAccessKeyId,
     // Special tags
     SamplingPriorityV1,
     /// A tag name that is not statically known.
@@ -580,6 +589,7 @@ impl TagName {
             Self::HttpRoute => "http.route",
             Self::HttpStatusCode => "http.status_code",
             Self::NetworkClientIp => "network.client.ip",
+            Self::AwsLambdaAccessKeyId => "aws.lambda.access_key_id",
             Self::SamplingPriorityV1 => "_sampling_priority_v1",
             Self::Dynamic(name) => name,
         }
