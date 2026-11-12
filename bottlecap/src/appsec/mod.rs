@@ -5,7 +5,7 @@ use crate::config::Config;
 pub mod processor;
 
 const AWS_ACCESS_KEY_ID: &str = "AWS_ACCESS_KEY_ID";
-const DD_APPSEC_AWS_ACCESS_KEY_ID_ENABLED: &str = "DD_APPSEC_AWS_ACCESS_KEY_ID_ENABLED";
+const DD_APPSEC_AWS_ACCESS_KEY_ID_TAG_ENABLED: &str = "DD_APPSEC_AWS_ACCESS_KEY_ID_TAG_ENABLED";
 
 /// Determines whether the Serverless App & API Protection features are enabled.
 #[must_use]
@@ -24,8 +24,8 @@ pub fn is_standalone() -> bool {
 /// environment's AWS access key ID. Read from the environment only: the key has
 /// no `datadog.yaml` equivalent.
 #[must_use]
-pub fn is_aws_access_key_id_enabled() -> bool {
-    env::var(DD_APPSEC_AWS_ACCESS_KEY_ID_ENABLED)
+pub fn is_aws_access_key_id_tag_enabled() -> bool {
+    env::var(DD_APPSEC_AWS_ACCESS_KEY_ID_TAG_ENABLED)
         .is_ok_and(|s| matches!(s.to_lowercase().as_str(), "true" | "1"))
 }
 

@@ -19,7 +19,7 @@ use tracing::{debug, info};
 use crate::appsec::processor::context::Context;
 use crate::appsec::processor::response::ExpectedResponseFormat;
 use crate::appsec::{
-    is_aws_access_key_id_enabled, is_enabled, is_standalone, read_aws_access_key_id,
+    is_aws_access_key_id_tag_enabled, is_enabled, is_standalone, read_aws_access_key_id,
 };
 use crate::config::Config;
 use crate::lifecycle::invocation::triggers::IdentifiedTrigger;
@@ -36,7 +36,7 @@ pub struct Processor {
     api_sec_sampler: Option<Arc<Mutex<apisec::Sampler>>>, // Must be [`Arc`] so [`Processor`] can be [`Send`].
     context_buffer: VecDeque<Context>,
     /// Whether invocation spans carry the AWS access key ID.
-    aws_access_key_id_enabled: bool,
+    aws_access_key_id_tag_enabled: bool,
     /// The AWS access key ID, read at the first invocation (after a `SnapStart`
     /// restore, never before the snapshot) and cached for the environment's life.
     aws_access_key_id: OnceCell<Option<String>>,
@@ -109,7 +109,7 @@ impl Processor {
                 None
             },
             context_buffer: VecDeque::with_capacity(capacity.get()),
-            aws_access_key_id_enabled: is_aws_access_key_id_enabled(),
+            aws_access_key_id_tag_enabled: is_aws_access_key_id_tag_enabled(),
             aws_access_key_id: OnceCell::new(),
         })
     }
@@ -253,7 +253,7 @@ impl Processor {
             ctx.set_response_seen().await;
         }
 
-        let aws_access_key_id = if self.aws_access_key_id_enabled {
+        let aws_access_key_id = if self.aws_access_key_id_tag_enabled {
             self.aws_access_key_id
                 .get_or_init(read_aws_access_key_id)
                 .as_deref()
@@ -900,8 +900,8 @@ mod tests {
     fn set_aws_env(enabled: Option<&str>, access_key_id: &str) {
         unsafe {
             match enabled {
-                Some(v) => env::set_var("DD_APPSEC_AWS_ACCESS_KEY_ID_ENABLED", v),
-                None => env::remove_var("DD_APPSEC_AWS_ACCESS_KEY_ID_ENABLED"),
+                Some(v) => env::set_var("DD_APPSEC_AWS_ACCESS_KEY_ID_TAG_ENABLED", v),
+                None => env::remove_var("DD_APPSEC_AWS_ACCESS_KEY_ID_TAG_ENABLED"),
             }
             env::set_var("AWS_ACCESS_KEY_ID", access_key_id);
             env::set_var("AWS_SECRET_ACCESS_KEY", SECRET_CANARY);
@@ -912,7 +912,7 @@ mod tests {
     fn clear_aws_env() {
         unsafe {
             for k in [
-                "DD_APPSEC_AWS_ACCESS_KEY_ID_ENABLED",
+                "DD_APPSEC_AWS_ACCESS_KEY_ID_TAG_ENABLED",
                 "AWS_ACCESS_KEY_ID",
                 "AWS_SECRET_ACCESS_KEY",
                 "AWS_SESSION_TOKEN",
