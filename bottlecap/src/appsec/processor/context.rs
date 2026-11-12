@@ -53,6 +53,7 @@ impl Context {
         waf_handle: &mut Handle,
         ruleset_version: &str,
         waf_timeout: Duration,
+        aws_access_key_id: Option<&str>,
     ) -> Self {
         let mut trace_tags = HashMap::from([
             (TagName::AppsecEnabled, TagValue::Metric(1.0)),
@@ -65,6 +66,12 @@ impl Context {
             trace_tags.insert(
                 TagName::AppsecEventRulesVersion,
                 TagValue::Always(ruleset_version.to_string()),
+            );
+        }
+        if let Some(aws_access_key_id) = aws_access_key_id {
+            trace_tags.insert(
+                TagName::AwsLambdaAccessKeyId,
+                TagValue::Always(aws_access_key_id.to_string()),
             );
         }
 
@@ -553,6 +560,8 @@ enum TagName {
     AppsecWafVersion,
     // Hidden span tags of relevance
     Origin,
+    // Execution environment tags
+    AwsLambdaAccessKeyId,
     // General request tags
     HttpUrl,
     HttpMethod,
@@ -575,6 +584,7 @@ impl TagName {
             Self::AppsecWafTimeouts => "_dd.appsec.waf.timeouts",
             Self::AppsecWafVersion => "_dd.appsec.waf.version",
             Self::Origin => "_dd.origin",
+            Self::AwsLambdaAccessKeyId => "aws.lambda.access_key_id",
             Self::HttpUrl => "http.url",
             Self::HttpMethod => "http.method",
             Self::HttpRoute => "http.route",
