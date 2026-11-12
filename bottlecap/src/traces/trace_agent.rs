@@ -386,7 +386,12 @@ impl TraceAgent {
         let socket = tokio::net::TcpSocket::new_v4()?;
         socket.set_reuseaddr(true)?;
         socket.bind(SocketAddr::from(([127, 0, 0, 1], port)))?;
-        socket.listen(LISTEN_BACKLOG)
+        let listener = socket.listen(LISTEN_BACKLOG)?;
+        debug!(
+            "TRACE AGENT | Listening on port {}",
+            listener.local_addr()?.port()
+        );
+        Ok(listener)
     }
 
     pub async fn start(&self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
@@ -404,11 +409,8 @@ impl TraceAgent {
 
         let router = self.make_router()?;
 
-        let port = listener.local_addr()?.port();
-
-        debug!("TRACE AGENT | Listening on port {port}");
         debug!(
-            "TRACE AGENT | Time taken to start: {} ms",
+            "TRACE AGENT | Time taken to build the router: {} ms",
             now.elapsed().as_millis()
         );
 
