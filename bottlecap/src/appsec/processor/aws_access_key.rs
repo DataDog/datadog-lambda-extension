@@ -12,6 +12,20 @@ pub(super) struct AwsAccessKeyId {
     value: OnceCell<Option<String>>,
 }
 impl AwsAccessKeyId {
+    /// Returns [`None`] when the tag is off, or on a `SnapStart` restore, where
+    /// `AWS_ACCESS_KEY_ID` is absent or belongs to the snapshotted environment
+    /// (RFC D2): the value is then never read.
+    pub(super) fn for_environment(tag_enabled: bool, init_type: Option<&str>) -> Option<Self> {
+        if !tag_enabled {
+            return None;
+        }
+        if init_type == Some(crate::tags::lambda::tags::SNAP_START_VALUE) {
+            debug!("aap: SnapStart restore, aws.lambda.access_key_id will not be set");
+            return None;
+        }
+        Some(Self::from_env())
+    }
+
     pub(super) fn from_env() -> Self {
         Self::with_reader(crate::config::aws::aws_access_key_id_from_env)
     }
@@ -59,6 +73,17 @@ mod tests {
         assert_eq!(subject.get(), Some("ASIAEXAMPLE000000001"));
         assert_eq!(subject.get(), Some("ASIAEXAMPLE000000001"));
         assert_eq!(READS.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn none_when_disabled_or_snapstart() {
+        assert!(AwsAccessKeyId::for_environment(false, None).is_none());
+        assert!(AwsAccessKeyId::for_environment(false, Some("on-demand")).is_none());
+        assert!(AwsAccessKeyId::for_environment(true, Some("snap-start")).is_none());
+        assert!(AwsAccessKeyId::for_environment(true, None).is_some());
+        assert!(AwsAccessKeyId::for_environment(true, Some("on-demand")).is_some());
+        assert!(AwsAccessKeyId::for_environment(true, Some("provisioned-concurrency")).is_some());
+        assert!(AwsAccessKeyId::for_environment(true, Some("lambda-managed-instances")).is_some());
     }
 
     #[test]

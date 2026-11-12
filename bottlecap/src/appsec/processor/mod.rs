@@ -105,10 +105,12 @@ impl Processor {
                 None
             },
             context_buffer: VecDeque::with_capacity(capacity.get()),
-            aws_access_key_id: cfg
-                .ext
-                .appsec_aws_access_key_id_tag_enabled
-                .then(AwsAccessKeyId::from_env),
+            aws_access_key_id: AwsAccessKeyId::for_environment(
+                cfg.ext.appsec_aws_access_key_id_tag_enabled,
+                std::env::var(crate::tags::lambda::tags::INIT_TYPE)
+                    .ok()
+                    .as_deref(),
+            ),
         })
     }
 

@@ -135,6 +135,8 @@ mod tests {
             "ASIAEXAMPLE00000000",
             "ASIAEXAMPLE0000000011",
             "ASIAEXAMPLE00000000-",
+            "ASIAEXAMPLE000000001\n",
+            "ASIAEXAMPLE00000000\n",
             " ASIAEXAMPLE00000001",
             "ASIAÉXAMPLE00000001",
         ] {
