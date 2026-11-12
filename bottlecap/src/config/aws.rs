@@ -80,6 +80,25 @@ impl AwsCredentials {
     }
 }
 
+/// Reads the execution environment's `AWS_ACCESS_KEY_ID`, and only that
+/// variable. Returns [`None`] when it is missing or malformed.
+#[must_use]
+pub fn aws_access_key_id_from_env() -> Option<String> {
+    env::var(AWS_ACCESS_KEY_ID)
+        .ok()
+        .filter(|v| is_valid_access_key_id(v))
+}
+
+/// Matches `^(ASIA|AKIA)[A-Z0-9]{16}$`.
+#[must_use]
+pub fn is_valid_access_key_id(value: &str) -> bool {
+    value.len() == 20
+        && (value.starts_with("ASIA") || value.starts_with("AKIA"))
+        && value[4..]
+            .bytes()
+            .all(|b| b.is_ascii_uppercase() || b.is_ascii_digit())
+}
+
 #[must_use]
 pub fn get_aws_partition_by_region(region: &str) -> String {
     match region {
@@ -93,4 +112,36 @@ pub fn get_aws_partition_by_region(region: &str) -> String {
 pub fn build_lambda_function_arn(account_id: &str, region: &str, function_name: &str) -> String {
     let aws_partition = get_aws_partition_by_region(region);
     format!("arn:{aws_partition}:lambda:{region}:{account_id}:function:{function_name}")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn valid_access_key_ids() {
+        assert!(is_valid_access_key_id("ASIAEXAMPLE000000001"));
+        assert!(is_valid_access_key_id("AKIAIOSFODNN7EXAMPLE"));
+    }
+
+    #[test]
+    fn invalid_access_key_ids() {
+        for value in [
+            "",
+            "ASIA",
+            "AKIDEXAMPLE",
+            "ABIAEXAMPLE000000001",
+            "ASIAexample000000001",
+            "ASIAEXAMPLE00000000",
+            "ASIAEXAMPLE0000000011",
+            "ASIAEXAMPLE00000000-",
+            " ASIAEXAMPLE00000001",
+            "ASIAÉXAMPLE00000001",
+        ] {
+            assert!(
+                !is_valid_access_key_id(value),
+                "{value:?} should be invalid"
+            );
+        }
+    }
 }
