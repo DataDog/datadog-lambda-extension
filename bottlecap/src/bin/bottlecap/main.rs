@@ -141,6 +141,20 @@ async fn main() -> anyhow::Result<()> {
         .map_err(|e| anyhow::anyhow!("Failed to create client: {e:?}"))?;
     cold_start_durations.create_extensions_api_client_ms = elapsed_ms(step_start_time);
 
+    // The runtime starts once the extension registers, so the MITM proxy and
+    // its CA files must exist before then.
+    let _replay_shutdown = if bottlecap::replay::record_enabled() {
+        match bottlecap::replay::start_recording(&aws_config).await {
+            Ok(token) => Some(token),
+            Err(e) => {
+                error!("REPLAY | failed to start recording: {e}");
+                None
+            }
+        }
+    } else {
+        None
+    };
+
     let cloned_client = client.clone();
     let runtime_api = aws_config.runtime_api.clone();
     let managed_instance_mode = aws_config.is_managed_instance_mode();
@@ -816,6 +830,7 @@ async fn extension_loop_active(
         }
 
         if let NextEventResponse::Shutdown { .. } = maybe_shutdown_event {
+            bottlecap::replay::on_shutdown().await;
             // Stop the Telemetry API listener, then let the logs agent drain. The agent sends the
             // Tombstone only after it has forwarded every telemetry event to the event bus.
             telemetry_listener_cancel_token.cancel();

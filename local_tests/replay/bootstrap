@@ -1,0 +1,30 @@
+#!/Users/darcy.rayner/.pyenv/versions/3.10.13/bin/python3
+"""Minimal Lambda runtime (stdlib only) for local record/replay tests."""
+import importlib, json, os, sys, traceback, urllib.request
+
+API = "http://" + os.environ["AWS_LAMBDA_RUNTIME_API"] + "/2018-06-01/runtime"
+sys.path.insert(0, os.environ.get("LAMBDA_TASK_ROOT", "."))
+module, func = os.environ["_HANDLER"].rsplit(".", 1)
+handler = getattr(importlib.import_module(module), func)
+
+class Context:
+    def __init__(self, headers):
+        self.aws_request_id = headers["Lambda-Runtime-Aws-Request-Id"]
+        self.invoked_function_arn = headers.get("Lambda-Runtime-Invoked-Function-Arn", "")
+        self.function_name = os.environ.get("AWS_LAMBDA_FUNCTION_NAME", "")
+
+def post(path, body, headers=None):
+    req = urllib.request.Request(API + path, data=json.dumps(body).encode(), method="POST",
+                                 headers={"Content-Type": "application/json", **(headers or {})})
+    urllib.request.urlopen(req).read()
+
+while True:
+    with urllib.request.urlopen(API + "/invocation/next") as r:
+        event, ctx = json.loads(r.read() or b"null"), Context(r.headers)
+    try:
+        post(f"/invocation/{ctx.aws_request_id}/response", handler(event, ctx))
+    except Exception as e:
+        post(f"/invocation/{ctx.aws_request_id}/error",
+             {"errorMessage": str(e), "errorType": type(e).__name__,
+              "stackTrace": traceback.format_exc().splitlines()},
+             {"Lambda-Runtime-Function-Error-Type": "Unhandled"})

@@ -180,6 +180,7 @@ fn get_proxy_socket_address(aws_lwa_proxy_lambda_runtime_api: Option<&String>) -
         .expect("Failed to parse socket address")
 }
 
+#[allow(clippy::too_many_lines)]
 async fn invocation_next_proxy(
     Path(api_version): Path<String>,
     State((
@@ -222,6 +223,15 @@ async fn invocation_next_proxy(
 
     let (intercepted_parts, intercepted_body) = intercepted_response.into_parts();
 
+    let replay_request_id = intercepted_parts
+        .headers
+        .get("Lambda-Runtime-Aws-Request-Id")
+        .and_then(|v| v.to_str().ok())
+        .map(std::string::ToString::to_string);
+    if let (Some(recorder), Some(id)) = (crate::replay::recorder(), &replay_request_id) {
+        recorder.begin_invocation(id, &intercepted_parts.headers);
+    }
+
     // Intercepted body is what the AWS Lambda event will be set as.
     // Which is what we want to process.
     let (intercepted_tee_body, intercepted_completion_receiver) =
@@ -233,6 +243,10 @@ async fn invocation_next_proxy(
     join_set.spawn(async move {
         if let Ok(body) = intercepted_completion_receiver.await {
             debug!("PROXY | invocation_next_proxy | intercepted body completed");
+
+            if let (Some(recorder), Some(id)) = (crate::replay::recorder(), &replay_request_id) {
+                recorder.set_event(id, &body);
+            }
 
             if let Some(appsec_processor) = appsec_processor
                 && let Some(request_id) = intercepted_parts_clone
@@ -316,6 +330,7 @@ async fn invocation_response_proxy(
         "PROXY | invocation_response_proxy | api_version: {api_version}, request_id: {request_id}"
     );
     let (parts, body) = request.into_parts();
+    let request_headers = parts.headers.clone();
     let (outgoing_tee_body, outgoing_completion_receiver) = TeeBodyWithCompletion::new(body);
 
     // The outgoing body is what the final user will see.
@@ -325,6 +340,16 @@ async fn invocation_response_proxy(
     join_set.spawn(async move {
         if let Ok(body) = outgoing_completion_receiver.await {
             debug!("PROXY | invocation_response_proxy | intercepted outgoing body completed");
+            if let Some(recorder) = crate::replay::recorder() {
+                recorder
+                    .on_result(
+                        &request_id,
+                        crate::replay::format::ResultKind::Response,
+                        &request_headers,
+                        &body,
+                    )
+                    .await;
+            }
             if let Some(appsec_processor) = appsec_processor {
                 appsec_processor
                     .lock()
@@ -397,6 +422,25 @@ async fn invocation_error_proxy(
             .process_invocation_result(&request_id, &Bytes::from("{}"))
             .await;
     }
+
+    let request = if let Some(recorder) = crate::replay::recorder() {
+        let (parts, body) = request.into_parts();
+        let bytes = http_body_util::BodyExt::collect(body)
+            .await
+            .map(http_body_util::Collected::to_bytes)
+            .unwrap_or_default();
+        recorder
+            .on_result(
+                &request_id,
+                crate::replay::format::ResultKind::Error,
+                &parts.headers,
+                &bytes,
+            )
+            .await;
+        Request::from_parts(parts, Body::from(bytes))
+    } else {
+        request
+    };
 
     passthrough_proxy(state, request).await
 }

@@ -1,0 +1,13 @@
+# Shared settings for the AWS demo scripts.
+export AWS_PROFILE="${AWS_PROFILE:-exec-sso-serverless-sandbox-account-admin}"
+export AWS_REGION="${AWS_REGION:-us-east-1}"
+export AWS_PAGER=""
+ACCOUNT="425362996713"
+BUCKET="lambda-replay-demo-$ACCOUNT"
+TABLE="lambda-replay-demo-orders"
+ROLE="lambda-replay-demo-role"
+LAYER="lambda-replay-extension"
+FUNCTION="lambda-replay-demo"
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT="$(cd "$HERE/../../.." && pwd)"
+LAYER_ZIP="$ROOT/.layers/datadog_extension-arm64.zip"

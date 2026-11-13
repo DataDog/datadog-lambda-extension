@@ -139,6 +139,7 @@ pub async fn next_event(
     runtime_api: &str,
     extension_id: &str,
 ) -> Result<NextEventResponse, ExtensionError> {
+    crate::replay::before_next_event().await;
     let base_url = base_url(EXTENSION_ROUTE, runtime_api);
     let url = format!("{base_url}/event/next");
 

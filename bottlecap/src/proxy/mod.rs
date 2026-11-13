@@ -28,7 +28,8 @@ pub fn should_start_proxy(config: &Arc<Config>, aws_config: Arc<AwsConfig>) -> b
         || (datadog_wrapper_set
             && (config.ext.serverless_appsec_enabled
                 || config.ext.dsm_consume_enabled
-                || experimental_proxy_enabled))
+                || experimental_proxy_enabled
+                || crate::replay::record_enabled()))
 }
 
 #[cfg(test)]

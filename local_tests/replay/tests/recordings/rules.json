@@ -1,0 +1,4 @@
+{
+  "ignore": [{"host": "::1", "paths": ["?nonce"]}],
+  "ignore_response": ["$.generated_at"]
+}

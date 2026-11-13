@@ -34,6 +34,7 @@ pub mod metrics;
 pub mod otlp;
 pub mod proc;
 pub mod proxy;
+pub mod replay;
 pub mod secrets;
 pub mod startup;
 pub mod tags;

@@ -30,6 +30,32 @@ then
   debug_log "Rerouting AWS_LAMBDA_RUNTIME_API to the Datadog extension at $AWS_LAMBDA_RUNTIME_API"
 fi
 
+DD_REPLAY_RECORD=$(echo "$DD_REPLAY_RECORD" | tr '[:upper:]' '[:lower:]')
+if [[ "$DD_REPLAY_RECORD" =~ ^(1|true)$ ]]
+then
+  debug_log "Enabling lambda-replay recording"
+  # Invocations go through the Runtime API proxy, outbound HTTP(S) through
+  # the extension's MITM proxy, which presents certificates from its own CA.
+  export AWS_LAMBDA_RUNTIME_API="127.0.0.1:9000"
+  export HTTP_PROXY="http://127.0.0.1:9100"
+  export HTTPS_PROXY="http://127.0.0.1:9100"
+  export http_proxy="$HTTP_PROXY"
+  export https_proxy="$HTTPS_PROXY"
+  export NO_PROXY="127.0.0.1,localhost${NO_PROXY:+,$NO_PROXY}"
+  export no_proxy="$NO_PROXY"
+  export NODE_USE_ENV_PROXY=1
+  # These replace the trust store, so they get system roots plus the CA.
+  export AWS_CA_BUNDLE="/tmp/dd-replay/ca-bundle.pem"
+  export REQUESTS_CA_BUNDLE="/tmp/dd-replay/ca-bundle.pem"
+  export SSL_CERT_FILE="/tmp/dd-replay/ca-bundle.pem"
+  # This one adds to the trust store.
+  export NODE_EXTRA_CA_CERTS="/tmp/dd-replay/ca.pem"
+  # Extensions do not see these; the recorder adds them to the recording.
+  mkdir -p /tmp/dd-replay
+  printf '%s\n' "_HANDLER=$_HANDLER" "AWS_EXECUTION_ENV=$AWS_EXECUTION_ENV" \
+    "LAMBDA_TASK_ROOT=$LAMBDA_TASK_ROOT" > /tmp/dd-replay/runtime.env
+fi
+
 if [[ "$DD_SERVERLESS_APPSEC_ENABLED" =~ ^(1|t|true)$ ]]
 then
   debug_log "Enabling Datadog Application Security Management"
