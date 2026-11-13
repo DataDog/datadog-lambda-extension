@@ -63,7 +63,11 @@ impl Passthrough {
             api_key_factory,
             client,
             flag_config_base_url: format!("https://{FLAG_CONFIG_SUBDOMAIN}.{}", config.site),
-            env: config.env.clone(),
+            // `DD_ENV` wins over an `env` tag in `DD_TAGS`, like in the tracers.
+            env: config
+                .env
+                .clone()
+                .or_else(|| config.tags.get("env").cloned()),
             timeout: UPSTREAM_TIMEOUT,
         }
     }
@@ -302,6 +306,25 @@ mod tests {
         .await;
 
         assert_eq!(response.status(), StatusCode::BAD_GATEWAY);
+    }
+
+    #[test]
+    fn env_falls_back_to_the_dd_tags_env() {
+        let from_tags = |env: Option<&str>| {
+            let config = Config {
+                env: env.map(str::to_string),
+                tags: [("env".to_string(), "from-tags".to_string())].into(),
+                ..Config::default()
+            };
+            Passthrough::new(
+                &config,
+                Arc::new(ApiKeyFactory::new("k")),
+                reqwest::Client::new(),
+            )
+            .env
+        };
+        assert_eq!(from_tags(None).as_deref(), Some("from-tags"));
+        assert_eq!(from_tags(Some("prod")).as_deref(), Some("prod"));
     }
 
     #[tokio::test]
