@@ -38,7 +38,7 @@ pub fn get_config(config_directory: &Path) -> Config {
         .merge(Env::prefixed("DD_").only(&["apm_error_tps"]))
         .extract::<ErrorSamplerEnvSource>()
         .unwrap_or_default();
-    if let Some(tps) = error_sampler_env.errors_per_second {
+    if let Some(tps) = error_sampler_env.apm_error_tps {
         config.ext.apm_error_tps = Some(tps);
     }
     config.ext.apply_experimental_features_gate();
@@ -217,11 +217,8 @@ where
 #[derive(Debug, Clone, Copy, Default, Deserialize)]
 #[serde(default)]
 struct ErrorSamplerEnvSource {
-    #[serde(
-        rename = "apm_error_tps",
-        deserialize_with = "deserialize_optional_finite_f64"
-    )]
-    errors_per_second: Option<f64>,
+    #[serde(deserialize_with = "deserialize_optional_finite_f64")]
+    apm_error_tps: Option<f64>,
 }
 
 #[derive(Debug, Clone, Copy, Default, Deserialize)]

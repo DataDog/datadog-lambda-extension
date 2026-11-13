@@ -1725,7 +1725,7 @@ mod tests {
     #[test]
     #[allow(clippy::float_cmp)]
     fn error_sampler_survives_clock_jumps() {
-        let sampler = new_error_sampler(crate::config::DEFAULT_APM_ERROR_TPS);
+        let sampler = default_error_sampler();
         sample_errored_trace(&sampler, 1_700_000_000, 1);
         // Backward step.
         sample_errored_trace(&sampler, 1_699_999_000, 2);

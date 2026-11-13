@@ -513,15 +513,15 @@ fn sampled_root_span(trace_id: u64, priority: f64, error: i32) -> pb::Span {
 /// P0 traces are forwarded only when the backend owns stats.
 #[tokio::test]
 async fn e2e_error_sampler_rescues_only_errored_p0_traces() {
-    // (owner label, lambda_extension_compute_stats, client_computed_stats)
+    // (owner, extension stats enabled, tracer computed stats, forwarded count)
     let cases = [
-        ("backend", false, false),
-        ("extension", true, false),
-        ("tracer", false, true),
-        ("tracer-precedence", true, true),
+        ("backend", false, false, 2),
+        ("extension", true, false, 1),
+        ("tracer", false, true, 1),
+        ("tracer-precedence", true, true, 1),
     ];
 
-    for (owner, compute_on_extension, client_computed_stats) in cases {
+    for (owner, compute_on_extension, client_computed_stats, forwarded_count) in cases {
         let rescued_trace_id = 1;
         let dropped_trace_id = 2;
         let outcome = run_processor_pipeline_with_traces(
@@ -537,7 +537,7 @@ async fn e2e_error_sampler_rescues_only_errored_p0_traces() {
         let captured_spans: Vec<&pb::Span> = captured_trace_spans(&outcome.traces).collect();
         assert_eq!(
             captured_spans.len(),
-            if owner == "backend" { 2 } else { 1 },
+            forwarded_count,
             "unexpected forwarded count (owner={owner})"
         );
         assert!(
@@ -687,15 +687,15 @@ fn captured_trace_spans(traces: &[pb::AgentPayload]) -> impl Iterator<Item = &pb
 /// stats path. All inputs remain represented in extension-computed stats.
 #[tokio::test]
 async fn e2e_error_rare_sample_tracer_drop_rescues_tracer_drops_selectively() {
-    // (owner label, lambda_extension_compute_stats, client_computed_stats)
+    // (owner, extension stats enabled, tracer computed stats, forwarded count)
     let cases = [
-        ("backend", false, false),
-        ("extension", true, false),
-        ("tracer", false, true),
-        ("tracer-precedence", true, true),
+        ("backend", false, false, 4),
+        ("extension", true, false, 2),
+        ("tracer", false, true, 2),
+        ("tracer-precedence", true, true, 2),
     ];
 
-    for (owner, compute_on_extension, client_computed_stats) in cases {
+    for (owner, compute_on_extension, client_computed_stats, forwarded_count) in cases {
         let rescued_trace_id = 1; // errored tracer rule drop
         let manual_drop_trace_id = 2; // errored manual tracer drop
         let nonerrored_trace_id = 3; // nonerrored tracer rule drop
@@ -722,7 +722,7 @@ async fn e2e_error_rare_sample_tracer_drop_rescues_tracer_drops_selectively() {
         let captured_spans: Vec<_> = captured_trace_spans(&outcome.traces).collect();
         assert_eq!(
             captured_spans.len(),
-            if owner == "backend" { 4 } else { 2 },
+            forwarded_count,
             "unexpected forwarded count (owner={owner})"
         );
         assert!(
