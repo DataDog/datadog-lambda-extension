@@ -53,6 +53,7 @@ impl Context {
         waf_handle: &mut Handle,
         ruleset_version: &str,
         waf_timeout: Duration,
+        aws_access_key_id: Option<&str>,
     ) -> Self {
         let mut trace_tags = HashMap::from([
             (TagName::AppsecEnabled, TagValue::Metric(1.0)),
@@ -65,6 +66,12 @@ impl Context {
             trace_tags.insert(
                 TagName::AppsecEventRulesVersion,
                 TagValue::Always(ruleset_version.to_string()),
+            );
+        }
+        if let Some(aws_access_key_id) = aws_access_key_id {
+            trace_tags.insert(
+                TagName::AwsLambdaAccessKeyId,
+                TagValue::IfAbsent(aws_access_key_id.to_string()),
             );
         }
 
@@ -239,6 +246,11 @@ impl Context {
             match value {
                 TagValue::Always(value) => {
                     span.meta.insert(key.to_string(), value.clone());
+                }
+                TagValue::IfAbsent(value) => {
+                    span.meta
+                        .entry(key.to_string())
+                        .or_insert_with(|| value.clone());
                 }
                 TagValue::AppSecEvents { triggers } => {
                     span.meta.insert(
@@ -553,6 +565,8 @@ enum TagName {
     AppsecWafVersion,
     // Hidden span tags of relevance
     Origin,
+    // Execution environment tags
+    AwsLambdaAccessKeyId,
     // General request tags
     HttpUrl,
     HttpMethod,
@@ -575,6 +589,7 @@ impl TagName {
             Self::AppsecWafTimeouts => "_dd.appsec.waf.timeouts",
             Self::AppsecWafVersion => "_dd.appsec.waf.version",
             Self::Origin => "_dd.origin",
+            Self::AwsLambdaAccessKeyId => "aws.lambda.access_key_id",
             Self::HttpUrl => "http.url",
             Self::HttpMethod => "http.method",
             Self::HttpRoute => "http.route",
@@ -595,6 +610,9 @@ impl std::fmt::Display for TagName {
 enum TagValue {
     /// A tag value that is always emitted.
     Always(String),
+    /// A tag value that is emitted only if the span does not carry the tag
+    /// yet, so a value set by a tracer is kept.
+    IfAbsent(String),
     /// A tag value that is only emitted when an event is matched.
     OnEvent(serde_json::Value),
     /// The special key used to encode AAP events
@@ -605,7 +623,7 @@ enum TagValue {
 impl std::fmt::Display for TagValue {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Always(str) => write!(f, "{str}"),
+            Self::Always(str) | Self::IfAbsent(str) => write!(f, "{str}"),
             Self::OnEvent(value) => write!(f, "{value}"),
             Self::AppSecEvents { triggers } => write!(
                 f,
