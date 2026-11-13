@@ -1,4 +1,5 @@
 use std::borrow::Cow;
+use std::cell::OnceCell;
 use std::collections::{HashMap, VecDeque};
 use std::fs::File;
 use std::io::Read;
@@ -17,7 +18,9 @@ use tracing::{debug, info};
 
 use crate::appsec::processor::context::Context;
 use crate::appsec::processor::response::ExpectedResponseFormat;
-use crate::appsec::{is_enabled, is_standalone};
+use crate::appsec::{
+    is_aws_access_key_id_tag_enabled, is_enabled, is_standalone, read_aws_access_key_id,
+};
 use crate::config::Config;
 use crate::lifecycle::invocation::triggers::IdentifiedTrigger;
 
@@ -32,6 +35,11 @@ pub struct Processor {
     waf_timeout: Duration,
     api_sec_sampler: Option<Arc<Mutex<apisec::Sampler>>>, // Must be [`Arc`] so [`Processor`] can be [`Send`].
     context_buffer: VecDeque<Context>,
+    /// Whether invocation spans carry the AWS access key ID.
+    aws_access_key_id_tag_enabled: bool,
+    /// The AWS access key ID, read at the first invocation (after a `SnapStart`
+    /// restore, never before the snapshot) and cached for the environment's life.
+    aws_access_key_id: OnceCell<Option<String>>,
 }
 impl Processor {
     const CONTEXT_BUFFER_DEFAULT_CAPACITY: NonZero<usize> = NonZero::new(5).unwrap();
@@ -101,6 +109,8 @@ impl Processor {
                 None
             },
             context_buffer: VecDeque::with_capacity(capacity.get()),
+            aws_access_key_id_tag_enabled: is_aws_access_key_id_tag_enabled(),
+            aws_access_key_id: OnceCell::new(),
         })
     }
 
@@ -243,12 +253,21 @@ impl Processor {
             ctx.set_response_seen().await;
         }
 
+        let aws_access_key_id = if self.aws_access_key_id_tag_enabled {
+            self.aws_access_key_id
+                .get_or_init(read_aws_access_key_id)
+                .as_deref()
+        } else {
+            None
+        };
+
         // Insert the new context at the back of the buffer.
         self.context_buffer.push_back(Context::new(
             rid.to_string(),
             &mut self.handle,
             &self.ruleset_version,
             self.waf_timeout,
+            aws_access_key_id,
         ));
         // Retrieve a mutable reference to it from the buffer.
         self.context_buffer
@@ -711,6 +730,7 @@ impl InvocationPayload for IdentifiedTrigger {
 #[cfg_attr(coverage_nightly, coverage(off))] // Test modules skew coverage metrics
 #[cfg(test)]
 mod tests {
+    use std::env;
     use std::io::Write;
 
     use super::*;
@@ -870,5 +890,151 @@ mod tests {
         }];
 
         assert!(Processor::service_entry_span_mut(&mut trace).is_none());
+    }
+
+    const ACCESS_KEY_ID: &str = "ASIAEXAMPLE000000001";
+    const SECRET_CANARY: &str = "canary-secret-ee3f9c1b";
+    const TOKEN_CANARY: &str = "canary-token-7d41a0c2";
+    const ACCESS_KEY_ID_TAG: &str = "aws.lambda.access_key_id";
+
+    fn set_aws_env(enabled: Option<&str>, access_key_id: &str) {
+        unsafe {
+            match enabled {
+                Some(v) => env::set_var("DD_APPSEC_AWS_ACCESS_KEY_ID_TAG_ENABLED", v),
+                None => env::remove_var("DD_APPSEC_AWS_ACCESS_KEY_ID_TAG_ENABLED"),
+            }
+            env::set_var("AWS_ACCESS_KEY_ID", access_key_id);
+            env::set_var("AWS_SECRET_ACCESS_KEY", SECRET_CANARY);
+            env::set_var("AWS_SESSION_TOKEN", TOKEN_CANARY);
+        }
+    }
+
+    fn clear_aws_env() {
+        unsafe {
+            for k in [
+                "DD_APPSEC_AWS_ACCESS_KEY_ID_TAG_ENABLED",
+                "AWS_ACCESS_KEY_ID",
+                "AWS_SECRET_ACCESS_KEY",
+                "AWS_SESSION_TOKEN",
+            ] {
+                env::remove_var(k);
+            }
+        }
+    }
+
+    fn appsec_processor() -> Processor {
+        let config = Config {
+            ext: crate::config::LambdaConfig {
+                serverless_appsec_enabled: true,
+                ..Default::default()
+            },
+            ..Config::default()
+        };
+        Processor::new(&config).expect("Should not fail")
+    }
+
+    fn function_url_event(query: &[(&str, &str)]) -> IdentifiedTrigger {
+        let json = crate::lifecycle::invocation::triggers::test_utils::read_json_file(
+            "lambda_function_url_event.json",
+        );
+        let mut value: serde_json::Value = serde_json::from_str(&json).expect("valid JSON");
+        value["queryStringParameters"] = query
+            .iter()
+            .map(|(k, v)| ((*k).to_string(), serde_json::Value::from(*v)))
+            .collect::<serde_json::Map<_, _>>()
+            .into();
+        let trigger = IdentifiedTrigger::from_value(&value);
+        assert!(matches!(
+            trigger,
+            IdentifiedTrigger::LambdaFunctionUrlEvent(_)
+        ));
+        trigger
+    }
+
+    async fn invoke(processor: &mut Processor, rid: &str, query: &[(&str, &str)]) -> Span {
+        processor
+            .process_invocation_next(rid, &function_url_event(query))
+            .await;
+        let mut span = Span {
+            name: "aws.lambda".into(),
+            meta: HashMap::from([("request_id".to_string(), rid.to_string())]),
+            ..Default::default()
+        };
+        let _ = processor.process_span(&mut span);
+        span
+    }
+
+    #[tokio::test]
+    #[serial_test::serial] // mutates the AWS credential env vars
+    async fn test_aws_access_key_id_tag() {
+        set_aws_env(Some("true"), ACCESS_KEY_ID);
+        let mut processor = appsec_processor();
+        let span = invoke(&mut processor, "rid-1", &[]).await;
+        assert_eq!(
+            span.meta.get(ACCESS_KEY_ID_TAG).map(String::as_str),
+            Some(ACCESS_KEY_ID)
+        );
+        let serialized = format!("{span:?}");
+        assert!(!serialized.contains(SECRET_CANARY));
+        assert!(!serialized.contains(TOKEN_CANARY));
+        clear_aws_env();
+    }
+
+    #[tokio::test]
+    #[serial_test::serial] // mutates the AWS credential env vars
+    async fn test_aws_access_key_id_tag_off_by_default() {
+        for enabled in [None, Some("false"), Some("0")] {
+            set_aws_env(enabled, ACCESS_KEY_ID);
+            let mut processor = appsec_processor();
+            let span = invoke(&mut processor, "rid-1", &[]).await;
+            assert!(span.metrics.contains_key("_dd.appsec.enabled"));
+            assert!(!span.meta.contains_key(ACCESS_KEY_ID_TAG), "{enabled:?}");
+        }
+        clear_aws_env();
+    }
+
+    #[tokio::test]
+    #[serial_test::serial] // mutates the AWS credential env vars
+    async fn test_aws_access_key_id_tag_malformed() {
+        for value in ["", "XXXXEXAMPLE000000001", "ASIAEXAMPLE0000000012"] {
+            set_aws_env(Some("true"), value);
+            let mut processor = appsec_processor();
+            let span = invoke(&mut processor, "rid-1", &[]).await;
+            assert!(span.metrics.contains_key("_dd.appsec.enabled"));
+            assert!(!span.meta.contains_key(ACCESS_KEY_ID_TAG), "{value:?}");
+        }
+        clear_aws_env();
+    }
+
+    #[tokio::test]
+    #[serial_test::serial] // mutates the AWS credential env vars
+    async fn test_aws_access_key_id_read_once() {
+        set_aws_env(Some("true"), ACCESS_KEY_ID);
+        let mut processor = appsec_processor();
+        let first = invoke(&mut processor, "rid-1", &[]).await;
+        set_aws_env(Some("true"), "AKIAEXAMPLE000000002");
+        let second = invoke(&mut processor, "rid-2", &[]).await;
+        for span in [first, second] {
+            assert_eq!(
+                span.meta.get(ACCESS_KEY_ID_TAG).map(String::as_str),
+                Some(ACCESS_KEY_ID)
+            );
+        }
+        clear_aws_env();
+    }
+
+    #[tokio::test]
+    #[serial_test::serial] // mutates the AWS credential env vars
+    async fn test_aws_access_key_id_tag_with_appsec_event() {
+        set_aws_env(Some("true"), ACCESS_KEY_ID);
+        let mut processor = appsec_processor();
+        let span = invoke(&mut processor, "rid-1", &[("file", "/proc/self/environ")]).await;
+        assert!(span.meta.contains_key("_dd.appsec.json"), "{span:?}");
+        assert!(span.meta["_dd.appsec.json"].contains("crs-930-120"));
+        assert_eq!(
+            span.meta.get(ACCESS_KEY_ID_TAG).map(String::as_str),
+            Some(ACCESS_KEY_ID)
+        );
+        clear_aws_env();
     }
 }
