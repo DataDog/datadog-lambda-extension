@@ -85,6 +85,10 @@ pub struct LambdaConfig {
     pub appsec_waf_timeout: Duration,
     pub api_security_enabled: bool,
     pub api_security_sample_delay: Duration,
+    /// `DD_APPSEC_AWS_ACCESS_KEY_ID_TAG_ENABLED`: tag each AppSec-monitored
+    /// invocation span with the execution environment's `AWS_ACCESS_KEY_ID`.
+    /// Only applies when `serverless_appsec_enabled` is true. Defaults to `false`.
+    pub appsec_aws_access_key_id_tag_enabled: bool,
     pub custom_metrics_exclude_tags: Vec<String>,
 
     /// When true, inferred (synthetic) event-source spans report the function's
@@ -152,6 +156,7 @@ impl Default for LambdaConfig {
             appsec_waf_timeout: Duration::from_millis(5),
             api_security_enabled: true,
             api_security_sample_delay: Duration::from_secs(30),
+            appsec_aws_access_key_id_tag_enabled: false,
             custom_metrics_exclude_tags: Vec::new(),
             trace_remove_integration_service_names_enabled: false,
             lambda_durable_function_log_buffer_size: 5,
@@ -228,6 +233,8 @@ pub struct LambdaConfigSource {
     pub api_security_enabled: Option<bool>,
     #[serde(deserialize_with = "deser_dur_secs")]
     pub api_security_sample_delay: Option<Duration>,
+    #[serde(deserialize_with = "deser_opt_bool")]
+    pub appsec_aws_access_key_id_tag_enabled: Option<bool>,
 
     /// `DD_LAMBDA_CUSTOMER_METRICS_EXCLUDE_TAGS` — comma-separated list of tag
     /// names to drop from customer `DogStatsD` metrics. Source field name
@@ -299,6 +306,7 @@ impl DatadogConfigExtension for LambdaConfig {
                 appsec_waf_timeout,
                 api_security_enabled,
                 api_security_sample_delay,
+                appsec_aws_access_key_id_tag_enabled,
                 trace_remove_integration_service_names_enabled,
                 lambda_durable_function_log_buffer_size,
                 trace_experimental_features_enabled,
@@ -854,6 +862,60 @@ mod lambda_config_tests {
     }
 
     // ---- AppSec / API Security ----
+
+    #[test]
+    fn appsec_aws_access_key_id_tag_enabled_defaults_to_false() {
+        let config = load(|_| Ok(()));
+        assert!(!config.ext.appsec_aws_access_key_id_tag_enabled);
+    }
+
+    #[test]
+    fn appsec_aws_access_key_id_tag_enabled_from_env() {
+        let config = load(|jail| {
+            jail.set_env("DD_APPSEC_AWS_ACCESS_KEY_ID_TAG_ENABLED", "true");
+            Ok(())
+        });
+        assert!(config.ext.appsec_aws_access_key_id_tag_enabled);
+
+        let config = load(|jail| {
+            jail.set_env("DD_APPSEC_AWS_ACCESS_KEY_ID_TAG_ENABLED", "false");
+            Ok(())
+        });
+        assert!(!config.ext.appsec_aws_access_key_id_tag_enabled);
+    }
+
+    #[test]
+    fn appsec_aws_access_key_id_tag_enabled_from_yaml() {
+        let config = load(|jail| {
+            jail.create_file(
+                "datadog.yaml",
+                "appsec_aws_access_key_id_tag_enabled: true\n",
+            )?;
+            Ok(())
+        });
+        assert!(config.ext.appsec_aws_access_key_id_tag_enabled);
+    }
+
+    /// Between `datadog.yaml` and the environment, the same source wins as for
+    /// `DD_SERVERLESS_APPSEC_ENABLED`: the environment.
+    #[test]
+    fn appsec_aws_access_key_id_tag_enabled_precedence_matches_appsec() {
+        for (yaml, env) in [(true, false), (false, true)] {
+            let config = load(|jail| {
+                jail.create_file(
+                    "datadog.yaml",
+                    &format!(
+                        "serverless_appsec_enabled: {yaml}\nappsec_aws_access_key_id_tag_enabled: {yaml}\n"
+                    ),
+                )?;
+                jail.set_env("DD_SERVERLESS_APPSEC_ENABLED", env);
+                jail.set_env("DD_APPSEC_AWS_ACCESS_KEY_ID_TAG_ENABLED", env);
+                Ok(())
+            });
+            assert_eq!(config.ext.serverless_appsec_enabled, env);
+            assert_eq!(config.ext.appsec_aws_access_key_id_tag_enabled, env);
+        }
+    }
 
     #[test]
     fn appsec_block_from_env() {

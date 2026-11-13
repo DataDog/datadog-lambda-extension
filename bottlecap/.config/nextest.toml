@@ -13,7 +13,7 @@ fixed-ports = { max-threads = 1 }
 # A regex so the config stays valid when one of these binaries is absent
 # (nextest rejects an exact `binary(name)` that matches nothing).
 [[profile.default.overrides]]
-filter = 'binary(/(^|_)(lifecycle_contract|fault_injection|config_robustness|port_conflict)_test$/)'
+filter = 'binary(/(^|_)(lifecycle_contract|fault_injection|config_robustness|port_conflict|appsec_access_key_id)_test$/)'
 test-group = "fixed-ports"
 # A debug build of the extension, a blocking flush and a shutdown deadline add
 # up; the longest test (a storm with a memory window) stays under this.
