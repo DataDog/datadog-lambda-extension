@@ -61,8 +61,13 @@ fn client() -> reqwest::Client {
 /// Plays the function runtime and its tracer for one cold-start invocation:
 /// the runtime polls `/next` and posts its response through the extension's
 /// Runtime API proxy, and the tracer calls the lifecycle listener around it.
-/// Returns the `aws.lambda` span that reached the intake.
-async fn monitored_invocation(s: &Scenario, bc: &mut BottlecapProcess) -> Span {
+/// Then shuts the extension down cleanly and returns the `aws.lambda` span
+/// that reached the intake.
+///
+/// The span is looked up after SHUTDOWN: with the `end` flush strategy the
+/// trace can reach the aggregator after the end-of-invocation flush, and then
+/// goes out with the shutdown flush, which the SHUTDOWN deadline bounds.
+async fn invoke_then_shutdown(s: &Scenario, bc: &mut BottlecapProcess) -> Span {
     let deadline = s
         .invoke(REQUEST_ID, INVOKE_DEADLINE, 1, bc.startup_deadline())
         .await
@@ -105,18 +110,6 @@ async fn monitored_invocation(s: &Scenario, bc: &mut BottlecapProcess) -> Span {
         start.status()
     );
 
-    let response = client
-        .post(format!("{proxy}/{REQUEST_ID}/response"))
-        .body(r#"{"statusCode":200}"#)
-        .send()
-        .await
-        .expect("runtime response through the proxy");
-    assert!(
-        response.status().is_success(),
-        "runtime response {}",
-        response.status()
-    );
-
     let end = client
         .post(format!("{lifecycle}/end-invocation"))
         .header("lambda-runtime-aws-request-id", REQUEST_ID)
@@ -129,34 +122,59 @@ async fn monitored_invocation(s: &Scenario, bc: &mut BottlecapProcess) -> Span {
         .expect("end-invocation");
     assert!(end.status().is_success(), "end-invocation {}", end.status());
 
+    let response = client
+        .post(format!("{proxy}/{REQUEST_ID}/response"))
+        .body(r#"{"statusCode":200}"#)
+        .send()
+        .await
+        .expect("runtime response through the proxy");
+    assert!(
+        response.status().is_success(),
+        "runtime response {}",
+        response.status()
+    );
+
+    // The listener answers end-invocation, and the proxy forwards the event and
+    // the response, before the extension processes them. Lambda's Telemetry API
+    // delivers platform.runtimeDone after a buffering delay, the fake at once,
+    // so wait until the extension holds the invocation end and AppSec has seen
+    // both the request and the response. Otherwise runtimeDone can overtake
+    // them, and the span goes out late, untagged or not at all.
+    wait_for_log(
+        bc,
+        &format!("Buffered UniversalInstrumentationEnd for request_id: {REQUEST_ID}"),
+    )
+    .await;
+    wait_for_log(
+        bc,
+        &format!("aap: marking security context for {REQUEST_ID} as having seen the response"),
+    )
+    .await;
     deliver_runtime_done(&s.api, REQUEST_ID, true)
         .await
         .unwrap();
-
-    let is_invocation_span = |span: &Span| span.name == "aws.lambda" && span.trace_id == TRACE_ID;
     assert!(
-        s.intake
-            .wait_for(
-                1,
-                |r| r.path.contains("/api/v0.2/traces")
-                    && r.api_key() == Some(TEST_API_KEY)
-                    && r.spans()
-                        .is_ok_and(|spans| spans.iter().any(is_invocation_span)),
-                deadline,
-            )
-            .await,
-        "no aws.lambda span by the INVOKE deadline. intake: {}\n{}",
-        s.intake.summary(),
-        bc.log_tail(60)
+        s.api.wait_for_next_calls(2, deadline).await,
+        "no /next after the invocation by its deadline. {}",
+        bc.log_tail(40)
     );
+    s.shutdown_cleanly(bc).await;
+
     let span = s
         .intake
         .requests_to("/api/v0.2/traces")
         .iter()
+        .filter(|r| r.api_key() == Some(TEST_API_KEY))
         .filter_map(|r| r.spans().ok())
         .flatten()
-        .find(is_invocation_span)
-        .expect("aws.lambda span");
+        .find(|span| span.name == "aws.lambda" && span.trace_id == TRACE_ID)
+        .unwrap_or_else(|| {
+            panic!(
+                "no aws.lambda span by the SHUTDOWN deadline. intake: {}\n{}",
+                s.intake.summary(),
+                bc.log_tail(60)
+            )
+        });
     // AppSec monitored the invocation: the processor wrote its tags.
     assert!(
         span.meta.contains_key("_dd.appsec.waf.version"),
@@ -164,6 +182,21 @@ async fn monitored_invocation(s: &Scenario, bc: &mut BottlecapProcess) -> Span {
         span.meta
     );
     span
+}
+
+/// Wait until the extension logs `needle`. Sequences the fake's next event
+/// after internal processing that the extension does not expose otherwise; it
+/// asserts nothing about the contract.
+async fn wait_for_log(bc: &BottlecapProcess, needle: &str) {
+    let deadline = Instant::now() + secs(5);
+    while !bc.log_contains(needle) {
+        assert!(
+            Instant::now() < deadline,
+            "no {needle:?} in the log. {}",
+            bc.log_tail(40)
+        );
+        tokio::time::sleep(ms(10)).await;
+    }
 }
 
 /// No intake request and no line on stdout or stderr carries the secret or the
@@ -196,7 +229,7 @@ async fn access_key_id_tagged_and_no_secret_sent() {
         .env("DD_APPSEC_AWS_ACCESS_KEY_ID_TAG_ENABLED", "true")
         .spawn();
 
-    let span = monitored_invocation(&s, &mut bc).await;
+    let span = invoke_then_shutdown(&s, &mut bc).await;
     assert_eq!(
         span.meta.get(TAG).map(String::as_str),
         Some(ACCESS_KEY_ID),
@@ -204,7 +237,6 @@ async fn access_key_id_tagged_and_no_secret_sent() {
         span.meta
     );
 
-    s.shutdown_cleanly(&mut bc).await;
     assert_no_canary(&s, &bc);
     assert!(
         !bc.stdout().contains(ACCESS_KEY_ID) && !bc.stderr().contains(ACCESS_KEY_ID),
@@ -219,10 +251,9 @@ async fn access_key_id_not_tagged_when_key_unset() {
     let s = Scenario::start(FaultMode::Ok).await;
     let mut bc = appsec_bottlecap(&s).spawn();
 
-    let span = monitored_invocation(&s, &mut bc).await;
+    let span = invoke_then_shutdown(&s, &mut bc).await;
     assert!(!span.meta.contains_key(TAG), "{:?}", span.meta);
 
-    s.shutdown_cleanly(&mut bc).await;
     assert_no_canary(&s, &bc);
 }
 
@@ -235,9 +266,8 @@ async fn access_key_id_not_tagged_when_key_false() {
         .env("DD_APPSEC_AWS_ACCESS_KEY_ID_TAG_ENABLED", "false")
         .spawn();
 
-    let span = monitored_invocation(&s, &mut bc).await;
+    let span = invoke_then_shutdown(&s, &mut bc).await;
     assert!(!span.meta.contains_key(TAG), "{:?}", span.meta);
 
-    s.shutdown_cleanly(&mut bc).await;
     assert_no_canary(&s, &bc);
 }
