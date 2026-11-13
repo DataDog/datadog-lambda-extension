@@ -118,8 +118,8 @@ impl IntakeRequest {
             .map(|b| String::from_utf8_lossy(&b).into_owned())
     }
 
-    /// Trace ID of every span in a `/api/v0.2/traces` body (`AgentPayload`).
-    pub fn trace_ids(&self) -> Result<Vec<u64>, String> {
+    /// Every span in a `/api/v0.2/traces` body (`AgentPayload`).
+    pub fn spans(&self) -> Result<Vec<pb::Span>, String> {
         let payload = pb::AgentPayload::decode(self.decoded_body()?.as_slice()).map_err(|e| {
             format!(
                 "{} {}: undecodable AgentPayload: {e}",
@@ -128,11 +128,15 @@ impl IntakeRequest {
         })?;
         Ok(payload
             .tracer_payloads
-            .iter()
-            .flat_map(|t| &t.chunks)
-            .flat_map(|c| &c.spans)
-            .map(|span| span.trace_id)
+            .into_iter()
+            .flat_map(|t| t.chunks)
+            .flat_map(|c| c.spans)
             .collect())
+    }
+
+    /// Trace ID of every span in a `/api/v0.2/traces` body (`AgentPayload`).
+    pub fn trace_ids(&self) -> Result<Vec<u64>, String> {
+        Ok(self.spans()?.iter().map(|span| span.trace_id).collect())
     }
 
     /// Metric name of every sketch or series in a `/api/beta/sketches` or

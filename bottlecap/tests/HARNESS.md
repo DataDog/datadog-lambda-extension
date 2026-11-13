@@ -28,6 +28,7 @@ a test whose expected behavior is a design choice, not a plain bug.
 | `tests/fault_injection_test.rs` | Intake faults: a 503 storm, an oversized trace, a response cut off mid-body. |
 | `tests/config_robustness_test.rs` | Wrong-typed config values. |
 | `tests/port_conflict_test.rs` | Another process holds port 8124 or 8126. |
+| `tests/appsec_access_key_id_test.rs` | Extension AppSec through the Runtime API proxy: the `aws.lambda.access_key_id` tag, and no credential canary in any payload or log. |
 | `.config/nextest.toml` | `fixed-ports` test group (`max-threads = 1`) for these binaries. |
 
 ## Write a new fault test in 10 lines
@@ -88,7 +89,10 @@ async fn my_fault() {
 
 ## API summary
 
-- `FakeExtensionsApi`: `push_invoke(id, deadline_in)`, `push_shutdown(reason, deadline_in)` (each
+- `FakeExtensionsApi`: `push_runtime_event(id, event)` (served to the function runtime's
+  `GET /2018-06-01/runtime/invocation/next`, through the extension's proxy on 9000, with
+  `Lambda-Runtime-Aws-Request-Id`; the runtime's `response` call gets the `202` below),
+  `push_invoke(id, deadline_in)`, `push_shutdown(reason, deadline_in)` (each
   returns the event's deadline as an `Instant`, taken before the event is queued), `next_calls()`, `next_call_at(n)`, `wait_for_next_calls(n, deadline)` (true only when `/next` call `n` arrived by
   the `Instant`), `set_subscribe_status(StatusCode)`, `request_lines()`,
   `send_telemetry(&[Value], budget)`, `send_telemetry_raw(Vec<u8>, budget)`, `telemetry_port()`
@@ -119,7 +123,7 @@ async fn my_fault() {
   `wait_for(n, pred, deadline)` (true only when `n` matching requests arrived by the `Instant`;
   `Slow` records a request before its delay),
   `wait_for_path`; `IntakeRequest::at` (arrival), `api_key()`, `decoded_body()`, `body_text()`,
-  `trace_ids()` (every span's trace ID in an `AgentPayload`) and `metric_names()` (a sketches or
+  `spans()` (every span in an `AgentPayload`), `trace_ids()` (every span's trace ID in an `AgentPayload`) and `metric_names()` (a sketches or
   series payload), each `Err` when the body does not decode. `SynBlackhole::start()` (backlog 1,
   queue pre-filled), `is_saturated()`.
 - `BottlecapProcess`: `scenario.bottlecap()` then `.intake(url)`, `.env`, `.envs`, `.remove_env`,
@@ -163,7 +167,8 @@ while the `http://` intake URLs bypass it). Managed Instance mode adds
 ```sh
 cd bottlecap
 cargo nextest run --test lifecycle_contract_test --test fault_injection_test \
-    --test config_robustness_test --test port_conflict_test            # CI set, ignored skipped
+    --test config_robustness_test --test port_conflict_test \
+    --test appsec_access_key_id_test                                   # CI set, ignored skipped
 cargo nextest run --test fault_injection_test --run-ignored only          # not-yet-fixed tests (none yet)
 cargo test --test fault_injection_test                                    # also serialized
 ```

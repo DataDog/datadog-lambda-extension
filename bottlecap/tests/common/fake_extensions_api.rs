@@ -20,6 +20,12 @@
 //! It also answers any other request with `202`, so the same port can stand in
 //! for the Datadog intake when a test does not need a `FaultIntake`.
 //!
+//! It also serves the Runtime API `/next` that a function runtime polls, for
+//! tests that go through the extension's Runtime API proxy: push an event with
+//! [`push_runtime_event`](FakeExtensionsApi::push_runtime_event) and the
+//! pending poll returns it with its `Lambda-Runtime-Aws-Request-Id`. The
+//! runtime's `response` call falls through to the `202` handler, as in Lambda.
+//!
 //! It also plays Lambda's Telemetry API sender: `send_telemetry` posts a batch
 //! to the extension's listener (the port and path of the subscribe URI). Like
 //! Lambda, it delivers nothing until a subscribe call was accepted, and then
@@ -77,6 +83,10 @@ struct Shared {
     /// Whether the trace agent port accepted a connection while the first
     /// register request was handled, `None` until then.
     trace_agent_listening_at_register: Arc<Mutex<Option<bool>>>,
+    /// `(request id, event)` pairs pushed by the test, served to the Runtime
+    /// API `/next` in order.
+    runtime_queue: Arc<Mutex<VecDeque<(String, Value)>>>,
+    runtime_notify: Arc<Notify>,
 }
 
 pub struct FakeExtensionsApi {
@@ -125,11 +135,14 @@ impl FakeExtensionsApi {
             telemetry_url: Arc::new(Mutex::new(None)),
             telemetry_types: Arc::new(Mutex::new(Vec::new())),
             trace_agent_listening_at_register: Arc::new(Mutex::new(None)),
+            runtime_queue: Arc::new(Mutex::new(VecDeque::new())),
+            runtime_notify: Arc::new(Notify::new()),
         };
         let router = Router::new()
             .route("/2020-01-01/extension/register", post(register))
             .route("/2020-01-01/extension/event/next", get(next))
             .route("/2022-07-01/telemetry", put(subscribe))
+            .route("/2018-06-01/runtime/invocation/next", get(runtime_next))
             .fallback(any(accept_anything))
             .with_state(shared.clone());
         let listener = TcpListener::bind("127.0.0.1:0")
@@ -201,6 +214,16 @@ impl FakeExtensionsApi {
         let deadline = Instant::now() + deadline_in;
         self.push_next(shutdown_event(reason, deadline_in));
         deadline
+    }
+
+    /// Queue `event` for the function runtime's next Runtime API `/next` poll.
+    pub fn push_runtime_event(&self, request_id: &str, event: Value) {
+        self.shared
+            .runtime_queue
+            .lock()
+            .expect("runtime queue lock")
+            .push_back((request_id.to_string(), event));
+        self.shared.runtime_notify.notify_one();
     }
 
     /// Number of `/next` calls that arrived so far.
@@ -558,6 +581,26 @@ async fn next(
         }
         // Lambda never sends an event type the extension did not register for.
         eprintln!("fake extensions api: dropped an unregistered {event_type} event");
+    }
+}
+
+async fn runtime_next(State(shared): State<Shared>) -> impl IntoResponse {
+    record(&shared, "GET", "/2018-06-01/runtime/invocation/next");
+    loop {
+        let item = shared
+            .runtime_queue
+            .lock()
+            .expect("runtime queue lock")
+            .pop_front();
+        let Some((request_id, event)) = item else {
+            shared.runtime_notify.notified().await;
+            continue;
+        };
+        return (
+            StatusCode::OK,
+            [("Lambda-Runtime-Aws-Request-Id", request_id)],
+            Json(event),
+        );
     }
 }
 
