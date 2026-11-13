@@ -89,3 +89,46 @@ async fn invoke_then_shutdown_exits_cleanly() {
         s.intake.summary()
     );
 }
+
+/// Lambda starts the runtime, and the tracer's first `/info` call, once every
+/// extension has registered, not at the extension's first `/next`. The fake
+/// probes the trace agent port while it handles register, so the trace agent
+/// must already be listening by then.
+async fn assert_trace_agent_listens_before_register(managed_instance: bool) {
+    let s = Scenario::start(FaultMode::Ok).await;
+    let builder = s.bottlecap();
+    let mut bc = if managed_instance {
+        builder.managed_instance().spawn()
+    } else {
+        builder.spawn()
+    };
+
+    assert!(
+        s.api.wait_for_next_calls(1, bc.startup_deadline()).await,
+        "no /next poll. {}",
+        bc.log_tail(40)
+    );
+    assert_eq!(
+        s.api.trace_agent_listening_at_register(),
+        Some(true),
+        "the trace agent was not listening on 8126 when the extension registered. {}",
+        bc.log_tail(40)
+    );
+    // Only the startup order matters here. The process is killed rather than
+    // shut down because the On-Demand loop does not yet act on a SHUTDOWN that
+    // answers the first `/next`.
+    bc.assert_no_panic();
+    bc.kill();
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[serial_test::serial(bottlecap_ports)]
+async fn trace_agent_listens_before_register() {
+    assert_trace_agent_listens_before_register(false).await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[serial_test::serial(bottlecap_ports)]
+async fn trace_agent_listens_before_register_managed_instance() {
+    assert_trace_agent_listens_before_register(true).await;
+}
