@@ -10,3 +10,4 @@ test_suites:
   - name: payload-size-e2e
   - name: dsm
   - name: durable-cold-start
+  - name: failure-accounting

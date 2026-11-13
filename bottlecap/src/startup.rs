@@ -223,15 +223,19 @@ pub fn build_trace_agent(
 }
 
 /// Builds the trace-processing pipeline with [`build_trace_agent`] and spawns
-/// the [`trace_agent::TraceAgent`] HTTP listener onto the current tokio
-/// runtime. Convenience entry point for callers that do not need to
+/// the [`trace_agent::TraceAgent`] HTTP server on `listener` onto the current
+/// tokio runtime. Convenience entry point for callers that do not need to
 /// further configure the `TraceAgent` before spawning it.
 ///
-/// Errors from `TraceAgent::start` (TCP bind failures, router-extension
-/// failures, axum serve errors) are logged and discarded; the surrounding
-/// pipeline keeps running with a dead trace channel. Callers that need to
-/// react to startup errors should use [`build_trace_agent`] and spawn the
-/// agent themselves.
+/// `listener` comes from [`trace_agent::TraceAgent::bind_listener`], called
+/// before the extension registers. `None` means that bind failed (the caller
+/// logged it), and no trace agent is served.
+///
+/// Errors from `TraceAgent::start_with_listener` (router-extension failures,
+/// axum serve errors) are logged and discarded; the surrounding pipeline keeps
+/// running with a dead trace channel. Callers that need to react to startup
+/// errors should use [`build_trace_agent`] and spawn the agent themselves.
+#[allow(clippy::too_many_arguments)]
 pub fn start_trace_agent(
     config: &Arc<Config>,
     api_key_factory: &Arc<ApiKeyFactory>,
@@ -240,6 +244,7 @@ pub fn start_trace_agent(
     appsec_processor: Option<Arc<TokioMutex<AppSecProcessor>>>,
     client: &reqwest::Client,
     proxy_aggregator: Arc<TokioMutex<proxy_aggregator::Aggregator>>,
+    listener: Option<tokio::net::TcpListener>,
 ) -> TraceAgentPipeline {
     let (trace_agent, pipeline) = build_trace_agent(
         config,
@@ -252,11 +257,13 @@ pub fn start_trace_agent(
         None,
     );
 
-    tokio::spawn(async move {
-        if let Err(e) = trace_agent.start().await {
-            error!("Error starting trace agent: {e:?}");
-        }
-    });
+    if let Some(listener) = listener {
+        tokio::spawn(async move {
+            if let Err(e) = trace_agent.start_with_listener(listener).await {
+                error!("Error starting trace agent: {e:?}");
+            }
+        });
+    }
 
     pipeline
 }
