@@ -30,3 +30,4 @@ integration-tests/cdk.context.json
 /CLAUDE_PERSONAL.md
 # Generated benchmark fixture corpus (see bottlecap/tests/fixtures/README.md)
 bottlecap/tests/fixtures/generated
+bottlecap/target-linux-arm64

@@ -35,7 +35,7 @@ use fixtures::{dogstatsd, events, invocation, logs, telemetry, traces};
 | `invocation` | `FUNCTION_NAME`, `FUNCTION_ARN`, `REGION`, `ACCOUNT_ID`, `MEMORY_SIZE_MB`, `ARCHITECTURE`, `RUNTIME`, `SERVICE`, `ENV`, `VERSION`, `REQUEST_ID`, `XRAY_ROOT`, `XRAY_TRACE_HEADER`, `TRACER_*` | The identity of the simulated invocation |
 | | `BASE_NS`, `START_MS`, `HANDLER_START_MS`, `HANDLER_MS`, `RUNTIME_DONE_MS`, `time(millis)`, `log_millis(i)` | Its times: offsets in ms from `BASE_NS`, and the time of the `i`th log line |
 | `telemetry` | `platform_batch(request_id) -> Vec<u8>` | One cold-start invocation: `initStart`, `initRuntimeDone`, `initReport`, `start`, `runtimeDone`, `report` |
-| | `log_batch(LogKind, n) -> Vec<u8>` | One POST body of `n` function log events (`LogKind::{Text, JsonObject, JsonString}`) |
+| | `log_batch(LogKind, n) -> Vec<u8>` | One POST body of `n` function log events (`LogKind::{Text, JsonObject, JsonString}`); `LogKind::max_events_per_post()` is the most one POST holds |
 | | `log_batches(LogKind, n, per_post) -> Vec<Vec<u8>>` | The same, split into POSTs of `per_post` events (Lambda sends at most 1000) |
 | | `invocation_batch(LogKind, n) -> Vec<u8>` | The invocation in the POST after its init events: `platform.start`, `n` log lines, `runtimeDone`, the cold-start `report` |
 | | `split_record_posts(total, piece, per_post) -> Vec<Vec<u8>>` | A record of `total` bytes cut into `piece`-byte pieces, spread over POSTs; the last carries `runtimeDone`. Feed to `FragmentBuffer::stitch` in order |
