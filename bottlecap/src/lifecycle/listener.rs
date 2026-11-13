@@ -140,6 +140,7 @@ impl Listener {
         }
 
         let mut join_set = tasks.lock().await;
+        Self::reap_finished(&mut join_set);
         join_set.spawn(async move {
             Self::universal_instrumentation_start(
                 headers,
@@ -164,12 +165,23 @@ impl Listener {
         let (parts, body) = extract_request_body_or_empty(request).await;
 
         let mut join_set = tasks.lock().await;
+        Self::reap_finished(&mut join_set);
         join_set.spawn(async move {
             Self::universal_instrumentation_end(&parts.headers, body, invocation_processor_handle)
                 .await;
         });
 
         (StatusCode::OK, json!({}).to_string()).into_response()
+    }
+
+    /// A `JoinSet` keeps each finished task until it is joined, so remove them before adding
+    /// one. Without this, the set grows by two tasks per invocation for the sandbox's lifetime.
+    fn reap_finished(join_set: &mut JoinSet<()>) {
+        while let Some(result) = join_set.try_join_next() {
+            if let Err(e) = result {
+                error!("Lifecycle API | Task error: {e}");
+            }
+        }
     }
 
     #[allow(clippy::unused_async)]
@@ -340,6 +352,34 @@ mod tests {
             "expected 'length limit exceeded' in response body, got: {}",
             String::from_utf8_lossy(&body)
         );
+    }
+
+    #[tokio::test]
+    async fn test_finished_tasks_are_removed_from_join_set() {
+        let propagator = Arc::new(DatadogCompositePropagator::new(Arc::new(
+            crate::config::Config::default(),
+        )));
+        let tasks = Arc::new(Mutex::new(JoinSet::new()));
+        let state: ListenerState = (InvocationProcessorHandle::noop(), propagator, tasks.clone());
+        let router = Listener::make_router(state);
+
+        for i in 0..100 {
+            for path in [START_INVOCATION_PATH, END_INVOCATION_PATH] {
+                let req = Request::builder()
+                    .method("POST")
+                    .uri(path)
+                    .header("lambda-runtime-aws-request-id", format!("req-{i}"))
+                    .body(Body::from("{}"))
+                    .expect("failed to build request");
+                let response = router.clone().oneshot(req).await.expect("request failed");
+                assert_eq!(response.status(), StatusCode::OK);
+            }
+            // Let the spawned tasks finish before the next request.
+            tokio::task::yield_now().await;
+        }
+
+        let len = tasks.lock().await.len();
+        assert!(len <= 2, "join set holds {len} tasks after 200 requests");
     }
 
     #[test]
