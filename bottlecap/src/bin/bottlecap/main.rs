@@ -141,6 +141,13 @@ async fn main() -> anyhow::Result<()> {
         .map_err(|e| anyhow::anyhow!("Failed to create client: {e:?}"))?;
     cold_start_durations.create_extensions_api_client_ms = elapsed_ms(step_start_time);
 
+    // Lambda starts the runtime once every extension has registered, and
+    // tracers probe `/info` early in their init. Bind the trace agent's port
+    // before registering, so that probe queues instead of being refused.
+    let trace_listener = bottlecap::traces::trace_agent::TraceAgent::bind_listener(None)
+        .inspect_err(|e| error!("Error starting trace agent: {e:?}"))
+        .ok();
+
     let cloned_client = client.clone();
     let runtime_api = aws_config.runtime_api.clone();
     let managed_instance_mode = aws_config.is_managed_instance_mode();
@@ -193,6 +200,7 @@ async fn main() -> anyhow::Result<()> {
         &r,
         Arc::clone(&api_key_factory),
         cold_start_durations,
+        trace_listener,
     )
     .await
     {
@@ -223,9 +231,14 @@ fn enable_logging_subsystem() {
     )
     .unwrap_or(LogLevel::Info);
 
+    let http_libraries_off: Vec<String> = logger::HTTP_LIBRARY_TARGETS
+        .iter()
+        .map(|target| format!("{target}=off"))
+        .collect();
     let (env_filter, invalid_entries) = build_env_filter(
         &format!(
-            "h2=off,hyper=off,reqwest=off,rustls=off,datadog-trace-mini-agent=off,{log_level:?}"
+            "{},datadog-trace-mini-agent=off,{log_level:?}",
+            http_libraries_off.join(",")
         ),
         &std::env::var(LEVEL_BY_TARGET_ENV_VAR).unwrap_or_default(),
     )
@@ -321,6 +334,7 @@ async fn extension_loop_idle(
 }
 
 #[allow(clippy::too_many_lines)]
+#[allow(clippy::too_many_arguments)]
 async fn extension_loop_active(
     aws_config: Arc<AwsConfig>,
     config: &Arc<Config>,
@@ -329,6 +343,7 @@ async fn extension_loop_active(
     r: &RegisterResponse,
     api_key_factory: Arc<ApiKeyFactory>,
     mut cold_start_durations: ColdStartDurations,
+    trace_listener: Option<tokio::net::TcpListener>,
 ) -> anyhow::Result<()> {
     let (mut event_bus, event_bus_tx) = EventBus::run();
 
@@ -457,6 +472,7 @@ async fn extension_loop_active(
         appsec_processor.clone(),
         &shared_client,
         Arc::clone(&proxy_aggregator),
+        trace_listener,
     );
 
     let api_runtime_proxy_shutdown_signal = start_api_runtime_proxy(
@@ -483,7 +499,6 @@ async fn extension_loop_active(
         &r.extension_id,
         &aws_config.runtime_api,
         logs_agent_channel,
-        event_bus_tx.clone(),
         config.ext.serverless_logs_enabled,
         aws_config.is_managed_instance_mode(),
     )
@@ -681,8 +696,8 @@ async fn extension_loop_active(
         // Shutdown sequence
         debug!("Initiating shutdown sequence");
 
-        // Wait for tombstone event from telemetry listener to ensure all events are processed
-        // This is the result of code refactoring which is shared by OnDemand mode as well.
+        // Process remaining events. The logs agent isn't cancelled in this mode, so no Tombstone
+        // arrives and this ends on the idle timeout.
         wait_for_tombstone_event(
             &mut event_bus,
             &invocation_processor_handle,
@@ -812,12 +827,9 @@ async fn extension_loop_active(
         }
 
         if let NextEventResponse::Shutdown { .. } = maybe_shutdown_event {
-            // Cancel Telemetry API listener
-            // Important to do this first, so we can receive the Tombstone event which signals
-            // that there are no more Telemetry events to process
+            // Stop the Telemetry API listener, then let the logs agent drain. The agent sends the
+            // Tombstone only after it has forwarded every telemetry event to the event bus.
             telemetry_listener_cancel_token.cancel();
-
-            // Cancel Logs Agent which might have Telemetry API events to process
             logs_agent_cancel_token.cancel();
 
             // Drop the event bus sender to allow the channel to close properly
@@ -825,7 +837,7 @@ async fn extension_loop_active(
 
             // Redrive/block on any failed payloads
             flushing_service.await_handles().await;
-            // Wait for tombstone event from telemetry listener to ensure all events are processed
+            // Wait for the Tombstone from the logs agent to ensure all events are processed
             wait_for_tombstone_event(
                 &mut event_bus,
                 &invocation_processor_handle,
@@ -867,7 +879,7 @@ async fn extension_loop_active(
     }
 }
 
-/// Wait for the `Tombstone` event from telemetry listener to ensure all events are processed.
+/// Wait for the `Tombstone` event from the logs agent to ensure all events are processed.
 /// This function will timeout after the specified duration to prevent hanging indefinitely.
 #[allow(clippy::too_many_arguments)]
 async fn wait_for_tombstone_event(
@@ -1343,16 +1355,15 @@ async fn setup_telemetry_client(
     extension_id: &str,
     runtime_api: &str,
     logs_tx: Sender<TelemetryEvent>,
-    event_bus_tx: Sender<Event>,
     logs_enabled: bool,
     managed_instance_mode: bool,
 ) -> anyhow::Result<CancellationToken> {
-    let listener = TelemetryListener::new(EXTENSION_HOST_IP, TELEMETRY_PORT, logs_tx, event_bus_tx);
+    let listener = TelemetryListener::new(EXTENSION_HOST_IP, TELEMETRY_PORT, logs_tx);
 
     let cancel_token = listener.cancel_token();
     match listener.start() {
         Ok(()) => {
-            // Drop the listener, so event_bus_tx is closed
+            // Drop the listener, so its `logs_tx` doesn't keep the logs agent's channel open
             drop(listener);
         }
         Err(e) => {

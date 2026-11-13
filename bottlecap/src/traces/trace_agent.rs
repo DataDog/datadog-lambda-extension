@@ -53,6 +53,8 @@ use crate::traces::stats_concentrator_service::StatsConcentratorHandle;
 
 /// Default TCP port the trace agent listener binds to on 127.0.0.1.
 pub const TRACE_AGENT_PORT: usize = 8126;
+/// Listen backlog; the kernel caps it at `net.core.somaxconn`.
+const LISTEN_BACKLOG: u32 = 1024;
 
 // Agent endpoints
 const V4_TRACE_ENDPOINT_PATH: &str = "/v0.4/traces";
@@ -115,11 +117,12 @@ pub struct ProxyState {
 /// deterministic drain endpoint) without adding a dedicated field per
 /// route to [`TraceAgent`].
 ///
-/// Returning `Err` propagates out of [`TraceAgent::start`], aborting the
-/// HTTP listener task. Note that the production convenience entry point
-/// [`crate::startup::start_trace_agent`] spawns `start` and only logs its
-/// error; the surrounding pipeline does not observe the failure. Callers
-/// that need to react to startup errors must use
+/// Returning `Err` propagates out of [`TraceAgent::start_with_listener`]
+/// (and [`TraceAgent::start`]), aborting the HTTP listener task. Note that
+/// the production convenience entry point
+/// [`crate::startup::start_trace_agent`] spawns `start_with_listener` and
+/// only logs its error; the surrounding pipeline does not observe the
+/// failure. Callers that need to react to startup errors must use
 /// [`crate::startup::build_trace_agent`] and spawn the agent themselves.
 ///
 /// Note that a path collision is not an `Err`: `Router::merge` panics when
@@ -367,21 +370,47 @@ impl TraceAgent {
         self
     }
 
-    #[allow(clippy::cast_possible_truncation)]
+    /// Binds the trace agent's listening socket on `port`, or
+    /// [`TRACE_AGENT_PORT`] when `None`. Connections are accepted (and queued)
+    /// from here on, before the agent serves.
+    ///
+    /// The extension calls this before it registers: Lambda starts the runtime
+    /// once every extension has registered, and tracers probe `/info` early in
+    /// their init, so the socket must already accept connections by then.
+    ///
+    /// Sets `SO_REUSEADDR` like `tokio::net::TcpListener::bind`. Must run
+    /// inside the tokio runtime.
+    pub fn bind_listener(port: Option<u16>) -> std::io::Result<tokio::net::TcpListener> {
+        let port =
+            port.unwrap_or(u16::try_from(TRACE_AGENT_PORT).expect("TRACE_AGENT_PORT is too large"));
+        let socket = tokio::net::TcpSocket::new_v4()?;
+        socket.set_reuseaddr(true)?;
+        socket.bind(SocketAddr::from(([127, 0, 0, 1], port)))?;
+        let listener = socket.listen(LISTEN_BACKLOG)?;
+        debug!(
+            "TRACE AGENT | Listening on port {}",
+            listener.local_addr()?.port()
+        );
+        Ok(listener)
+    }
+
     pub async fn start(&self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        let listener = Self::bind_listener(self.receiver_port)?;
+        self.start_with_listener(listener).await
+    }
+
+    /// Serves on a listener from [`TraceAgent::bind_listener`].
+    #[allow(clippy::cast_possible_truncation)]
+    pub async fn start_with_listener(
+        &self,
+        listener: tokio::net::TcpListener,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let now = Instant::now();
 
         let router = self.make_router()?;
 
-        let port = self
-            .receiver_port
-            .unwrap_or(u16::try_from(TRACE_AGENT_PORT).expect("TRACE_AGENT_PORT is too large"));
-        let socket = SocketAddr::from(([127, 0, 0, 1], port));
-        let listener = tokio::net::TcpListener::bind(&socket).await?;
-
-        debug!("TRACE AGENT | Listening on port {port}");
         debug!(
-            "TRACE AGENT | Time taken to start: {} ms",
+            "TRACE AGENT | Time taken to build the router: {} ms",
             now.elapsed().as_millis()
         );
 
@@ -1187,6 +1216,15 @@ mod tests {
         );
 
         SendDataBuilderInfo::new(builder, size, owned_tags)
+    }
+
+    /// Once `bind_listener` returns, clients can connect before the agent serves.
+    #[tokio::test]
+    async fn bind_accepts_connections_before_serving() {
+        let listener = TraceAgent::bind_listener(Some(0)).expect("bind");
+        let addr = listener.local_addr().expect("local_addr");
+
+        std::net::TcpStream::connect(addr).expect("connect before serving");
     }
 
     /// A payload is only handed to the aggregator by a background forwarder
