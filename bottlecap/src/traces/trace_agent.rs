@@ -34,6 +34,7 @@ use crate::{
     tags::{self, provider},
     traces::{
         INVOCATION_SPAN_RESOURCE,
+        passthrough::Passthrough,
         proxy_aggregator::{self, ProxyRequest},
         span_dedup::DedupKey,
         span_dedup_service::DedupHandle,
@@ -259,6 +260,9 @@ pub struct TraceAgent {
     /// `None` when the caller wants the default port. See
     /// [`TraceAgent::with_receiver_port`].
     receiver_port: Option<u16>,
+    /// Routes forwarded to Datadog with the API key. See
+    /// [`TraceAgent::with_passthrough`].
+    passthrough: Option<Passthrough>,
 }
 
 #[derive(Clone, Copy)]
@@ -357,7 +361,16 @@ impl TraceAgent {
             span_deduper,
             router_extension: None,
             receiver_port: None,
+            passthrough: None,
         }
+    }
+
+    /// Adds the pass-through routes (for example feature flag config), which
+    /// forward to Datadog right away with the resolved API key.
+    #[must_use]
+    pub fn with_passthrough(mut self, passthrough: Passthrough) -> Self {
+        self.passthrough = Some(passthrough);
+        self
     }
 
     /// Attaches a [`RouterExtension`] that will be applied to the
@@ -520,6 +533,10 @@ impl TraceAgent {
             .merge(proxy_router)
             .merge(evp_proxy_router)
             .merge(info_router);
+
+        if let Some(passthrough) = &self.passthrough {
+            router = router.merge(passthrough.clone().router());
+        }
 
         if let Some(extension) = &self.router_extension {
             router = extension.extend(router)?;
