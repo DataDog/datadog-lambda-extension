@@ -21,7 +21,7 @@ use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use bottlecap::LAMBDA_RUNTIME_SLUG;
-use bottlecap::config::{Config, get_config};
+use bottlecap::config::{Config, DEFAULT_APM_ERROR_TPS, get_config};
 use bottlecap::tags::provider::Provider;
 use bottlecap::traces::http_client::create_client;
 use bottlecap::traces::stats_aggregator::StatsAggregator;
@@ -375,7 +375,7 @@ async fn run_processor_pipeline_with_settings(
         appsec: None,
         processor: Arc::new(ServerlessTraceProcessor {
             obfuscation_config: Arc::new(ObfuscationConfig::default()),
-            error_sampler: new_error_sampler(true),
+            error_sampler: new_error_sampler(DEFAULT_APM_ERROR_TPS),
             error_rare_sample_tracer_drop,
         }),
         trace_tx,
@@ -509,15 +509,19 @@ fn sampled_root_span(trace_id: u64, priority: f64, error: i32) -> pb::Span {
     }
 }
 
-/// An errored P0 trace is rescued and reaches the intake, while a non-errored P0 trace is
-/// dropped. Applies whenever stats are computed before the backend, by either the
-/// extension or the tracer.
+/// An errored P0 trace is marked as rescued for every stats owner. Non-errored
+/// P0 traces are forwarded only when the backend owns stats.
 #[tokio::test]
 async fn e2e_error_sampler_rescues_only_errored_p0_traces() {
-    // (owner label, lambda_extension_compute_stats, client_computed_stats)
-    let cases = [("extension", true, false), ("tracer", false, true)];
+    // (owner, extension stats enabled, tracer computed stats, forwarded count)
+    let cases = [
+        ("backend", false, false, 2),
+        ("extension", true, false, 1),
+        ("tracer", false, true, 1),
+        ("tracer-precedence", true, true, 1),
+    ];
 
-    for (owner, compute_on_extension, client_computed_stats) in cases {
+    for (owner, compute_on_extension, client_computed_stats, forwarded_count) in cases {
         let rescued_trace_id = 1;
         let dropped_trace_id = 2;
         let outcome = run_processor_pipeline_with_traces(
@@ -533,12 +537,20 @@ async fn e2e_error_sampler_rescues_only_errored_p0_traces() {
         let captured_spans: Vec<&pb::Span> = captured_trace_spans(&outcome.traces).collect();
         assert_eq!(
             captured_spans.len(),
-            1,
-            "only the rescued trace reaches intake (owner={owner})"
+            forwarded_count,
+            "unexpected forwarded count (owner={owner})"
+        );
+        assert!(
+            captured_spans
+                .iter()
+                .filter(|s| s.trace_id != rescued_trace_id)
+                .all(|s| !s.metrics.contains_key("_dd.errors_sr"))
         );
 
-        let rescued_span = captured_spans[0];
-        assert_eq!(rescued_span.trace_id, rescued_trace_id);
+        let rescued_span = captured_spans
+            .iter()
+            .find(|s| s.trace_id == rescued_trace_id)
+            .expect("rescued trace present");
         assert!(
             rescued_span.metrics.contains_key("_dd.errors_sr"),
             "the rescued root span must carry its error sampling rate (owner={owner})",
@@ -547,8 +559,8 @@ async fn e2e_error_sampler_rescues_only_errored_p0_traces() {
 }
 
 /// Sampled-out chunks are filtered from the trace intake whenever stats are computed
-/// before the backend, by either the extension or the tracer, while backend-owned
-/// stats keep them so the backend can compute stats.
+/// before the backend, by either the extension or the tracer. The backend-owned
+/// stats path preserves its existing forwarding behavior.
 #[tokio::test]
 async fn e2e_sampled_out_chunks_filtered_by_stats_owner() {
     // (owner label, lambda_extension_compute_stats, client_computed_stats, expected_trace_ids)
@@ -670,16 +682,20 @@ fn captured_trace_spans(traces: &[pb::AgentPayload]) -> impl Iterator<Item = &pb
 
 /// APMSVLS-674: with `error_rare_sample_tracer_drop` enabled, an errored tracer
 /// rule drop (priority -1, no decision maker) is rescued and reaches the intake
-/// with `_dd.errors_sr`, while an errored manual drop (decision maker "-4") and
-/// a nonerrored drop are excluded. Dropped inputs remain represented in stats.
-/// Runs for both stats owners: the tracer-owned path reaches the rescue only
-/// when filtering also applies to tracer-computed stats.
+/// with `_dd.errors_sr` for every stats owner. Errored manual drops (decision maker
+/// "-4") and nonerrored drops are not rescued, but still forwarded on the backend
+/// stats path. All inputs remain represented in extension-computed stats.
 #[tokio::test]
 async fn e2e_error_rare_sample_tracer_drop_rescues_tracer_drops_selectively() {
-    // (owner label, lambda_extension_compute_stats, client_computed_stats)
-    let cases = [("extension", true, false), ("tracer", false, true)];
+    // (owner, extension stats enabled, tracer computed stats, forwarded count)
+    let cases = [
+        ("backend", false, false, 4),
+        ("extension", true, false, 2),
+        ("tracer", false, true, 2),
+        ("tracer-precedence", true, true, 2),
+    ];
 
-    for (owner, compute_on_extension, client_computed_stats) in cases {
+    for (owner, compute_on_extension, client_computed_stats, forwarded_count) in cases {
         let rescued_trace_id = 1; // errored tracer rule drop
         let manual_drop_trace_id = 2; // errored manual tracer drop
         let nonerrored_trace_id = 3; // nonerrored tracer rule drop
@@ -706,9 +722,8 @@ async fn e2e_error_rare_sample_tracer_drop_rescues_tracer_drops_selectively() {
         let captured_spans: Vec<_> = captured_trace_spans(&outcome.traces).collect();
         assert_eq!(
             captured_spans.len(),
-            2,
-            "only the rescued tracer drop and the normally kept trace reach intake \
-             (owner={owner})"
+            forwarded_count,
+            "unexpected forwarded count (owner={owner})"
         );
         assert!(
             captured_spans
@@ -726,10 +741,17 @@ async fn e2e_error_rare_sample_tracer_drop_rescues_tracer_drops_selectively() {
             "the rescued root span must carry its error sampling rate (owner={owner})",
         );
 
+        assert!(
+            captured_spans
+                .iter()
+                .filter(|s| s.trace_id != rescued_trace_id)
+                .all(|s| !s.metrics.contains_key("_dd.errors_sr"))
+        );
+
         // Dropped inputs must still be accounted for in stats, but only when the
         // extension computes them: with tracer-owned stats the extension
         // suppresses its own stats generation entirely.
-        if compute_on_extension {
+        if compute_on_extension && !client_computed_stats {
             let grouped = captured_grouped_stats(&outcome.stats);
             let total_hits: u64 = grouped.iter().map(|g| g.hits).sum();
             let total_errors: u64 = grouped.iter().map(|g| g.errors).sum();
@@ -744,7 +766,7 @@ async fn e2e_error_rare_sample_tracer_drop_rescues_tracer_drops_selectively() {
         } else {
             assert!(
                 outcome.stats.is_empty(),
-                "extension must not emit stats when the tracer computed them (owner={owner})"
+                "extension must not emit stats for another stats owner (owner={owner})"
             );
         }
     }

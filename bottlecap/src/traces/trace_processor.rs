@@ -79,8 +79,8 @@ const USER_DROP_PRIORITY: i32 = -1;
 /// Returns true when `config.apm_features` contains
 /// [`ERROR_RARE_SAMPLE_TRACER_DROP`].
 ///
-/// `DD_APM_FEATURES` is parsed upstream as a comma-separated list, so matching
-/// is exact per entry; space-separated values are not supported.
+/// `DD_APM_FEATURES` is split on commas when one is present, otherwise on
+/// spaces, and matching is exact per entry.
 #[must_use]
 pub fn error_rare_sample_tracer_drop_enabled(config: &config::Config) -> bool {
     config
@@ -93,10 +93,10 @@ pub fn error_rare_sample_tracer_drop_enabled(config: &config::Config) -> bool {
 #[allow(clippy::module_name_repetitions)]
 pub struct ServerlessTraceProcessor {
     pub obfuscation_config: Arc<obfuscation_config::ObfuscationConfig>,
-    /// Rescues errored chunks whenever stats are computed before the backend,
-    /// by either the tracer or the extension. Shared across invocations so a
-    /// stateful mode (`RateLimited`) would keep its rolling window; a std Mutex
-    /// rather than tokio because `process_traces` is synchronous.
+    /// Rescues errored chunks independently of stats ownership. Shared across
+    /// invocations so the `RateLimited` budget and rolling window span the whole
+    /// execution environment; a std Mutex rather than tokio because
+    /// `process_traces` is synchronous.
     pub error_sampler: Arc<std::sync::Mutex<ErrorsSampler>>,
     /// Whether `DD_APM_FEATURES` enables [`ERROR_RARE_SAMPLE_TRACER_DROP`]. When
     /// true, chunks with a negative priority are rescued like `AutoDrop` chunks
@@ -117,30 +117,46 @@ fn span_view(span: &Span) -> SpanView<'_> {
     }
 }
 
-/// Builds the error sampler as the extension ships it, enabled or disabled by
-/// `serverless_error_sampler_enabled`.
+/// Builds the error sampler's configuration with the extension's fixed policy:
+/// rate-limited rescue with the given budget and no extra sampling.
 ///
-/// The mode is hardcoded to `AlwaysKeep`: Lambda's per-invocation trace volume
-/// is low, and freeze/thaw breaks `RateLimited`'s 30s wall-clock window. There
-/// is therefore no rate ceiling when enabled: every errored chunk is rescued.
+/// All three fields are set explicitly so a change to the crate's defaults
+/// cannot silently change bottlecap behavior.
 #[must_use]
-pub fn new_error_sampler(enabled: bool) -> Arc<std::sync::Mutex<ErrorsSampler>> {
+pub fn error_sampler_config(target_tps: f64) -> ErrorSamplerConfig {
+    ErrorSamplerConfig {
+        mode: ErrorSamplerMode::RateLimited,
+        target_tps,
+        extra_sample_rate: 1.0,
+    }
+}
+
+/// Builds the error sampler as the extension ships it: rate-limited rescue with
+/// the given budget.
+///
+/// The rolling window is driven by the wall-clock seconds passed on each call,
+/// so a freeze/thaw gap expires stale counters. Stored per-signature rates are
+/// not reset by a gap: they are recomputed only when a rescue candidate arrives
+/// in a new 5s bucket, a throttled signature recovers by at most 20% per
+/// recomputation, and the lowest stored rate also caps unseen signatures
+/// (inherited from the Go agent). A budget `<= 0` disables rescue; see
+/// [`crate::config::LambdaConfig::apm_error_tps`] for the caveats.
+#[must_use]
+pub fn new_error_sampler(target_tps: f64) -> Arc<std::sync::Mutex<ErrorsSampler>> {
     Arc::new(std::sync::Mutex::new(ErrorsSampler::new(
-        ErrorSamplerConfig {
-            mode: ErrorSamplerMode::AlwaysKeep,
-            // `is_disabled()` is `target_tps <= 0.0`; the magnitude only
-            // matters in RateLimited mode.
-            target_tps: if enabled { 1.0 } else { 0.0 },
-            extra_sample_rate: 1.0,
-        },
+        error_sampler_config(target_tps),
     )))
 }
 
 impl ServerlessTraceProcessor {
-    /// Removes sampled-out chunks so they won't be sent to Datadog, then drops
-    /// any payload left without chunks. `SamplerPriority::None` (-128) means no
-    /// explicit priority was set and the trace is kept.
-    fn drop_sampled_out_chunks(&self, tracer_payloads: &mut Vec<pb::TracerPayload>) {
+    /// Marks rescued error chunks for every stats owner. When `drop_sampled_out`
+    /// is true, also removes rejected chunks and any payload left without chunks.
+    /// `SamplerPriority::None` (-128) means no explicit priority was set and is kept.
+    fn sample_and_filter_chunks(
+        &self,
+        tracer_payloads: &mut Vec<pb::TracerPayload>,
+        drop_sampled_out: bool,
+    ) {
         // Read once up front so non-errored and explicitly-dropped chunks never
         // touch the lock. Recover through poisoning: the sampler holds only
         // rolling-window counters, so a partially updated bucket is far cheaper
@@ -176,15 +192,18 @@ impl ServerlessTraceProcessor {
                 if chunk.priority < 0
                     && (!self.error_rare_sample_tracer_drop || Self::is_manual_tracer_drop(chunk))
                 {
-                    return false;
+                    return !drop_sampled_out;
                 }
                 if !rescue_enabled {
-                    return false;
+                    return !drop_sampled_out;
                 }
-                self.rescue_error_chunk(chunk, env, now_secs)
+                // Consult the sampler even when rejected chunks must be forwarded.
+                self.rescue_error_chunk(chunk, env, now_secs) || !drop_sampled_out
             });
         }
-        tracer_payloads.retain(|tp| !tp.chunks.is_empty());
+        if drop_sampled_out {
+            tracer_payloads.retain(|tp| !tp.chunks.is_empty());
+        }
     }
 
     /// Whether the chunk is an explicit tracer manual drop: priority exactly -1
@@ -634,15 +653,12 @@ impl TraceProcessor for ServerlessTraceProcessor {
             }
         };
 
-        // Sampled-out chunks are preserved in payloads_for_stats above, so their
-        // stats are still counted after they are removed here. Filter whenever
-        // stats are computed before the backend, by either the tracer or the
-        // extension: the backend only needs these chunks when it owns stats.
-        if stats_computed_by != StatsComputedBy::Backend
-            && let TracerPayloadCollection::V07(ref mut tracer_payloads) = payload
-        {
-            self.drop_sampled_out_chunks(tracer_payloads);
-            if tracer_payloads.is_empty() {
+        // Rescue is independent of stats ownership. Preserve the pre-rescue stats
+        // snapshot and existing forwarding behavior when the backend owns stats.
+        let drop_sampled_out = stats_computed_by != StatsComputedBy::Backend;
+        if let TracerPayloadCollection::V07(ref mut tracer_payloads) = payload {
+            self.sample_and_filter_chunks(tracer_payloads, drop_sampled_out);
+            if drop_sampled_out && tracer_payloads.is_empty() {
                 return (None, payloads_for_stats);
             }
         }
@@ -792,10 +808,11 @@ impl SendingTraceProcessor {
     }
 }
 
-/// Enabled error sampler for constructing `ServerlessTraceProcessor` in tests.
+/// Error sampler with the default budget, for constructing
+/// `ServerlessTraceProcessor` in tests.
 #[cfg(test)]
-pub(crate) fn enabled_error_sampler() -> Arc<std::sync::Mutex<ErrorsSampler>> {
-    new_error_sampler(true)
+pub(crate) fn default_error_sampler() -> Arc<std::sync::Mutex<ErrorsSampler>> {
+    new_error_sampler(crate::config::DEFAULT_APM_ERROR_TPS)
 }
 
 #[cfg(test)]
@@ -964,7 +981,7 @@ mod tests {
 
         let trace_processor = ServerlessTraceProcessor {
             obfuscation_config: Arc::new(ObfuscationConfig::default()),
-            error_sampler: enabled_error_sampler(),
+            error_sampler: default_error_sampler(),
             error_rare_sample_tracer_drop: false,
         };
         let config = create_test_config();
@@ -1412,8 +1429,8 @@ mod tests {
 
     /// Verifies that `process_traces` filters sampled-out chunks from the backend
     /// payload whenever stats are computed before the backend, by either the tracer
-    /// or the extension, while preserving them in the stats collection. When the
-    /// backend owns stats, all chunks are kept so the backend can compute stats.
+    /// or the extension, while preserving them in the stats collection. The
+    /// backend-owned stats path preserves its existing forwarding behavior.
     #[test]
     #[allow(clippy::unwrap_used)]
     fn test_process_traces_filters_sampled_out_chunks() {
@@ -1428,7 +1445,7 @@ mod tests {
         for (compute_on_extension, client_computed_stats, expected_backend_span_count) in cases {
             let config = create_compute_stats_config_with(compute_on_extension);
             let (tags_provider, processor) =
-                create_test_processor(&config, enabled_error_sampler(), false);
+                create_test_processor(&config, default_error_sampler(), false);
             let mut header_tags = create_test_header_tags();
             header_tags.generic.client_computed_stats = client_computed_stats;
 
@@ -1461,24 +1478,29 @@ mod tests {
         }
     }
 
-    /// On any stats path where stats are computed before the backend (extension or
-    /// tracer), the error sampler rescues errored chunks that would otherwise be
-    /// dropped (`AutoDrop`), stamping `_dd.errors_sr`, while non-errored P0 chunks
-    /// and explicit user drops are still dropped. Priorities are never rewritten.
+    /// Error rescue stamps eligible errored P0 chunks for every stats owner.
+    /// Rejected chunks are forwarded only on the backend-owned stats path.
+    /// Priorities and the pre-rescue stats snapshot are never rewritten.
     #[test]
+    #[allow(clippy::float_cmp)]
     fn test_error_sampler_rescues_errored_p0_chunks() {
-        // (owner label, lambda_extension_compute_stats, client_computed_stats)
-        let cases = [("extension", true, false), ("tracer", false, true)];
+        // (owner, extension stats enabled, tracer computed stats, forwarded count)
+        let cases = [
+            ("backend", false, false, 4),
+            ("extension", true, false, 2),
+            ("tracer", false, true, 2),
+            ("tracer-precedence", true, true, 2),
+        ];
 
-        for (owner, compute_on_extension, client_computed_stats) in cases {
+        for (owner, compute_on_extension, client_computed_stats, forwarded_count) in cases {
             let config = create_compute_stats_config_with(compute_on_extension);
             let (tags_provider, processor) =
-                create_test_processor(&config, enabled_error_sampler(), false);
+                create_test_processor(&config, default_error_sampler(), false);
             let mut header_tags = create_test_header_tags();
             header_tags.generic.client_computed_stats = client_computed_stats;
 
             // trace 1: kept normally (priority 1). trace 2: errored P0 (rescued).
-            // trace 3: non-errored P0 (dropped). trace 4: errored user drop (dropped).
+            // Traces 3 (non-errored P0) and 4 (errored user drop) are not rescued.
             let traces = vec![
                 vec![make_tracer_drop_span(1, 1.0, 0, None)],
                 vec![make_tracer_drop_span(2, 0.0, 1, None)],
@@ -1486,8 +1508,10 @@ mod tests {
                 vec![make_tracer_drop_span(4, -1.0, 1, None)],
             ];
 
-            let (payload_info, _stats) =
+            let (payload_info, stats) =
                 processor.process_traces(config, tags_provider, header_tags, traces, 0, None);
+            assert_eq!(trace_spans(&stats).count(), 4);
+            assert!(trace_spans(&stats).all(|s| !s.metrics.contains_key("_dd.errors_sr")));
             let payload_info = payload_info.expect("expected Some payload");
             let backend_send_data = payload_info.builder.build();
             let kept: Vec<(u64, f64)> = trace_spans(backend_send_data.get_payloads())
@@ -1495,8 +1519,8 @@ mod tests {
                 .collect();
             assert_eq!(
                 kept.len(),
-                2,
-                "kept normal trace + rescued errored trace (owner={owner})"
+                forwarded_count,
+                "unexpected forwarded count (owner={owner})"
             );
             assert!(
                 kept.contains(&(1, 1.0)),
@@ -1510,27 +1534,40 @@ mod tests {
             let rescued_root = trace_spans(backend_send_data.get_payloads())
                 .find(|s| s.trace_id == 2)
                 .expect("rescued trace present");
-            assert!(
-                rescued_root.metrics.contains_key("_dd.errors_sr"),
-                "_dd.errors_sr stamped on rescued root (owner={owner})"
+            assert_eq!(
+                rescued_root.metrics.get("_dd.errors_sr").copied(),
+                Some(1.0),
+                "_dd.errors_sr is exactly 1.0 for a cold sampler at low volume (owner={owner})"
             );
+            assert!(
+                trace_spans(backend_send_data.get_payloads())
+                    .filter(|s| s.trace_id != 2)
+                    .all(|s| !s.metrics.contains_key("_dd.errors_sr"))
+            );
+            if owner == "backend" {
+                assert!(kept.contains(&(3, 0.0)));
+                assert!(kept.contains(&(4, -1.0)));
+            }
         }
     }
 
     /// With `error_rare_sample_tracer_drop` enabled, an errored chunk the tracer
     /// dropped itself (priority -1, no decision maker) is rescued like an
-    /// `AutoDrop` chunk, matching the Go agent. Runs for both stats owners: the
-    /// tracer-owned path reaches the rescue only when filtering also applies to
-    /// tracer-computed stats.
+    /// `AutoDrop` chunk, matching the Go agent, regardless of stats ownership.
     #[test]
     fn test_error_rare_sample_tracer_drop_rescues_errored_user_drop() {
         // (owner label, lambda_extension_compute_stats, client_computed_stats)
-        let cases = [("extension", true, false), ("tracer", false, true)];
+        let cases = [
+            ("backend", false, false),
+            ("extension", true, false),
+            ("tracer", false, true),
+            ("tracer-precedence", true, true),
+        ];
 
         for (owner, compute_on_extension, client_computed_stats) in cases {
             let config = create_compute_stats_config_with(compute_on_extension);
             let (tags_provider, processor) =
-                create_test_processor(&config, enabled_error_sampler(), true);
+                create_test_processor(&config, default_error_sampler(), true);
             let mut header_tags = create_test_header_tags();
             header_tags.generic.client_computed_stats = client_computed_stats;
 
@@ -1624,6 +1661,177 @@ mod tests {
         (kept, in_stats)
     }
 
+    #[test]
+    #[allow(clippy::float_cmp)]
+    fn error_sampler_config_is_rate_limited_with_given_tps() {
+        for tps in [10.0, 2.5, 0.0, -1.0] {
+            let config = error_sampler_config(tps);
+            assert_eq!(config.mode, ErrorSamplerMode::RateLimited, "tps {tps}");
+            assert_eq!(config.target_tps, tps, "tps {tps}");
+            assert_eq!(config.extra_sample_rate, 1.0, "tps {tps}");
+        }
+    }
+
+    #[test]
+    fn new_error_sampler_builds_rate_limited() {
+        let sampler = new_error_sampler(10.0);
+        assert!(
+            matches!(
+                *sampler.lock().expect("lock"),
+                ErrorsSampler::RateLimited(_)
+            ),
+            "a positive budget must build a RateLimited sampler"
+        );
+        assert!(
+            !sampler.lock().expect("lock").is_disabled(),
+            "10 tps must not disable rescue"
+        );
+        for tps in [0.0, -1.0] {
+            assert!(
+                new_error_sampler(tps).lock().expect("lock").is_disabled(),
+                "{tps} tps must disable rescue"
+            );
+        }
+    }
+
+    /// Samples one single-span errored trace at `now`. Every call uses the same
+    /// signature; `n` only spreads the trace id.
+    fn sample_errored_trace(
+        sampler: &std::sync::Mutex<ErrorsSampler>,
+        now: i64,
+        n: u64,
+    ) -> SampleDecision {
+        let spans = [SpanView {
+            service: "svc",
+            name: "op",
+            resource: "res",
+            error: true,
+            http_status_code: None,
+            error_type: None,
+        }];
+        let trace = TraceView {
+            env: "test-env",
+            trace_id: n.wrapping_mul(2_654_435_761),
+            root_index: 0,
+            root_global_sample_rate: 1.0,
+            spans: &spans,
+        };
+        sampler.lock().expect("lock").sample(now, &trace)
+    }
+
+    /// A backward clock step, a gap longer than the 30s window, and the epoch
+    /// fallback value must all be survivable; after the gap a cold signature
+    /// falls back to rate 1.0.
+    #[test]
+    #[allow(clippy::float_cmp)]
+    fn error_sampler_survives_clock_jumps() {
+        let sampler = default_error_sampler();
+        sample_errored_trace(&sampler, 1_700_000_000, 1);
+        // Backward step.
+        sample_errored_trace(&sampler, 1_699_999_000, 2);
+        assert_eq!(
+            sample_errored_trace(&sampler, 1_700_100_000, 3),
+            SampleDecision::Keep { errors_sr: 1.0 },
+            "after a long gap a cold signature falls back to rate 1.0"
+        );
+        // The `UNIX_EPOCH.elapsed()` fallback value.
+        sample_errored_trace(&sampler, 0, 4);
+    }
+
+    /// A long freeze/thaw gap clears stale counters, but a throttled
+    /// signature's stored rate recovers by at most 20% per evaluation, so
+    /// rescue keeps working after the gap at a rate still below 1.0.
+    #[test]
+    fn error_sampler_stays_throttled_after_long_gap() {
+        let sampler = new_error_sampler(1.0);
+        let t0 = 1_700_000_000_i64;
+        let mut n = 0_u64;
+        for bucket in 0..4_i64 {
+            for _ in 0..200 {
+                n += 1;
+                sample_errored_trace(&sampler, t0 + 5 * bucket, n);
+            }
+        }
+
+        // All post-gap calls share one bucket, so the rate stays fixed. Ids are
+        // deterministic, so this bounded scan is stable.
+        let after_gap = t0 + 15 + 3600;
+        let errors_sr = (n + 1..=n + 400)
+            .find_map(|id| match sample_errored_trace(&sampler, after_gap, id) {
+                SampleDecision::Keep { errors_sr } => Some(errors_sr),
+                SampleDecision::Drop => None,
+            })
+            .expect("a throttled signature must still rescue some traces after a long gap");
+        assert!(
+            errors_sr < 1.0,
+            "a previously throttled signature must stay below 1.0, got {errors_sr}"
+        );
+        // Stored rate 1/40 before the gap, capped at a 20% increase.
+        assert!(
+            (errors_sr - 0.025 * 1.2).abs() < 1e-9,
+            "expected the capped recovery rate 0.03, got {errors_sr}"
+        );
+    }
+
+    /// Runs one batch of 50 errored P0 traces with the same signature (distinct
+    /// trace ids derived from `call`) through `processor`, returning how many
+    /// spans were rescued. A batch whose chunks are all dropped returns 0.
+    fn run_errored_p0_batch(
+        processor: &ServerlessTraceProcessor,
+        config: &Arc<Config>,
+        tags_provider: &Arc<Provider>,
+        call: usize,
+    ) -> usize {
+        let traces: Vec<Vec<pb::Span>> = (0..50)
+            .map(|i| {
+                let trace_id = ((call * 50 + i + 1) as u64).wrapping_mul(2_654_435_761);
+                vec![make_tracer_drop_span(trace_id, 0.0, 1, None)]
+            })
+            .collect();
+
+        processor
+            .process_traces(
+                config.clone(),
+                tags_provider.clone(),
+                create_test_header_tags(),
+                traces,
+                0,
+                None,
+            )
+            .0
+            .map_or(0, |info| {
+                trace_spans(info.builder.build().get_payloads()).count()
+            })
+    }
+
+    /// The rescue budget lives on the shared sampler, so it spans invocations:
+    /// ten batches through one processor rescue far fewer traces than ten
+    /// batches each with a fresh sampler.
+    #[test]
+    fn error_sampler_budget_is_shared_across_invocations() {
+        let config = create_compute_stats_config();
+
+        let (tags_provider, processor) =
+            create_test_processor(&config, new_error_sampler(1.0), false);
+        let shared: usize = (0..10)
+            .map(|call| run_errored_p0_batch(&processor, &config, &tags_provider, call))
+            .sum();
+
+        let control: usize = (0..10)
+            .map(|call| {
+                let (tags_provider, processor) =
+                    create_test_processor(&config, new_error_sampler(1.0), false);
+                run_errored_p0_batch(&processor, &config, &tags_provider, call)
+            })
+            .sum();
+
+        assert!(shared > 0, "the shared run must rescue some traces");
+        assert!(
+            shared * 2 < control,
+            "one shared budget must rescue far fewer traces than a fresh sampler per batch: shared {shared}, control {control}"
+        );
+    }
+
     /// A manual tracer drop (priority -1 with decision maker "-4" in the root
     /// span meta) is never rescued, even with the feature enabled, matching the
     /// Go agent's `isManualUserDrop`.
@@ -1631,7 +1839,7 @@ mod tests {
     fn test_error_rare_sample_tracer_drop_excludes_manual_drop() {
         let config = create_compute_stats_config();
         let (tags_provider, processor) =
-            create_test_processor(&config, enabled_error_sampler(), true);
+            create_test_processor(&config, default_error_sampler(), true);
 
         let trace = vec![make_tracer_drop_span(7, -1.0, 1, Some("-4"))];
         let (kept, in_stats) = run_single_trace(&processor, &config, tags_provider, trace);
@@ -1650,7 +1858,7 @@ mod tests {
     fn test_error_rare_sample_tracer_drop_manual_drop_on_child_span() {
         let config = create_compute_stats_config();
         let (tags_provider, processor) =
-            create_test_processor(&config, enabled_error_sampler(), true);
+            create_test_processor(&config, default_error_sampler(), true);
 
         // Root is fine and carries no decision maker; the errored child does.
         let mut root = make_tracer_drop_span(7, -1.0, 0, None);
@@ -1672,7 +1880,7 @@ mod tests {
     fn test_error_rare_sample_tracer_drop_nonmanual_decision_maker_rescued() {
         let config = create_compute_stats_config();
         let (tags_provider, processor) =
-            create_test_processor(&config, enabled_error_sampler(), true);
+            create_test_processor(&config, default_error_sampler(), true);
 
         let trace = vec![make_tracer_drop_span(7, -1.0, 1, Some("-3"))];
         let (kept, _) = run_single_trace(&processor, &config, tags_provider, trace);
@@ -1689,7 +1897,7 @@ mod tests {
     fn test_error_rare_sample_tracer_drop_other_negative_priority_rescued() {
         let config = create_compute_stats_config();
         let (tags_provider, processor) =
-            create_test_processor(&config, enabled_error_sampler(), true);
+            create_test_processor(&config, default_error_sampler(), true);
 
         let trace = vec![make_tracer_drop_span(7, -2.0, 1, Some("-4"))];
         let (kept, _) = run_single_trace(&processor, &config, tags_provider, trace);
@@ -1708,7 +1916,7 @@ mod tests {
 
         for (first_dm, second_dm, rescued) in [("-3", "-4", true), ("-4", "-3", false)] {
             let (tags_provider, processor) =
-                create_test_processor(&config, enabled_error_sampler(), true);
+                create_test_processor(&config, default_error_sampler(), true);
             let mut root = make_tracer_drop_span(7, -1.0, 1, Some(first_dm));
             root.span_id = 1;
             let mut child = make_tracer_drop_span(7, -1.0, 0, Some(second_dm));
@@ -1729,7 +1937,7 @@ mod tests {
     fn test_error_rare_sample_tracer_drop_nonerrored_still_dropped() {
         let config = create_compute_stats_config();
         let (tags_provider, processor) =
-            create_test_processor(&config, enabled_error_sampler(), true);
+            create_test_processor(&config, default_error_sampler(), true);
 
         let trace = vec![make_tracer_drop_span(7, -1.0, 0, None)];
         let (kept, in_stats) = run_single_trace(&processor, &config, tags_provider, trace);
@@ -1747,7 +1955,7 @@ mod tests {
     fn test_error_rare_sample_tracer_drop_requires_sampler_enabled() {
         let config = create_compute_stats_config();
         let (tags_provider, processor) =
-            create_test_processor(&config, new_error_sampler(false), true);
+            create_test_processor(&config, new_error_sampler(0.0), true);
 
         let trace = vec![make_tracer_drop_span(7, -1.0, 1, None)];
         let (kept, _) = run_single_trace(&processor, &config, tags_provider, trace);
@@ -1764,7 +1972,7 @@ mod tests {
     fn test_error_sampler_rescues_chunk_with_errored_child_span() {
         let config = create_compute_stats_config();
         let (tags_provider, processor) =
-            create_test_processor(&config, enabled_error_sampler(), false);
+            create_test_processor(&config, default_error_sampler(), false);
         let header_tags = create_test_header_tags();
 
         let make_span = |span_id: u64, parent_id: u64, error: i32| -> pb::Span {
@@ -1808,35 +2016,59 @@ mod tests {
         );
     }
 
-    /// With the error sampler disabled (the shipping default), errored P0
+    /// With error trace rescue disabled (`DD_APM_ERROR_TPS <= 0`), errored P0
     /// chunks are dropped: no rescue, no `_dd.errors_sr`.
     #[test]
     fn test_disabled_error_sampler_drops_errored_p0_chunks() {
-        let config = create_compute_stats_config();
-        let (tags_provider, processor) =
-            create_test_processor(&config, new_error_sampler(false), false);
-        let header_tags = create_test_header_tags();
+        for tps in [0.0, -1.0] {
+            let config = create_compute_stats_config();
+            let (tags_provider, processor) =
+                create_test_processor(&config, new_error_sampler(tps), false);
+            let header_tags = create_test_header_tags();
 
-        let mut metrics = HashMap::new();
-        metrics.insert("_sampling_priority_v1".to_string(), 0.0);
-        let traces = vec![vec![pb::Span {
-            trace_id: 1,
-            span_id: 1,
-            parent_id: 0,
-            error: 1,
-            metrics,
-            service: "svc".to_string(),
-            name: "op".to_string(),
-            resource: "res".to_string(),
-            ..Default::default()
-        }]];
+            let traces = vec![vec![make_tracer_drop_span(1, 0.0, 1, None)]];
 
-        let (payload_info, _stats) =
-            processor.process_traces(config, tags_provider, header_tags, traces, 0, None);
-        assert!(
-            payload_info.is_none(),
-            "errored P0 trace must stay dropped when the error sampler is disabled"
-        );
+            let (payload_info, _stats) =
+                processor.process_traces(config, tags_provider, header_tags, traces, 0, None);
+            assert!(
+                payload_info.is_none(),
+                "errored P0 trace must stay dropped when rescue is disabled (tps {tps})"
+            );
+        }
+    }
+
+    #[test]
+    fn test_backend_stats_forwards_unrescued_chunks() {
+        for feature_enabled in [false, true] {
+            for tps in [0.0, -1.0] {
+                let config = create_compute_stats_config_with(false);
+                let (tags_provider, processor) =
+                    create_test_processor(&config, new_error_sampler(tps), feature_enabled);
+                let traces = vec![
+                    vec![make_tracer_drop_span(1, 0.0, 1, None)],
+                    vec![make_tracer_drop_span(2, -1.0, 1, Some("-4"))],
+                    vec![make_tracer_drop_span(3, 0.0, 0, None)],
+                ];
+                let (payload_info, stats) = processor.process_traces(
+                    config,
+                    tags_provider,
+                    create_test_header_tags(),
+                    traces,
+                    0,
+                    None,
+                );
+                let payload = payload_info
+                    .expect("backend path must forward rejected chunks")
+                    .builder
+                    .build();
+                assert_eq!(trace_spans(payload.get_payloads()).count(), 3);
+                assert!(
+                    trace_spans(payload.get_payloads())
+                        .all(|s| !s.metrics.contains_key("_dd.errors_sr"))
+                );
+                assert_eq!(trace_spans(&stats).count(), 3);
+            }
+        }
     }
 
     /// With the error sampler disabled, an errored P0 chunk dropped from the
@@ -1846,7 +2078,7 @@ mod tests {
     fn test_disabled_error_sampler_keeps_dropped_errored_p0_chunk_in_stats() {
         let config = create_compute_stats_config();
         let (tags_provider, processor) =
-            create_test_processor(&config, new_error_sampler(false), false);
+            create_test_processor(&config, new_error_sampler(0.0), false);
         let header_tags = create_test_header_tags();
 
         let make_span = |trace_id: u64, priority: f64, error: i32| -> pb::Span {
@@ -1914,7 +2146,7 @@ mod tests {
     fn test_process_traces_returns_none_when_all_sampled_out() {
         let config = create_compute_stats_config();
         let (tags_provider, processor) =
-            create_test_processor(&config, enabled_error_sampler(), false);
+            create_test_processor(&config, default_error_sampler(), false);
         let header_tags = create_test_header_tags();
 
         let make_dropped_span = |trace_id: u64| -> pb::Span {
@@ -1965,7 +2197,7 @@ mod tests {
 
         let config = create_compute_stats_config();
         let (tags_provider, processor) =
-            create_test_processor(&config, enabled_error_sampler(), false);
+            create_test_processor(&config, default_error_sampler(), false);
         let header_tags = create_test_header_tags();
 
         let make_span = |trace_id: u64, priority: f64| -> pb::Span {
@@ -2049,7 +2281,7 @@ mod tests {
             ..Config::default()
         });
         let (tags_provider, processor) =
-            create_test_processor(&config, enabled_error_sampler(), false);
+            create_test_processor(&config, default_error_sampler(), false);
         let header_tags = create_test_header_tags();
 
         let span = pb::Span {
@@ -2605,7 +2837,7 @@ mod tests {
                 appsec: None,
                 processor: Arc::new(ServerlessTraceProcessor {
                     obfuscation_config: Arc::new(ObfuscationConfig::default()),
-                    error_sampler: enabled_error_sampler(),
+                    error_sampler: default_error_sampler(),
                     error_rare_sample_tracer_drop: false,
                 }),
                 trace_tx,
