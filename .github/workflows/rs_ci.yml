@@ -5,6 +5,8 @@ on:
   push:
     branches:
       - main
+      # The Datadog MergeQueue tests each PR on one of these branches, on top of the latest main.
+      - "mq-working-branch-*"
   workflow_dispatch:
 
 env:

@@ -8,7 +8,18 @@ The Datadog Lambda Extension ("Bottlecap") is an AWS Lambda Extension written in
 
 ## Common Commands
 
-All Rust code lives under `bottlecap/`. Run these from that directory unless noted.
+All Rust code lives under `bottlecap/`. Run these from that directory unless noted. CI runs the same commands (`.github/workflows/rs_ci.yml`).
+
+- Build: `cargo build`
+- Test: `cargo nextest run --workspace`
+- Lint: `cargo clippy --workspace --all-targets --features default`. CI also runs it with `--features default,test-mode` and with `--no-default-features --features fips`.
+- Format: `cargo fmt --all -- --check`
+
+## Testing
+
+- Unit tests live next to the code. Integration tests are in `bottlecap/tests/`.
+- Process-level tests run the real binary against a fake Lambda API and an intake that fails on demand. Read `bottlecap/tests/HARNESS.md` before you add or change one. Each reliability fix should come with one of these tests.
+- Shared test inputs (telemetry batches, logs, traces, metrics, trigger events) are in `bottlecap/tests/fixtures/`. See `bottlecap/tests/fixtures/README.md`.
 
 ## Where New Code Goes
 

@@ -1,0 +1,6 @@
+{
+  "name": "failure-accounting-node",
+  "version": "1.0.0",
+  "description": "Lambda that times out or crashes on demand for failure-accounting integration tests",
+  "main": "index.js"
+}

@@ -2293,7 +2293,7 @@ mod tests {
                         appsec: None,
                         processor: Arc::new(trace_processor::ServerlessTraceProcessor {
                             obfuscation_config: Arc::new(ObfuscationConfig::default()),
-                            error_sampler: trace_processor::enabled_error_sampler(),
+                            error_sampler: trace_processor::default_error_sampler(),
                             error_rare_sample_tracer_drop: false,
                         }),
                         trace_tx: tokio::sync::mpsc::channel(1).0,
@@ -2403,7 +2403,7 @@ mod tests {
             appsec: None,
             processor: Arc::new(trace_processor::ServerlessTraceProcessor {
                 obfuscation_config: Arc::new(ObfuscationConfig::default()),
-                error_sampler: trace_processor::enabled_error_sampler(),
+                error_sampler: trace_processor::default_error_sampler(),
                 error_rare_sample_tracer_drop: false,
             }),
             trace_tx: tokio::sync::mpsc::channel(1).0,
@@ -3041,7 +3041,7 @@ mod tests {
             appsec: None,
             processor: Arc::new(trace_processor::ServerlessTraceProcessor {
                 obfuscation_config: Arc::new(ObfuscationConfig::default()),
-                error_sampler: trace_processor::enabled_error_sampler(),
+                error_sampler: trace_processor::default_error_sampler(),
                 error_rare_sample_tracer_drop: false,
             }),
             trace_tx: tokio::sync::mpsc::channel(1).0,
@@ -3622,7 +3622,7 @@ mod tests {
             appsec: None,
             processor: Arc::new(trace_processor::ServerlessTraceProcessor {
                 obfuscation_config: Arc::new(ObfuscationConfig::default()),
-                error_sampler: trace_processor::enabled_error_sampler(),
+                error_sampler: trace_processor::default_error_sampler(),
                 error_rare_sample_tracer_drop: false,
             }),
             trace_tx,

@@ -511,6 +511,7 @@ dependencies = [
  "opentelemetry-semantic-conventions 0.30.0",
  "ordered_hash_map",
  "prost 0.14.3",
+ "protobuf",
  "rand 0.8.6",
  "regex",
  "reqwest",
