@@ -16,7 +16,7 @@ use libdd_capabilities::{
 };
 use libdd_common::http_common::{self, Body, GenericHttpClient};
 use rustls::RootCertStore;
-use rustls_pki_types::CertificateDer;
+use rustls_pki_types::{CertificateDer, TrustAnchor};
 use std::error::Error;
 use std::fs::File;
 use std::future::Future;
@@ -190,6 +190,23 @@ pub fn create_client(
     tls_cert_file: Option<&String>,
     skip_ssl_validation: bool,
 ) -> Result<HttpClient, Box<dyn Error>> {
+    create_client_with_public_roots(
+        proxy_https,
+        tls_cert_file,
+        skip_ssl_validation,
+        webpki_roots::TLS_SERVER_ROOTS,
+    )
+}
+
+/// [`create_client`] with the public roots the proxy tunnel starts from. They are the
+/// bundle `ProxyConnector::from_proxy()` trusts by default; a `DD_TLS_CERT_FILE` is added
+/// to them, not substituted for them.
+fn create_client_with_public_roots(
+    proxy_https: Option<&String>,
+    tls_cert_file: Option<&String>,
+    skip_ssl_validation: bool,
+    public_roots: &[TrustAnchor<'static>],
+) -> Result<HttpClient, Box<dyn Error>> {
     if skip_ssl_validation && tls_cert_file.is_some() {
         debug!(
             "HTTP_CLIENT | skip_ssl_validation=true overrides tls_cert_file={:?}, custom certificate will be ignored",
@@ -230,9 +247,21 @@ pub fn create_client(
 
         // Create a root certificate store and add custom certs
         let mut root_store = RootCertStore::empty();
-        for cert in certs {
-            root_store.add(cert)?;
+        for cert in &certs {
+            root_store.add(cert.clone())?;
         }
+
+        // The tunnel's handshake with the destination trusts the public roots plus the
+        // custom certs: a proxy that tunnels without intercepting passes Datadog's publicly
+        // signed certificate through, and an intercepting one re-signs it with the custom CA.
+        let mut tunnel_roots = RootCertStore::empty();
+        tunnel_roots.extend(public_roots.iter().cloned());
+        for cert in certs {
+            tunnel_roots.add(cert)?;
+        }
+        let tunnel_config = rustls::ClientConfig::builder()
+            .with_root_certificates(tunnel_roots)
+            .with_no_client_auth();
 
         // Build the TLS config with custom root certificates
         let tls_config = rustls::ClientConfig::builder()
@@ -251,7 +280,7 @@ pub fn create_client(
         // Construct the Connector::Https variant directly
         (
             libdd_common::connector::Connector::Https(https_connector),
-            Some(TlsConnector::from(Arc::new(tls_config))),
+            Some(TlsConnector::from(Arc::new(tunnel_config))),
         )
     } else {
         // Use default connector
@@ -507,6 +536,43 @@ QUI=
             1,
             "request must go via the proxy"
         );
+        assert_eq!(hits.load(Ordering::SeqCst), 1);
+    }
+
+    /// Trust anchors for the CA in `pem`, standing in for the public bundle.
+    fn anchors_from(pem: &str) -> Vec<TrustAnchor<'static>> {
+        let cert = rustls_pemfile::certs(&mut BufReader::new(pem.as_bytes()))
+            .next()
+            .expect("a certificate")
+            .expect("parse certificate");
+        let mut store = RootCertStore::empty();
+        store.add(cert).expect("add certificate");
+        store.roots
+    }
+
+    /// A proxy that tunnels without intercepting passes the destination's own certificate
+    /// through. Setting `DD_TLS_CERT_FILE` (here an unrelated CA, as for a proxy that is
+    /// itself signed by a private CA) must not drop the public roots that certificate needs.
+    #[tokio::test]
+    async fn proxy_tunnel_keeps_public_roots_when_tls_cert_file_is_set() {
+        let (connects, hits) = (Arc::new(AtomicUsize::new(0)), Arc::new(AtomicUsize::new(0)));
+        let server = spawn_tls_server(hits.clone()).await;
+        let proxy = spawn_connect_proxy(connects.clone()).await;
+        let proxy_ca = pem_file(UNRELATED_CA_PEM);
+
+        let client = create_client_with_public_roots(
+            Some(&proxy_url(proxy)),
+            Some(&path_string(&proxy_ca)),
+            false,
+            &anchors_from(TEST_CA_CERT_PEM),
+        )
+        .expect("client");
+        let resp = get(&client, server)
+            .await
+            .expect("the tunnel must still trust the public roots");
+
+        assert_eq!(resp.status(), 200);
+        assert_eq!(connects.load(Ordering::SeqCst), 1);
         assert_eq!(hits.load(Ordering::SeqCst), 1);
     }
 
