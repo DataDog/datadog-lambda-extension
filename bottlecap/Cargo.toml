@@ -85,6 +85,8 @@ hyper-http-proxy = { version = "1.1.0", default-features = false, features = [
 ] }
 # Used to install the custom-root TLS connector for the post-CONNECT proxy handshake (SLES-3105).
 tokio-rustls = { version = "0.26", default-features = false, features = ["logging", "tls12"] }
+# The public roots `hyper-http-proxy` trusts in the tunnel by default; `DD_TLS_CERT_FILE` is added to them.
+webpki-roots = { version = "1", default-features = false }
 # If you are adding or updating a datadog-owned code dependency, please ensure
 # that it has a clippy.toml rule for disallowing the reqwest::Client::builder
 # method in favor of our
