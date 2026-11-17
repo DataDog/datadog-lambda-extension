@@ -1,0 +1,16 @@
+{
+  "name": "feature-flags-config-cache-example",
+  "private": true,
+  "description": "Lambda-style handler that evaluates Datadog feature flags from the Extension's configuration cache",
+  "main": "handler.js",
+  "scripts": {
+    "test": "node --test --test-concurrency=1 test/*.test.js"
+  },
+  "dependencies": {
+    "@openfeature/server-sdk": "1.23.0",
+    "dd-trace": "6.25.0"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

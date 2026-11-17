@@ -6,12 +6,12 @@
 //! Extension can read the key (for example `DD_API_KEY_SECRET_ARN`).
 
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
 
 use axum::{
     Router,
     extract::{RawQuery, State},
-    http::{HeaderMap, HeaderName, StatusCode, header},
+    http::{HeaderMap, HeaderName, HeaderValue, StatusCode, header},
     response::{IntoResponse, Response},
     routing::get,
 };
@@ -20,10 +20,15 @@ use tokio::time::{Instant, timeout_at};
 use tracing::{debug, error};
 
 use crate::config::Config;
+use crate::traces::flag_config_cache::{
+    CacheSettings, Fetch, Fetched, FlagConfigCache, Lookup, scope_key,
+};
 
 /// Feature flag configuration (rules) used by the tracers' flag providers.
 pub const FLAG_CONFIG_PATH: &str = "/api/v2/feature-flagging/config/rules-based/server";
 const FLAG_CONFIG_SUBDOMAIN: &str = "ufc-server.ff-cdn";
+/// Tells the tracer whether a cached reply was fresh, stale or the bootstrap file.
+pub const CACHE_STATUS_HEADER: &str = "x-datadog-flag-config-cache";
 
 /// Covers resolving the API key and the request to Datadog. Below the tracers'
 /// default 5 second request timeout, so the tracer sees our error instead of
@@ -50,6 +55,8 @@ pub struct Passthrough {
     flag_config_base_url: String,
     env: Option<String>,
     timeout: Duration,
+    /// When set, flag config is served from the execution environment's cache.
+    cache: Option<FlagConfigCache>,
 }
 
 impl Passthrough {
@@ -59,23 +66,78 @@ impl Passthrough {
         api_key_factory: Arc<ApiKeyFactory>,
         client: reqwest::Client,
     ) -> Self {
-        Self {
+        #[allow(unused_mut)]
+        let mut flag_config_base_url = format!("https://{FLAG_CONFIG_SUBDOMAIN}.{}", config.site);
+        // Lets the local test harness stand in for the CDN.
+        #[cfg(feature = "test-mode")]
+        if let Ok(url) = std::env::var("DD_TESTMODE_FEATURE_FLAGS_CDN_URL") {
+            flag_config_base_url = url;
+        }
+        let mut passthrough = Self {
             api_key_factory,
             client,
-            flag_config_base_url: format!("https://{FLAG_CONFIG_SUBDOMAIN}.{}", config.site),
+            flag_config_base_url,
             // `DD_ENV` wins over an `env` tag in `DD_TAGS`, like in the tracers.
             env: config
                 .env
                 .clone()
                 .or_else(|| config.tags.get("env").cloned()),
             timeout: UPSTREAM_TIMEOUT,
+            cache: None,
+        };
+        if let Some(settings) = CacheSettings::from_config(config) {
+            let mut cache = FlagConfigCache::new(settings, Arc::new(SystemTime::now));
+            if let Some(path) = &config.ext.feature_flags_extension_cache_bootstrap_file {
+                match std::fs::read(path) {
+                    Ok(body) => {
+                        let query = passthrough
+                            .upstream_url(None)
+                            .query()
+                            .unwrap_or("")
+                            .to_string();
+                        cache = cache.with_bootstrap(query, body.into());
+                    }
+                    Err(e) => {
+                        error!("TRACE_AGENT | Can't read the flag config bootstrap file: {e}");
+                    }
+                }
+            }
+            passthrough.cache = Some(cache);
         }
+        passthrough
     }
 
     pub fn router(self) -> Router {
         Router::new()
             .route(FLAG_CONFIG_PATH, get(flag_config))
             .with_state(self)
+    }
+
+    /// With the cache on, starts fetching the default configuration now, so
+    /// it can arrive while the runtime initializes.
+    pub fn prefetch(&self) {
+        if self.cache.is_none() {
+            return;
+        }
+        let passthrough = self.clone();
+        tokio::spawn(async move {
+            let _ = flag_config(State(passthrough), RawQuery(None), HeaderMap::new()).await;
+        });
+    }
+
+    /// The tracer drops `dd_env` when it uses a custom base URL, so add ours.
+    fn upstream_url(&self, query: Option<&str>) -> reqwest::Url {
+        let mut url =
+            reqwest::Url::parse(&format!("{}{FLAG_CONFIG_PATH}", self.flag_config_base_url))
+                .unwrap_or_else(|_| {
+                    reqwest::Url::parse("https://invalid.invalid").expect("valid url")
+                });
+        url.set_query(query);
+        let has_env = url.query_pairs().any(|(k, _)| k == "dd_env");
+        if let (Some(env), false) = (&self.env, has_env) {
+            url.query_pairs_mut().append_pair("dd_env", env);
+        }
+        url
     }
 }
 
@@ -114,10 +176,9 @@ async fn flag_config(
         }
     };
 
-    let mut url = format!("{}{FLAG_CONFIG_PATH}", passthrough.flag_config_base_url);
-    if let Some(query) = &query {
-        url.push('?');
-        url.push_str(query);
+    let url = passthrough.upstream_url(query.as_deref());
+    if let Some(cache) = &passthrough.cache {
+        return cached(&passthrough, cache, url, api_key, &headers).await;
     }
 
     let mut request = passthrough
@@ -125,14 +186,6 @@ async fn flag_config(
         .get(url)
         .timeout(deadline.saturating_duration_since(Instant::now()))
         .header("DD-API-KEY", api_key);
-    // The tracer drops `dd_env` when it uses a custom base URL.
-    let has_env = query.as_deref().is_some_and(|q| {
-        q.split('&')
-            .any(|pair| pair == "dd_env" || pair.starts_with("dd_env="))
-    });
-    if let (Some(env), false) = (&passthrough.env, has_env) {
-        request = request.query(&[("dd_env", env)]);
-    }
     for name in FORWARDED_REQUEST_HEADERS {
         if let Some(value) = headers.get(&name) {
             request = request.header(name, value);
@@ -166,6 +219,79 @@ async fn flag_config(
     }
 }
 
+async fn cached(
+    passthrough: &Passthrough,
+    cache: &FlagConfigCache,
+    url: reqwest::Url,
+    api_key: String,
+    headers: &HeaderMap,
+) -> Response {
+    let query = url.query().unwrap_or("").to_string();
+    let scope = scope_key(&api_key, &query);
+    let client = passthrough.client.clone();
+    let fetch: Fetch = Box::new(move |etag| {
+        Box::pin(async move {
+            let mut request = client
+                .get(url)
+                .timeout(UPSTREAM_TIMEOUT)
+                .header("DD-API-KEY", api_key)
+                .header(header::ACCEPT, "application/json");
+            if let Some(etag) = etag {
+                request = request.header(header::IF_NONE_MATCH, etag);
+            }
+            let upstream = match request.send().await {
+                Ok(upstream) => upstream,
+                Err(e) => {
+                    error!("TRACE_AGENT | Flag config request to Datadog failed: {e}");
+                    return Fetched::Failed(StatusCode::BAD_GATEWAY);
+                }
+            };
+            match upstream.status() {
+                StatusCode::NOT_MODIFIED => Fetched::NotModified,
+                status if status.is_success() => {
+                    let etag = upstream
+                        .headers()
+                        .get(header::ETAG)
+                        .and_then(|v| v.to_str().ok())
+                        .map(str::to_string);
+                    match upstream.bytes().await {
+                        Ok(body) => Fetched::Config { body, etag },
+                        Err(_) => Fetched::Failed(StatusCode::BAD_GATEWAY),
+                    }
+                }
+                status => Fetched::Failed(status),
+            }
+        })
+    });
+
+    match cache.get(&scope, &query, fetch).await {
+        Lookup::Serve {
+            entry,
+            freshness,
+            age,
+        } => {
+            let mut response_headers = HeaderMap::new();
+            if let Ok(etag) = HeaderValue::from_str(&entry.etag) {
+                response_headers.insert(header::ETAG, etag);
+            }
+            response_headers.insert(header::AGE, HeaderValue::from(age.as_secs()));
+            response_headers.insert(CACHE_STATUS_HEADER, freshness.as_header());
+            let unchanged = headers
+                .get(header::IF_NONE_MATCH)
+                .is_some_and(|v| v.as_bytes() == entry.etag.as_bytes());
+            if unchanged {
+                return (StatusCode::NOT_MODIFIED, response_headers).into_response();
+            }
+            response_headers.insert(
+                header::CONTENT_TYPE,
+                HeaderValue::from_static("application/json"),
+            );
+            (StatusCode::OK, response_headers, entry.body).into_response()
+        }
+        Lookup::Unavailable(status) => status.into_response(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -185,6 +311,7 @@ mod tests {
             flag_config_base_url: base_url,
             env: Some("prod".to_string()),
             timeout: UPSTREAM_TIMEOUT,
+            cache: None,
         }
     }
 
@@ -395,6 +522,109 @@ mod tests {
         .expect("the key load never finished");
         assert_eq!(second.status(), StatusCode::OK);
         mock.assert_async().await;
+    }
+
+    const UFC: &str = r#"{"data":{"type":"universal-flag-configuration","attributes":{"flags":{},"environment":{"name":"prod"}}}}"#;
+
+    fn cached(passthrough: Passthrough) -> Passthrough {
+        let settings = CacheSettings {
+            ttl: Duration::from_secs(30),
+            max_stale: Duration::from_secs(300),
+            startup_wait: Duration::from_secs(3),
+            refresh_wait: Duration::from_millis(500),
+            failure_backoff: Duration::from_secs(5),
+        };
+        Passthrough {
+            cache: Some(FlagConfigCache::new(settings, Arc::new(SystemTime::now))),
+            ..passthrough
+        }
+    }
+
+    #[tokio::test]
+    async fn cache_serves_repeated_reads_from_one_request() {
+        let server = MockServer::start_async().await;
+        let mock = server
+            .mock_async(|when, then| {
+                when.method(GET)
+                    .path(FLAG_CONFIG_PATH)
+                    .header("DD-API-KEY", "test-key")
+                    .query_param("dd_env", "prod");
+                then.status(200).header("ETag", "\"v1\"").body(UFC);
+            })
+            .await;
+        let passthrough = cached(passthrough(
+            server.base_url(),
+            ApiKeyFactory::new("test-key"),
+        ));
+
+        for _ in 0..10 {
+            let response = call(passthrough.clone(), FLAG_CONFIG_PATH, None).await;
+            assert_eq!(response.status(), StatusCode::OK);
+            assert_eq!(response.headers()[CACHE_STATUS_HEADER], "fresh");
+            let body = to_bytes(response.into_body(), usize::MAX)
+                .await
+                .expect("body");
+            assert_eq!(&body[..], UFC.as_bytes());
+        }
+        let unchanged = call(passthrough, FLAG_CONFIG_PATH, Some("\"v1\"")).await;
+
+        assert_eq!(unchanged.status(), StatusCode::NOT_MODIFIED);
+        assert_eq!(mock.hits_async().await, 1);
+    }
+
+    #[tokio::test]
+    async fn cache_keeps_environments_apart() {
+        let server = MockServer::start_async().await;
+        for env in ["prod", "staging"] {
+            server
+                .mock_async(|when, then| {
+                    when.method(GET)
+                        .path(FLAG_CONFIG_PATH)
+                        .query_param("dd_env", env);
+                    then.status(200)
+                        .body(UFC.replace("\"prod\"", &format!("\"{env}\"")));
+                })
+                .await;
+        }
+        let passthrough = cached(passthrough(
+            server.base_url(),
+            ApiKeyFactory::new("test-key"),
+        ));
+
+        for env in ["prod", "staging", "prod"] {
+            let response = call(
+                passthrough.clone(),
+                &format!("{FLAG_CONFIG_PATH}?dd_env={env}"),
+                None,
+            )
+            .await;
+            let body = to_bytes(response.into_body(), usize::MAX)
+                .await
+                .expect("body");
+            assert!(
+                String::from_utf8_lossy(&body).contains(&format!(r#""name":"{env}""#)),
+                "{env} got {body:?}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn cache_passes_an_auth_failure_through() {
+        let server = MockServer::start_async().await;
+        server
+            .mock_async(|when, then| {
+                when.method(GET).path(FLAG_CONFIG_PATH);
+                then.status(403);
+            })
+            .await;
+        let passthrough = cached(passthrough(
+            server.base_url(),
+            ApiKeyFactory::new("bad-key"),
+        ));
+
+        let response = call(passthrough, FLAG_CONFIG_PATH, None).await;
+
+        assert_eq!(response.status(), StatusCode::FORBIDDEN);
     }
 
     #[tokio::test]
