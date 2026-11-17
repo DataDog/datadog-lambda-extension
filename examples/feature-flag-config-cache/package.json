@@ -1,0 +1,12 @@
+{
+  "name": "datadog-lambda-config-cache-prototype",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "go test -v -count=1 ./..."
+  },
+  "dependencies": {
+    "@datadog/openfeature-node-server": "2.7.0",
+    "@openfeature/server-sdk": "1.23.0"
+  }
+}

@@ -1,0 +1,37 @@
+name: Feature flag configuration cache example
+
+on:
+  pull_request:
+    paths:
+      - examples/feature-flag-config-cache/**
+      - .github/workflows/feature-flag-config-cache-example.yml
+  push:
+    branches: [main]
+    paths:
+      - examples/feature-flag-config-cache/**
+      - .github/workflows/feature-flag-config-cache-example.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: examples/feature-flag-config-cache
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version: '1.27.4'
+          cache: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: '22'
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - run: test -z "$(gofmt -l *.go)"
+      - run: go vet ./...
+      - run: go test -race -v -count=1 ./...
