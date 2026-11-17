@@ -66,15 +66,14 @@ impl Passthrough {
         let timeout = cache
             .as_ref()
             .map_or(UPSTREAM_TIMEOUT, |cache| cache.timeout);
+        let flag_config_base_url = format!("https://{FLAG_CONFIG_SUBDOMAIN}.{}", config.site);
         #[cfg(feature = "test-mode")]
-        let test_base_url = std::env::var("DD_TEST_FLAG_CONFIG_BASE_URL").ok();
-        #[cfg(not(feature = "test-mode"))]
-        let test_base_url: Option<String> = None;
+        let flag_config_base_url =
+            std::env::var("DD_TEST_FLAG_CONFIG_BASE_URL").unwrap_or(flag_config_base_url);
         Self {
             api_key_factory,
             client,
-            flag_config_base_url: test_base_url
-                .unwrap_or_else(|| format!("https://{FLAG_CONFIG_SUBDOMAIN}.{}", config.site)),
+            flag_config_base_url,
             // `DD_ENV` wins over an `env` tag in `DD_TAGS`, like in the tracers.
             env: config
                 .env
