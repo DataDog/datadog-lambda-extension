@@ -39,7 +39,7 @@ pub struct StepFunctionEvent {
 pub struct Execution {
     #[serde(rename = "Id")]
     id: String,
-    #[serde(rename = "RedriveCount")]
+    #[serde(rename = "RedriveCount", default)]
     redrive_count: u16,
 }
 
@@ -252,7 +252,7 @@ impl ServiceNameResolver for StepFunctionEvent {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::lifecycle::invocation::triggers::test_utils::read_json_file;
+    use crate::lifecycle::invocation::triggers::{IdentifiedTrigger, test_utils::read_json_file};
 
     // dd-trace-rs no longer re-exports this constant publicly (moved to
     // libdd-sampling internally); the tag key itself is part of the stable
@@ -293,6 +293,78 @@ mod tests {
             let result = StepFunctionEvent::new(payload).expect("Failed to deserialize into Event");
 
             assert_eq!(result, expected);
+        }
+    }
+
+    #[test]
+    fn test_missing_redrive_count_matches_zero() {
+        let test_cases = [
+            ("step_function_event.json", ""),
+            ("step_function_legacy_event.json", "/Payload"),
+            ("step_function_nested_event.json", "/_datadog"),
+            (
+                "step_function_nested_legacy_event.json",
+                "/Payload/_datadog",
+            ),
+            ("step_function_lambda_root_event.json", "/_datadog"),
+            (
+                "step_function_lambda_root_legacy_event.json",
+                "/Payload/_datadog",
+            ),
+        ];
+
+        for (file, context_path) in test_cases {
+            for retry_count in [0, 2] {
+                let mut payload: Value = serde_json::from_str(&read_json_file(file))
+                    .expect("Failed to deserialize into Value");
+                payload
+                    .pointer_mut(context_path)
+                    .expect("Step Functions context")["State"]["RetryCount"] = retry_count.into();
+                let expected = StepFunctionEvent::new(payload.clone())
+                    .expect("Failed to deserialize event with RedriveCount")
+                    .get_span_context();
+
+                payload
+                    .pointer_mut(context_path)
+                    .expect("Step Functions context")["Execution"]
+                    .as_object_mut()
+                    .expect("Execution object")
+                    .remove("RedriveCount")
+                    .expect("Fixture must contain RedriveCount");
+
+                let IdentifiedTrigger::StepFunctionEvent(event) =
+                    IdentifiedTrigger::from_value(&payload)
+                else {
+                    panic!("Failed to identify {file} without RedriveCount");
+                };
+
+                assert_eq!(event.execution.redrive_count, 0);
+                assert_eq!(
+                    event.get_span_context(),
+                    expected,
+                    "Span context changed for {file} with retry count {retry_count}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_nonzero_redrive_count_is_preserved() {
+        for (retry_count, expected_parent_id) in [
+            (0, 8_522_702_438_458_184_040),
+            (2, 7_920_960_230_523_345_012),
+        ] {
+            let mut payload: Value =
+                serde_json::from_str(&read_json_file("step_function_event.json"))
+                    .expect("Failed to deserialize into Value");
+            payload["Execution"]["RedriveCount"] = 1.into();
+            payload["State"]["RetryCount"] = retry_count.into();
+            let event =
+                StepFunctionEvent::new(payload).expect("Failed to deserialize redriven event");
+
+            assert_eq!(event.execution.redrive_count, 1);
+            assert_eq!(event.get_span_context().trace_id, 5_744_042_798_732_701_615);
+            assert_eq!(event.get_span_context().span_id, expected_parent_id);
         }
     }
 

@@ -132,3 +132,64 @@ async fn trace_agent_listens_before_register() {
 async fn trace_agent_listens_before_register_managed_instance() {
     assert_trace_agent_listens_before_register(true).await;
 }
+
+/// The .NET tracer consumes the trace headers returned by start-invocation.
+#[tokio::test(flavor = "multi_thread")]
+#[serial_test::serial(bottlecap_ports)]
+async fn express_event_without_redrive_count_returns_trace_context() {
+    let s = Scenario::start(FaultMode::Ok).await;
+    let mut bc = s.bottlecap().spawn();
+    let deadline = s
+        .invoke("req-express", INVOKE_DEADLINE, 1, bc.startup_deadline())
+        .await
+        .unwrap_or_else(|| panic!("no /next poll. {}", bc.log_tail(40)));
+    deliver_start(&s.api, "req-express", true).await.unwrap();
+
+    let context: serde_json::Value =
+        serde_json::from_str(&fixtures::events::payload("step_function_express_event")).unwrap();
+    // Test-only client towards the local lifecycle listener.
+    #[allow(clippy::disallowed_methods)]
+    let client = reqwest::Client::builder().build().unwrap();
+    let response = tokio::time::timeout_at(
+        deadline.into(),
+        client
+            .post(format!(
+                "http://127.0.0.1:{LIFECYCLE_PORT}/lambda/start-invocation"
+            ))
+            .header("lambda-runtime-aws-request-id", "req-express")
+            .header("x-datadog-tracing-enabled", "false")
+            .json(&serde_json::json!({"_datadog": context}))
+            .send(),
+    )
+    .await
+    .expect("start-invocation exceeded the invocation deadline")
+    .unwrap();
+
+    assert_eq!(response.status(), reqwest::StatusCode::OK);
+    assert_eq!(
+        response.headers().get("x-datadog-trace-id"),
+        Some(&reqwest::header::HeaderValue::from_static(
+            "4284077050596024822"
+        )),
+        "Express trace context was not returned to the tracer. {}",
+        bc.log_tail(40)
+    );
+    assert_eq!(
+        response.headers().get("x-datadog-tags"),
+        Some(&reqwest::header::HeaderValue::from_static(
+            "_dd.p.tid=f1a18940a433d46"
+        )),
+        "Express trace ID high bits were not returned to the tracer. {}",
+        bc.log_tail(40)
+    );
+
+    deliver_runtime_done(&s.api, "req-express", true)
+        .await
+        .unwrap();
+    assert!(
+        s.api.wait_for_next_calls(2, deadline).await,
+        "no second /next within the invocation deadline. {}",
+        bc.log_tail(40)
+    );
+    s.shutdown_cleanly(&mut bc).await;
+}
