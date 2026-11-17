@@ -4,11 +4,13 @@ on:
   pull_request:
     paths:
       - examples/feature-flag-config-cache/**
+      - bottlecap/**
       - .github/workflows/feature-flag-config-cache-example.yml
   push:
     branches: [main]
     paths:
       - examples/feature-flag-config-cache/**
+      - bottlecap/**
       - .github/workflows/feature-flag-config-cache-example.yml
   workflow_dispatch:
 
@@ -18,20 +20,26 @@ permissions:
 jobs:
   test:
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    timeout-minutes: 45
+    env:
+      CARGO_INCREMENTAL: "0"
+      CARGO_PROFILE_DEV_DEBUG: "0"
     defaults:
       run:
         working-directory: examples/feature-flag-config-cache
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+      - uses: actions-rust-lang/setup-rust-toolchain@150fca883cd4034361b621bd4e6a9d34e5143606 # v1.15.4
         with:
-          go-version: '1.27.4'
           cache: false
+      - run: sudo apt-get update && sudo apt-get install -y cmake
+      - name: Install protobuf compiler
+        run: |
+          curl -LO https://github.com/protocolbuffers/protobuf/releases/download/v25.3/protoc-25.3-linux-x86_64.zip
+          unzip protoc-25.3-linux-x86_64.zip -d "$HOME/.local"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
       - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version: '22'
       - run: npm ci --ignore-scripts --no-audit --no-fund
-      - run: test -z "$(gofmt -l *.go)"
-      - run: go vet ./...
-      - run: go test -race -v -count=1 ./...
+      - run: npm test

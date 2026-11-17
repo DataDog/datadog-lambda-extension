@@ -34,7 +34,7 @@ export async function handler(event = {}) {
     // Evaluation still goes through the real provider when the extension is unavailable.
   }
   if (response?.ok) {
-    const nextRevision = response.headers.get('x-config-version')
+    const nextRevision = response.headers.get('x-config-version') || response.headers.get('etag')
     const configuration = (await response.json()).data.attributes
     if (nextRevision !== revision) {
       provider.setConfiguration(configuration)

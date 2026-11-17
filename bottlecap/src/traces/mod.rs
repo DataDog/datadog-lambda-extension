@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 pub mod data_streams;
+mod flag_config_cache;
 pub mod http_client;
 pub mod passthrough;
 pub mod propagation;

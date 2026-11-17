@@ -4,6 +4,7 @@
 //! one Datadog endpoint right away, adds the API key it resolved, and returns
 //! Datadog's reply unchanged. This lets tracers reach Datadog when only the
 //! Extension can read the key (for example `DD_API_KEY_SECRET_ARN`).
+//! Opt-in flag configuration caching retains accepted rules in this process.
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -19,6 +20,7 @@ use dogstatsd::api_key::ApiKeyFactory;
 use tokio::time::{Instant, timeout_at};
 use tracing::{debug, error};
 
+use super::flag_config_cache::FlagConfigCache;
 use crate::config::Config;
 
 /// Feature flag configuration (rules) used by the tracers' flag providers.
@@ -50,6 +52,7 @@ pub struct Passthrough {
     flag_config_base_url: String,
     env: Option<String>,
     timeout: Duration,
+    cache: Option<Arc<FlagConfigCache>>,
 }
 
 impl Passthrough {
@@ -59,16 +62,26 @@ impl Passthrough {
         api_key_factory: Arc<ApiKeyFactory>,
         client: reqwest::Client,
     ) -> Self {
+        let cache = FlagConfigCache::from_config(config).map(Arc::new);
+        let timeout = cache
+            .as_ref()
+            .map_or(UPSTREAM_TIMEOUT, |cache| cache.timeout);
+        #[cfg(feature = "test-mode")]
+        let test_base_url = std::env::var("DD_TEST_FLAG_CONFIG_BASE_URL").ok();
+        #[cfg(not(feature = "test-mode"))]
+        let test_base_url: Option<String> = None;
         Self {
             api_key_factory,
             client,
-            flag_config_base_url: format!("https://{FLAG_CONFIG_SUBDOMAIN}.{}", config.site),
+            flag_config_base_url: test_base_url
+                .unwrap_or_else(|| format!("https://{FLAG_CONFIG_SUBDOMAIN}.{}", config.site)),
             // `DD_ENV` wins over an `env` tag in `DD_TAGS`, like in the tracers.
             env: config
                 .env
                 .clone()
                 .or_else(|| config.tags.get("env").cloned()),
-            timeout: UPSTREAM_TIMEOUT,
+            timeout,
+            cache,
         }
     }
 
@@ -84,7 +97,19 @@ async fn flag_config(
     RawQuery(query): RawQuery,
     headers: HeaderMap,
 ) -> Response {
-    let deadline = Instant::now() + passthrough.timeout;
+    let budget = if passthrough.cache.is_some() {
+        headers
+            .get("X-Config-Budget-Ms")
+            .and_then(|v| v.to_str().ok())
+            .and_then(|v| v.parse::<u64>().ok())
+            .filter(|ms| *ms > 0)
+            .map_or(passthrough.timeout, |ms| {
+                Duration::from_millis(ms).min(passthrough.timeout)
+            })
+    } else {
+        passthrough.timeout
+    };
+    let deadline = Instant::now() + budget;
     // Resolve the key in its own task: if the tracer disconnects, this handler
     // is dropped, and a key load cancelled midway would leave every other
     // caller of the factory waiting on it forever.
@@ -139,6 +164,17 @@ async fn flag_config(
         }
     }
 
+    if let Some(cache) = &passthrough.cache {
+        return match request.build() {
+            Ok(request) => {
+                cache
+                    .respond(&passthrough.client, request, &headers, deadline)
+                    .await
+            }
+            Err(_) => StatusCode::BAD_GATEWAY.into_response(),
+        };
+    }
+
     let upstream = match request.send().await {
         Ok(upstream) => upstream,
         Err(e) => {
@@ -185,6 +221,7 @@ mod tests {
             flag_config_base_url: base_url,
             env: Some("prod".to_string()),
             timeout: UPSTREAM_TIMEOUT,
+            cache: None,
         }
     }
 
@@ -410,5 +447,170 @@ mod tests {
         .await;
 
         assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    }
+
+    fn cached(base_url: String, ttl: Duration) -> Passthrough {
+        let mut config = Config::default();
+        config.ext.serverless_flag_config_cache_enabled = true;
+        config.ext.serverless_flag_config_cache_ttl = ttl;
+        let mut p = passthrough(base_url, ApiKeyFactory::new("test-key"));
+        p.cache = FlagConfigCache::from_config(&config).map(Arc::new);
+        p.timeout = Duration::from_secs(1);
+        p
+    }
+
+    const RULES: &str = r#"{"data":{"attributes":{"format":"SERVER","flags":{}}}}"#;
+
+    #[tokio::test]
+    async fn cache_isolates_query_and_resolved_credentials() {
+        let server = MockServer::start_async().await;
+        for (key, env, etag) in [
+            ("test-key", "prod", "p"),
+            ("test-key", "stage", "s"),
+            ("other-key", "prod", "o"),
+        ] {
+            server
+                .mock_async(|when, then| {
+                    when.method(GET)
+                        .path(FLAG_CONFIG_PATH)
+                        .header("DD-API-KEY", key)
+                        .query_param("dd_env", env);
+                    then.status(200).header("ETag", etag).body(RULES);
+                })
+                .await;
+        }
+        let p = cached(server.base_url(), Duration::from_secs(60));
+        assert_eq!(
+            call(p.clone(), FLAG_CONFIG_PATH, None).await.headers()[header::ETAG],
+            "p"
+        );
+        assert_eq!(
+            call(p.clone(), &format!("{FLAG_CONFIG_PATH}?dd_env=stage"), None)
+                .await
+                .headers()[header::ETAG],
+            "s"
+        );
+        let other_key = Passthrough {
+            api_key_factory: Arc::new(ApiKeyFactory::new("other-key")),
+            ..p
+        };
+        assert_eq!(
+            call(other_key, FLAG_CONFIG_PATH, None).await.headers()[header::ETAG],
+            "o"
+        );
+    }
+
+    #[tokio::test]
+    async fn cache_preserves_rules_after_invalid_refresh_and_applies_failure_backoff() {
+        let server = MockServer::start_async().await;
+        let accepted = server
+            .mock_async(|when, then| {
+                when.method(GET)
+                    .path(FLAG_CONFIG_PATH)
+                    .header("DD-API-KEY", "test-key");
+                then.status(200).header("ETag", "v1").body(RULES);
+            })
+            .await;
+        let p = cached(server.base_url(), Duration::ZERO);
+        assert_eq!(
+            call(p.clone(), FLAG_CONFIG_PATH, None).await.status(),
+            StatusCode::OK
+        );
+        accepted.delete_async().await;
+        let invalid = server
+            .mock_async(|when, then| {
+                when.method(GET)
+                    .path(FLAG_CONFIG_PATH)
+                    .header("DD-API-KEY", "test-key");
+                then.status(200).header("ETag", "v2").body("{invalid");
+            })
+            .await;
+        for _ in 0..10 {
+            let reply = call(p.clone(), FLAG_CONFIG_PATH, None).await;
+            assert_eq!(reply.headers()["X-Config-Source"], "stale");
+            assert_eq!(reply.headers()[header::ETAG], "v1");
+            assert_eq!(
+                to_bytes(reply.into_body(), 4096).await.expect("body"),
+                RULES
+            );
+        }
+        invalid.assert_async().await;
+    }
+
+    #[tokio::test]
+    async fn cache_bounds_cold_and_warm_waits() {
+        let server = MockServer::start_async().await;
+        let accepted = server
+            .mock_async(|when, then| {
+                when.method(GET)
+                    .path(FLAG_CONFIG_PATH)
+                    .header("DD-API-KEY", "test-key");
+                then.status(200).header("ETag", "v1").body(RULES);
+            })
+            .await;
+        let warm = cached(server.base_url(), Duration::ZERO);
+        assert_eq!(
+            call(warm.clone(), FLAG_CONFIG_PATH, None).await.status(),
+            StatusCode::OK
+        );
+        accepted.delete_async().await;
+        server
+            .mock_async(|when, then| {
+                when.method(GET)
+                    .path(FLAG_CONFIG_PATH)
+                    .header("DD-API-KEY", "test-key");
+                then.status(200)
+                    .delay(Duration::from_millis(500))
+                    .header("ETag", "v2")
+                    .body(RULES);
+            })
+            .await;
+        for (p, status) in [
+            (warm, StatusCode::OK),
+            (
+                cached(server.base_url(), Duration::ZERO),
+                StatusCode::SERVICE_UNAVAILABLE,
+            ),
+        ] {
+            let response = tokio::time::timeout(
+                Duration::from_millis(300),
+                p.router().oneshot(
+                    Request::get(FLAG_CONFIG_PATH)
+                        .header("X-Config-Budget-Ms", "50")
+                        .body(Body::empty())
+                        .expect("request"),
+                ),
+            )
+            .await
+            .expect("50ms budget must bound the upstream wait")
+            .expect("response");
+            assert_eq!(response.status(), status);
+            if status == StatusCode::OK {
+                assert_eq!(response.headers()["X-Config-Source"], "stale");
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn cache_rejects_304_without_accepted_rules() {
+        let server = MockServer::start_async().await;
+        server
+            .mock_async(|when, then| {
+                when.method(GET)
+                    .path(FLAG_CONFIG_PATH)
+                    .header("DD-API-KEY", "test-key");
+                then.status(304);
+            })
+            .await;
+        assert_eq!(
+            call(
+                cached(server.base_url(), Duration::ZERO),
+                FLAG_CONFIG_PATH,
+                Some("v1")
+            )
+            .await
+            .status(),
+            StatusCode::SERVICE_UNAVAILABLE
+        );
     }
 }

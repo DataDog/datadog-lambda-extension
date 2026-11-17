@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "go test -v -count=1 ./..."
+    "test": "cargo test --locked --manifest-path ../../bottlecap/Cargo.toml --features test-mode --test flag_config_cache_test -- --nocapture"
   },
   "dependencies": {
     "@datadog/openfeature-node-server": "2.7.0",
