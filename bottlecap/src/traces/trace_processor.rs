@@ -29,6 +29,7 @@ use libdd_trace_utils::trace_utils::{self};
 use libdd_trace_utils::tracer_header_tags;
 use libdd_trace_utils::tracer_payload::{TraceChunkProcessor, TracerPayloadCollection};
 use regex::Regex;
+use std::net::IpAddr;
 use std::str::FromStr;
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -565,14 +566,37 @@ fn filter_span_from_lambda_library_or_runtime(span: &Span) -> bool {
         return true;
     }
 
-    if span.name == "dns.lookup"
-        || span.resource == DNS_LOCAL_HOST_ADDRESS_URL_PREFIX
+    if span.resource == DNS_LOCAL_HOST_ADDRESS_URL_PREFIX
         || span.resource == DNS_NON_ROUTABLE_ADDRESS_URL_PREFIX
     {
         return true;
     }
 
+    // Only lookups of internal hosts are dropped; customer lookups are kept.
+    if span.name == "dns.lookup"
+        && (is_internal_address(&span.resource)
+            || span
+                .meta
+                .get("dns.address")
+                .is_some_and(|address| is_internal_address(address)))
+    {
+        return true;
+    }
+
     false
+}
+
+/// Loopback, unspecified, `localhost`, or the X-Ray daemon address.
+fn is_internal_address(address: &str) -> bool {
+    if address.eq_ignore_ascii_case("localhost")
+        || address.starts_with(AWS_XRAY_DAEMON_ADDRESS_URL_PREFIX)
+    {
+        return true;
+    }
+    address.parse::<IpAddr>().is_ok_and(|ip| {
+        let ip = ip.to_canonical();
+        ip.is_loopback() || ip.is_unspecified()
+    })
 }
 
 #[allow(clippy::module_name_repetitions)]
@@ -1091,6 +1115,80 @@ mod tests {
 
         assert!(span_matches_tag_regex(&span, "env", r"test.*"));
         assert!(!span_matches_tag_regex(&span, "env", r"prod.*"));
+    }
+
+    fn dns_lookup_span(hostname: &str, address: Option<&str>) -> Span {
+        let mut span = Span {
+            name: "dns.lookup".to_string(),
+            resource: hostname.to_string(),
+            ..Default::default()
+        };
+        span.meta
+            .insert("dns.hostname".to_string(), hostname.to_string());
+        if let Some(address) = address {
+            span.meta
+                .insert("dns.address".to_string(), address.to_string());
+        }
+        span
+    }
+
+    #[test]
+    fn test_filter_span_keeps_external_dns_lookup() {
+        for address in [Some("93.184.215.14"), Some("2606:2800:21f:cb07::1"), None] {
+            let span = dns_lookup_span("example.com", address);
+            assert!(
+                !filter_span_from_lambda_library_or_runtime(&span),
+                "expected dns.lookup of example.com ({address:?}) to be kept"
+            );
+        }
+    }
+
+    #[test]
+    fn test_filter_span_drops_internal_dns_lookup() {
+        let cases = [
+            ("localhost", Some("127.0.0.1")),
+            ("localhost", Some("::1")),
+            ("localhost", Some("::ffff:127.0.0.1")),
+            ("localhost", None),
+            ("my-host", Some("127.0.1.1")),
+            ("my-host", Some("0.0.0.0")),
+            ("my-host", Some("::")),
+            ("my-host", Some("169.254.79.129")),
+            ("127.0.0.1", None),
+            ("0.0.0.0", None),
+        ];
+        for (hostname, address) in cases {
+            let span = dns_lookup_span(hostname, address);
+            assert!(
+                filter_span_from_lambda_library_or_runtime(&span),
+                "expected dns.lookup of {hostname} ({address:?}) to be filtered"
+            );
+        }
+    }
+
+    #[test]
+    fn test_filter_span_non_dns_lookup_behavior_unchanged() {
+        // Dropped before and still dropped.
+        let mut span = Span {
+            name: "tcp.connect".to_string(),
+            resource: "127.0.0.1".to_string(),
+            ..Default::default()
+        };
+        assert!(filter_span_from_lambda_library_or_runtime(&span));
+        span.resource = "example.com".to_string();
+        span.meta
+            .insert("dns.address".to_string(), "127.0.0.1:8126".to_string());
+        assert!(filter_span_from_lambda_library_or_runtime(&span));
+
+        // Kept before and still kept.
+        let mut span = Span {
+            name: "dns.resolve".to_string(),
+            resource: "localhost".to_string(),
+            ..Default::default()
+        };
+        span.meta
+            .insert("dns.address".to_string(), "::1".to_string());
+        assert!(!filter_span_from_lambda_library_or_runtime(&span));
     }
 
     #[test]
