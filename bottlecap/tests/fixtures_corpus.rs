@@ -85,7 +85,7 @@ fn dogstatsd_packets_split_by_lines() {
 
 #[test]
 fn large_events_identify_as_their_trigger() {
-    assert_eq!(events::all_payloads().len(), 38);
+    assert_eq!(events::all_payloads().len(), 39);
     let sqs = events::sqs_220kb();
     assert_eq!(sqs["Records"][0]["body"].as_str().unwrap().len(), 22_000);
     let sqs_len = serde_json::to_vec(&sqs).unwrap().len();
