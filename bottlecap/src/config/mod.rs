@@ -86,6 +86,12 @@ pub struct LambdaConfig {
     pub capture_lambda_payload: bool,
     pub capture_lambda_payload_max_depth: u32,
     pub lambda_extension_compute_stats: bool,
+    /// Experimental, execution-environment-local cache for the flag configuration route.
+    pub serverless_flag_config_cache_enabled: bool,
+    pub serverless_flag_config_cache_ttl: Duration,
+    pub serverless_flag_config_cache_max_age: Duration,
+    pub serverless_flag_config_cache_timeout: Duration,
+    pub serverless_flag_config_cache_failure_backoff: Duration,
 
     /// Deprecated raw value of `DD_SERVERLESS_ERROR_SAMPLER_ENABLED`, kept so
     /// the legacy on/off switch still resolves. Read only through
@@ -172,6 +178,11 @@ impl Default for LambdaConfig {
             capture_lambda_payload: false,
             capture_lambda_payload_max_depth: 10,
             lambda_extension_compute_stats: false,
+            serverless_flag_config_cache_enabled: false,
+            serverless_flag_config_cache_ttl: Duration::from_secs(30),
+            serverless_flag_config_cache_max_age: Duration::from_secs(300),
+            serverless_flag_config_cache_timeout: Duration::from_millis(100),
+            serverless_flag_config_cache_failure_backoff: Duration::from_secs(1),
             serverless_error_sampler_enabled: None,
             apm_error_tps: None,
             span_dedup_timeout: None,
@@ -274,6 +285,17 @@ pub struct LambdaConfigSource {
     pub lambda_extension_compute_stats: Option<bool>,
 
     #[serde(deserialize_with = "deser_opt_bool")]
+    pub serverless_flag_config_cache_enabled: Option<bool>,
+    #[serde(deserialize_with = "deser_dur_secs")]
+    pub serverless_flag_config_cache_ttl: Option<Duration>,
+    #[serde(deserialize_with = "deser_dur_secs")]
+    pub serverless_flag_config_cache_max_age: Option<Duration>,
+    #[serde(deserialize_with = "deser_dur_secs")]
+    pub serverless_flag_config_cache_timeout: Option<Duration>,
+    #[serde(deserialize_with = "deser_dur_secs")]
+    pub serverless_flag_config_cache_failure_backoff: Option<Duration>,
+
+    #[serde(deserialize_with = "deser_opt_bool")]
     pub serverless_error_sampler_enabled: Option<bool>,
 
     /// YAML `apm_config.errors_per_second`: error trace rescue budget.
@@ -361,6 +383,11 @@ impl DatadogConfigExtension for LambdaConfig {
                 capture_lambda_payload,
                 capture_lambda_payload_max_depth,
                 lambda_extension_compute_stats,
+                serverless_flag_config_cache_enabled,
+                serverless_flag_config_cache_ttl,
+                serverless_flag_config_cache_max_age,
+                serverless_flag_config_cache_timeout,
+                serverless_flag_config_cache_failure_backoff,
                 serverless_appsec_enabled,
                 appsec_waf_timeout,
                 api_security_enabled,
