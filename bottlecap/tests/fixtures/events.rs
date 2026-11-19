@@ -1,4 +1,4 @@
-//! Invocation payloads: the 38 trigger events in `tests/payloads/`, checked in with their own
+//! Invocation payloads: the 39 trigger events in `tests/payloads/`, checked in with their own
 //! ids and times, plus large generated SQS and DynamoDB events in the region, account and time
 //! of the shared invocation.
 

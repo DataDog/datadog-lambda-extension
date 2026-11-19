@@ -74,6 +74,9 @@ struct Shared {
     telemetry_url: Arc<Mutex<Option<reqwest::Url>>>,
     /// `types` of the last accepted subscribe body.
     telemetry_types: Arc<Mutex<Vec<String>>>,
+    /// Whether the trace agent port accepted a connection while the first
+    /// register request was handled, `None` until then.
+    trace_agent_listening_at_register: Arc<Mutex<Option<bool>>>,
 }
 
 pub struct FakeExtensionsApi {
@@ -121,6 +124,7 @@ impl FakeExtensionsApi {
             subscribe_status: Arc::new(AtomicU16::new(StatusCode::OK.as_u16())),
             telemetry_url: Arc::new(Mutex::new(None)),
             telemetry_types: Arc::new(Mutex::new(Vec::new())),
+            trace_agent_listening_at_register: Arc::new(Mutex::new(None)),
         };
         let router = Router::new()
             .route("/2020-01-01/extension/register", post(register))
@@ -239,6 +243,16 @@ impl FakeExtensionsApi {
         self.shared.requests.lock().expect("requests lock").clone()
     }
 
+    /// Whether the trace agent port accepted a connection while the first
+    /// register request was handled, `None` before any register.
+    pub fn trace_agent_listening_at_register(&self) -> Option<bool> {
+        *self
+            .shared
+            .trace_agent_listening_at_register
+            .lock()
+            .expect("trace agent probe lock")
+    }
+
     // --- Telemetry API sender ----------------------------------------------
 
     /// Port the extension asked Lambda to deliver telemetry to, `None` until
@@ -345,6 +359,21 @@ async fn register(
     body: Bytes,
 ) -> Result<impl IntoResponse, StatusCode> {
     record(&shared, "POST", "/2020-01-01/extension/register");
+    // Lambda starts the runtime, and with it the tracer's early `/info`
+    // probe, once every extension has registered. Probe the trace agent
+    // once, before answering, the way that tracer would.
+    {
+        let mut at_register = shared
+            .trace_agent_listening_at_register
+            .lock()
+            .expect("trace agent probe lock");
+        if at_register.is_none() {
+            let addr = SocketAddr::from(([127, 0, 0, 1], super::port_guard::TRACE_AGENT_PORT));
+            let listening =
+                std::net::TcpStream::connect_timeout(&addr, Duration::from_millis(200)).is_ok();
+            *at_register = Some(listening);
+        }
+    }
     // Lambda answers `403` without a name. Any name but the file under
     // `/opt/extensions` registers an internal extension, which cannot take SHUTDOWN.
     if headers
