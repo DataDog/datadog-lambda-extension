@@ -1,0 +1,13 @@
+{
+  "Execution": {
+    "Id": "arn:aws:states:us-east-1:123456789012:express:ExampleStateMachine:acaf1a67-336a-e854-1599-2a627eb2dd8a:c8baf081-31f1-464d-971f-70cb17d01111"
+  },
+  "State": {
+    "Name": "InvokeLambda",
+    "EnteredTime": "2022-12-08T21:08:19.224Z",
+    "RetryCount": 0
+  },
+  "StateMachine": {
+    "Id": "arn:aws:states:us-east-1:123456789012:stateMachine:ExampleStateMachine"
+  }
+}

@@ -12,7 +12,7 @@
 //! together trace, stats, proxy, lifecycle, tags, appsec, and flushing
 //! pieces: it is orchestration, not a trace-domain API.
 
-use std::{env, sync::Arc};
+use std::sync::Arc;
 
 use dogstatsd::api_key::ApiKeyFactory;
 use libdd_common::regex_engine::{Regex, Replacer};
@@ -27,7 +27,9 @@ use crate::config::Config;
 use crate::lifecycle::invocation::processor_service::InvocationProcessorHandle;
 use crate::tags::provider::Provider as TagProvider;
 use crate::traces::{
-    http_client as trace_http_client, proxy_aggregator,
+    http_client as trace_http_client,
+    passthrough::Passthrough,
+    proxy_aggregator,
     proxy_flusher::Flusher as ProxyFlusher,
     span_dedup_service,
     stats_aggregator::StatsAggregator,
@@ -157,29 +159,24 @@ pub fn build_trace_agent(
         ..Default::default()
     };
 
-    // The Agent's error sampler knob has no effect here: the extension's
-    // sampler is a plain on/off switch, not a TPS budget.
-    if env::var("DD_APM_ERROR_TPS").is_ok_and(|v| !v.trim().is_empty()) {
-        warn!(
-            "DD_APM_ERROR_TPS is not supported by the Lambda extension; error trace rescue is an on/off switch controlled by DD_SERVERLESS_ERROR_SAMPLER_ENABLED"
-        );
+    if let Some(message) = config.ext.legacy_error_sampler_warning() {
+        warn!("{message}");
     }
+    let error_tps = config.ext.error_sampler_target_tps();
 
     // One-time startup warning: the feature only widens rescue eligibility, it
-    // does not enable the sampler.
+    // does not change the rescue budget.
     let error_rare_sample_tracer_drop =
         trace_processor::error_rare_sample_tracer_drop_enabled(config);
-    if error_rare_sample_tracer_drop && !config.ext.serverless_error_sampler_enabled {
+    if error_rare_sample_tracer_drop && error_tps <= 0.0 {
         warn!(
-            "DD_APM_FEATURES includes error_rare_sample_tracer_drop, but DD_SERVERLESS_ERROR_SAMPLER_ENABLED is false: errored traces dropped by the tracer will not be rescued"
+            "DD_APM_FEATURES includes error_rare_sample_tracer_drop, but error trace rescue is disabled (effective DD_APM_ERROR_TPS {error_tps}): errored traces dropped by the tracer will not be rescued"
         );
     }
 
     let trace_processor = Arc::new(trace_processor::ServerlessTraceProcessor {
         obfuscation_config: Arc::new(obfuscation_config),
-        error_sampler: trace_processor::new_error_sampler(
-            config.ext.serverless_error_sampler_enabled,
-        ),
+        error_sampler: trace_processor::new_error_sampler(error_tps),
         error_rare_sample_tracer_drop,
     });
 
@@ -195,7 +192,7 @@ pub fn build_trace_agent(
         client.clone(),
     ));
 
-    let trace_agent = trace_agent::TraceAgent::new(
+    let mut trace_agent = trace_agent::TraceAgent::new(
         Arc::clone(config),
         trace_aggregator_handle.clone(),
         trace_processor.clone(),
@@ -208,6 +205,12 @@ pub fn build_trace_agent(
         stats_concentrator_handle.clone(),
         span_dedup_handle,
     );
+    // Without a client that refuses redirects, leave the route out (404)
+    // rather than risk sending the API key elsewhere.
+    if let Some(client) = crate::http::get_client_without_redirects(config) {
+        trace_agent =
+            trace_agent.with_passthrough(Passthrough::new(config, api_key_factory.clone(), client));
+    }
     let pipeline = TraceAgentPipeline {
         trace_tx: trace_agent.get_sender_copy(),
         trace_flusher,
@@ -223,15 +226,19 @@ pub fn build_trace_agent(
 }
 
 /// Builds the trace-processing pipeline with [`build_trace_agent`] and spawns
-/// the [`trace_agent::TraceAgent`] HTTP listener onto the current tokio
-/// runtime. Convenience entry point for callers that do not need to
+/// the [`trace_agent::TraceAgent`] HTTP server on `listener` onto the current
+/// tokio runtime. Convenience entry point for callers that do not need to
 /// further configure the `TraceAgent` before spawning it.
 ///
-/// Errors from `TraceAgent::start` (TCP bind failures, router-extension
-/// failures, axum serve errors) are logged and discarded; the surrounding
-/// pipeline keeps running with a dead trace channel. Callers that need to
-/// react to startup errors should use [`build_trace_agent`] and spawn the
-/// agent themselves.
+/// `listener` comes from [`trace_agent::TraceAgent::bind_listener`], called
+/// before the extension registers. `None` means that bind failed (the caller
+/// logged it), and no trace agent is served.
+///
+/// Errors from `TraceAgent::start_with_listener` (router-extension failures,
+/// axum serve errors) are logged and discarded; the surrounding pipeline keeps
+/// running with a dead trace channel. Callers that need to react to startup
+/// errors should use [`build_trace_agent`] and spawn the agent themselves.
+#[allow(clippy::too_many_arguments)]
 pub fn start_trace_agent(
     config: &Arc<Config>,
     api_key_factory: &Arc<ApiKeyFactory>,
@@ -240,6 +247,7 @@ pub fn start_trace_agent(
     appsec_processor: Option<Arc<TokioMutex<AppSecProcessor>>>,
     client: &reqwest::Client,
     proxy_aggregator: Arc<TokioMutex<proxy_aggregator::Aggregator>>,
+    listener: Option<tokio::net::TcpListener>,
 ) -> TraceAgentPipeline {
     let (trace_agent, pipeline) = build_trace_agent(
         config,
@@ -252,11 +260,13 @@ pub fn start_trace_agent(
         None,
     );
 
-    tokio::spawn(async move {
-        if let Err(e) = trace_agent.start().await {
-            error!("Error starting trace agent: {e:?}");
-        }
-    });
+    if let Some(listener) = listener {
+        tokio::spawn(async move {
+            if let Err(e) = trace_agent.start_with_listener(listener).await {
+                error!("Error starting trace agent: {e:?}");
+            }
+        });
+    }
 
     pipeline
 }
