@@ -46,7 +46,6 @@ ignore = [
     { id = "RUSTSEC-2026-0349", reason = "rustls fix needs aws-lc-rs >= 1.18 (AWS-LC-FIPS 4.x, uncertified)" },
     { id = "RUSTSEC-2026-0382", reason = "rustls-webpki fix needs aws-lc-rs ^1.18 (AWS-LC-FIPS 4.x, uncertified)" },
     { id = "RUSTSEC-2026-0410", reason = "wasm32 only; the extension ships on Linux" },
-    { id = "RUSTSEC-2023-0050", reason = "multipart 0.18 is unmaintained; it parses AppSec multipart request bodies; no maintained replacement is chosen yet" },
     { id = "RUSTSEC-2025-0134", reason = "rustls-pemfile is unmaintained; replace with rustls-pki-types PEM parsing (code change, not a version bump)" },
     { id = "RUSTSEC-2026-0543", reason = "chrono is unmaintained with no patched release; replacing it requires migrating telemetry timestamps and AWS request signing" },
     { id = "RUSTSEC-2026-0386", reason = "tokio AsyncFd unsoundness; bottlecap does not construct AsyncFd. Fix: cargo update -p tokio (>= 1.53.3)" },
