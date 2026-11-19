@@ -122,6 +122,16 @@ async fn graceful_shutdown(tasks: Arc<Mutex<JoinSet<()>>>, shutdown_token: Cance
     }
 }
 
+/// A `JoinSet` keeps each finished task until it is joined, so remove them before adding one.
+/// Without this, the set grows by two tasks per invocation for the sandbox's lifetime.
+fn reap_finished(join_set: &mut JoinSet<()>) {
+    while let Some(result) = join_set.try_join_next() {
+        if let Err(e) = result {
+            error!("PROXY | Task error: {e}");
+        }
+    }
+}
+
 async fn record_dsm_consume_from_invocation_next(
     invocation_processor: &InvocationProcessorHandle,
     parts: &http::response::Parts,
@@ -228,6 +238,7 @@ async fn invocation_next_proxy(
         TeeBodyWithCompletion::new(intercepted_body);
 
     let mut join_set = tasks.lock().await;
+    reap_finished(&mut join_set);
     let intercepted_parts_clone = intercepted_parts.clone();
     let propagator = Arc::clone(&propagator);
     join_set.spawn(async move {
@@ -321,6 +332,7 @@ async fn invocation_response_proxy(
     // The outgoing body is what the final user will see.
     // Which is what AWS Lambda returns, in turn what we want to process.
     let mut join_set = tasks.lock().await;
+    reap_finished(&mut join_set);
     let aws_config_clone = aws_config.clone();
     join_set.spawn(async move {
         if let Ok(body) = outgoing_completion_receiver.await {
@@ -531,6 +543,7 @@ mod tests {
         LAMBDA_RUNTIME_SLUG, appsec::processor::Error::FeatureDisabled as AppSecFeatureDisabled,
         config::Config, tags::provider::Provider, traces::propagation::DatadogCompositePropagator,
     };
+    use tower::ServiceExt;
 
     fn test_aws_config(aws_lwa_proxy_lambda_runtime_api: Option<String>) -> AwsConfig {
         AwsConfig {
@@ -570,6 +583,92 @@ mod tests {
             get_invocation_next_processing_mode(&test_aws_config(None), true, true),
             InvocationNextProcessingMode::UniversalInstrumentation
         );
+    }
+
+    #[tokio::test]
+    async fn test_invocation_cycles_keep_join_set_bounded() {
+        // A fake Lambda Runtime API that serves one event per `next` call.
+        let runtime_api = Router::new()
+            .route(
+                "/2018-06-01/runtime/invocation/next",
+                get(|| async {
+                    (
+                        [("Lambda-Runtime-Aws-Request-Id", "req")],
+                        r#"{"key":"value"}"#,
+                    )
+                }),
+            )
+            .route(
+                "/2018-06-01/runtime/invocation/{request_id}/response",
+                post(|_body: Bytes| async { StatusCode::ACCEPTED }),
+            );
+        let runtime_api_listener = TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("failed to bind fake Runtime API");
+        let runtime_api_addr = runtime_api_listener
+            .local_addr()
+            .expect("failed to read fake Runtime API address");
+        tokio::spawn(async move {
+            axum::serve(runtime_api_listener, runtime_api)
+                .await
+                .expect("fake Runtime API failed");
+        });
+
+        let mut aws_config = test_aws_config(None);
+        aws_config.runtime_api = runtime_api_addr.to_string();
+        let propagator = Arc::new(DatadogCompositePropagator::new(Arc::new(Config::default())));
+        let tasks = Arc::new(Mutex::new(JoinSet::new()));
+        let state: InterceptorState = (
+            Arc::new(aws_config),
+            Arc::new(Client::builder(TokioExecutor::new()).build(HttpConnector::new())),
+            InvocationProcessorHandle::noop(),
+            None,
+            propagator,
+            false,
+            tasks.clone(),
+        );
+        let router = make_router(state);
+
+        for _ in 0..100 {
+            let next = Request::builder()
+                .uri("/2018-06-01/runtime/invocation/next")
+                .body(Body::empty())
+                .expect("failed to build next request");
+            let response = router.clone().oneshot(next).await.expect("next failed");
+            assert_eq!(response.status(), StatusCode::OK);
+            // The task for the event runs once the proxy has forwarded the whole body.
+            response
+                .into_body()
+                .collect()
+                .await
+                .expect("failed to read event");
+
+            let result = Request::builder()
+                .method("POST")
+                .uri("/2018-06-01/runtime/invocation/req/response")
+                .body(Body::from(r#"{"ok":true}"#))
+                .expect("failed to build response request");
+            let response = router
+                .clone()
+                .oneshot(result)
+                .await
+                .expect("response failed");
+            assert_eq!(response.status(), StatusCode::ACCEPTED);
+            tokio::task::yield_now().await;
+        }
+
+        let len = tasks.lock().await.len();
+        assert!(len <= 2, "join set holds {len} tasks after 100 invocations");
+
+        let shutdown_token = CancellationToken::new();
+        shutdown_token.cancel();
+        tokio::time::timeout(
+            Duration::from_secs(5),
+            graceful_shutdown(tasks.clone(), shutdown_token),
+        )
+        .await
+        .expect("shutdown did not finish");
+        assert!(tasks.lock().await.is_empty());
     }
 
     #[tokio::test]
