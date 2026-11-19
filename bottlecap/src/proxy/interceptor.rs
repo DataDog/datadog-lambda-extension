@@ -543,6 +543,7 @@ mod tests {
         LAMBDA_RUNTIME_SLUG, appsec::processor::Error::FeatureDisabled as AppSecFeatureDisabled,
         config::Config, tags::provider::Provider, traces::propagation::DatadogCompositePropagator,
     };
+    use tower::ServiceExt;
 
     fn test_aws_config(aws_lwa_proxy_lambda_runtime_api: Option<String>) -> AwsConfig {
         AwsConfig {
@@ -585,21 +586,89 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_reap_finished_removes_finished_tasks() {
-        let mut join_set = JoinSet::new();
-        for _ in 0..10 {
-            join_set.spawn(async {});
-        }
-        // Let the spawned tasks finish.
-        tokio::task::yield_now().await;
+    async fn test_invocation_cycles_keep_join_set_bounded() {
+        // A fake Lambda Runtime API that serves one event per `next` call.
+        let runtime_api = Router::new()
+            .route(
+                "/2018-06-01/runtime/invocation/next",
+                get(|| async {
+                    (
+                        [("Lambda-Runtime-Aws-Request-Id", "req")],
+                        r#"{"key":"value"}"#,
+                    )
+                }),
+            )
+            .route(
+                "/2018-06-01/runtime/invocation/{request_id}/response",
+                post(|_body: Bytes| async { StatusCode::ACCEPTED }),
+            );
+        let runtime_api_listener = TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("failed to bind fake Runtime API");
+        let runtime_api_addr = runtime_api_listener
+            .local_addr()
+            .expect("failed to read fake Runtime API address");
+        tokio::spawn(async move {
+            axum::serve(runtime_api_listener, runtime_api)
+                .await
+                .expect("fake Runtime API failed");
+        });
 
-        reap_finished(&mut join_set);
-
-        assert!(
-            join_set.is_empty(),
-            "join set holds {} tasks",
-            join_set.len()
+        let mut aws_config = test_aws_config(None);
+        aws_config.runtime_api = runtime_api_addr.to_string();
+        let propagator = Arc::new(DatadogCompositePropagator::new(Arc::new(Config::default())));
+        let tasks = Arc::new(Mutex::new(JoinSet::new()));
+        let state: InterceptorState = (
+            Arc::new(aws_config),
+            Arc::new(Client::builder(TokioExecutor::new()).build(HttpConnector::new())),
+            InvocationProcessorHandle::noop(),
+            None,
+            propagator,
+            false,
+            tasks.clone(),
         );
+        let router = make_router(state);
+
+        for _ in 0..100 {
+            let next = Request::builder()
+                .uri("/2018-06-01/runtime/invocation/next")
+                .body(Body::empty())
+                .expect("failed to build next request");
+            let response = router.clone().oneshot(next).await.expect("next failed");
+            assert_eq!(response.status(), StatusCode::OK);
+            // The task for the event runs once the proxy has forwarded the whole body.
+            response
+                .into_body()
+                .collect()
+                .await
+                .expect("failed to read event");
+
+            let result = Request::builder()
+                .method("POST")
+                .uri("/2018-06-01/runtime/invocation/req/response")
+                .body(Body::from(r#"{"ok":true}"#))
+                .expect("failed to build response request");
+            let response = router
+                .clone()
+                .oneshot(result)
+                .await
+                .expect("response failed");
+            assert_eq!(response.status(), StatusCode::ACCEPTED);
+            tokio::task::yield_now().await;
+        }
+
+        let len = tasks.lock().await.len();
+        assert!(len <= 2, "join set holds {len} tasks after 100 invocations");
+
+        let shutdown_token = CancellationToken::new();
+        shutdown_token.cancel();
+        tokio::time::timeout(
+            Duration::from_secs(5),
+            graceful_shutdown(tasks.clone(), shutdown_token),
+        )
+        .await
+        .expect("shutdown did not finish");
+        assert!(tasks.lock().await.is_empty());
     }
 
     #[tokio::test]
