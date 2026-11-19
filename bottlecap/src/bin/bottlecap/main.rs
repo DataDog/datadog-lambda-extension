@@ -511,6 +511,7 @@ async fn extension_loop_active(
         trace_processor.clone(),
         trace_agent_channel.clone(),
         stats_concentrator.clone(),
+        Arc::clone(&proxy_aggregator),
     );
 
     // Validate and get the appropriate flush strategy for the current mode
@@ -1391,6 +1392,7 @@ fn start_otlp_agent(
     trace_processor: Arc<dyn trace_processor::TraceProcessor + Send + Sync>,
     trace_tx: Sender<SendDataBuilderInfo>,
     stats_concentrator: StatsConcentratorHandle,
+    proxy_aggregator: Arc<TokioMutex<proxy_aggregator::Aggregator>>,
 ) -> Option<CancellationToken> {
     if !should_enable_otlp_agent(config) {
         return None;
@@ -1405,6 +1407,7 @@ fn start_otlp_agent(
         trace_processor,
         trace_tx,
         stats_generator,
+        proxy_aggregator,
         cancel_token.clone(),
     );
 
