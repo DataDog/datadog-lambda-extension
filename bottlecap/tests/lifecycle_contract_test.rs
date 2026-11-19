@@ -289,3 +289,76 @@ async fn universal_instrumentation_memory_stays_bounded() {
     })
     .await;
 }
+
+/// Runtime API cycles (next event, then response) through the proxy per invocation. The proxy
+/// keeps less memory per leaked task than the lifecycle listener, so one cycle per invocation
+/// stays under [`MEMORY_GROWTH_LIMIT_KB`] even with a leak. The proxy does not link its calls to
+/// the extension's invocations.
+const PROXY_CYCLES_PER_INVOCATION: usize = 5;
+
+/// The proxy in front of the Lambda Runtime API handles the runtime's calls for the next event
+/// and for the response on every invocation. Over many warm invocations, the extension's memory
+/// must stay bounded. The Datadog wrapper with Data Streams Monitoring starts the proxy.
+#[tokio::test(flavor = "multi_thread")]
+#[serial_test::serial(bottlecap_ports)]
+async fn runtime_api_proxy_memory_stays_bounded() {
+    let s = Scenario::start(FaultMode::Ok).await;
+    let bc = s
+        .bottlecap()
+        .env("AWS_LAMBDA_EXEC_WRAPPER", "/opt/datadog_wrapper")
+        .env("DD_DATA_STREAMS_ENABLED", "true")
+        .spawn();
+    // Test-only client towards the local Runtime API proxy.
+    #[allow(clippy::disallowed_methods)]
+    let client = reqwest::Client::builder().build().unwrap();
+    let base = format!("http://127.0.0.1:{PROXY_PORT}/2018-06-01/runtime/invocation");
+
+    assert_memory_stays_bounded(&s, bc, async |request_id, deadline| {
+        for _ in 0..PROXY_CYCLES_PER_INVOCATION {
+            let next = client.get(format!("{base}/next")).send();
+            let response = tokio::time::timeout_at(deadline.into(), next)
+                .await
+                .unwrap_or_else(|_| {
+                    panic!("next for {request_id} exceeded the invocation deadline")
+                })
+                .unwrap();
+            assert!(
+                response.status().is_success(),
+                "next got {}",
+                response.status()
+            );
+            // The proxy handles the event once its whole body has passed through.
+            response.bytes().await.unwrap();
+
+            let result = client
+                .post(format!("{base}/{request_id}/response"))
+                .json(&serde_json::json!({"statusCode": 200}))
+                .send();
+            let response = tokio::time::timeout_at(deadline.into(), result)
+                .await
+                .unwrap_or_else(|_| {
+                    panic!("response for {request_id} exceeded the invocation deadline")
+                })
+                .unwrap();
+            assert!(
+                response.status().is_success(),
+                "response got {}",
+                response.status()
+            );
+        }
+
+        if request_id == "req-1" {
+            let lines = s.api.request_lines();
+            for line in [
+                "GET /2018-06-01/runtime/invocation/next".to_string(),
+                format!("POST /2018-06-01/runtime/invocation/{request_id}/response"),
+            ] {
+                assert!(
+                    lines.contains(&line),
+                    "the proxy did not forward {line}: {lines:?}"
+                );
+            }
+        }
+    })
+    .await;
+}
