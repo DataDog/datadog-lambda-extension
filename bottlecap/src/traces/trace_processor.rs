@@ -588,14 +588,14 @@ fn filter_span_from_lambda_library_or_runtime(span: &Span) -> bool {
 
 /// Loopback, unspecified, `localhost`, or the X-Ray daemon address.
 fn is_internal_address(address: &str) -> bool {
-    if address.eq_ignore_ascii_case("localhost")
-        || address.starts_with(AWS_XRAY_DAEMON_ADDRESS_URL_PREFIX)
-    {
+    if address.eq_ignore_ascii_case("localhost") {
         return true;
     }
     address.parse::<IpAddr>().is_ok_and(|ip| {
         let ip = ip.to_canonical();
-        ip.is_loopback() || ip.is_unspecified()
+        ip.is_loopback()
+            || ip.is_unspecified()
+            || AWS_XRAY_DAEMON_ADDRESS_URL_PREFIX.parse::<IpAddr>().ok() == Some(ip)
     })
 }
 
@@ -1141,6 +1141,10 @@ mod tests {
                 "expected dns.lookup of example.com ({address:?}) to be kept"
             );
         }
+
+        // A hostname that only starts with the X-Ray daemon IP is external.
+        let span = dns_lookup_span("169.254.79.129.example.com", None);
+        assert!(!filter_span_from_lambda_library_or_runtime(&span));
     }
 
     #[test]
@@ -1154,6 +1158,7 @@ mod tests {
             ("my-host", Some("0.0.0.0")),
             ("my-host", Some("::")),
             ("my-host", Some("169.254.79.129")),
+            ("my-host", Some("::ffff:169.254.79.129")),
             ("127.0.0.1", None),
             ("0.0.0.0", None),
         ];
