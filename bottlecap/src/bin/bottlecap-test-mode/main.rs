@@ -278,7 +278,7 @@ async fn shutdown_signal() -> anyhow::Result<()> {
 
 /// Spawns the periodic flush driver. Decoupled from managed-instance mode: any
 /// non-Default strategy enables it, using that strategy's interval. Note that
-/// `end` yields the 15-minute placeholder interval `FlushControl` uses to mean
+/// `end` yields the 30-minute placeholder interval `FlushControl` uses to mean
 /// "never race a flush", so it is periodic only in name. Manual flushing via
 /// `POST /flush` always works regardless.
 fn spawn_periodic_flush(
