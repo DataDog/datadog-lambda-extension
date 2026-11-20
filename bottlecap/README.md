@@ -52,7 +52,7 @@ Lambda Managed Instances run your functions on EC2 instances (managed by AWS) wi
 #### `End`
 - **Configuration**: `DD_SERVERLESS_FLUSH_STRATEGY=end`
 - **Behavior**: Always flushes at the end of each invocation (blocking)
-- **Interval**: 15 minutes (effectively disables periodic flushing)
+- **Interval**: 30 minutes, the maximum on-demand Lambda timeout (effectively disables periodic flushing)
 - **Use case**: Minimize flushing overhead - only flush once per invocation when the invocation is complete
 
 #### `EndPeriodically`
