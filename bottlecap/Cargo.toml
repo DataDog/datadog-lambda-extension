@@ -29,7 +29,7 @@ http-body = { version = "1", default-features = false }
 http-body-util = { version = "0.1", default-features = false }
 itertools = { version = "0.14", default-features = false, features = ["use_std"] }
 mime = { version = "0.3", default-features = false }
-multipart = { version = "0.18", default-features = false, features = ["server"] }
+multipart = { package = "multipart_ng", version = "0.18.1", default-features = false, features = ["server"] }
 nix = { version = "0.26", default-features = false, features = ["feature", "fs"] }
 ordered_hash_map = { version = "0.4", default-features = false }
 regex = { version = "1.10", default-features = false }
