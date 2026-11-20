@@ -55,7 +55,9 @@ pub struct TraceAgentPipeline {
     pub trace_aggregator_handle: TraceAggregatorHandle,
 }
 
-fn build_tag_replace_rules(config: &Config) -> Vec<ReplaceRule> {
+#[doc(hidden)]
+#[must_use]
+pub fn build_tag_replace_rules(config: &Config) -> Vec<ReplaceRule> {
     config
         .apm_replace_tags
         .as_ref()

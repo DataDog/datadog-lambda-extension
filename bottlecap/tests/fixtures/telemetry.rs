@@ -37,6 +37,15 @@ impl LogKind {
             LogKind::JsonString => "json_string",
         }
     }
+
+    /// The most events of this shape one POST holds: `maxItems` (1000) for text, and 600 for
+    /// the JSON shapes (1.3 to 1.5 KB each) to stay under the 1 MiB `maxBytes`.
+    pub const fn max_events_per_post(self) -> usize {
+        match self {
+            LogKind::Text => 1000,
+            LogKind::JsonObject | LogKind::JsonString => 600,
+        }
+    }
 }
 
 /// One telemetry event `millis` after `BASE_NS`:
@@ -222,7 +231,7 @@ pub fn platform_batch(request_id: &str) -> Vec<u8> {
 }
 
 /// `n` function log events of one shape, as one POST body. Lambda caps a POST at 1000 events
-/// and 1 MiB, so keep `n` at most 600 for the JSON shapes.
+/// and 1 MiB, so keep `n` at most [`LogKind::max_events_per_post`].
 pub fn log_batch(kind: LogKind, n: usize) -> Vec<u8> {
     let events: Vec<String> = (0..n).map(|i| function_event(kind, i)).collect();
     batch(&events)

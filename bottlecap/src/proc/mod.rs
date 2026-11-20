@@ -52,7 +52,8 @@ pub fn get_network_data() -> Result<NetworkData, io::Error> {
     get_network_data_from_path(PROC_NET_DEV_PATH)
 }
 
-fn get_network_data_from_path(path: &str) -> Result<NetworkData, io::Error> {
+#[doc(hidden)]
+pub fn get_network_data_from_path(path: &str) -> Result<NetworkData, io::Error> {
     let file = File::open(path)?;
     let reader = io::BufReader::new(file);
 
@@ -107,7 +108,8 @@ pub fn get_cpu_data() -> Result<CPUData, io::Error> {
     get_cpu_data_from_path(PROC_STAT_PATH)
 }
 
-fn get_cpu_data_from_path(path: &str) -> Result<CPUData, io::Error> {
+#[doc(hidden)]
+pub fn get_cpu_data_from_path(path: &str) -> Result<CPUData, io::Error> {
     let file = File::open(path)?;
     let reader = io::BufReader::new(file);
 
@@ -185,7 +187,8 @@ pub fn get_uptime() -> Result<f64, io::Error> {
     get_uptime_from_path(PROC_UPTIME_PATH)
 }
 
-fn get_uptime_from_path(path: &str) -> Result<f64, io::Error> {
+#[doc(hidden)]
+pub fn get_uptime_from_path(path: &str) -> Result<f64, io::Error> {
     let file = File::open(path)?;
     let reader = io::BufReader::new(file);
 
@@ -220,7 +223,9 @@ pub fn get_fd_max_data(pids: &[i64]) -> f64 {
     get_fd_max_data_from_path(PROC_PATH, pids)
 }
 
-fn get_fd_max_data_from_path(path: &str, pids: &[i64]) -> f64 {
+#[doc(hidden)]
+#[must_use]
+pub fn get_fd_max_data_from_path(path: &str, pids: &[i64]) -> f64 {
     let mut fd_max = constants::LAMBDA_FILE_DESCRIPTORS_DEFAULT_LIMIT;
     // regex to capture the soft limit value (first numeric value after the title)
     let re = Regex::new(r"^Max open files\s+(\d+)").expect("Failed to create regex");
@@ -252,7 +257,9 @@ pub fn get_fd_use_data(pids: &[i64]) -> f64 {
     get_fd_use_data_from_path(PROC_PATH, pids)
 }
 
-fn get_fd_use_data_from_path(path: &str, pids: &[i64]) -> f64 {
+#[doc(hidden)]
+#[must_use]
+pub fn get_fd_use_data_from_path(path: &str, pids: &[i64]) -> f64 {
     let mut fd_use = 0;
 
     for &pid in pids {
@@ -271,7 +278,9 @@ pub fn get_threads_max_data(pids: &[i64]) -> f64 {
     get_threads_max_data_from_path(PROC_PATH, pids)
 }
 
-fn get_threads_max_data_from_path(path: &str, pids: &[i64]) -> f64 {
+#[doc(hidden)]
+#[must_use]
+pub fn get_threads_max_data_from_path(path: &str, pids: &[i64]) -> f64 {
     let mut threads_max = constants::LAMBDA_EXECUTION_PROCESSES_DEFAULT_LIMIT;
     // regex to capture the soft limit value (first numeric value after the title)
     let re = Regex::new(r"^Max processes\s+(\d+)").expect("Failed to create regex");
@@ -302,7 +311,8 @@ pub fn get_threads_use_data(pids: &[i64]) -> Result<f64, io::Error> {
     get_threads_use_data_from_path(PROC_PATH, pids)
 }
 
-fn get_threads_use_data_from_path(path: &str, pids: &[i64]) -> Result<f64, io::Error> {
+#[doc(hidden)]
+pub fn get_threads_use_data_from_path(path: &str, pids: &[i64]) -> Result<f64, io::Error> {
     let mut threads_use = 0;
 
     for &pid in pids {
