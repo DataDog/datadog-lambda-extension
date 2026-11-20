@@ -542,6 +542,7 @@ dependencies = [
  "tracing-core",
  "tracing-subscriber",
  "ustr",
+ "webpki-roots 1.0.10",
  "zstd",
 ]
 
