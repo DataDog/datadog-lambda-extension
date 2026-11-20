@@ -19,9 +19,24 @@ mod fixtures;
 mod harness;
 
 use harness::prelude::*;
+use libdd_trace_protobuf::pb;
+use prost::Message as _;
 
 const TRACES_PATH: &str = "/api/v0.2/traces";
 const LOGS_PATH: &str = "/api/v2/logs";
+
+/// The root span with `trace_id` from an accepted trace request.
+fn decoded_root_span(request: &IntakeRequest, trace_id: u64) -> pb::Span {
+    let body = request.decoded_body().expect("decode intake body");
+    let payload = pb::AgentPayload::decode(body.as_slice()).expect("decode AgentPayload");
+    payload
+        .tracer_payloads
+        .into_iter()
+        .flat_map(|payload| payload.chunks)
+        .flat_map(|chunk| chunk.spans)
+        .find(|span| span.trace_id == trace_id)
+        .expect("the trace must reach the intake")
+}
 
 /// The function log [`end_invocation_and_wait`] sends for `request_id`.
 fn log_text(request_id: &str) -> String {
@@ -212,4 +227,87 @@ async fn intake_closing_mid_body_does_not_hold_next() {
         s.intake.summary()
     );
     assert!(exit.is_some_and(|e| e.success()), "exit {exit:?}");
+}
+
+/// An errored priority-0 trace is marked for backend retention even when the
+/// backend owns stats, without changing its sampling priority.
+#[tokio::test(flavor = "multi_thread")]
+#[serial_test::serial(bottlecap_ports)]
+async fn backend_owned_stats_rescues_errored_sampled_out_trace() {
+    let s = Scenario::start(FaultMode::Ok).await;
+    // Backend owns stats: the extension computes none and the tracer sends no
+    // `Datadog-Client-Computed-Stats` header (`post_trace` sends none).
+    let mut bc = s
+        .bottlecap()
+        .env("DD_LAMBDA_EXTENSION_COMPUTE_STATS", "false")
+        .env("DD_APM_ERROR_TPS", "10")
+        .spawn();
+    let deadline = s
+        .invoke("req-1", secs(10), 1, bc.startup_deadline())
+        .await
+        .unwrap_or_else(|| panic!("no /next poll. {}", bc.log_tail(40)));
+
+    let mut traces = fixtures::traces::make_traces(1, 1, false);
+    let root = &mut traces[0][0];
+    root.error = 1;
+    root.metrics
+        .insert("_sampling_priority_v1".to_string(), 0.0);
+    let trace_id = root.trace_id;
+    let status = post_trace(fixtures::traces::v04_msgpack(&traces), STARTUP_BUDGET)
+        .await
+        .unwrap();
+    eprintln!("trace agent answered {status} to the errored priority-0 trace");
+
+    let released = end_invocation_and_wait(&s, "req-1", true, 2, deadline).await;
+    let accepted = s
+        .intake
+        .wait_for(
+            1,
+            |r| {
+                r.path.contains(TRACES_PATH)
+                    && r.status == 202
+                    && r.api_key() == Some(TEST_API_KEY)
+                    && r.trace_ids().unwrap().contains(&trace_id)
+            },
+            deadline,
+        )
+        .await;
+
+    s.shutdown_cleanly(&mut bc).await;
+
+    assert!(
+        released,
+        "the errored sampled-out trace held /next. {}",
+        bc.log_tail(40)
+    );
+    assert!(
+        accepted,
+        "the errored priority-0 trace never reached the intake with the API key (trace agent answered {status}). Intake:\n{}",
+        s.intake.summary()
+    );
+    let request = s
+        .intake
+        .requests_to(TRACES_PATH)
+        .into_iter()
+        .find(|r| r.status == 202 && r.api_key() == Some(TEST_API_KEY))
+        .expect("accepted trace request");
+    let root = decoded_root_span(&request, trace_id);
+    assert!(
+        root.error != 0,
+        "the decoded root span must still be errored. Intake:\n{}",
+        s.intake.summary()
+    );
+    let errors_sr = root.metrics.get("_dd.errors_sr").copied();
+    assert!(
+        errors_sr.is_some_and(|rate| rate > 0.0),
+        "the backend-owned errored trace must be rescued with _dd.errors_sr > 0, got {errors_sr:?}. Intake:\n{}\n{}",
+        s.intake.summary(),
+        bc.log_tail(40)
+    );
+    assert_eq!(
+        root.metrics.get("_sampling_priority_v1").copied(),
+        Some(0.0),
+        "the rescue must not change the sampling priority. Intake:\n{}",
+        s.intake.summary()
+    );
 }

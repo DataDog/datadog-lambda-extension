@@ -81,6 +81,8 @@ bottlecap ({{ $flavor.name }}):
     max: 2
     when:
       - stuck_or_timeout_failure
+      # GitLab gives a job that exceeds `timeout` this reason, not the one above.
+      - job_execution_timeout
       - runner_system_failure
       - script_failure
   artifacts:
