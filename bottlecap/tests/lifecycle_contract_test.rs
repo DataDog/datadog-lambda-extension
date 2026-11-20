@@ -193,3 +193,99 @@ async fn express_event_without_redrive_count_returns_trace_context() {
     );
     s.shutdown_cleanly(&mut bc).await;
 }
+
+/// Invocations before the RSS baseline. In Linux runs of this test, RSS levels off by invocation 500.
+const MEMORY_WARMUP: usize = 500;
+/// Invocations measured after the baseline.
+const MEMORY_MEASURED: usize = 3000;
+/// Allowed RSS growth over the measured invocations. A leak of 2 KiB per invocation grows
+/// about 6 MiB in 3,000 invocations. Without a leak, RSS moves about 1 MiB.
+const MEMORY_GROWTH_LIMIT_KB: u64 = 3 * 1024;
+
+/// Runs warm invocations, calling `per_invocation` with each request ID and deadline between
+/// `platform.start` and `platform.runtimeDone`. On Linux, asserts that RSS grows by at most
+/// [`MEMORY_GROWTH_LIMIT_KB`] after the warm-up. Then shuts down cleanly.
+async fn assert_memory_stays_bounded(
+    s: &Scenario,
+    mut bc: BottlecapProcess,
+    per_invocation: impl AsyncFn(&str, Instant),
+) {
+    // Without a memory measurement, a few invocations still check the calls and the shutdown.
+    let measured = if BottlecapProcess::can_measure_memory() {
+        MEMORY_MEASURED
+    } else {
+        10
+    };
+    let mut poll_by = bc.startup_deadline();
+    let mut rss_baseline = None;
+    for n in 1..=MEMORY_WARMUP + measured {
+        let request_id = format!("req-{n}");
+        let deadline = s
+            .invoke(&request_id, INVOKE_DEADLINE, n, poll_by)
+            .await
+            .unwrap_or_else(|| panic!("no /next poll {n}. {}", bc.log_tail(40)));
+        deliver_start(&s.api, &request_id, n == 1).await.unwrap();
+        per_invocation(&request_id, deadline).await;
+        deliver_runtime_done(&s.api, &request_id, true)
+            .await
+            .unwrap();
+        poll_by = deadline;
+        if n == MEMORY_WARMUP {
+            rss_baseline = bc.rss_kb();
+        }
+    }
+    assert!(
+        s.api
+            .wait_for_next_calls(MEMORY_WARMUP + measured + 1, poll_by)
+            .await,
+        "no /next after the last invocation. {}",
+        bc.log_tail(40)
+    );
+
+    if BottlecapProcess::can_measure_memory() {
+        let baseline = rss_baseline.expect("no RSS after the warm-up");
+        let end = bc.rss_kb().expect("no RSS after the last invocation");
+        let growth = end.saturating_sub(baseline);
+        assert!(
+            growth <= MEMORY_GROWTH_LIMIT_KB,
+            "RSS grew {growth} KiB over {measured} invocations ({baseline} -> {end} KiB). {}",
+            bc.log_tail(40)
+        );
+    }
+    s.shutdown_cleanly(&mut bc).await;
+}
+
+/// With universal instrumentation, the tracer calls start-invocation and end-invocation on
+/// every invocation. Over many warm invocations, the extension's memory must stay bounded.
+#[tokio::test(flavor = "multi_thread")]
+#[serial_test::serial(bottlecap_ports)]
+async fn universal_instrumentation_memory_stays_bounded() {
+    let s = Scenario::start(FaultMode::Ok).await;
+    let bc = s.bottlecap().spawn();
+    // Test-only client towards the local lifecycle listener.
+    #[allow(clippy::disallowed_methods)]
+    let client = reqwest::Client::builder().build().unwrap();
+    let event: serde_json::Value =
+        serde_json::from_str(&fixtures::events::payload("api_gateway_http_event")).unwrap();
+
+    assert_memory_stays_bounded(&s, bc, async |request_id, deadline| {
+        for (path, body) in [
+            ("start-invocation", event.clone()),
+            ("end-invocation", serde_json::json!({"statusCode": 200})),
+        ] {
+            let response = tokio::time::timeout_at(
+                deadline.into(),
+                client
+                    .post(format!("http://127.0.0.1:{LIFECYCLE_PORT}/lambda/{path}"))
+                    .header("lambda-runtime-aws-request-id", request_id)
+                    .json(&body)
+                    .send(),
+            )
+            .await
+            .unwrap_or_else(|_| panic!("{path} for {request_id} exceeded the invocation deadline"))
+            .unwrap();
+            assert_eq!(response.status(), reqwest::StatusCode::OK);
+        }
+    })
+    .await;
+}
