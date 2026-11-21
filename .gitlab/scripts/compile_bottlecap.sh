@@ -38,6 +38,19 @@ else
     printf "Debug mode requested: ${DEBUG}\n"
 fi
 
+if [ "$KEEP_SYMBOLS" != "1" ]; then
+    OUTPUT_NAME=bottlecap-$FILE_SUFFIX
+    KEEP_SYMBOLS_ARG=()
+else
+    if [ "$ALPINE" != "0" ]; then
+        printf "[ERROR]: KEEP_SYMBOLS=1 is only supported with Dockerfile.bottlecap.compile (ALPINE=0)\n"
+        exit 1
+    fi
+    OUTPUT_NAME=bottlecap-$FILE_SUFFIX-unstripped
+    KEEP_SYMBOLS_ARG=(--build-arg KEEP_SYMBOLS=1)
+    printf "Keeping symbols: the output is %s and is not shipped\n" "$OUTPUT_NAME"
+fi
+
 if [ "$ALPINE" = "0" ]; then
     COMPILE_IMAGE=Dockerfile.bottlecap.compile
 else
@@ -53,7 +66,7 @@ cd $ROOT_DIR
 
 BINARY_DIR=".binaries"
 TARGET_DIR=$(pwd)/$BINARY_DIR
-BINARY_PATH=$TARGET_DIR/compiled-bottlecap-$FILE_SUFFIX
+BINARY_PATH=$TARGET_DIR/compiled-$OUTPUT_NAME
 
 mkdir -p $BINARY_DIR
 
@@ -75,11 +88,12 @@ docker_build() {
         --build-arg PLATFORM=$PLATFORM \
         --build-arg FIPS="${FIPS}" \
         --build-arg DEBUG="${DEBUG}" \
+        "${KEEP_SYMBOLS_ARG[@]}" \
         . -o $BINARY_PATH
 
     # Copy the compiled binary to the target directory with the expected name
     # If it already exist, it will be replaced
-    cp $BINARY_PATH/bottlecap $TARGET_DIR/bottlecap-$FILE_SUFFIX
+    cp "$BINARY_PATH/bottlecap" "$TARGET_DIR/$OUTPUT_NAME"
 }
 
 docker_build $ARCHITECTURE $COMPILE_IMAGE
