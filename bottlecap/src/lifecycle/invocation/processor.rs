@@ -947,7 +947,7 @@ impl Processor {
                 .await;
             }
             ReportMetrics::OnDemand(metrics) => {
-                self.handle_ondemand_report(request_id, metrics, timestamp);
+                self.handle_ondemand_report(request_id, metrics, timestamp, status);
             }
         }
 
@@ -1039,6 +1039,7 @@ impl Processor {
         request_id: &String,
         metrics: OnDemandReportMetrics,
         timestamp: i64,
+        status: Status,
     ) {
         // If the invocation hit the memory limit, increment the OOM metric. This catches
         // OOM-induced failures that don't surface through a runtime-specific log line or a
@@ -1046,7 +1047,9 @@ impl Processor {
         // pattern reported in datadog-lambda-extension#1237 (Node). Best-effort dedup
         // against the other two detection paths is handled by `try_increment_oom_metric`
         // (it can still double-count in edge cases — see that function's doc).
-        if metrics.max_memory_used_mb == metrics.memory_size_mb {
+        // A successful invocation can sit at the limit without running out of memory, for
+        // example a JVM whose heap fills the memory size, so it is not counted.
+        if status != Status::Success && metrics.max_memory_used_mb == metrics.memory_size_mb {
             debug!(
                 "Invocation Processor | PlatformReport | Last invocation hit memory limit. Incrementing OOM metric."
             );
@@ -1618,7 +1621,8 @@ impl Processor {
     /// Several detection paths can fire for the same invocation:
     /// 1. A runtime-specific OOM log line (logs processor → `Event::OutOfMemory`)
     /// 2. `error_type == "Runtime.OutOfMemory"` in `PlatformRuntimeDone`
-    /// 3. `max_memory_used_mb == memory_size_mb` in `PlatformReport`
+    /// 3. `max_memory_used_mb == memory_size_mb` in `PlatformReport`, for an invocation
+    ///    that did not succeed
     ///
     /// When `request_id` is supplied AND the matching context is still in the
     /// buffer, the per-invocation `Context::oom_emitted` flag guarantees one
@@ -2689,7 +2693,12 @@ mod tests {
         // Processor receives the platform report event
         // This should set the init duration metric as the processor is initalized
         // with init_duration_metric_emitted set to false
-        processor.handle_ondemand_report(&"req-1".to_string(), report_metrics, timestamp);
+        processor.handle_ondemand_report(
+            &"req-1".to_string(),
+            report_metrics,
+            timestamp,
+            Status::Success,
+        );
 
         // Check that the init duration metric was inserted into the aggregator
         let tags = dogstatsd::metric::SortedTags::parse("init_type:on-demand").ok();
@@ -2729,7 +2738,12 @@ mod tests {
         };
 
         // A warm invocation has no init_duration_ms, so nothing should be emitted
-        processor.handle_ondemand_report(&"req-1".to_string(), report_metrics, timestamp);
+        processor.handle_ondemand_report(
+            &"req-1".to_string(),
+            report_metrics,
+            timestamp,
+            Status::Success,
+        );
 
         // Check that an init duration metric was NOT inserted into the aggregator
         assert!(!processor.init_duration_metric_emitted);
@@ -2773,6 +2787,7 @@ mod tests {
             &"req-1".to_string(),
             report_metrics,
             platform_report_timestamp,
+            Status::Success,
         );
 
         // Filter for metrics with the "on-demand" init type
@@ -3532,8 +3547,9 @@ mod tests {
         );
     }
 
-    /// In `handle_ondemand_report`, when `max_memory_used_mb == memory_size_mb`,
-    /// the OOM metric should be incremented exactly once for that invocation.
+    /// In `handle_ondemand_report`, when a failed invocation has
+    /// `max_memory_used_mb == memory_size_mb`, the OOM metric should be incremented
+    /// exactly once for that invocation.
     #[tokio::test]
     async fn test_handle_ondemand_report_emits_oom_on_memory_equality() {
         let mut p = setup();
@@ -3555,7 +3571,7 @@ mod tests {
             init_duration_ms: None,
             restore_duration_ms: None,
         };
-        p.handle_ondemand_report(&request_id, metrics, now);
+        p.handle_ondemand_report(&request_id, metrics, now, Status::Error);
 
         let ts = (now / 10) * 10;
         assert!(
@@ -3570,6 +3586,47 @@ mod tests {
                 .unwrap()
                 .is_some(),
             "OOM must be emitted when max_memory_used_mb == memory_size_mb"
+        );
+    }
+
+    /// A successful invocation at the memory limit is not an OOM. A JVM heap can fill
+    /// the memory size and keep working.
+    #[tokio::test]
+    async fn test_handle_ondemand_report_skips_oom_on_memory_equality_for_success() {
+        let mut p = setup();
+        let request_id = String::from("req-eq-success");
+        p.context_buffer.start_context(&request_id, Span::default());
+
+        let now: i64 = std::time::UNIX_EPOCH
+            .elapsed()
+            .expect("clock")
+            .as_secs()
+            .try_into()
+            .unwrap_or_default();
+
+        let metrics = OnDemandReportMetrics {
+            duration_ms: 100.0,
+            billed_duration_ms: 100,
+            memory_size_mb: 512,
+            max_memory_used_mb: 512,
+            init_duration_ms: None,
+            restore_duration_ms: None,
+        };
+        p.handle_ondemand_report(&request_id, metrics, now, Status::Success);
+
+        let ts = (now / 10) * 10;
+        assert!(
+            p.enhanced_metrics
+                .aggr_handle
+                .get_entry_by_id(
+                    crate::metrics::enhanced::constants::OUT_OF_MEMORY_METRIC.into(),
+                    None,
+                    ts
+                )
+                .await
+                .unwrap()
+                .is_none(),
+            "OOM must not be emitted for a successful invocation at the memory limit"
         );
     }
 
