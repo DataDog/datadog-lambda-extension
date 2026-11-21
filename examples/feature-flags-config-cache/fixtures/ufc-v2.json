@@ -1,0 +1,111 @@
+{
+  "data": {
+    "id": "1",
+    "type": "universal-flag-configuration",
+    "attributes": {
+      "createdAt": "2026-11-17T12:05:00.000Z",
+      "format": "SERVER",
+      "environment": {
+        "name": "prod"
+      },
+      "flags": {
+        "kill-switch": {
+          "key": "kill-switch",
+          "enabled": true,
+          "variationType": "BOOLEAN",
+          "variations": {
+            "on": {
+              "key": "on",
+              "value": true
+            },
+            "off": {
+              "key": "off",
+              "value": false
+            }
+          },
+          "allocations": [
+            {
+              "key": "on-for-NA",
+              "rules": [
+                {
+                  "conditions": [
+                    {
+                      "attribute": "country",
+                      "operator": "ONE_OF",
+                      "value": [
+                        "US",
+                        "Canada",
+                        "Mexico"
+                      ]
+                    }
+                  ]
+                }
+              ],
+              "splits": [
+                {
+                  "variationKey": "on",
+                  "shards": [
+                    {
+                      "salt": "some-salt",
+                      "totalShards": 10000,
+                      "ranges": [
+                        {
+                          "start": 0,
+                          "end": 10000
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ],
+              "doLog": true
+            },
+            {
+              "key": "on-for-age-50+",
+              "rules": [
+                {
+                  "conditions": [
+                    {
+                      "attribute": "age",
+                      "operator": "GTE",
+                      "value": 50
+                    }
+                  ]
+                }
+              ],
+              "splits": [
+                {
+                  "variationKey": "on",
+                  "shards": [
+                    {
+                      "salt": "some-salt",
+                      "totalShards": 10000,
+                      "ranges": [
+                        {
+                          "start": 0,
+                          "end": 10000
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ],
+              "doLog": true
+            },
+            {
+              "key": "on-for-all",
+              "rules": [],
+              "splits": [
+                {
+                  "variationKey": "on",
+                  "shards": []
+                }
+              ],
+              "doLog": true
+            }
+          ]
+        }
+      }
+    }
+  }
+}

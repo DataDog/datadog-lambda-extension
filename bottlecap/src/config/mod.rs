@@ -115,6 +115,21 @@ pub struct LambdaConfig {
     pub api_security_sample_delay: Duration,
     pub custom_metrics_exclude_tags: Vec<String>,
 
+    /// `DD_FEATURE_FLAGS_EXTENSION_CACHE_ENABLED`: serve the feature flag
+    /// configuration route from a cache in this execution environment.
+    pub feature_flags_extension_cache_enabled: bool,
+    /// Serve the cached configuration without contacting Datadog while it is
+    /// this young.
+    pub feature_flags_extension_cache_ttl_seconds: Duration,
+    /// When a refresh fails, keep serving a configuration up to this age.
+    pub feature_flags_extension_cache_max_stale_seconds: Duration,
+    /// Longest a read waits for the first configuration.
+    pub feature_flags_extension_cache_startup_wait_ms: u64,
+    /// Longest a read waits for a refresh before it gets the stale configuration.
+    pub feature_flags_extension_cache_refresh_wait_ms: u64,
+    /// Configuration file shipped with the function, used until Datadog answers.
+    pub feature_flags_extension_cache_bootstrap_file: Option<String>,
+
     /// When true, inferred (synthetic) event-source spans report the function's
     /// base service (`DD_SERVICE`) instead of the AWS resource/instance
     /// representation. An explicit `DD_SERVICE_MAPPING` entry still wins.
@@ -182,6 +197,12 @@ impl Default for LambdaConfig {
             api_security_enabled: true,
             api_security_sample_delay: Duration::from_secs(30),
             custom_metrics_exclude_tags: Vec::new(),
+            feature_flags_extension_cache_enabled: false,
+            feature_flags_extension_cache_ttl_seconds: Duration::from_secs(30),
+            feature_flags_extension_cache_max_stale_seconds: Duration::from_secs(300),
+            feature_flags_extension_cache_startup_wait_ms: 3000,
+            feature_flags_extension_cache_refresh_wait_ms: 500,
+            feature_flags_extension_cache_bootstrap_file: None,
             trace_remove_integration_service_names_enabled: false,
             lambda_durable_function_log_buffer_size: 5,
             dsm_consume_enabled: false,
@@ -296,6 +317,19 @@ pub struct LambdaConfigSource {
     #[serde(deserialize_with = "deser_dur_secs")]
     pub api_security_sample_delay: Option<Duration>,
 
+    #[serde(deserialize_with = "deser_opt_bool")]
+    pub feature_flags_extension_cache_enabled: Option<bool>,
+    #[serde(deserialize_with = "deser_dur_secs")]
+    pub feature_flags_extension_cache_ttl_seconds: Option<Duration>,
+    #[serde(deserialize_with = "deser_dur_secs")]
+    pub feature_flags_extension_cache_max_stale_seconds: Option<Duration>,
+    #[serde(deserialize_with = "deser_opt_lossless")]
+    pub feature_flags_extension_cache_startup_wait_ms: Option<u64>,
+    #[serde(deserialize_with = "deser_opt_lossless")]
+    pub feature_flags_extension_cache_refresh_wait_ms: Option<u64>,
+    #[serde(deserialize_with = "deser_opt_str")]
+    pub feature_flags_extension_cache_bootstrap_file: Option<String>,
+
     /// `DD_LAMBDA_CUSTOMER_METRICS_EXCLUDE_TAGS` — comma-separated list of tag
     /// names to drop from customer `DogStatsD` metrics. Source field name
     /// matches the env var; merges into `custom_metrics_exclude_tags`.
@@ -368,8 +402,13 @@ impl DatadogConfigExtension for LambdaConfig {
                 trace_remove_integration_service_names_enabled,
                 lambda_durable_function_log_buffer_size,
                 trace_experimental_features_enabled,
+                feature_flags_extension_cache_enabled,
+                feature_flags_extension_cache_ttl_seconds,
+                feature_flags_extension_cache_max_stale_seconds,
+                feature_flags_extension_cache_startup_wait_ms,
+                feature_flags_extension_cache_refresh_wait_ms,
             ],
-            option: [span_dedup_timeout, api_key_secret_reload_interval, appsec_rules, serverless_error_sampler_enabled, dsm_exchange_name, dsm_kafka_group],
+            option: [feature_flags_extension_cache_bootstrap_file, span_dedup_timeout, api_key_secret_reload_interval, appsec_rules, serverless_error_sampler_enabled, dsm_exchange_name, dsm_kafka_group],
         );
 
         if let Some(tps) = source.apm_config.errors_per_second {
@@ -1325,6 +1364,44 @@ mod lambda_config_tests {
             config.ext.api_key_secret_reload_interval,
             Some(Duration::from_secs(10))
         );
+    }
+
+    #[test]
+    fn feature_flags_extension_cache_from_env() {
+        let config = load(|jail| {
+            jail.set_env("DD_FEATURE_FLAGS_EXTENSION_CACHE_ENABLED", "true");
+            jail.set_env("DD_FEATURE_FLAGS_EXTENSION_CACHE_TTL_SECONDS", "60");
+            jail.set_env("DD_FEATURE_FLAGS_EXTENSION_CACHE_MAX_STALE_SECONDS", "600");
+            jail.set_env("DD_FEATURE_FLAGS_EXTENSION_CACHE_STARTUP_WAIT_MS", "1500");
+            jail.set_env("DD_FEATURE_FLAGS_EXTENSION_CACHE_REFRESH_WAIT_MS", "0");
+            jail.set_env(
+                "DD_FEATURE_FLAGS_EXTENSION_CACHE_BOOTSTRAP_FILE",
+                "/var/task/flags.json",
+            );
+            Ok(())
+        });
+        let ext = &config.ext;
+        assert!(ext.feature_flags_extension_cache_enabled);
+        assert_eq!(
+            ext.feature_flags_extension_cache_ttl_seconds,
+            Duration::from_secs(60)
+        );
+        assert_eq!(
+            ext.feature_flags_extension_cache_max_stale_seconds,
+            Duration::from_secs(600)
+        );
+        assert_eq!(ext.feature_flags_extension_cache_startup_wait_ms, 1500);
+        assert_eq!(ext.feature_flags_extension_cache_refresh_wait_ms, 0);
+        assert_eq!(
+            ext.feature_flags_extension_cache_bootstrap_file.as_deref(),
+            Some("/var/task/flags.json")
+        );
+    }
+
+    #[test]
+    fn feature_flags_extension_cache_is_off_by_default() {
+        let config = load(|_| Ok(()));
+        assert!(!config.ext.feature_flags_extension_cache_enabled);
     }
 
     #[test]
