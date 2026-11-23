@@ -404,6 +404,36 @@ export async function getMetricCountWithTag(
   return pointlist.reduce((acc, [, value]) => acc + (value || 0), 0);
 }
 
+/**
+ * Sums a count metric for one service over the window. Metrics forwarded to the OTLP intake
+ * are tagged from their resource attributes, so they carry `service` rather than `functionname`.
+ */
+export async function getMetricCountByService(
+  metricName: string,
+  service: string,
+  fromTime: number,
+  toTime: number,
+  tagFilter?: string,
+): Promise<number> {
+  const filter = [`service:${service.toLowerCase()}`, tagFilter].filter(Boolean).join(',');
+  const query = `sum:${metricName}{${filter}}.as_count()`;
+
+  console.log(`Querying metric count: ${query}`);
+
+  const response = await requestWithRetry(() => datadogClient.get('/api/v1/query', {
+    params: {
+      query,
+      from: Math.floor(fromTime / 1000),
+      to: Math.floor(toTime / 1000),
+    },
+  }), query);
+
+  const series = response.data.series || [];
+  return series
+    .flatMap((s: any) => s.pointlist || [])
+    .reduce((acc: number, [, value]: [number, number]) => acc + (value || 0), 0);
+}
+
 async function getMetrics(
   metricName: string,
   functionName: string,

@@ -146,5 +146,33 @@ export class Otlp extends cdk.Stack {
     });
     dotnetFunction.addToRolePolicy(defaultDatadogSecretPolicy);
     dotnetFunction.addLayers(extensionLayer);
+
+    // The default Node layer bundles dd-trace 5.80, which predates OTel metrics; this one
+    // bundles dd-trace 6.24.
+    const otelMetricsNodeLayer = lambda.LayerVersion.fromLayerVersionArn(
+      this,
+      'DatadogNodeOtelMetricsLayer',
+      'arn:aws:lambda:us-east-1:464622532012:layer:Datadog-Node24-x:144'
+    );
+    const otelMetricsFunctionName = `${id}-otel-metrics-node-lambda`;
+    const otelMetricsFunction = new lambda.Function(this, otelMetricsFunctionName, {
+      runtime: defaultNodeRuntime,
+      architecture: lambda.Architecture.ARM_64,
+      handler: '/opt/nodejs/node_modules/datadog-lambda-js/handler.handler',
+      code: lambda.Code.fromAsset('./lambda/otlp-metrics-node'),
+      functionName: otelMetricsFunctionName,
+      timeout: cdk.Duration.seconds(30),
+      memorySize: 256,
+      environment: {
+        ...defaultDatadogEnvVariables,
+        DD_SERVICE: otelMetricsFunctionName,
+        DD_LAMBDA_HANDLER: 'index.handler',
+        DD_METRICS_OTEL_ENABLED: 'true',
+        OTEL_METRIC_EXPORT_INTERVAL: '1000',
+      },
+      logGroup: createLogGroup(this, otelMetricsFunctionName)
+    });
+    otelMetricsFunction.addToRolePolicy(defaultDatadogSecretPolicy);
+    otelMetricsFunction.addLayers(extensionLayer, otelMetricsNodeLayer);
   }
 }

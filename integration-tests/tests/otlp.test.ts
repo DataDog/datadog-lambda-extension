@@ -1,14 +1,20 @@
 import { invokeAndCollectTelemetry, FunctionConfig } from './utils/default';
-import { DatadogTelemetry } from './utils/datadog';
+import { DatadogTelemetry, getMetricCountByService } from './utils/datadog';
 import { IDENTIFIER, DATADOG_INDEXING_WAIT_5_MIN_MS } from '../config';
 
 const runtimes = ['node', 'python', 'java', 'dotnet'] as const;
 type Runtime = typeof runtimes[number];
 
 const stackName = `${IDENTIFIER}-otlp`;
+const otelMetricsFunctionName = `${stackName}-otel-metrics-node-lambda`;
+// Must match lambda/otlp-metrics-node/index.js.
+const OTEL_COUNTER_NAME = 'integration.otlp_metrics.requests';
+const OTEL_COUNTER_INCREMENT = 5;
 
 describe('OTLP Integration Tests', () => {
   let telemetry: Record<string, DatadogTelemetry>;
+  let metricsStartTime: number;
+  let metricsEndTime: number;
 
   beforeAll(async () => {
     // Build function configs for all runtimes plus response validation and gRPC
@@ -25,12 +31,21 @@ describe('OTLP Integration Tests', () => {
         functionName: `${stackName}-node-grpc-lambda`,
         runtime: 'nodeGrpc',
       },
+      {
+        functionName: otelMetricsFunctionName,
+        runtime: 'otelMetrics',
+      },
     ];
 
     console.log('Invoking all OTLP Lambda functions...');
 
+    // Back up 60s so the metric's rollup bucket falls inside the query range.
+    metricsStartTime = Date.now() - 60_000;
+
     // Invoke all OTLP functions and collect telemetry
     telemetry = await invokeAndCollectTelemetry(functions, 1, 1, 0, {}, DATADOG_INDEXING_WAIT_5_MIN_MS);
+
+    metricsEndTime = Date.now();
 
     console.log('All OTLP Lambda invocations and data fetching completed');
   }, 1800000);
@@ -118,6 +133,35 @@ describe('OTLP Integration Tests', () => {
       expect(result).toBeDefined();
       const trace = result.traces![0];
       expect(trace.spans.length).toBeGreaterThan(0);
+    });
+  });
+
+  describe('OTLP Metrics Forwarding', () => {
+    it('should invoke the OTel metrics Lambda successfully', () => {
+      const result = telemetry['otelMetrics']?.threads[0]?.[0];
+      expect(result).toBeDefined();
+      expect(result.statusCode).toBe(200);
+    });
+
+    it('should deliver the counter to Datadog with its full value', async () => {
+      const count = await getMetricCountByService(
+        OTEL_COUNTER_NAME,
+        otelMetricsFunctionName,
+        metricsStartTime,
+        metricsEndTime,
+      );
+      expect(count).toBe(OTEL_COUNTER_INCREMENT);
+    });
+
+    it('should tag the counter with runtime-id', async () => {
+      const count = await getMetricCountByService(
+        OTEL_COUNTER_NAME,
+        otelMetricsFunctionName,
+        metricsStartTime,
+        metricsEndTime,
+        'runtime-id:*',
+      );
+      expect(count).toBe(OTEL_COUNTER_INCREMENT);
     });
   });
 });
