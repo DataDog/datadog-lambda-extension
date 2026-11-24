@@ -1,0 +1,9 @@
+# Suppressions for the Grype image scans in
+# `.github/workflows/vulnerability-scan.yml`. These are the rustls entries in
+# `.trivyignore.yaml`, which give the reason for each. Keep the two lists the
+# same.
+ignore:
+  - vulnerability: GHSA-2mjx-qc3c-rqvc
+  - vulnerability: GHSA-c8m5-c952-6cm4
+  - vulnerability: GHSA-h2v8-394m-p7vv
+  - vulnerability: GHSA-w44r-93j7-qv28
