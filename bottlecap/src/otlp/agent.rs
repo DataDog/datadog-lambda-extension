@@ -45,8 +45,12 @@ const MAX_RECV_MSG_SIZE_CAP: usize = 50 * 1024 * 1024; // 50MB cap (matches trac
 
 const OTLP_METRICS_PATH: &str = "/v1/metrics";
 const DD_OTEL_METRIC_CONFIG_HEADER: &str = "dd-otel-metric-config";
-// Turns resource attributes (service, env, runtime-id, DD_TAGS) into metric tags.
-const DD_OTEL_METRIC_CONFIG: &str = r#"{"resource_attributes_as_tags": true}"#;
+// The Go agent's OTLP defaults: instrumentation scope tags on, and other resource attributes
+// (runtime-id, DD_TAGS) as tags only with DD_OTLP_CONFIG_METRICS_RESOURCE_ATTRIBUTES_AS_TAGS.
+const DD_OTEL_METRIC_CONFIG: &str =
+    r#"{"resource_attributes_as_tags": false, "instrumentation_scope_metadata_as_tags": true}"#;
+const DD_OTEL_METRIC_CONFIG_RESOURCE_ATTRIBUTES_AS_TAGS: &str =
+    r#"{"resource_attributes_as_tags": true, "instrumentation_scope_metadata_as_tags": true}"#;
 
 /// State for `/v1/metrics`: requests are queued unchanged and sent to Datadog's OTLP intake
 /// by the proxy flusher.
@@ -437,9 +441,17 @@ impl Agent {
             }
         };
 
+        let metric_config = if metrics_proxy
+            .config
+            .otlp_config_metrics_resource_attributes_as_tags
+        {
+            DD_OTEL_METRIC_CONFIG_RESOURCE_ATTRIBUTES_AS_TAGS
+        } else {
+            DD_OTEL_METRIC_CONFIG
+        };
         parts.headers.insert(
             DD_OTEL_METRIC_CONFIG_HEADER,
-            HeaderValue::from_static(DD_OTEL_METRIC_CONFIG),
+            HeaderValue::from_static(metric_config),
         );
         let proxy_request = ProxyRequest {
             headers: parts.headers,
@@ -603,6 +615,35 @@ mod tests {
         assert_eq!(
             request.headers.get(DD_OTEL_METRIC_CONFIG_HEADER).unwrap(),
             DD_OTEL_METRIC_CONFIG
+        );
+    }
+
+    #[tokio::test]
+    async fn test_v1_metrics_sends_resource_attributes_as_tags_when_configured() {
+        let metrics_proxy = MetricsProxy {
+            config: Arc::new(Config {
+                otlp_config_metrics_resource_attributes_as_tags: true,
+                ..Config::default()
+            }),
+            proxy_aggregator: Arc::new(Mutex::new(proxy_aggregator::Aggregator::default())),
+        };
+        let router = Agent::http_router(None, Some(metrics_proxy.clone()));
+
+        let response = router
+            .oneshot(post_request("/v1/metrics", "application/x-protobuf", b""))
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let batch = metrics_proxy.proxy_aggregator.lock().await.get_batch();
+        assert_eq!(
+            batch
+                .first()
+                .unwrap()
+                .headers
+                .get(DD_OTEL_METRIC_CONFIG_HEADER)
+                .unwrap(),
+            DD_OTEL_METRIC_CONFIG_RESOURCE_ATTRIBUTES_AS_TAGS
         );
     }
 

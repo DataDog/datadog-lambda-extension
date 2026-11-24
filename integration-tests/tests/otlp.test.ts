@@ -153,7 +153,20 @@ describe('OTLP Integration Tests', () => {
       expect(count).toBe(OTEL_COUNTER_INCREMENT);
     });
 
-    it('should tag the counter with runtime-id', async () => {
+    it('should tag the counter with its instrumentation scope', async () => {
+      const count = await getMetricCountByService(
+        OTEL_COUNTER_NAME,
+        otelMetricsFunctionName,
+        metricsStartTime,
+        metricsEndTime,
+        'instrumentation_scope:otlp-metrics-node',
+      );
+      expect(count).toBe(OTEL_COUNTER_INCREMENT);
+    });
+
+    // Like the Go agent, other resource attributes are tags only with
+    // DD_OTLP_CONFIG_METRICS_RESOURCE_ATTRIBUTES_AS_TAGS.
+    it('should not tag the counter with runtime-id', async () => {
       const count = await getMetricCountByService(
         OTEL_COUNTER_NAME,
         otelMetricsFunctionName,
@@ -161,7 +174,7 @@ describe('OTLP Integration Tests', () => {
         metricsEndTime,
         'runtime-id:*',
       );
-      expect(count).toBe(OTEL_COUNTER_INCREMENT);
+      expect(count).toBe(0);
     });
   });
 });

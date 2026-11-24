@@ -151,7 +151,9 @@ async fn metrics_export_is_forwarded_unchanged_with_metric_config_header() {
     assert_eq!(sent[0].api_key(), Some(TEST_API_KEY));
     assert_eq!(
         sent[0].header("dd-otel-metric-config"),
-        Some(r#"{"resource_attributes_as_tags": true}"#)
+        Some(
+            r#"{"resource_attributes_as_tags": false, "instrumentation_scope_metadata_as_tags": true}"#
+        )
     );
     assert_eq!(sent[0].header("content-type"), Some("application/json"));
     assert_eq!(sent[0].header("content-encoding"), Some("gzip"));
