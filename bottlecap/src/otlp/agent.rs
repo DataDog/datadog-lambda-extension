@@ -56,8 +56,27 @@ const DD_OTEL_METRIC_CONFIG_RESOURCE_ATTRIBUTES_AS_TAGS: &str =
 /// by the proxy flusher.
 #[derive(Clone)]
 struct MetricsProxy {
-    config: Arc<Config>,
+    target_url: String,
+    metric_config: &'static str,
     proxy_aggregator: Arc<Mutex<proxy_aggregator::Aggregator>>,
+}
+
+impl MetricsProxy {
+    fn new(config: &Config, proxy_aggregator: Arc<Mutex<proxy_aggregator::Aggregator>>) -> Self {
+        let intake_url = match config.ext.otlp_config_metrics_dd_url.as_deref() {
+            Some(url) => url.trim_end_matches('/').to_string(),
+            None => format!("https://otlp.{}", config.site),
+        };
+        Self {
+            target_url: format!("{intake_url}{OTLP_METRICS_PATH}"),
+            metric_config: if config.otlp_config_metrics_resource_attributes_as_tags {
+                DD_OTEL_METRIC_CONFIG_RESOURCE_ATTRIBUTES_AS_TAGS
+            } else {
+                DD_OTEL_METRIC_CONFIG
+            },
+            proxy_aggregator,
+        }
+    }
 }
 
 /// Shared state and trace processing pipeline used by both HTTP and gRPC handlers.
@@ -194,10 +213,7 @@ impl Agent {
             .filter(|_| traces_enabled)
             .map(|ep| Self::parse_port(Some(ep), OTLP_AGENT_GRPC_PORT));
 
-        let metrics_proxy = metrics_enabled.then(|| MetricsProxy {
-            config: Arc::clone(&config),
-            proxy_aggregator,
-        });
+        let metrics_proxy = metrics_enabled.then(|| MetricsProxy::new(&config, proxy_aggregator));
 
         let pipeline = TracePipeline {
             config: Arc::clone(&config),
@@ -441,25 +457,14 @@ impl Agent {
             }
         };
 
-        let metric_config = if metrics_proxy
-            .config
-            .otlp_config_metrics_resource_attributes_as_tags
-        {
-            DD_OTEL_METRIC_CONFIG_RESOURCE_ATTRIBUTES_AS_TAGS
-        } else {
-            DD_OTEL_METRIC_CONFIG
-        };
         parts.headers.insert(
             DD_OTEL_METRIC_CONFIG_HEADER,
-            HeaderValue::from_static(metric_config),
+            HeaderValue::from_static(metrics_proxy.metric_config),
         );
         let proxy_request = ProxyRequest {
             headers: parts.headers,
             body,
-            target_url: format!(
-                "https://otlp.{}{OTLP_METRICS_PATH}",
-                metrics_proxy.config.site
-            ),
+            target_url: metrics_proxy.target_url.clone(),
         };
         metrics_proxy
             .proxy_aggregator
@@ -565,13 +570,13 @@ mod tests {
     use tower::ServiceExt;
 
     fn metrics_proxy() -> MetricsProxy {
-        MetricsProxy {
-            config: Arc::new(Config {
+        MetricsProxy::new(
+            &Config {
                 site: "datadoghq.eu".to_string(),
                 ..Config::default()
-            }),
-            proxy_aggregator: Arc::new(Mutex::new(proxy_aggregator::Aggregator::default())),
-        }
+            },
+            Arc::new(Mutex::new(proxy_aggregator::Aggregator::default())),
+        )
     }
 
     fn post_request(path: &str, content_type: &str, body: &'static [u8]) -> Request {
@@ -620,13 +625,13 @@ mod tests {
 
     #[tokio::test]
     async fn test_v1_metrics_sends_resource_attributes_as_tags_when_configured() {
-        let metrics_proxy = MetricsProxy {
-            config: Arc::new(Config {
+        let metrics_proxy = MetricsProxy::new(
+            &Config {
                 otlp_config_metrics_resource_attributes_as_tags: true,
                 ..Config::default()
-            }),
-            proxy_aggregator: Arc::new(Mutex::new(proxy_aggregator::Aggregator::default())),
-        };
+            },
+            Arc::new(Mutex::new(proxy_aggregator::Aggregator::default())),
+        );
         let router = Agent::http_router(None, Some(metrics_proxy.clone()));
 
         let response = router

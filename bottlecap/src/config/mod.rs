@@ -150,6 +150,9 @@ pub struct LambdaConfig {
     /// `/v1/metrics` and forwards it to Datadog's OTLP intake, as
     /// `DD_OTLP_CONFIG_METRICS_ENABLED` does.
     pub metrics_otel_enabled: bool,
+    /// `DD_OTLP_CONFIG_METRICS_DD_URL`: the URL OTLP metrics are forwarded to in place of
+    /// `https://otlp.<DD_SITE>`, for example a proxy. `/v1/metrics` is appended.
+    pub otlp_config_metrics_dd_url: Option<String>,
 
     /// `DD_TRACE_EXPERIMENTAL_FEATURES_ENABLED`: gates `additional_metric_tags` and
     /// `additional_metric_tags_cardinality_limit` below, matching the Serverless
@@ -194,6 +197,7 @@ impl Default for LambdaConfig {
             dsm_exchange_name: None,
             dsm_kafka_group: None,
             metrics_otel_enabled: false,
+            otlp_config_metrics_dd_url: None,
             trace_experimental_features_enabled: false,
             additional_metric_tags: Vec::new(),
             additional_metric_tags_cardinality_limit: None,
@@ -336,6 +340,9 @@ pub struct LambdaConfigSource {
     /// `DD_METRICS_OTEL_ENABLED`: see `LambdaConfig::metrics_otel_enabled`.
     #[serde(deserialize_with = "deser_opt_bool")]
     pub metrics_otel_enabled: Option<bool>,
+    /// `DD_OTLP_CONFIG_METRICS_DD_URL`: see `LambdaConfig::otlp_config_metrics_dd_url`.
+    #[serde(deserialize_with = "deser_opt_str")]
+    pub otlp_config_metrics_dd_url: Option<String>,
 
     /// `DD_TRACE_EXPERIMENTAL_FEATURES_ENABLED`: see `LambdaConfig::trace_experimental_features_enabled`.
     #[serde(deserialize_with = "deser_opt_bool")]
@@ -381,7 +388,7 @@ impl DatadogConfigExtension for LambdaConfig {
                 metrics_otel_enabled,
                 trace_experimental_features_enabled,
             ],
-            option: [span_dedup_timeout, api_key_secret_reload_interval, appsec_rules, serverless_error_sampler_enabled, dsm_exchange_name, dsm_kafka_group],
+            option: [span_dedup_timeout, api_key_secret_reload_interval, appsec_rules, serverless_error_sampler_enabled, dsm_exchange_name, dsm_kafka_group, otlp_config_metrics_dd_url],
         );
 
         if let Some(tps) = source.apm_config.errors_per_second {
