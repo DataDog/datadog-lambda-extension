@@ -1,7 +1,5 @@
 # Suppressions for the `bottlecap/Cargo.lock` scans in
-# `.github/workflows/rs_ci.yml` and `.github/workflows/vulnerability-scan.yml`,
-# and for the release image scans in `vulnerability-scan.yml`. The Grype image
-# scans read `.grype.yaml`, which repeats the rustls entries.
+# `.github/workflows/rs_ci.yml` and `.github/workflows/vulnerability-scan.yml`.
 #
 # `Cargo.lock` covers build and dev dependencies as well as the crates linked
 # into the extension, so it over-reports relative to what ships. The dependency
