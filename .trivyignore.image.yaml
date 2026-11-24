@@ -1,0 +1,15 @@
+# Suppressions for the Trivy scans of the release images in
+# `.github/workflows/vulnerability-scan.yml`. These are the rustls entries in
+# `.trivyignore.yaml`, which give the reason for each. That file also waives
+# build-only crates, which must stay visible to the image scans, so the image
+# scans read this file instead. Keep the rustls entries in this file,
+# `.trivyignore.yaml` and `.grype.yaml` the same.
+vulnerabilities:
+  - id: GHSA-2mjx-qc3c-rqvc
+    statement: rustls fix needs AWS-LC-FIPS 4.x, which is not FIPS 140-3 certified.
+  - id: GHSA-c8m5-c952-6cm4
+    statement: rustls fix needs AWS-LC-FIPS 4.x, which is not FIPS 140-3 certified.
+  - id: GHSA-h2v8-394m-p7vv
+    statement: rustls fix needs AWS-LC-FIPS 4.x, which is not FIPS 140-3 certified.
+  - id: GHSA-w44r-93j7-qv28
+    statement: rustls fix needs AWS-LC-FIPS 4.x, which is not FIPS 140-3 certified.
