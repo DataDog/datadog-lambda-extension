@@ -85,6 +85,7 @@ impl<'api> BottlecapBuilder<'api> {
             "DD_URL",
             "DD_APM_DD_URL",
             "DD_LOGS_CONFIG_LOGS_DD_URL",
+            "DD_OTLP_CONFIG_METRICS_DD_URL",
         ] {
             self.env.insert(key.to_string(), url.to_string());
         }

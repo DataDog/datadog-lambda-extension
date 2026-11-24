@@ -1,7 +1,7 @@
 use axum::{
     Router,
     extract::{Request, State},
-    http::{StatusCode, header},
+    http::{HeaderValue, StatusCode, header},
     response::{IntoResponse, Response},
     routing::post,
 };
@@ -14,7 +14,10 @@ use opentelemetry_proto::tonic::collector::trace::v1::{
 use prost::Message;
 use std::net::SocketAddr;
 use std::sync::Arc;
-use tokio::{net::TcpListener, sync::mpsc::Sender};
+use tokio::{
+    net::TcpListener,
+    sync::{Mutex, mpsc::Sender},
+};
 use tokio_util::sync::CancellationToken;
 use tonic_types::Status as ProtoStatus;
 use tracing::{debug, error};
@@ -22,9 +25,13 @@ use tracing::{debug, error};
 use crate::{
     config::Config,
     http::{extract_request_body, handler_not_found},
-    otlp::processor::{OtlpEncoding, Processor as OtlpProcessor},
+    otlp::{
+        processor::{OtlpEncoding, Processor as OtlpProcessor},
+        should_enable_otlp_metrics, should_enable_otlp_traces,
+    },
     tags::provider,
     traces::{
+        proxy_aggregator::{self, ProxyRequest},
         stats_generator::StatsGenerator,
         trace_aggregator::SendDataBuilderInfo,
         trace_processor::{StatsComputedBy, TraceProcessor},
@@ -35,6 +42,23 @@ const OTLP_AGENT_HTTP_PORT: u16 = 4318;
 const OTLP_AGENT_GRPC_PORT: u16 = 4317;
 const DEFAULT_MAX_RECV_MSG_SIZE: usize = 4 * 1024 * 1024; // 4MB default
 const MAX_RECV_MSG_SIZE_CAP: usize = 50 * 1024 * 1024; // 50MB cap (matches trace agent)
+
+const OTLP_METRICS_PATH: &str = "/v1/metrics";
+const DD_OTEL_METRIC_CONFIG_HEADER: &str = "dd-otel-metric-config";
+// The Go agent's OTLP defaults: instrumentation scope tags on, and other resource attributes
+// (runtime-id, DD_TAGS) as tags only with DD_OTLP_CONFIG_METRICS_RESOURCE_ATTRIBUTES_AS_TAGS.
+const DD_OTEL_METRIC_CONFIG: &str =
+    r#"{"resource_attributes_as_tags": false, "instrumentation_scope_metadata_as_tags": true}"#;
+const DD_OTEL_METRIC_CONFIG_RESOURCE_ATTRIBUTES_AS_TAGS: &str =
+    r#"{"resource_attributes_as_tags": true, "instrumentation_scope_metadata_as_tags": true}"#;
+
+/// State for `/v1/metrics`: requests are queued unchanged and sent to Datadog's OTLP intake
+/// by the proxy flusher.
+#[derive(Clone)]
+struct MetricsProxy {
+    config: Arc<Config>,
+    proxy_aggregator: Arc<Mutex<proxy_aggregator::Aggregator>>,
+}
 
 /// Shared state and trace processing pipeline used by both HTTP and gRPC handlers.
 #[derive(Clone)]
@@ -140,6 +164,8 @@ impl TraceService for TracePipeline {
 
 pub struct Agent {
     pipeline: TracePipeline,
+    metrics_proxy: Option<MetricsProxy>,
+    traces_enabled: bool,
     cancel_token: CancellationToken,
     http_port: Option<u16>,
     grpc_port: Option<u16>,
@@ -152,17 +178,26 @@ impl Agent {
         trace_processor: Arc<dyn TraceProcessor + Send + Sync>,
         trace_tx: Sender<SendDataBuilderInfo>,
         stats_generator: Arc<StatsGenerator>,
+        proxy_aggregator: Arc<Mutex<proxy_aggregator::Aggregator>>,
         cancel_token: CancellationToken,
     ) -> Self {
-        let http_port = config
-            .otlp_config_receiver_protocols_http_endpoint
-            .as_ref()
-            .map(|ep| Self::parse_port(Some(ep), OTLP_AGENT_HTTP_PORT));
+        let traces_enabled = should_enable_otlp_traces(&config);
+        let metrics_enabled = should_enable_otlp_metrics(&config);
+
+        let http_endpoint = config.otlp_config_receiver_protocols_http_endpoint.as_ref();
+        let http_port = (metrics_enabled || (traces_enabled && http_endpoint.is_some()))
+            .then(|| Self::parse_port(http_endpoint, OTLP_AGENT_HTTP_PORT));
 
         let grpc_port = config
             .otlp_config_receiver_protocols_grpc_endpoint
             .as_ref()
+            .filter(|_| traces_enabled)
             .map(|ep| Self::parse_port(Some(ep), OTLP_AGENT_GRPC_PORT));
+
+        let metrics_proxy = metrics_enabled.then(|| MetricsProxy {
+            config: Arc::clone(&config),
+            proxy_aggregator,
+        });
 
         let pipeline = TracePipeline {
             config: Arc::clone(&config),
@@ -175,6 +210,8 @@ impl Agent {
 
         Self {
             pipeline,
+            metrics_proxy,
+            traces_enabled,
             cancel_token,
             http_port,
             grpc_port,
@@ -208,11 +245,14 @@ impl Agent {
         let mut handles: Vec<tokio::task::JoinHandle<()>> = Vec::new();
 
         if let Some(port) = self.http_port {
-            let pipeline = self.pipeline.clone();
+            let router = Self::http_router(
+                self.traces_enabled.then(|| self.pipeline.clone()),
+                self.metrics_proxy.clone(),
+            );
             let cancel_token = self.cancel_token.clone();
 
             handles.push(tokio::spawn(async move {
-                if let Err(e) = Self::start_http(port, pipeline, cancel_token).await {
+                if let Err(e) = Self::start_http(port, router, cancel_token).await {
                     error!("OTLP HTTP agent error: {e:?}");
                 }
             }));
@@ -241,16 +281,31 @@ impl Agent {
         Ok(())
     }
 
+    fn http_router(pipeline: Option<TracePipeline>, metrics_proxy: Option<MetricsProxy>) -> Router {
+        let mut router = Router::new();
+        if let Some(pipeline) = pipeline {
+            router = router.merge(
+                Router::new()
+                    .route("/v1/traces", post(Self::v1_traces))
+                    .with_state(pipeline),
+            );
+        }
+        if let Some(metrics_proxy) = metrics_proxy {
+            router = router.merge(
+                Router::new()
+                    .route(OTLP_METRICS_PATH, post(Self::v1_metrics))
+                    .with_state(metrics_proxy),
+            );
+        }
+        router.fallback(handler_not_found)
+    }
+
     async fn start_http(
         port: u16,
-        pipeline: TracePipeline,
+        router: Router,
         cancel_token: CancellationToken,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let socket = SocketAddr::from(([127, 0, 0, 1], port));
-        let router = Router::new()
-            .route("/v1/traces", post(Self::v1_traces))
-            .fallback(handler_not_found)
-            .with_state(pipeline);
 
         let listener = TcpListener::bind(&socket).await?;
         debug!("OTLP HTTP | Starting collector on {}", socket);
@@ -366,6 +421,56 @@ impl Agent {
         }
     }
 
+    async fn v1_metrics(State(metrics_proxy): State<MetricsProxy>, request: Request) -> Response {
+        let encoding = OtlpEncoding::from_content_type(
+            request
+                .headers()
+                .get(header::CONTENT_TYPE)
+                .and_then(|v| v.to_str().ok()),
+        );
+
+        let (mut parts, body) = match extract_request_body(request).await {
+            Ok(r) => r,
+            Err(e) => {
+                error!("OTLP HTTP | Failed to extract metrics request body: {e}");
+                return Self::otlp_error_response(
+                    StatusCode::BAD_REQUEST,
+                    format!("Failed to extract request body: {e}"),
+                    encoding,
+                );
+            }
+        };
+
+        let config = &metrics_proxy.config;
+        let metric_config = if config.otlp_config_metrics_resource_attributes_as_tags {
+            DD_OTEL_METRIC_CONFIG_RESOURCE_ATTRIBUTES_AS_TAGS
+        } else {
+            DD_OTEL_METRIC_CONFIG
+        };
+        let intake_url = match config.ext.otlp_config_metrics_dd_url.as_deref() {
+            Some(url) => url.trim_end_matches('/').to_string(),
+            None => format!("https://otlp.{}", config.site),
+        };
+        parts.headers.insert(
+            DD_OTEL_METRIC_CONFIG_HEADER,
+            HeaderValue::from_static(metric_config),
+        );
+        let proxy_request = ProxyRequest {
+            headers: parts.headers,
+            body,
+            target_url: format!("{intake_url}{OTLP_METRICS_PATH}"),
+        };
+        metrics_proxy
+            .proxy_aggregator
+            .lock()
+            .await
+            .add(proxy_request);
+        debug!("OTLP HTTP | Queued metrics for the OTLP intake");
+
+        // An empty trace export response encodes the same as an empty metrics one.
+        Self::otlp_success_response(encoding)
+    }
+
     fn otlp_error_response(
         status_code: StatusCode,
         message: String,
@@ -451,8 +556,144 @@ impl Agent {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
+
+    use axum::body::Body;
+    use tower::ServiceExt;
+
+    fn metrics_proxy() -> MetricsProxy {
+        MetricsProxy {
+            config: Arc::new(Config {
+                site: "datadoghq.eu".to_string(),
+                ..Config::default()
+            }),
+            proxy_aggregator: Arc::new(Mutex::new(proxy_aggregator::Aggregator::default())),
+        }
+    }
+
+    fn post_request(path: &str, content_type: &str, body: &'static [u8]) -> Request {
+        Request::builder()
+            .method("POST")
+            .uri(path)
+            .header(header::CONTENT_TYPE, content_type)
+            .body(Body::from(body))
+            .unwrap()
+    }
+
+    #[tokio::test]
+    async fn test_v1_metrics_queues_request_for_otlp_intake() {
+        let metrics_proxy = metrics_proxy();
+        let router = Agent::http_router(None, Some(metrics_proxy.clone()));
+
+        let response = router
+            .oneshot(post_request(
+                "/v1/metrics",
+                "application/x-protobuf",
+                b"\x0a\x02\x08\x01",
+            ))
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(
+            response.headers().get(header::CONTENT_TYPE).unwrap(),
+            "application/x-protobuf"
+        );
+
+        let batch = metrics_proxy.proxy_aggregator.lock().await.get_batch();
+        assert_eq!(batch.len(), 1);
+        let request = batch.first().unwrap();
+        assert_eq!(request.target_url, "https://otlp.datadoghq.eu/v1/metrics");
+        assert_eq!(request.body.as_ref(), b"\x0a\x02\x08\x01");
+        assert_eq!(
+            request.headers.get(header::CONTENT_TYPE).unwrap(),
+            "application/x-protobuf"
+        );
+        assert_eq!(
+            request.headers.get(DD_OTEL_METRIC_CONFIG_HEADER).unwrap(),
+            DD_OTEL_METRIC_CONFIG
+        );
+    }
+
+    #[tokio::test]
+    async fn test_v1_metrics_sends_resource_attributes_as_tags_when_configured() {
+        let metrics_proxy = MetricsProxy {
+            config: Arc::new(Config {
+                otlp_config_metrics_resource_attributes_as_tags: true,
+                ..Config::default()
+            }),
+            proxy_aggregator: Arc::new(Mutex::new(proxy_aggregator::Aggregator::default())),
+        };
+        let router = Agent::http_router(None, Some(metrics_proxy.clone()));
+
+        let response = router
+            .oneshot(post_request("/v1/metrics", "application/x-protobuf", b""))
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let batch = metrics_proxy.proxy_aggregator.lock().await.get_batch();
+        assert_eq!(
+            batch
+                .first()
+                .unwrap()
+                .headers
+                .get(DD_OTEL_METRIC_CONFIG_HEADER)
+                .unwrap(),
+            DD_OTEL_METRIC_CONFIG_RESOURCE_ATTRIBUTES_AS_TAGS
+        );
+    }
+
+    #[tokio::test]
+    async fn test_v1_metrics_replies_json_for_json_request() {
+        let router = Agent::http_router(None, Some(metrics_proxy()));
+
+        let response = router
+            .oneshot(post_request("/v1/metrics", "application/json", b"{}"))
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(
+            response.headers().get(header::CONTENT_TYPE).unwrap(),
+            "application/json"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_v1_metrics_not_found_when_metrics_disabled() {
+        let router = Agent::http_router(None, None);
+
+        let response = router
+            .oneshot(post_request("/v1/metrics", "application/x-protobuf", b""))
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn test_v1_traces_not_found_when_only_metrics_enabled() {
+        let metrics_proxy = metrics_proxy();
+        let router = Agent::http_router(None, Some(metrics_proxy.clone()));
+
+        let response = router
+            .oneshot(post_request("/v1/traces", "application/x-protobuf", b""))
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+        assert!(
+            metrics_proxy
+                .proxy_aggregator
+                .lock()
+                .await
+                .get_batch()
+                .is_empty()
+        );
+    }
 
     #[test]
     fn test_parse_port_with_valid_endpoint() {

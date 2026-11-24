@@ -152,7 +152,7 @@ async fn my_fault() {
 `AWS_REGION`/`AWS_DEFAULT_REGION=us-east-1`, `LAMBDA_TASK_ROOT=<tempdir>`,
 `DD_API_KEY=<TEST_API_KEY>`, `DD_SITE=datadoghq.com`, `DD_LOG_LEVEL=debug`,
 `DD_SERVERLESS_FLUSH_STRATEGY=end`,
-`DD_DD_URL`/`DD_URL`/`DD_APM_DD_URL`/`DD_LOGS_CONFIG_LOGS_DD_URL=http://<intake>`,
+`DD_DD_URL`/`DD_URL`/`DD_APM_DD_URL`/`DD_LOGS_CONFIG_LOGS_DD_URL`/`DD_OTLP_CONFIG_METRICS_DD_URL=http://<intake>`,
 `DD_HTTP_PROTOCOL=http1` (the fakes speak HTTP/1.1; the default client uses h2
 prior knowledge), `DD_PROXY_HTTPS=http://127.0.0.1:1` (trace stats follow
 `DD_SITE` over https; an https-only proxy on a closed port fails them at once
