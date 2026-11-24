@@ -16,13 +16,14 @@ use libdd_capabilities::{
 };
 use libdd_common::http_common::{self, Body, GenericHttpClient};
 use rustls::RootCertStore;
-use rustls_pki_types::CertificateDer;
+use rustls_pki_types::{CertificateDer, TrustAnchor};
 use std::error::Error;
 use std::fs::File;
 use std::future::Future;
 use std::io::BufReader;
 use std::sync::{Arc, LazyLock};
 use std::time::Duration;
+use tokio_rustls::TlsConnector;
 use tracing::debug;
 
 type InnerClient =
@@ -189,6 +190,23 @@ pub fn create_client(
     tls_cert_file: Option<&String>,
     skip_ssl_validation: bool,
 ) -> Result<HttpClient, Box<dyn Error>> {
+    create_client_with_public_roots(
+        proxy_https,
+        tls_cert_file,
+        skip_ssl_validation,
+        webpki_roots::TLS_SERVER_ROOTS,
+    )
+}
+
+/// [`create_client`] with the public roots the proxy tunnel starts from. They are the
+/// bundle `ProxyConnector::from_proxy()` trusts by default; a `DD_TLS_CERT_FILE` is added
+/// to them, not substituted for them.
+fn create_client_with_public_roots(
+    proxy_https: Option<&String>,
+    tls_cert_file: Option<&String>,
+    skip_ssl_validation: bool,
+    public_roots: &[TrustAnchor<'static>],
+) -> Result<HttpClient, Box<dyn Error>> {
     if skip_ssl_validation && tls_cert_file.is_some() {
         debug!(
             "HTTP_CLIENT | skip_ssl_validation=true overrides tls_cert_file={:?}, custom certificate will be ignored",
@@ -197,7 +215,7 @@ pub fn create_client(
     }
 
     // Create the base connector with optional custom TLS config
-    let connector = if skip_ssl_validation {
+    let (connector, tunnel_tls) = if skip_ssl_validation {
         ensure_crypto_provider_initialized();
 
         let tls_config = rustls::ClientConfig::builder()
@@ -206,14 +224,17 @@ pub fn create_client(
             .with_no_client_auth();
 
         let https_connector = HttpsConnectorBuilder::new()
-            .with_tls_config(tls_config)
+            .with_tls_config(tls_config.clone())
             .https_or_http()
             .enable_http1()
             .build();
 
         debug!("HTTP_CLIENT | TLS certificate validation disabled (skip_ssl_validation=true)");
 
-        libdd_common::connector::Connector::Https(https_connector)
+        (
+            libdd_common::connector::Connector::Https(https_connector),
+            Some(TlsConnector::from(Arc::new(tls_config))),
+        )
     } else if let Some(ca_cert_path) = tls_cert_file {
         // Ensure crypto provider is initialized before creating TLS config
         ensure_crypto_provider_initialized();
@@ -226,9 +247,21 @@ pub fn create_client(
 
         // Create a root certificate store and add custom certs
         let mut root_store = RootCertStore::empty();
-        for cert in certs {
-            root_store.add(cert)?;
+        for cert in &certs {
+            root_store.add(cert.clone())?;
         }
+
+        // The tunnel's handshake with the destination trusts the public roots plus the
+        // custom certs: a proxy that tunnels without intercepting passes Datadog's publicly
+        // signed certificate through, and an intercepting one re-signs it with the custom CA.
+        let mut tunnel_roots = RootCertStore::empty();
+        tunnel_roots.extend(public_roots.iter().cloned());
+        for cert in certs {
+            tunnel_roots.add(cert)?;
+        }
+        let tunnel_config = rustls::ClientConfig::builder()
+            .with_root_certificates(tunnel_roots)
+            .with_no_client_auth();
 
         // Build the TLS config with custom root certificates
         let tls_config = rustls::ClientConfig::builder()
@@ -237,7 +270,7 @@ pub fn create_client(
 
         // Build the HTTPS connector with custom config
         let https_connector = HttpsConnectorBuilder::new()
-            .with_tls_config(tls_config)
+            .with_tls_config(tls_config.clone())
             .https_or_http()
             .enable_http1()
             .build();
@@ -245,16 +278,25 @@ pub fn create_client(
         debug!("HTTP_CLIENT | Added root certificate from {}", ca_cert_path);
 
         // Construct the Connector::Https variant directly
-        libdd_common::connector::Connector::Https(https_connector)
+        (
+            libdd_common::connector::Connector::Https(https_connector),
+            Some(TlsConnector::from(Arc::new(tunnel_config))),
+        )
     } else {
         // Use default connector
-        libdd_common::connector::Connector::default()
+        (libdd_common::connector::Connector::default(), None)
     };
 
     if let Some(proxy) = proxy_https {
         let proxy =
             hyper_http_proxy::Proxy::new(hyper_http_proxy::Intercept::Https, proxy.parse()?);
-        let proxy_connector = hyper_http_proxy::ProxyConnector::from_proxy(connector, proxy)?;
+        let mut proxy_connector = hyper_http_proxy::ProxyConnector::from_proxy(connector, proxy)?;
+        // from_proxy() builds its own tunnel TLS connector with public webpki roots, so a CA
+        // from DD_TLS_CERT_FILE (or DD_SKIP_SSL_VALIDATION) never applied to the handshake
+        // with the destination. Replace it with the connector built from the same policy.
+        if let Some(tls) = tunnel_tls {
+            proxy_connector.set_tls(Some(tls));
+        }
         // Disable connection pooling to avoid stale connections after Lambda freeze/resume.
         // In Lambda, the execution environment can be frozen for seconds to minutes between
         // invocations. Pooled connections become stale during this time, causing failures
@@ -277,5 +319,323 @@ pub fn create_client(
                 .pool_max_idle_per_host(0)
                 .build(proxy_connector),
         ))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    //! SLES-3105: `DD_TLS_CERT_FILE` must be honoured for the TLS handshake that
+    //! happens *inside* the CONNECT tunnel, not just for the connection to the proxy.
+    //!
+    //! Topology under test (all on loopback):
+    //!   client --HTTP--> CONNECT proxy --TCP--> TLS server (leaf signed by a private CA)
+    use super::*;
+    use std::io::Write;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use tempfile::NamedTempFile;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::net::{TcpListener, TcpStream};
+
+    const TEST_CA_CERT_PEM: &str = r"
+-----BEGIN CERTIFICATE-----
+MIIBnzCCAUWgAwIBAgIUf5l+dmNjL/xU10EM0qk4Iseh3nQwCgYIKoZIzj0EAwIw
+HDEaMBgGA1UEAwwRQm90dGxlY2FwIFRlc3QgQ0EwIBcNMjYwNjI1MTgzNjMwWhgP
+MjEyNjA2MDExODM2MzBaMBwxGjAYBgNVBAMMEUJvdHRsZWNhcCBUZXN0IENBMFkw
+EwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEK9O0WnLz1pRAD3RZzYzsCf8vEieLLwnV
+D8RNYJBaEBZBJbE+4snr+0vhVm2mGtIojZTJ0bc5Z98JHpZ57LBpwqNjMGEwHQYD
+VR0OBBYEFJtZHbWEv1FI0KacM/4ctJkUuMg2MB8GA1UdIwQYMBaAFJtZHbWEv1FI
+0KacM/4ctJkUuMg2MA8GA1UdEwEB/wQFMAMBAf8wDgYDVR0PAQH/BAQDAgEGMAoG
+CCqGSM49BAMCA0gAMEUCIQDFLc+zjel9LGmytihROgErrPc6WDxmziypva+k2cSN
+CAIgYb1nsDag2/bwlzf4OOcYvqU9xNRdXMarkRxn4o5rPR4=
+-----END CERTIFICATE-----
+";
+    const TEST_SERVER_CERT_PEM: &str = r"
+-----BEGIN CERTIFICATE-----
+MIIBvTCCAWSgAwIBAgIUOkYng/RZxQcYlMY5I+RAXzR7dSkwCgYIKoZIzj0EAwIw
+HDEaMBgGA1UEAwwRQm90dGxlY2FwIFRlc3QgQ0EwIBcNMjYwNjI1MTgzNjMwWhgP
+MjEyNjA2MDExODM2MzBaMBQxEjAQBgNVBAMMCWxvY2FsaG9zdDBZMBMGByqGSM49
+AgEGCCqGSM49AwEHA0IABOuKun0roY5MAEOgA3NNebQa9l56HVsNFwGJ4a5chM2T
+s+vToAoyflPMZfxuS6PUv2WHrahmUH5WZKr0XaT/RIijgYkwgYYwCQYDVR0TBAIw
+ADAOBgNVHQ8BAf8EBAMCB4AwEwYDVR0lBAwwCgYIKwYBBQUHAwEwFAYDVR0RBA0w
+C4IJbG9jYWxob3N0MB0GA1UdDgQWBBTcqKduDXHEOeUXAL6fqwAYl50VVTAfBgNV
+HSMEGDAWgBSbWR21hL9RSNCmnDP+HLSZFLjINjAKBggqhkjOPQQDAgNHADBEAiAT
+nwOMjOwnQoeLvZgHhNqrzlVGNqnT4FPudJTgTKrAAAIgVMw8wqk70JXLm4pEdN8/
+oMUo5j7nV6S8Hd02b5hW5pM=
+-----END CERTIFICATE-----
+";
+    const TEST_SERVER_KEY_PEM: &str = r"
+-----BEGIN PRIVATE KEY-----
+MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQgkflx4lEcI8Fafj8E
+EgBejgnIKCAkaQXo+p0h3a6IsQOhRANCAATrirp9K6GOTABDoANzTXm0GvZeeh1b
+DRcBieGuXITNk7Pr06AKMn5TzGX8bkuj1L9lh62oZlB+VmSq9F2k/0SI
+-----END PRIVATE KEY-----
+";
+
+    /// A CA that has nothing to do with the server certificate (negative control).
+    const UNRELATED_CA_PEM: &str = r"
+-----BEGIN CERTIFICATE-----
+MIIBfjCCASSgAwIBAgIUYP+TuKcxEIhJmpDhImnx0kx1VGMwCgYIKoZIzj0EAwIw
+HDEaMBgGA1UEAwwRVW5yZWxhdGVkIFRlc3QgQ0EwIBcNMjYxMTE2MTIwMDQwWhgP
+MjEyNjEwMjMxMjAwNDBaMBwxGjAYBgNVBAMMEVVucmVsYXRlZCBUZXN0IENBMFkw
+EwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEqqQSp7ePJKl/mYLhafkULk5tsx8N/eAG
+D4AISM6bDMAMTYNy+b5D/o8OFi6Er9jR3SzlPP2eEpIrgw+llkFoVKNCMEAwHQYD
+VR0OBBYEFM13NV0lLVfhl8ucmEirnnYgOl1HMA8GA1UdEwEB/wQFMAMBAf8wDgYD
+VR0PAQH/BAQDAgEGMAoGCCqGSM49BAMCA0gAMEUCIQDpxEu50JhvSlIxMzDWboFF
+NTK5yjb/KSEqOWs7Rs8B5QIgCTMvqLDKf5X3dZPGAAlYl/zmnv9DtU7Q1qT5FoK+
+QUI=
+-----END CERTIFICATE-----
+";
+
+    fn pem_file(pem: &str) -> NamedTempFile {
+        let mut f = NamedTempFile::new().expect("create temp pem file");
+        f.write_all(pem.as_bytes()).expect("write temp pem file");
+        f
+    }
+
+    fn path_string(f: &NamedTempFile) -> String {
+        f.path().to_str().expect("utf8 path").to_string()
+    }
+
+    /// HTTPS server presenting the private-CA-signed leaf. `requests` counts HTTP
+    /// requests that actually reached the server (i.e. handshake succeeded).
+    async fn spawn_tls_server(requests: Arc<AtomicUsize>) -> u16 {
+        ensure_crypto_provider_initialized();
+        let certs = rustls_pemfile::certs(&mut BufReader::new(TEST_SERVER_CERT_PEM.as_bytes()))
+            .collect::<Result<Vec<_>, _>>()
+            .expect("parse server cert");
+        let key = rustls_pemfile::private_key(&mut BufReader::new(TEST_SERVER_KEY_PEM.as_bytes()))
+            .expect("read server key")
+            .expect("server key present");
+        let server_config = rustls::ServerConfig::builder()
+            .with_no_client_auth()
+            .with_single_cert(certs, key)
+            .expect("server tls config");
+        let acceptor = tokio_rustls::TlsAcceptor::from(Arc::new(server_config));
+        let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind tls");
+        let port = listener.local_addr().expect("addr").port();
+        tokio::spawn(async move {
+            loop {
+                let Ok((sock, _)) = listener.accept().await else {
+                    return;
+                };
+                let acceptor = acceptor.clone();
+                let requests = requests.clone();
+                tokio::spawn(async move {
+                    let Ok(mut tls) = acceptor.accept(sock).await else {
+                        return;
+                    };
+                    let mut buf = vec![0u8; 8192];
+                    let mut acc = Vec::new();
+                    loop {
+                        let n = match tls.read(&mut buf).await {
+                            Ok(0) | Err(_) => return,
+                            Ok(n) => n,
+                        };
+                        acc.extend_from_slice(&buf[..n]);
+                        if acc.windows(4).any(|w| w == b"\r\n\r\n") {
+                            requests.fetch_add(1, Ordering::SeqCst);
+                            let _ = tls
+                                .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok")
+                                .await;
+                            let _ = tls.shutdown().await;
+                            return;
+                        }
+                    }
+                });
+            }
+        });
+        port
+    }
+
+    /// Minimal TLS-*passthrough* CONNECT proxy: it never terminates TLS, so the
+    /// destination certificate is verified by the client inside the tunnel -- exactly
+    /// the handshake that was using the wrong roots. `connects` counts CONNECTs seen.
+    async fn spawn_connect_proxy(connects: Arc<AtomicUsize>) -> u16 {
+        let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind proxy");
+        let port = listener.local_addr().expect("addr").port();
+        tokio::spawn(async move {
+            loop {
+                let Ok((mut client, _)) = listener.accept().await else {
+                    return;
+                };
+                let connects = connects.clone();
+                tokio::spawn(async move {
+                    let mut head = Vec::new();
+                    let mut buf = [0u8; 1024];
+                    while !head.windows(4).any(|w| w == b"\r\n\r\n") {
+                        match client.read(&mut buf).await {
+                            Ok(0) | Err(_) => return,
+                            Ok(n) => head.extend_from_slice(&buf[..n]),
+                        }
+                    }
+                    let head = String::from_utf8_lossy(&head).to_string();
+                    let first = head.lines().next().unwrap_or_default();
+                    let mut parts = first.split_whitespace();
+                    if parts.next() != Some("CONNECT") {
+                        return;
+                    }
+                    connects.fetch_add(1, Ordering::SeqCst);
+                    let target_port: u16 = parts
+                        .next()
+                        .and_then(|t| t.rsplit(':').next())
+                        .and_then(|p| p.parse().ok())
+                        .expect("CONNECT target port");
+                    let Ok(mut upstream) = TcpStream::connect(("127.0.0.1", target_port)).await
+                    else {
+                        return;
+                    };
+                    if client
+                        .write_all(b"HTTP/1.1 200 Connection established\r\n\r\n")
+                        .await
+                        .is_err()
+                    {
+                        return;
+                    }
+                    let _ = tokio::io::copy_bidirectional(&mut client, &mut upstream).await;
+                });
+            }
+        });
+        port
+    }
+
+    async fn get(
+        client: &HttpClient,
+        port: u16,
+    ) -> Result<http::Response<bytes::Bytes>, HttpError> {
+        let req = http::Request::builder()
+            .method("GET")
+            .uri(format!("https://localhost:{port}/"))
+            .body(bytes::Bytes::new())
+            .expect("request");
+        client.request(req).await
+    }
+
+    fn proxy_url(port: u16) -> String {
+        format!("http://127.0.0.1:{port}")
+    }
+
+    /// THE BUG. Private CA supplied via `DD_TLS_CERT_FILE`, destination reached through a
+    /// CONNECT proxy: the tunnel handshake must trust that CA.
+    #[tokio::test]
+    async fn proxy_tunnel_trusts_tls_cert_file_ca() {
+        let (connects, hits) = (Arc::new(AtomicUsize::new(0)), Arc::new(AtomicUsize::new(0)));
+        let server = spawn_tls_server(hits.clone()).await;
+        let proxy = spawn_connect_proxy(connects.clone()).await;
+        let ca = pem_file(TEST_CA_CERT_PEM);
+
+        let client =
+            create_client(Some(&proxy_url(proxy)), Some(&path_string(&ca)), false).expect("client");
+        let resp = get(&client, server)
+            .await
+            .expect("request through proxy should succeed");
+
+        assert_eq!(resp.status(), 200);
+        assert_eq!(resp.body().as_ref(), b"ok");
+        assert_eq!(
+            connects.load(Ordering::SeqCst),
+            1,
+            "request must go via the proxy"
+        );
+        assert_eq!(hits.load(Ordering::SeqCst), 1);
+    }
+
+    /// Trust anchors for the CA in `pem`, standing in for the public bundle.
+    fn anchors_from(pem: &str) -> Vec<TrustAnchor<'static>> {
+        let cert = rustls_pemfile::certs(&mut BufReader::new(pem.as_bytes()))
+            .next()
+            .expect("a certificate")
+            .expect("parse certificate");
+        let mut store = RootCertStore::empty();
+        store.add(cert).expect("add certificate");
+        store.roots
+    }
+
+    /// A proxy that tunnels without intercepting passes the destination's own certificate
+    /// through. Setting `DD_TLS_CERT_FILE` (here an unrelated CA, as for a proxy that is
+    /// itself signed by a private CA) must not drop the public roots that certificate needs.
+    #[tokio::test]
+    async fn proxy_tunnel_keeps_public_roots_when_tls_cert_file_is_set() {
+        let (connects, hits) = (Arc::new(AtomicUsize::new(0)), Arc::new(AtomicUsize::new(0)));
+        let server = spawn_tls_server(hits.clone()).await;
+        let proxy = spawn_connect_proxy(connects.clone()).await;
+        let proxy_ca = pem_file(UNRELATED_CA_PEM);
+
+        let client = create_client_with_public_roots(
+            Some(&proxy_url(proxy)),
+            Some(&path_string(&proxy_ca)),
+            false,
+            &anchors_from(TEST_CA_CERT_PEM),
+        )
+        .expect("client");
+        let resp = get(&client, server)
+            .await
+            .expect("the tunnel must still trust the public roots");
+
+        assert_eq!(resp.status(), 200);
+        assert_eq!(connects.load(Ordering::SeqCst), 1);
+        assert_eq!(hits.load(Ordering::SeqCst), 1);
+    }
+
+    /// Verification must stay ON: an unrelated CA must NOT make the tunnel trust the server.
+    #[tokio::test]
+    async fn proxy_tunnel_rejects_unrelated_ca() {
+        let (connects, hits) = (Arc::new(AtomicUsize::new(0)), Arc::new(AtomicUsize::new(0)));
+        let server = spawn_tls_server(hits.clone()).await;
+        let proxy = spawn_connect_proxy(connects.clone()).await;
+        let ca = pem_file(UNRELATED_CA_PEM);
+
+        let client =
+            create_client(Some(&proxy_url(proxy)), Some(&path_string(&ca)), false).expect("client");
+        assert!(
+            get(&client, server).await.is_err(),
+            "unrelated CA must be rejected"
+        );
+        assert_eq!(
+            hits.load(Ordering::SeqCst),
+            0,
+            "no HTTP request may reach the server"
+        );
+    }
+
+    /// Without a custom CA the default (public) roots apply and a private-CA server is rejected.
+    #[tokio::test]
+    async fn proxy_tunnel_rejects_private_ca_without_tls_cert_file() {
+        let (connects, hits) = (Arc::new(AtomicUsize::new(0)), Arc::new(AtomicUsize::new(0)));
+        let server = spawn_tls_server(hits.clone()).await;
+        let proxy = spawn_connect_proxy(connects.clone()).await;
+
+        let client = create_client(Some(&proxy_url(proxy)), None, false).expect("client");
+        assert!(get(&client, server).await.is_err());
+        assert_eq!(hits.load(Ordering::SeqCst), 0);
+    }
+
+    /// Same bug, other knob: `DD_SKIP_SSL_VALIDATION=true` must also apply inside the tunnel.
+    #[tokio::test]
+    async fn proxy_tunnel_honours_skip_ssl_validation() {
+        let (connects, hits) = (Arc::new(AtomicUsize::new(0)), Arc::new(AtomicUsize::new(0)));
+        let server = spawn_tls_server(hits.clone()).await;
+        let proxy = spawn_connect_proxy(connects.clone()).await;
+
+        let client = create_client(Some(&proxy_url(proxy)), None, true).expect("client");
+        let resp = get(&client, server)
+            .await
+            .expect("skip_ssl_validation must work via proxy");
+        assert_eq!(resp.status(), 200);
+        assert_eq!(connects.load(Ordering::SeqCst), 1);
+    }
+
+    /// Control (the customer's "direct HTTPS + trusted CA" row): already worked, must keep working.
+    #[tokio::test]
+    async fn direct_connection_trusts_tls_cert_file_ca() {
+        let hits = Arc::new(AtomicUsize::new(0));
+        let server = spawn_tls_server(hits.clone()).await;
+        let ca = pem_file(TEST_CA_CERT_PEM);
+
+        let client = create_client(None, Some(&path_string(&ca)), false).expect("client");
+        let resp = get(&client, server)
+            .await
+            .expect("direct request should succeed");
+        assert_eq!(resp.status(), 200);
+        assert_eq!(hits.load(Ordering::SeqCst), 1);
     }
 }

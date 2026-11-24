@@ -28,6 +28,7 @@ a test whose expected behavior is a design choice, not a plain bug.
 | `tests/fault_injection_test.rs` | Intake faults: a 503 storm, an oversized trace, a response cut off mid-body. |
 | `tests/config_robustness_test.rs` | Wrong-typed config values. |
 | `tests/port_conflict_test.rs` | Another process holds port 8124 or 8126. |
+| `tests/proxy_tls_test.rs` | `DD_PROXY_HTTPS` + `DD_TLS_CERT_FILE`: a trace reaches a private-CA HTTPS intake through a CONNECT proxy (a TLS front over `FaultIntake`, a CONNECT proxy that only tunnels to it). |
 | `.config/nextest.toml` | `fixed-ports` test group (`max-threads = 1`) for these binaries. |
 
 ## Write a new fault test in 10 lines
@@ -163,7 +164,8 @@ while the `http://` intake URLs bypass it). Managed Instance mode adds
 ```sh
 cd bottlecap
 cargo nextest run --test lifecycle_contract_test --test fault_injection_test \
-    --test config_robustness_test --test port_conflict_test            # CI set, ignored skipped
+    --test config_robustness_test --test port_conflict_test \
+    --test proxy_tls_test                                              # CI set, ignored skipped
 cargo nextest run --test fault_injection_test --run-ignored only          # not-yet-fixed tests (none yet)
 cargo test --test fault_injection_test                                    # also serialized
 ```
