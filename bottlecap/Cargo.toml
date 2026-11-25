@@ -29,7 +29,7 @@ http-body = { version = "1", default-features = false }
 http-body-util = { version = "0.1", default-features = false }
 itertools = { version = "0.14", default-features = false, features = ["use_std"] }
 mime = { version = "0.3", default-features = false }
-multipart = { version = "0.18", default-features = false, features = ["server"] }
+multer = { version = "3.1", default-features = false }
 nix = { version = "0.26", default-features = false, features = ["feature", "fs"] }
 ordered_hash_map = { version = "0.4", default-features = false }
 regex = { version = "1.10", default-features = false }
@@ -69,7 +69,7 @@ prost = { version = "0.14", default-features = false }
 tonic = { version = "0.14", features = ["transport", "codegen", "server", "channel", "router"], default-features = false }
 tonic-types = { version = "0.14", default-features = false }
 zstd = { version = "0.14.3", default-features = false }
-futures = { version = "0.3.31", default-features = false }
+futures = { version = "0.3.31", default-features = false, features = ["executor"] }
 serde_html_form = { version = "0.2", default-features = false }
 opentelemetry-proto = { version = "0.32.0", features = ["trace", "with-serde", "gen-tonic"] }
 opentelemetry-semantic-conventions = { version = "0.30", features = ["semconv_experimental"] }
