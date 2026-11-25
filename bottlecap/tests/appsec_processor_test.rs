@@ -341,6 +341,70 @@ async fn test_processor() {
     );
 }
 
+#[tokio::test]
+async fn test_processor_detects_attack_in_multipart_field() {
+    let cfg = Config {
+        ext: bottlecap::config::LambdaConfig {
+            serverless_appsec_enabled: true,
+            appsec_waf_timeout: Duration::from_secs(60), // Ample so it does not time out on slow CI hosts
+            ..Default::default()
+        },
+        ..Config::default()
+    };
+    let mut subject = Processor::new(&cfg).expect("failed to create Processor");
+
+    let mut event: serde_json::Value = serde_json::from_slice(include_bytes!(
+        "payloads/api_gateway_http_event_appsec.json"
+    ))
+    .expect("failed to parse request payload");
+    event["headers"] = serde_json::json!({
+        "Content-Type": "multipart/form-data; boundary=B",
+        "User-Agent": "test",
+    });
+    event["body"] = "--B\r\nContent-Disposition: form-data; name=\"comment\"\r\n\r\n<script>alert(document.cookie)</script>\r\n--B--".into();
+    event["isBase64Encoded"] = false.into();
+    let payload = IdentifiedTrigger::APIGatewayHttpEvent(
+        serde_json::from_value(event).expect("failed to build request payload"),
+    );
+
+    subject
+        .process_invocation_next("rid-multipart", &payload)
+        .await;
+    subject
+        .process_invocation_result("rid-multipart", &Bytes::from(r#"{"statusCode": 200}"#))
+        .await;
+    let mut span = Span {
+        meta: HashMap::from([("request_id".to_string(), "rid-multipart".to_string())]),
+        ..Span::default()
+    };
+    subject.process_span(&mut span);
+
+    assert_eq!(
+        Some("true"),
+        span.meta.get("appsec.event").map(String::as_str)
+    );
+    let triggers: serde_json::Value = serde_json::from_str(
+        span.meta
+            .get("_dd.appsec.json")
+            .expect("missing _dd.appsec.json"),
+    )
+    .expect("_dd.appsec.json is not JSON");
+    let body_matches: Vec<_> = triggers["triggers"]
+        .as_array()
+        .expect("triggers is an array")
+        .iter()
+        .flat_map(|t| t["rule_matches"].as_array().cloned().unwrap_or_default())
+        .flat_map(|m| m["parameters"].as_array().cloned().unwrap_or_default())
+        .filter(|p| p["address"] == "server.request.body")
+        .collect();
+    assert!(
+        body_matches
+            .iter()
+            .any(|p| p["key_path"] == serde_json::json!(["comment"])),
+        "no server.request.body match on the multipart field: {triggers}"
+    );
+}
+
 #[track_caller]
 fn assert_span_matches(expected: Span, actual: Span) {
     for (key, value) in &expected.meta {

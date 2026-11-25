@@ -10,7 +10,6 @@ use libddwaf::{
     Context as WafContext, Handle, RunError, RunOutput, RunResult, RunnableContext, waf_map,
 };
 use mime::Mime;
-use multipart::server::Multipart;
 use tracing::{debug, info, warn};
 
 use crate::appsec::processor::response::ExpectedResponseFormat;
@@ -732,39 +731,18 @@ fn try_parse_body_with_mime(body: impl Read, mime_type: Mime) -> Result<WafObjec
             let Some(boundary) = mime_type.get_param("boundary") else {
                 return Err(BodyParseError::MissingBoundary(mime_type));
             };
-            let mut multipart = Multipart::with_body(body, boundary.as_str());
-            let mut items = Vec::new();
-            loop {
-                match multipart.read_entry() {
-                    Ok(Some(mut entry)) => {
-                        let mime = entry.headers.content_type.unwrap_or(mime::TEXT_PLAIN);
-                        let mut data = Vec::new();
-                        let _ = entry.data.read_to_end(&mut data)?;
-                        let value = match try_parse_body_with_mime(Bytes::from(data).reader(), mime)
-                        {
-                            Ok(value) => value,
-                            Err(e) => {
-                                // Logging as INFO as this is often not directly actionnable by the
-                                // customer and can lead to excessive log spam if sent as WARN.
-                                info!(
-                                    "aap: failed to parse multipart body entry {name}: {e}",
-                                    name = entry.headers.name
-                                );
-                                WafObject::default()
-                            }
-                        };
-
-                        items.push((entry.headers.name.to_string(), value));
-                    }
-                    Ok(None) => break,
+            let fields = read_multipart_fields(body, boundary.as_str())?;
+            let mut res = WafMap::new(fields.len()).expect("WAF map length is representable");
+            for (idx, (name, mime, data)) in fields.into_iter().enumerate() {
+                let value = match try_parse_body_with_mime(data.reader(), mime) {
+                    Ok(value) => value,
                     Err(e) => {
-                        warn!("aap: failed to read multipart body entry: {e}");
-                        break;
+                        // Logging as INFO as this is often not directly actionnable by the
+                        // customer and can lead to excessive log spam if sent as WARN.
+                        info!("aap: failed to parse multipart body entry {name}: {e}");
+                        WafObject::default()
                     }
-                }
-            }
-            let mut res = WafMap::new(items.len()).expect("WAF map length is representable");
-            for (idx, (name, value)) in items.into_iter().enumerate() {
+                };
                 res[idx] = (name.as_str(), value).into();
             }
             Ok(res.into())
@@ -775,6 +753,73 @@ fn try_parse_body_with_mime(body: impl Read, mime_type: Mime) -> Result<WafObjec
         }
         _ => Err(BodyParseError::UnsupportedMimeType(mime_type)),
     }
+}
+
+/// Reads the named fields of a `multipart/form-data` body. Fields read before a
+/// malformed or truncated one are kept, and the data of a truncated final field
+/// is kept too, so the WAF still sees it. Fields are only collected here because
+/// parsing them may recurse into a nested multipart body, and `block_on`
+/// cannot be nested.
+fn read_multipart_fields(
+    mut body: impl Read,
+    boundary: &str,
+) -> std::io::Result<Vec<(String, Mime, Bytes)>> {
+    let mut data = Vec::new();
+    body.read_to_end(&mut data)?;
+    let raw = Bytes::from(data);
+    let stream = futures::stream::once({
+        let raw = raw.clone();
+        async move { Ok::<_, std::io::Error>(raw) }
+    });
+    let mut multipart = multer::Multipart::new(stream, boundary);
+    Ok(futures::executor::block_on(async {
+        let mut fields = Vec::new();
+        loop {
+            let field = match multipart.next_field().await {
+                Ok(Some(field)) => field,
+                Ok(None) => break,
+                Err(e) => {
+                    warn!("aap: failed to read multipart body entry: {e}");
+                    break;
+                }
+            };
+            let Some(name) = field.name().map(str::to_owned) else {
+                continue;
+            };
+            let mime = field.content_type().cloned().unwrap_or(mime::TEXT_PLAIN);
+            match field.bytes().await {
+                Ok(data) => fields.push((name, mime, data)),
+                Err(e) => {
+                    warn!("aap: failed to read multipart body entry {name}: {e}");
+                    if matches!(e, multer::Error::IncompleteFieldData { .. })
+                        && let Some(data) = truncated_field_data(&raw, boundary)
+                    {
+                        fields.push((name, mime, data));
+                    }
+                    break;
+                }
+            }
+        }
+        fields
+    }))
+}
+
+/// Returns the data of the final part of a body that ends before the part's
+/// closing delimiter: everything after the last delimiter's header block.
+fn truncated_field_data(raw: &Bytes, boundary: &str) -> Option<Bytes> {
+    let delimiter = format!("\r\n--{boundary}");
+    let delimiter = delimiter.as_bytes();
+    let part_start = match raw.windows(delimiter.len()).rposition(|w| w == delimiter) {
+        Some(idx) => idx + delimiter.len(),
+        // The truncated part is the first one, with no CRLF before its delimiter.
+        None if raw.starts_with(&delimiter[2..]) => delimiter.len() - 2,
+        None => return None,
+    };
+    let headers_len = raw[part_start..]
+        .windows(4)
+        .position(|w| w == b"\r\n\r\n")?
+        + 4;
+    Some(raw.slice(part_start + headers_len..))
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -882,6 +927,113 @@ key=value&space=%20
             },
             parsed,
         );
+    }
+
+    fn parse_multipart(body: &str) -> WafObject {
+        try_parse_body(
+            Bytes::from(body.replace('\n', "\r\n")).reader(),
+            "multipart/form-data; boundary=B",
+        )
+        .expect("should have parsed successfully")
+    }
+
+    #[test]
+    fn test_try_parse_body_nested_multipart() {
+        let parsed = parse_multipart(
+            "--B
+Content-Disposition: form-data; name=\"outer\"
+Content-Type: multipart/form-data; boundary=C
+
+--C
+Content-Disposition: form-data; name=\"inner\"
+
+value
+--C--
+--B--",
+        );
+        assert_eq!(
+            waf_map! { ("outer", waf_map! { ("inner", "value") }) },
+            parsed
+        );
+    }
+
+    #[test]
+    fn test_try_parse_body_multipart_truncated_keeps_partial_final_field() {
+        let parsed = parse_multipart(
+            "--B
+Content-Disposition: form-data; name=\"complete\"
+
+value
+--B
+Content-Disposition: form-data; name=\"truncated\"
+
+val",
+        );
+        assert_eq!(
+            waf_map! { ("complete", "value"), ("truncated", "val") },
+            parsed
+        );
+    }
+
+    #[test]
+    fn test_try_parse_body_multipart_skips_unnamed_fields() {
+        let parsed = parse_multipart(
+            "--B
+Content-Disposition: form-data
+
+unnamed
+--B
+Content-Disposition: form-data; name=\"named\"
+
+value
+--B--",
+        );
+        assert_eq!(waf_map! { ("named", "value") }, parsed);
+    }
+
+    #[test]
+    fn test_try_parse_body_multipart_boundary_transport_padding() {
+        let parsed = parse_multipart(
+            "--B\x20\x20\nContent-Disposition: form-data; name=\"field\"\n\nvalue\n--B--",
+        );
+        assert_eq!(waf_map! { ("field", "value") }, parsed);
+    }
+
+    #[test]
+    fn test_try_parse_body_multipart_invalid_content_type_is_text() {
+        let parsed = parse_multipart(
+            "--B
+Content-Disposition: form-data; name=\"field\"
+Content-Type: not a mime
+
+value
+--B--",
+        );
+        assert_eq!(waf_map! { ("field", "value") }, parsed);
+    }
+
+    #[test]
+    fn test_try_parse_body_multipart_quoted_name_with_semicolon() {
+        let parsed = parse_multipart(
+            "--B
+Content-Disposition: form-data; name=\"a;b\"
+
+value
+--B--",
+        );
+        assert_eq!(waf_map! { ("a;b", "value") }, parsed);
+    }
+
+    #[test]
+    fn test_try_parse_body_multipart_boundary_text_inside_value() {
+        let parsed = parse_multipart(
+            "--B
+Content-Disposition: form-data; name=\"field\"
+
+x--By
+--B--",
+        );
+        assert_eq!(waf_map! { ("field", "x--By") }, parsed);
     }
 
     #[test]
