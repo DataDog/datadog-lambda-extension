@@ -96,7 +96,8 @@ impl Lambda {
     // edge cases that can still double-count). The three detection paths are:
     // 1. Runtime-specific OOM log line (.NET, Node, Java, Go, Ruby, Python)
     // 2. PlatformRuntimeDone with error_type == "Runtime.OutOfMemory" (Node, Ruby, Python)
-    // 3. PlatformReport with max_memory_used_mb == memory_size_mb (all runtimes)
+    // 3. PlatformReport with max_memory_used_mb == memory_size_mb, for an invocation that
+    //    did not succeed (all runtimes)
     pub fn increment_oom_metric(&self, timestamp: i64) {
         self.increment_metric(constants::OUT_OF_MEMORY_METRIC, timestamp);
     }
