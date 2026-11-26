@@ -6,7 +6,7 @@ use crate::lifecycle::invocation_times::InvocationTimes;
 
 const DEFAULT_FLUSH_INTERVAL: u64 = 60 * 1000; // 60s
 pub const DEFAULT_CONTINUOUS_FLUSH_INTERVAL: u64 = 30 * 1000; // 30s
-const FIFTEEN_MINUTES: u64 = 15 * 60 * 1000;
+const THIRTY_MINUTES: u64 = 30 * 60 * 1000;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct FlushControl {
@@ -58,9 +58,9 @@ impl FlushControl {
                 i
             }
             FlushStrategy::End => {
-                // Set the race flush interval to the maximum value of Lambda timeout, so flush will
-                // only happen at the end of the invocation, and race flush will never happen.
-                tokio::time::interval(tokio::time::Duration::from_millis(FIFTEEN_MINUTES))
+                // Set the race flush interval to the maximum Lambda timeout in on-demand mode, the
+                // only mode that uses `End`, so flush will only happen at the end of the invocation.
+                tokio::time::interval(tokio::time::Duration::from_millis(THIRTY_MINUTES))
             }
         }
     }
@@ -208,7 +208,7 @@ mod tests {
         let flush_control = FlushControl::new(FlushStrategy::End, 60);
         assert_eq!(
             flush_control.get_flush_interval().period().as_millis(),
-            tokio::time::Duration::from_millis(FIFTEEN_MINUTES).as_millis()
+            tokio::time::Duration::from_millis(THIRTY_MINUTES).as_millis()
         );
     }
 }
