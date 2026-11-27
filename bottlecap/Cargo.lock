@@ -505,7 +505,7 @@ dependencies = [
  "libddwaf-sys",
  "mime",
  "mock_instant",
- "multipart",
+ "multipart_ng",
  "nix 0.26.4",
  "opentelemetry-proto",
  "opentelemetry-semantic-conventions 0.30.0",
@@ -547,10 +547,10 @@ dependencies = [
 ]
 
 [[package]]
-name = "buf_redux"
-version = "0.8.4"
+name = "buf_redux_ng"
+version = "0.8.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b953a6887648bb07a535631f2bc00fbdb2a2216f135552cb3f534ed136b9c07f"
+checksum = "9f3d7709133329ea7b6e9f48e423251eafd398391806686f713e52f17ca6ef19"
 dependencies = [
  "memchr",
  "safemem",
@@ -2592,12 +2592,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1d87ecb2933e8aeadb3e3a02b828fed80a7528047e68b4f424523a0981a3a084"
 
 [[package]]
-name = "multipart"
-version = "0.18.0"
+name = "multipart_ng"
+version = "0.18.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "00dec633863867f29cb39df64a397cdf4a6354708ddd7759f70c7fb51c5f9182"
+checksum = "9be2246eb884185c3a396640492b883f30c30240a943d235df2691bee914f013"
 dependencies = [
- "buf_redux",
+ "buf_redux_ng",
  "httparse",
  "log",
  "mime",
